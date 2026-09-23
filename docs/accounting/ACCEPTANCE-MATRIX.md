@@ -7,7 +7,7 @@ the accountant's close.  It is therefore an operating checklist, not a claim
 that 1C can already be retired.
 
 Current source branch: `agent/crm-acc-prod009`; `alembic heads`
-reports the single source head `0164`.
+reports the single source head `0165`.
 
 | Requirement | Source evidence | Still required for acceptance |
 | --- | --- | --- |

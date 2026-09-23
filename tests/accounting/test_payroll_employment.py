@@ -4,7 +4,7 @@ from uuid import uuid4
 from sqlalchemy import func, select
 
 from modules.accounting import statutory_requirements
-from modules.accounting.models import AccessGrant, Organization, PayrollEmploymentBinding
+from modules.accounting.models import AccessGrant, Organization, PayrollEmploymentBinding, Period
 from modules.hr.models import Employee
 from tests.accounting.test_payroll_calculation import command, rate_input
 
@@ -136,3 +136,24 @@ async def test_binding_rejects_unmapped_employee_and_requires_chief(client, db, 
     grant.role = "reader"
     denied_reader = await client.post(url, json=binding_command(employee_id))
     assert denied_reader.status_code == 403
+
+
+async def test_closed_period_rejects_new_backdated_binding_but_keeps_idempotent_replay(
+        client, db, book):
+    employee = Employee(full_name="Synthetic Employee", department="repair", position="technician")
+    db.add(employee)
+    await db.flush()
+    url = f"/accounting/organizations/{book[0]}/payroll-employments"
+    original = binding_command(employee.id)
+    created = await client.post(url, json=original)
+    assert created.status_code == 200, created.text
+
+    db.add(Period(organization_id=book[0], month="2026-10", closed=True, generation=0))
+    await db.commit()
+    assert (await client.post(url, json=original)).json() == created.json()
+    changed = await client.post(url, json=binding_command(
+        employee.id, state="ended", effective_from="2026-10-15",
+    ))
+    assert changed.status_code == 422
+    assert "Closed period blocks" in changed.text
+    assert await db.scalar(select(func.count(PayrollEmploymentBinding.id))) == 1

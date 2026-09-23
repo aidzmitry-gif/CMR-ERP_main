@@ -51,6 +51,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0162_payroll_rule_set.py",
     "0163_payroll_evidence_file.py",
     "0164_payroll_workpaper_review.py",
+    "0165_payroll_employment_closed_period.py",
 )
 
 
@@ -525,6 +526,53 @@ async def pg_book(pg_factory, db, book):
             await session.flush()
         await session.commit()
     return book
+
+
+async def test_payroll_employment_closed_period_guard_in_postgres(pg_factory, pg_book):
+    from sqlalchemy.exc import DBAPIError
+
+    from modules.accounting.models import Period
+    from modules.accounting.payroll_employment import PayrollEmploymentInput, create
+    from modules.hr.models import Employee
+
+    async with pg_factory() as session:
+        employee = Employee(full_name="Synthetic payroll employee", department="repair",
+                            position="technician")
+        session.add(employee)
+        await session.flush()
+        original = PayrollEmploymentInput.model_validate({
+            "request_key": str(uuid4()), "employee_id": employee.id,
+            "contract_ref": "synthetic-contract", "effective_from": "2026-01-01",
+            "state": "active", "source_document": "synthetic-signed-contract",
+            "evidence": "Synthetic chief-reviewed employment evidence",
+        })
+        receipt = await create(session, pg_book[0], original, "tester")
+        session.add(Period(organization_id=pg_book[0], month="2026-10",
+                           closed=True, generation=0))
+        await session.commit()
+
+    async with pg_factory() as session:
+        assert (await create(session, pg_book[0], original, "tester"))["binding_id"] == receipt["binding_id"]
+        with pytest.raises(service.AccountingError, match="Closed period blocks"):
+            await create(session, pg_book[0], PayrollEmploymentInput.model_validate({
+                **original.model_dump(mode="json"), "request_key": str(uuid4()),
+                "effective_from": "2026-10-15", "state": "ended",
+            }), "tester")
+        await session.rollback()
+
+    async with pg_factory() as session:
+        with pytest.raises(DBAPIError, match="Closed period blocks"):
+            await session.execute(text("""
+                INSERT INTO accounting.payroll_employment_binding
+                  (organization_id, employee_id, contract_ref, effective_from,
+                   revision, state, source_document, evidence, request_key,
+                   request_digest, digest, snapshot, actor)
+                SELECT organization_id, employee_id, contract_ref, effective_from,
+                       revision + 1, state, source_document, evidence, :request_key,
+                       request_digest, digest, snapshot, actor
+                FROM accounting.payroll_employment_binding WHERE id = :binding_id
+            """), {"request_key": str(uuid4()), "binding_id": receipt["binding_id"]})
+        await session.rollback()
 
 
 async def test_opening_import_receipt_is_bound_and_immutable_in_postgres(pg_factory, pg_book, posting):

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from uuid import UUID
 
@@ -11,7 +11,9 @@ from fastapi import HTTPException
 from pydantic import Field, field_validator
 from sqlalchemy import select
 
-from modules.accounting.models import PayrollWorkpaperReview, Period
+from modules.accounting.models import PayrollEmploymentBinding, PayrollWorkpaperReview, Period
+from modules.accounting.payroll_calculation import month_bounds
+from modules.accounting.payroll_employment import result as employment_result
 from modules.accounting.payroll_workpaper import PayrollWorkpaperInput, preview_workpaper
 from modules.accounting.service import AccountingError, lock_organization
 
@@ -215,6 +217,72 @@ async def by_request(session, org_id: int, request_key: UUID) -> dict:
     return result(row)
 
 
+async def _known_binding_coverage(session, org_id: int, month: str,
+                                  by_binding: dict[int, dict]) -> dict:
+    first, last = month_bounds(month)
+    history = (await session.scalars(select(PayrollEmploymentBinding).where(
+        PayrollEmploymentBinding.organization_id == org_id,
+        PayrollEmploymentBinding.effective_from <= last,
+    ).order_by(PayrollEmploymentBinding.employee_id,
+               PayrollEmploymentBinding.contract_ref,
+               PayrollEmploymentBinding.effective_from,
+               PayrollEmploymentBinding.revision))).all()
+    events: dict[tuple[int, str], dict[date, PayrollEmploymentBinding]] = {}
+    for row in history:
+        employment_result(row)
+        events.setdefault((row.employee_id, row.contract_ref), {})[row.effective_from] = row
+
+    expected: dict[int, tuple[date, date]] = {}
+    for dated in events.values():
+        ordered = sorted(dated.items())
+        for index, (effective_from, row) in enumerate(ordered):
+            if row.state != "active":
+                continue
+            end = (ordered[index + 1][0] - timedelta(days=1)
+                   if index + 1 < len(ordered) else last)
+            start = max(first, effective_from)
+            end = min(last, end)
+            if start <= end:
+                expected[row.id] = (start, end)
+
+    issues = []
+    for binding_id, (start, end) in sorted(expected.items()):
+        cursor = start
+        for segment in by_binding.get(binding_id, {}).get("segments", []):
+            segment_from = date.fromisoformat(segment["work_from"])
+            segment_to = date.fromisoformat(segment["work_to"])
+            if segment_from < start or segment_to > end:
+                issues.append({"kind": "outside_current_binding", "employment_binding_id": binding_id,
+                               "work_from": segment["work_from"], "work_to": segment["work_to"]})
+            if segment_to < start or segment_from > end:
+                continue
+            if segment_from > cursor:
+                issues.append({"kind": "unreviewed_interval", "employment_binding_id": binding_id,
+                               "work_from": cursor.isoformat(),
+                               "work_to": (min(segment_from, end + timedelta(days=1))
+                                           - timedelta(days=1)).isoformat()})
+            cursor = max(cursor, min(segment_to, end) + timedelta(days=1))
+        if cursor <= end:
+            issues.append({"kind": "unreviewed_interval", "employment_binding_id": binding_id,
+                           "work_from": cursor.isoformat(), "work_to": end.isoformat()})
+    for binding_id, binding in sorted(by_binding.items()):
+        if binding_id not in expected:
+            for segment in binding["segments"]:
+                issues.append({"kind": "outside_current_binding", "employment_binding_id": binding_id,
+                               "work_from": segment["work_from"], "work_to": segment["work_to"]})
+    return {
+        "active_binding_count": len(expected),
+        "expected_intervals": [
+            {"employment_binding_id": binding_id,
+             "work_from": start.isoformat(), "work_to": end.isoformat()}
+            for binding_id, (start, end) in sorted(expected.items())
+        ],
+        "known_binding_coverage_complete": bool(expected) and not issues,
+        "organization_payroll_population_verified": False,
+        "issues": issues,
+    }
+
+
 async def monthly_arithmetic_summary(session, org_id: int, month: str) -> dict:
     """Sum latest reviewed segments only; never assert a complete payroll run."""
     rows = (await session.scalars(select(PayrollWorkpaperReview).where(
@@ -263,15 +331,25 @@ async def monthly_arithmetic_summary(session, org_id: int, month: str) -> dict:
     for binding in by_binding.values():
         binding["totals"] = {field: format(value, ".2f")
                              for field, value in binding["totals"].items()}
+    coverage = await _known_binding_coverage(session, org_id, month, by_binding)
+    formatted_totals = {field: format(value, ".2f") for field, value in totals.items()}
+    selection_digest = _digest(selected_receipts)
+    coverage_digest = _digest(coverage)
     return {
         "status": "arithmetic_reviews_aggregate_only",
         "organization_id": org_id,
         "month": month,
         "review_count": len(rows),
         "selected_segment_count": len(selected_receipts),
-        "selection_digest": _digest(selected_receipts),
+        "selection_digest": selection_digest,
+        "coverage_digest": coverage_digest,
+        "summary_digest": _digest({"organization_id": org_id, "month": month,
+                                   "selection_digest": selection_digest,
+                                   "coverage_digest": coverage_digest,
+                                   "totals": formatted_totals}),
         "bindings": list(by_binding.values()),
-        "totals": {field: format(value, ".2f") for field, value in totals.items()},
+        "totals": formatted_totals,
+        "known_binding_coverage": coverage,
         "coverage_verified": False,
         "source_facts_verified": False,
         "statutory_payroll_certified": False,

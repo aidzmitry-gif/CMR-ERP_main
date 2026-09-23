@@ -241,6 +241,41 @@ async def test_workpaper_rejects_foreign_rate_and_reader(
     assert denied.status_code == 403
 
 
+async def test_monthly_summary_exposes_unreviewed_known_employment(
+        client, book, workpaper_sources):
+    binding, _, _, _ = workpaper_sources
+    url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-arithmetic-summary"
+    empty = await client.get(url)
+    assert empty.status_code == 200, empty.text
+    assert empty.json()["review_count"] == 0
+    assert empty.json()["known_binding_coverage"] == {
+        "active_binding_count": 1,
+        "expected_intervals": [{"employment_binding_id": binding["binding_id"],
+                                "work_from": "2026-10-01", "work_to": "2026-10-31"}],
+        "known_binding_coverage_complete": False,
+        "organization_payroll_population_verified": False,
+        "issues": [{"kind": "unreviewed_interval",
+                    "employment_binding_id": binding["binding_id"],
+                    "work_from": "2026-10-01", "work_to": "2026-10-31"}],
+    }
+    assert empty.json()["coverage_verified"] is False
+
+    ended = await client.post(f"/accounting/organizations/{book[0]}/payroll-employments", json={
+        "request_key": str(uuid4()),
+        "employee_id": binding["employee_id"],
+        "contract_ref": binding["contract_ref"],
+        "effective_from": "2026-10-15",
+        "state": "ended",
+        "source_document": "synthetic-contract-end-7",
+        "evidence": "Synthetic accountant supplied termination evidence",
+    })
+    assert ended.status_code == 200, ended.text
+    shortened = (await client.get(url)).json()["known_binding_coverage"]
+    assert shortened["expected_intervals"][0]["work_to"] == "2026-10-14"
+    assert shortened["issues"][0]["work_from"] == "2026-10-01"
+    assert shortened["issues"][0]["work_to"] == "2026-10-14"
+
+
 async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
         client, db, book, workpaper_sources, tmp_path, monkeypatch):
     binding, deduction, contribution, ruleset = workpaper_sources
@@ -377,20 +412,14 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     }
     assert len(summary["selection_digest"]) == 64
     assert summary["coverage_verified"] is False
+    assert summary["known_binding_coverage"]["known_binding_coverage_complete"] is True
+    assert summary["known_binding_coverage"]["organization_payroll_population_verified"] is False
     assert summary["posting_available"] is False
     assert summary["statutory_payroll_certified"] is False
     assert (await client.post(review_url, json={
         **review_command, "request_key": str(uuid4()),
         "supersedes_review_id": receipt["review_id"],
     })).status_code == 422
-
-    db.add(Period(organization_id=book[0], month="2026-10", closed=True, generation=0))
-    await db.commit()
-    assert (await client.post(review_url, json={
-        **review_command, "request_key": str(uuid4()),
-        "supersedes_review_id": corrected.json()["review_id"],
-    })).status_code == 422
-    assert (await client.post(review_url, json=review_command)).json() == receipt
 
     wrong_claim = await client.post(preview_url, json=command(*args, **{
         **fields, "timesheet_digest": hashlib.sha256(b"different").hexdigest(),
@@ -407,6 +436,34 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
         path.write_bytes(b"%PDF-1.7\ncorrupted")
     tampered = await client.post(preview_url, json=command(*args, **fields))
     assert tampered.status_code == 409
+    ended_after_review = await client.post(
+        f"/accounting/organizations/{book[0]}/payroll-employments", json={
+            "request_key": str(uuid4()),
+            "employee_id": binding["employee_id"],
+            "contract_ref": binding["contract_ref"],
+            "effective_from": "2026-10-15",
+            "state": "ended",
+            "source_document": "synthetic-retrospective-contract-end",
+            "evidence": "Synthetic later correction to employment period",
+        },
+    )
+    assert ended_after_review.status_code == 200, ended_after_review.text
+    stale_summary = (await client.get(summary_url)).json()
+    stale_coverage = stale_summary["known_binding_coverage"]
+    assert stale_coverage["known_binding_coverage_complete"] is False
+    assert stale_coverage["expected_intervals"][0]["work_to"] == "2026-10-14"
+    assert stale_coverage["issues"][0]["kind"] == "outside_current_binding"
+    assert stale_summary["selection_digest"] == summary["selection_digest"]
+    assert stale_summary["coverage_digest"] != summary["coverage_digest"]
+    assert stale_summary["summary_digest"] != summary["summary_digest"]
+
+    db.add(Period(organization_id=book[0], month="2026-10", closed=True, generation=0))
+    await db.commit()
+    assert (await client.post(review_url, json={
+        **review_command, "request_key": str(uuid4()),
+        "supersedes_review_id": corrected.json()["review_id"],
+    })).status_code == 422
+    assert (await client.post(review_url, json=review_command)).json() == receipt
     grant = await db.scalar(select(AccessGrant).where(
         AccessGrant.organization_id == book[0], AccessGrant.subject == "tester",
     ))

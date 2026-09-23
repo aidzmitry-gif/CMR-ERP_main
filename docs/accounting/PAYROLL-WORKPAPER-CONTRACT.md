@@ -69,14 +69,26 @@ records the bytes verified at review time but does not claim that files remain
 unchanged later, that their figures are true, or that statutory payroll is
 complete. It does not post to the ledger.
 
+A new dated employer/contract binding is also blocked once its month or any
+later accounting period is closed; a repeat of an already accepted request
+still returns its original receipt. Revision `0165` enforces this at the
+PostgreSQL insert boundary as well as in the API. Corrections to closed history
+require the controlled reopening process before a new dated binding is added.
+
 `GET /accounting/organizations/{org_id}/periods/{YYYY-MM}/payroll-arithmetic-summary`
 reads all immutable reviewed segments of one legal entity and month. It checks
 receipt hashes, scope, component arithmetic and correction chains, then sums
 only the latest revision of each non-overlapping work segment. The response
 lists selected receipt IDs and basis/snapshot hashes; `selection_digest` changes
-when a selected revision changes. Accountant/chief membership is required.
-This is an arithmetic summary of reviewed segments, including potentially
-incomplete coverage. It does not prove that every employee, date, payment,
-legal rule or rate is present. `coverage_verified`, `source_facts_verified`,
-`posting_available` and `statutory_payroll_certified` remain false. No ledger
-entry, payroll run or external form is created.
+when a selected revision changes. `coverage_digest` changes when the known
+employment timeline changes; `summary_digest` binds both digests and totals.
+Accountant/chief membership is required.
+`known_binding_coverage` compares selected segments with the current effective
+history of **explicitly bound** contracts, reporting unreviewed date intervals
+and segments outside that history. A complete result covers only contracts
+already recorded in this organization's binding registry; unbound employees,
+authenticity of contracts, hours, payments and applicable legal rules remain
+unknown. Therefore `organization_payroll_population_verified`,
+`coverage_verified`, `source_facts_verified`, `posting_available` and
+`statutory_payroll_certified` remain false. No ledger entry, payroll run or
+external form is created.

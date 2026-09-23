@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from pydantic import Field
 from sqlalchemy import func, select
 
-from modules.accounting.models import PayrollEmploymentBinding
+from modules.accounting.models import PayrollEmploymentBinding, Period
 from modules.accounting.schemas import Input
 from modules.accounting.service import AccountingError, lock_organization
 from modules.hr.models import Employee
@@ -81,6 +81,14 @@ async def create(session, org_id: int, data: PayrollEmploymentInput, actor: str)
         if existing.request_digest != request_digest:
             raise HTTPException(409, "Payroll employment request key was reused with different content")
         return result(existing)
+
+    closed = await session.scalar(select(Period.id).where(
+        Period.organization_id == org_id,
+        Period.month >= data.effective_from.strftime("%Y-%m"),
+        Period.closed.is_(True),
+    ).limit(1))
+    if closed is not None:
+        raise AccountingError("Closed period blocks a new payroll employment binding")
 
     employee = await session.get(Employee, data.employee_id)
     if employee is None:
