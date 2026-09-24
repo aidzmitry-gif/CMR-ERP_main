@@ -30,7 +30,7 @@ describe("DealEditButton", () => {
     // Несколько number-инпутов (сумма + штраф %/день + потолок) — сумма первая.
     fireEvent.change(screen.getAllByRole("spinbutton")[0], { target: { value: "555" } });
 
-    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
     await waitFor(() =>
       expect(api.updateDeal).toHaveBeenCalledWith(
         "1",
@@ -42,6 +42,36 @@ describe("DealEditButton", () => {
         }),
       ),
     );
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Редактировать сделку" })).toBeNull());
+  });
+
+  it("сохраняет ввод и форму открытой, если сервер отказал", async () => {
+    mock(api.updateDeal).mockResolvedValue(false);
+    open();
+    fireEvent.change(screen.getByRole("textbox", { name: "Описание" }), { target: { value: "Исправленная поставка" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Сервер не подтвердил сохранение");
+    expect(screen.getByRole("textbox", { name: "Описание" })).toHaveValue("Исправленная поставка");
+    expect(screen.getByRole("button", { name: "Сохранить и закрыть" })).toBeEnabled();
+  });
+
+  it("предупреждает о несохранённых правках при закрытии и уходе со страницы", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    open();
+    fireEvent.change(screen.getByRole("textbox", { name: "Описание" }), { target: { value: "Исправленная поставка" } });
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(screen.getByRole("heading", { name: "Редактировать сделку" })).toBeInTheDocument();
+    expect(confirm).toHaveBeenCalledOnce();
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(screen.queryByRole("heading", { name: "Редактировать сделку" })).toBeNull();
+    const afterClose = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(afterClose);
+    expect(afterClose.defaultPrevented).toBe(false);
+    confirm.mockRestore();
   });
 
   it("закрывается по кнопке Отмена", () => {
