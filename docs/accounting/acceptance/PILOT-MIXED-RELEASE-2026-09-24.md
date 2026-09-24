@@ -29,8 +29,9 @@ Read-only серверная проверка 24.09.2026, 08:34 UTC: дейст�
 ExecStart — `node_modules/.bin/next start -p 3100`, WorkingDirectory —
 `/opt/cmr-erp-releases/crm-ready-r4-ui-20260916/frontend`, BUILD_ID
 `F_-CH9cdxitoaicSnuYyR`. Новый распакованный standalone проверен локально
-на Linux Node 22.23.3 через `node server.js` с `PORT=3100`, но не на точной
-серверной patch-версии и не под systemd. Для переключения нужен новый
+на Linux Node 22.23.3 и повторно на точной серверной Node 22.22.3 (ABI 127)
+через `node server.js` с `PORT=3100`: Ready, login redirect, JS 200 и
+BUILD_ID совпали. Под systemd на сервере он не проверен. Для переключения нужен новый
 проверенный drop-in с отдельным ExecStart/WorkingDirectory и сохранённой
 старой точкой возврата; существующие env/drop-in не копировать вслепую.
 
