@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 
-from core.domain.models import Counterparty
+from core.domain.models import Counterparty, Sku
 from modules.accounting import models, sales, service
 from modules.accounting.schemas import PostingInput
 from tests.accounting.test_inventory_cost import move, request
@@ -12,11 +12,13 @@ from tests.accounting.test_inventory_cost import move, request
 
 async def setup_sale(db, book, posting, **changes):
     await move(db, book, posting, "receipt", "3", "10.00")
+    db.add(Sku(code="SKU", title="Synthetic accounting item", unit="шт", is_active=True))
     for code, category in [("90.2", changes.pop("vat_category", "income")), ("68.2", "liability")]:
         db.add(models.Account(organization_id=book[0], code=code, title=code, category=category,
                               valid_from=date(2026, 1, 1), required_dimensions=[], currency_tracking=False,
                               quantity_tracking=False, cash=False, normative_ref="synthetic"))
     await db.commit()
+    sku = await db.scalar(select(Sku).where(Sku.code == "SKU"))
     return {**request(book), "source": "sale-1", "source_version": 1,
             "document_date": "2026-09-01", "operation_date": "2026-09-01",
             "expense_account": "90.4", "explanation": "Synthetic sale preview",
@@ -24,7 +26,9 @@ async def setup_sale(db, book, posting, **changes):
             "buyer_account": "62", "revenue_account": "90.1", "vat_revenue_account": "90.2", "vat_payable_account": "68.2",
             "buyer_dimensions": {"counterparty_id": "1", "counterparty": "supplier1",
                                  "counterparty_unp": "190000001", "counterparty_revision": "1",
-                                 "contract": "contract", "settlement_document": "sale-1"}, **changes}
+                                 "contract": "contract", "settlement_document": "sale-1"},
+            "sku_identity": {"id": sku.id, "code": sku.code, "title": sku.title, "unit": sku.unit},
+            **changes}
 
 
 async def test_sale_preview_balanced_net_income_cost_and_no_writes(client, db, book, posting):
@@ -90,6 +94,43 @@ async def test_sale_confirmation_rechecks_buyer_after_preview(client, db, book, 
     assert (await client.post(base + "/posting-preview", json=current)).status_code == 200
 
 
+async def test_accountant_sale_requires_current_sku_snapshot(client, db, book, posting):
+    data = await setup_sale(db, book, posting)
+    base = f"/accounting/organizations/{book[0]}"
+    options = await client.get(base + "/inventory/skus?q=SKU")
+    assert options.status_code == 200
+    assert options.json()["items"] == [data["sku_identity"]]
+    assert (await client.get("/accounting/organizations/999/inventory/skus?q=SKU")).status_code == 403
+    missing = {key: value for key, value in data.items() if key != "sku_identity"}
+    assert (await client.post(base + "/sales/posting-preview", json=missing)).status_code == 422
+    forged = {**data, "sku_identity": {**data["sku_identity"], "title": "Forged"}}
+    assert (await client.post(base + "/sales/posting-preview", json=forged)).status_code == 422
+    preview = (await client.post(base + "/sales/posting-preview", json=data)).json()
+    sku = await db.get(Sku, data["sku_identity"]["id"])
+    sku.title = "Renamed item"
+    await db.commit()
+    stale = await client.post(base + "/sales/confirm", json={**data,
+        "basis_digest": preview["cost"]["basis_digest"], "digest": preview["digest"]})
+    assert stale.status_code == 422
+    assert await db.scalar(select(func.count()).select_from(models.InventorySaleReceipt)) == 0
+
+
+async def test_historical_sale_without_sku_id_replays_after_catalog_change(client, db, book, posting):
+    data = await setup_sale(db, book, posting)
+    old = {key: value for key, value in data.items() if key != "sku_identity"}
+    document = sales.SaleDocument.model_validate(old)
+    prepared = await sales.prepare(db, book[0], document)
+    entry = await sales.confirm(db, book[0], document, prepared["cost"]["basis_digest"],
+                                prepared["digest"], "tester")
+    sku = await db.get(Sku, data["sku_identity"]["id"])
+    sku.title = "Renamed item"
+    await db.commit()
+    repeated = await client.post(f"/accounting/organizations/{book[0]}/sales/confirm", json={**old,
+        "basis_digest": prepared["cost"]["basis_digest"], "digest": prepared["digest"]})
+    assert repeated.status_code == 201 and repeated.json()["id"] == entry.id
+    assert await db.scalar(select(func.count()).select_from(models.InventorySaleReceipt)) == 1
+
+
 @pytest.mark.parametrize(("method", "expected_cost", "expected_lines"), [
     ("fifo", "50.00", [("old", "30.00"), ("new", "20.00")]),
     ("weighted_average", "56.00", [("old", "42.00"), ("new", "14.00")]),
@@ -104,6 +145,9 @@ async def test_sale_preview_preserves_policy_selected_inventory_layers(client, d
     book = (book[0], policy.id)
     await move(db, book, posting, "old-receipt", "3", "30.00", day="2026-09-01", lot="old")
     await move(db, book, posting, "new-receipt", "2", "40.00", day="2026-09-02", lot="new")
+    db.add(Sku(code="SKU", title="Synthetic accounting item", unit="шт", is_active=True))
+    await db.commit()
+    sku = await db.scalar(select(Sku).where(Sku.code == "SKU"))
     data = {**request(book, lot="", quantity="4", posting_date="2026-09-03"),
             "source": f"{method}-sale", "source_version": 1,
             "document_date": "2026-09-03", "operation_date": "2026-09-03",
@@ -113,7 +157,8 @@ async def test_sale_preview_preserves_policy_selected_inventory_layers(client, d
             "vat_payable_account": "68.2",
             "buyer_dimensions": {"counterparty_id": "1", "counterparty": "supplier1",
                                  "counterparty_unp": "190000001", "counterparty_revision": "1",
-                                 "contract": "contract", "settlement_document": method}}
+                                 "contract": "contract", "settlement_document": method},
+            "sku_identity": {"id": sku.id, "code": sku.code, "title": sku.title, "unit": sku.unit}}
     response = await client.post(f"/accounting/organizations/{book[0]}/sales/posting-preview", json=data)
     assert response.status_code == 200, response.text
     result = response.json()

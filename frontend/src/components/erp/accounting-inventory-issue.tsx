@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { searchAccountingBuyers, type AccountingBuyer } from "@/lib/accounting-buyers";
+import { searchAccountingSkus, type AccountingSku } from "@/lib/accounting-skus";
 import { confirmedIssueReceipt } from "@/lib/accounting-issue-receipt";
 
 const dimensionNames: Record<string, string> = { counterparty: "Контрагент", contract: "Договор", settlement_document: "Документ расчётов", department: "Подразделение", employee: "Сотрудник", asset: "Основное средство", warehouse: "Склад", sku: "Номенклатура", lot: "Партия", order: "Заказ" };
@@ -16,10 +17,13 @@ type Calculation = { kind?: "monetary"; net_amount_byn?: string; vat_amount_byn?
 export function AccountingInventoryIssue({ org, date, policyId, inventoryMethod = "specific", accounts, onBusyChange, onPosted, onDate, onEntry, sale = false }: { org: string; date: string; policyId?: number; inventoryMethod?: "specific" | "fifo" | "weighted_average"; accounts: Account[]; onBusyChange: (busy: boolean) => void; onPosted: () => void; onDate: (value: string) => void; onEntry?: (id: number) => void; sale?: boolean }) {
   const [form, setForm] = useState({ source: "", source_version: 1, document_date: date, operation_date: date, account: "", warehouse: "", sku: "", lot: "", quantity: "", expense_account: "", expense_dimensions: {} as Record<string, string>, explanation: "" });
   const [prepared, setPrepared] = useState<{ key: string; body: Record<string, unknown>; calculation: Calculation } | null>(null);
-  const [saleForm, setSaleForm] = useState({ net_amount: "", vat_rate: "", vat_basis: "", buyer_account: "", revenue_account: "", vat_revenue_account: "", vat_payable_account: "", buyer_dimensions: {} as Record<string, string>, revenue_dimensions: {} as Record<string, string>, vat_dimensions: {} as Record<string, string> });
+  const [saleForm, setSaleForm] = useState({ net_amount: "", vat_rate: "", vat_basis: "", buyer_account: "", revenue_account: "", vat_revenue_account: "", vat_payable_account: "", buyer_dimensions: {} as Record<string, string>, revenue_dimensions: {} as Record<string, string>, vat_dimensions: {} as Record<string, string>, sku_identity: null as AccountingSku | null });
   const [buyerSearch, setBuyerSearch] = useState("");
   const [buyerOptions, setBuyerOptions] = useState<AccountingBuyer[]>([]);
   const buyerLookup = useRef(0);
+  const [skuSearch, setSkuSearch] = useState("");
+  const [skuOptions, setSkuOptions] = useState<AccountingSku[]>([]);
+  const skuLookup = useRef(0);
   const [busy, setBusy] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -52,6 +56,21 @@ export function AccountingInventoryIssue({ org, date, policyId, inventoryMethod 
       counterparty_id: String(buyer.id), counterparty: buyer.name,
       counterparty_unp: buyer.unp, counterparty_revision: String(buyer.revision) } });
   }
+  async function findSkus() {
+    const token = ++skuLookup.current;
+    setError("");
+    try {
+      const items = await searchAccountingSkus(org, skuSearch);
+      if (mounted.current && token === skuLookup.current) setSkuOptions(items);
+    } catch (cause) { if (mounted.current && token === skuLookup.current)
+      setError(cause instanceof Error ? cause.message : "Не удалось найти номенклатуру"); }
+  }
+  function selectSku(id: number) {
+    const item = skuOptions.find(option => option.id === id);
+    if (!item) return;
+    change({ sku: item.code, lot: "" });
+    changeSale({ sku_identity: item });
+  }
   function filteredSale(next: typeof saleForm) {
     const required = (code: string) => accounts.find((a) => a.code === code)?.required_dimensions ?? [];
     const keep = (values: Record<string, string>, keys: string[]) => Object.fromEntries(Object.entries(values).filter(([key]) => keys.includes(key)));
@@ -63,7 +82,7 @@ export function AccountingInventoryIssue({ org, date, policyId, inventoryMethod 
     };
   }
   async function execute(confirm: boolean) {
-    if (busy || !org || !policyId || (confirm && !current)) return;
+    if (busy || !org || !policyId || (sale && !saleForm.sku_identity) || (confirm && !current)) return;
     const body = confirm ? { ...current!.body, basis_digest: current!.calculation.cost.basis_digest, digest: current!.calculation.digest } : { ...form, expense_dimensions: Object.fromEntries(Object.entries(form.expense_dimensions).filter(([dimension]) => accounts.find((a) => a.code === form.expense_account)?.required_dimensions.includes(dimension))), ...(sale ? { ...filteredSale(saleForm), net_amount: saleForm.net_amount.trim().replace(",", "."), vat_rate: saleForm.vat_rate.trim().replace(",", ".") } : {}), quantity: form.quantity.trim().replace(",", "."), posting_date: date, policy_id: policyId };
     setBusy(true); onBusyChange(true); setError(""); setNotice("");
     if (!confirm) setPrepared(null);
@@ -87,11 +106,19 @@ export function AccountingInventoryIssue({ org, date, policyId, inventoryMethod 
   const inventory = accounts.filter((account) => account.category === "asset" && !account.cash && account.quantity_tracking && (sale ? belongs(account.code, "41") || belongs(account.code, "43") : /^(10|41|43)(\.|$)/.test(account.code)));
   const expense = accounts.filter((account) => account.category === "expense" && !account.cash && !account.quantity_tracking && (!sale || belongs(account.code, "90.4")));
   return <section aria-label={sale ? "Бухгалтерская продажа товаров" : "Бухгалтерское списание запасов"} className="space-y-4 rounded-xl border border-line bg-surface p-4">
-    <h2 className="font-semibold">{sale ? "Продажа товаров: выручка, НДС и себестоимость" : "Бухгалтерское списание партии"}</h2>
-    <p>{sale ? `Бухгалтерский документ продажи в BYN по методу ${inventoryMethod === "specific" ? "индивидуальной оценки" : inventoryMethod === "fifo" ? "ФИФО" : "средневзвешенной стоимости"}. Основание и ставку НДС указывает бухгалтер. Физическая отгрузка оформляется отдельно.` : `Расчёт себестоимости в BYN по методу ${inventoryMethod === "specific" ? "индивидуальной оценки" : inventoryMethod === "fifo" ? "ФИФО" : "средневзвешенной стоимости"}. Для ФИФО и средней стоимости партия может быть пустой: расчёт использует явные слои выбранного склада и SKU. Физическое движение склада оформляется отдельно.`}</p>
+    <h2 className="font-semibold">{sale ? "Ручная продажа: только исключения" : "Бухгалтерское списание партии"}</h2>
+    <p>{sale ? `Эта форма не создаёт счёт CRM, резерв или складскую отгрузку. Для обычной продажи используйте сделку CRM и проводки по акту отгрузки. Ручной документ нужен только для согласованного бухгалтером исключения, не отражённого через CRM. Расчёт себестоимости в BYN по методу ${inventoryMethod === "specific" ? "индивидуальной оценки" : inventoryMethod === "fifo" ? "ФИФО" : "средневзвешенной стоимости"}.` : `Расчёт себестоимости в BYN по методу ${inventoryMethod === "specific" ? "индивидуальной оценки" : inventoryMethod === "fifo" ? "ФИФО" : "средневзвешенной стоимости"}. Для ФИФО и средней стоимости партия может быть пустой: расчёт использует явные слои выбранного склада и SKU. Физическое движение склада оформляется отдельно.`}</p>
     {!policyId && <p role="alert">Нет действующей учётной политики на дату отражения.</p>}
     <fieldset disabled={busy || !org} className="grid gap-3 md:grid-cols-2">
-      {([['source', 'Идентификатор основания'], ['warehouse', 'Склад партии'], ['sku', 'Номенклатура партии'], ['lot', inventoryMethod === "specific" ? 'Партия' : 'Партия (необязательно)'], ['quantity', 'Количество списания'], ['explanation', 'Содержание списания']] as const).map(([field, label]) => <label key={field}>{sale && field === "explanation" ? "Содержание продажи" : label}<Input value={form[field]} onChange={(e) => change({ [field]: e.target.value })} /></label>)}
+      {([['source', 'Идентификатор основания'], ['warehouse', 'Склад партии'], ['sku', 'Номенклатура партии'], ['lot', inventoryMethod === "specific" ? 'Партия' : 'Партия (необязательно)'], ['quantity', 'Количество списания'], ['explanation', 'Содержание списания']] as const).map(([field, label]) => sale && field === "sku"
+        ? <div key={field} className="space-y-2"><label>Поиск номенклатуры в справочнике<Input value={skuSearch} onChange={(event) => {
+            skuLookup.current++; setSkuSearch(event.target.value); setSkuOptions([]);
+            change({ sku: "", lot: "" }); changeSale({ sku_identity: null });
+          }} /></label><Button variant="secondary" onClick={() => void findSkus()} disabled={!skuSearch.trim()}>Найти номенклатуру</Button>
+          <label>Номенклатура из справочника<Select value={saleForm.sku_identity?.id ?? ""} onChange={(event) => selectSku(Number(event.target.value))}>
+            <option value="">Выберите товар</option>{skuOptions.map(item => <option value={item.id} key={item.id}>{item.code} · {item.title} · {item.unit} · ID {item.id}</option>)}
+          </Select></label></div>
+        : <label key={field}>{sale && field === "explanation" ? "Содержание продажи" : label}<Input value={form[field]} onChange={(e) => change({ [field]: e.target.value })} /></label>)}
       <label>Версия основания<Input type="number" min="1" step="1" value={form.source_version} onChange={(e) => change({ source_version: Number(e.target.value) })} /></label>
       <label>{sale ? "Дата отражения продажи" : "Дата отражения списания"}<Input type="date" value={date} onChange={(e) => { setPrepared(null); onDate(e.target.value); }} /></label>
       <label>{sale ? "Дата документа продажи" : "Дата документа списания"}<Input type="date" value={form.document_date} onChange={(e) => change({ document_date: e.target.value })} /></label>
@@ -119,7 +146,7 @@ export function AccountingInventoryIssue({ org, date, policyId, inventoryMethod 
       </>}
     </fieldset>
     <p>Дата отражения: {date}.</p>
-    <Button disabled={busy || !org || !policyId || (sale && !saleForm.buyer_dimensions.counterparty_id)} onClick={() => void execute(false)}>{sale ? "Рассчитать продажу" : "Рассчитать списание"}</Button>
+    <Button disabled={busy || !org || !policyId || (sale && (!saleForm.buyer_dimensions.counterparty_id || !saleForm.sku_identity))} onClick={() => void execute(false)}>{sale ? "Рассчитать продажу" : "Рассчитать списание"}</Button>
     {busy && <p role="status">{sale ? "Обработка продажи…" : "Обработка списания…"}</p>}{error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {current && <div className="space-y-2 rounded border border-accent p-3">
       {sale && current.calculation.kind !== "quantity_only_receipt" && <p>Без НДС: {current.calculation.net_amount_byn} BYN · НДС: {current.calculation.vat_amount_byn} BYN · К оплате: {current.calculation.gross_amount_byn} BYN</p>}

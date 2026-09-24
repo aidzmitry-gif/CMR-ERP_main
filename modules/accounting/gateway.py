@@ -262,11 +262,12 @@ class AccountingService:
                 raise HTTPException(422, "A confirmation digest is required with a cost basis")
             return await sales.prepare(session, organization_id, data,
                 procurement=getattr(self.services, "procurement_source", None),
-                require_current_buyer=True)
+                require_current_buyer=True, require_current_sku=True)
         if basis_digest is None:
             raise HTTPException(422, "Confirmed sale requires its cost basis digest")
         entry = await sales.confirm(session, organization_id, data, basis_digest, confirm_digest, actor, event_bus,
-            procurement=getattr(self.services, "procurement_source", None), require_current_buyer=True)
+            procurement=getattr(self.services, "procurement_source", None), require_current_buyer=True,
+            require_current_sku=True)
         if control.entry_id is not None and control.entry_id != entry.id:
             raise HTTPException(409, "Source revision is linked to another entry")
         if control.entry_id is None:

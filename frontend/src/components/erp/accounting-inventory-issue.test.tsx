@@ -4,6 +4,9 @@ import { afterEach, expect, it, vi } from "vitest";
 vi.mock("@/lib/accounting-buyers", () => ({
   searchAccountingBuyers: vi.fn(async () => [{ id: 1, name: "Buyer from MDM", unp: "190000001", revision: 2 }]),
 }));
+vi.mock("@/lib/accounting-skus", () => ({
+  searchAccountingSkus: vi.fn(async () => [{ id: 8, code: "SKU", title: "Catalog item", unit: "шт" }]),
+}));
 import { AccountingInventoryIssue } from "./accounting-inventory-issue";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -21,7 +24,7 @@ function receipt(init: RequestInit, preview: { digest: string; cost: { basis_dig
     : { ...facts, id: options.id ?? 7 };
 }
 function fill(sale = false) {
-  for (const [label, value] of [["Идентификатор основания", "ISSUE-1"], ["Склад партии", "W"], ["Номенклатура партии", "SKU"], ["Партия", "LOT"], ["Количество списания", "1,5"], [sale ? "Содержание продажи" : "Содержание списания", "Test issue"], ["Счёт запасов", "41"], ["Счёт расходов", "90.4"]]) fireEvent.change(screen.getByLabelText(label === "Партия" ? /^Партия/ : label, { exact: true }), { target: { value } });
+  for (const [label, value] of [["Идентификатор основания", "ISSUE-1"], ["Склад партии", "W"], ...(!sale ? [["Номенклатура партии", "SKU"]] : []), ["Партия", "LOT"], ["Количество списания", "1,5"], [sale ? "Содержание продажи" : "Содержание списания", "Test issue"], ["Счёт запасов", "41"], ["Счёт расходов", "90.4"]]) fireEvent.change(screen.getByLabelText(label === "Партия" ? /^Партия/ : label, { exact: true }), { target: { value } });
 }
 
 async function selectBuyer() {
@@ -29,6 +32,14 @@ async function selectBuyer() {
   fireEvent.click(screen.getByRole("button", { name: "Найти покупателя" }));
   await screen.findByRole("option", { name: "Buyer from MDM · 190000001 · ID 1" });
   fireEvent.change(screen.getByLabelText("Покупатель из справочника"), { target: { value: "1" } });
+}
+
+async function selectSku() {
+  fireEvent.change(screen.getByLabelText("Поиск номенклатуры в справочнике"), { target: { value: "SKU" } });
+  fireEvent.click(screen.getByRole("button", { name: "Найти номенклатуру" }));
+  await screen.findByRole("option", { name: "SKU · Catalog item · шт · ID 8" });
+  fireEvent.change(screen.getByLabelText("Номенклатура из справочника"), { target: { value: "8" } });
+  fireEvent.change(screen.getByLabelText(/^Партия/, { exact: true }), { target: { value: "LOT" } });
 }
 
 it("shows the complete zero-cost receipt and confirms without client source IDs", async () => {
@@ -164,6 +175,7 @@ it("previews sale with exact VAT inputs, invalidates edits and confirms its froz
   render(<AccountingInventoryIssue {...props} sale accounts={saleAccounts} />);
   fill(true);
   await selectBuyer();
+  await selectSku();
   for (const [label, value] of [["Стоимость продажи без НДС, BYN", "20,00"], ["Ставка НДС, %", "20"], ["Основание применения НДС", "Approved basis"], ["Счёт покупателя", "62"], ["Счёт выручки", "90.1"], ["Счёт НДС из выручки", "90.2"], ["Счёт расчётов по НДС", "68.2"], ["Покупатель: Договор", "contract"], ["Покупатель: Документ расчётов", "sale"]]) fireEvent.change(screen.getByLabelText(label === "Партия" ? /^Партия/ : label, { exact: true }), { target: { value } });
   fireEvent.click(screen.getByText("Рассчитать продажу"));
   await screen.findByText("Подтвердить продажу");
@@ -175,7 +187,7 @@ it("previews sale with exact VAT inputs, invalidates edits and confirms its froz
   expect(await screen.findByText("Продажа № 7 проведена.")).toBeInTheDocument();
   const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
   expect(calls[2][0]).toBe("/api/accounting/organizations/1/sales/confirm");
-  expect(JSON.parse(String(calls[2][1].body))).toMatchObject({ net_amount: "20.00", vat_rate: "10", buyer_dimensions: { counterparty_id: "1", counterparty: "Buyer from MDM", counterparty_unp: "190000001", counterparty_revision: "2", contract: "contract", settlement_document: "sale" }, basis_digest: "basis", digest: "posting" });
+  expect(JSON.parse(String(calls[2][1].body))).toMatchObject({ net_amount: "20.00", vat_rate: "10", sku: "SKU", sku_identity: { id: 8, code: "SKU", title: "Catalog item", unit: "шт" }, buyer_dimensions: { counterparty_id: "1", counterparty: "Buyer from MDM", counterparty_unp: "190000001", counterparty_revision: "2", contract: "contract", settlement_document: "sale" }, basis_digest: "basis", digest: "posting" });
 });
 
 it("shows V4 zero-cost sale sources with commercial revenue and VAT postings", async () => {
@@ -185,6 +197,7 @@ it("shows V4 zero-cost sale sources with commercial revenue and VAT postings", a
   render(<AccountingInventoryIssue {...props} sale accounts={saleAccounts} />);
   fill(true);
   await selectBuyer();
+  await selectSku();
   for (const [label, value] of [["Стоимость продажи без НДС, BYN", "20,00"], ["Ставка НДС, %", "20"], ["Основание применения НДС", "Approved basis"], ["Счёт покупателя", "62"], ["Счёт выручки", "90.1"], ["Счёт НДС из выручки", "90.2"], ["Счёт расчётов по НДС", "68.2"], ["Покупатель: Договор", "contract"], ["Покупатель: Документ расчётов", "sale"]]) fireEvent.change(screen.getByLabelText(label, { exact: true }), { target: { value } });
   fireEvent.click(screen.getByText("Рассчитать продажу"));
   expect(await screen.findByText(/Себестоимость 0.00 BYN. Количество 1.500000/)).toBeInTheDocument();
@@ -204,6 +217,7 @@ it.each(["account", "date"])("drops hidden revenue analytics when %s changes", a
   const saleAccounts = [...accounts, ...["90.1.1", "90.1.2"].map((code) => ({ code, category: "income", title: code, cash: false, quantity_tracking: false, required_dimensions: code.endsWith("1") ? ["department"] : [] }))];
   const view = render(<AccountingInventoryIssue {...props} sale accounts={saleAccounts} />);
   await selectBuyer();
+  await selectSku();
   fireEvent.change(screen.getByLabelText("Счёт выручки", { exact: true }), { target: { value: "90.1.1" } });
   fireEvent.change(screen.getByLabelText("Выручка: Подразделение"), { target: { value: "OLD-DEPARTMENT" } });
   if (mode === "account") fireEvent.change(screen.getByLabelText("Счёт выручки", { exact: true }), { target: { value: "90.1.2" } });

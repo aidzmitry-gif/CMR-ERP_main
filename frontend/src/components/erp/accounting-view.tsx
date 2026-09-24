@@ -56,9 +56,10 @@ type AccountingSection = { id: string; label: string; pages: { id: string; label
 const accountingSections: AccountingSection[] = [
   { id: "workspace", label: "Рабочее место", pages: [{ id: "home", label: "Обзор" }] },
   { id: "documents", label: "Документы", pages: [
-    { id: "sale", label: "Продажа товаров" }, { id: "inventory-issue", label: "Списание запасов" },
+    { id: "crm-sales", label: "Продажи CRM" }, { id: "inventory-issue", label: "Списание запасов" },
     { id: "entry", label: "Ручная операция" }, { id: "production", label: "Производство" },
     { id: "repairs", label: "Ремонты" }, { id: "fixed-assets", label: "ОС и амортизация" },
+    { id: "sale", label: "Ручная продажа" },
   ], hiddenTabs: ["shipment-preview"] },
   { id: "banking", label: "Банк и платежи", pages: [
     { id: "bank", label: "Банк" }, { id: "bank-import", label: "Импорт выписки" },
@@ -284,6 +285,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
       <Button key={page.id} disabled={locked} aria-pressed={tab === page.id} variant={tab === page.id ? "primary" : "secondary"} onClick={() => setTab(page.id)}>{page.label}</Button>
     )}</nav>}
     {tab === "expenses" && <ExpenseControl org={org} onEntry={(id) => void openEntry(id)} />}
+    {tab === "crm-sales" && <section aria-label="Продажи из CRM" className="space-y-3 rounded-xl border border-line bg-surface p-4"><h2 className="font-semibold">Продажа через сделку и отгрузку</h2><p>Счёт и резерв создаются в CRM, товар отгружается со склада по акту. Проводки выручки, НДС и себестоимости бухгалтер готовит по этому акту в очереди документов. Повторно вводить продажу здесь не нужно.</p><div className="flex flex-wrap gap-3"><Link className="text-accent underline" href="/crm/deals">Открыть сделки CRM</Link><Button variant="secondary" disabled={!org} onClick={() => { setControlSection("inbox"); setTab("controls"); }}>Отгрузки, ожидающие проводок</Button></div></section>}
     {tab === "home" && <AccountingHome selected={!!org} pending={report?.pending_documents ?? null} onOpen={openWorkspace} />}
     {tab === "seller-profiles" && <AccountingSellerProfiles org={org} organization={organizations.find((row) => String(row.id) === org)} onBusyChange={setControlsBusy} />}
     {tab === "invoice-settlements" && <AccountingInvoiceSettlements org={org} onBusyChange={setControlsBusy} />}

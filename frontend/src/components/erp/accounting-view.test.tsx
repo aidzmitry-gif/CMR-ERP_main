@@ -46,6 +46,18 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe("AccountingView", () => {
+  it("directs ordinary sales through CRM shipment evidence and keeps manual sale separate", async () => {
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    openPage("Документы", "Продажи CRM");
+    expect(screen.getByRole("link", { name: "Открыть сделки CRM" })).toHaveAttribute("href", "/crm/deals");
+    expect(screen.getByText(/Повторно вводить продажу здесь не нужно/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Отгрузки, ожидающие проводок" }));
+    expect(screen.getByText("Раздел контроля: inbox")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Документы", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Ручная продажа" }));
+    expect(screen.getByText("Ручная продажа: только исключения")).toBeInTheDocument();
+  });
   it("uses seven sections and keeps home shortcuts in the selected section", async () => {
     render(<AccountingView />);
     await screen.findByText(/включительно: 0\./);

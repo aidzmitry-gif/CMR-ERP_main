@@ -1,4 +1,5 @@
 """Pilot BYN goods sale preview; recognition and VAT basis are accountant inputs."""
+import hashlib
 import json
 import re
 from decimal import ROUND_HALF_UP, Decimal, localcontext
@@ -7,7 +8,7 @@ from typing import Annotated
 from pydantic import BeforeValidator, Field
 from sqlalchemy import select, text
 
-from core.domain.models import Counterparty
+from core.domain.models import Counterparty, Sku
 from modules.accounting import inventory_cost, inventory_issues, service
 from modules.accounting.models import Entry, InventorySaleReceipt
 from modules.accounting.schemas import (
@@ -22,6 +23,13 @@ from modules.accounting.schemas import (
 )
 
 
+class SaleSkuIdentity(Input):
+    id: int = Field(gt=0, le=2147483647, strict=True)
+    code: str = Field(min_length=1, max_length=64)
+    title: str = Field(min_length=1, max_length=255)
+    unit: str = Field(min_length=1, max_length=16)
+
+
 class SaleTerms(Input):
     net_amount: Money
     vat_rate: Annotated[Decimal, BeforeValidator(exact), Field(ge=0, le=100, decimal_places=4)]
@@ -33,6 +41,7 @@ class SaleTerms(Input):
     buyer_dimensions: dict[str, str]
     revenue_dimensions: dict[str, str] = Field(default_factory=dict)
     vat_dimensions: dict[str, str] = Field(default_factory=dict)
+    sku_identity: SaleSkuIdentity | None = None
 
 
 class SaleDocument(InventoryIssueDocument, SaleTerms):
@@ -45,7 +54,20 @@ class SaleConfirm(SaleDocument):
 
 
 def rule_version(document, basis_digest, *, allocation_version=None):
-    issue_rule = inventory_issues.rule_version(document, basis_digest, allocation_version=allocation_version)
+    if document.sku_identity is None:
+        # This optional field did not exist in historical sale commands. Keep
+        # their original rule digest so an exact replay remains possible.
+        old_document = document.model_dump(mode="json")
+        old_document.pop("sku_identity", None)
+        raw = json.dumps({"document": old_document, "basis": basis_digest},
+                         sort_keys=True, ensure_ascii=False)
+        issue_rule = "inventory-issue-v2:" + hashlib.sha256(raw.encode()).hexdigest()
+        if allocation_version is not None:
+            if type(allocation_version) is not int or allocation_version != 1:
+                raise service.AccountingError("Explicit allocation version must be integer 1")
+            issue_rule += ":a1"
+    else:
+        issue_rule = inventory_issues.rule_version(document, basis_digest, allocation_version=allocation_version)
     return "sale-v1:" + issue_rule.removeprefix("inventory-issue-v2:")
 
 
@@ -64,6 +86,20 @@ async def verified_buyer(session, document):
             or dimensions.get("counterparty_revision") != str(buyer.revision)):
         raise service.AccountingError("Buyer directory record changed; select it again")
     return buyer
+
+
+async def verified_sku(session, document):
+    """Bind the sale's accounting SKU code to a current immutable MDM ID."""
+    identity = document.sku_identity
+    if identity is None:
+        raise service.AccountingError("Select the item from the SKU directory")
+    sku = await session.scalar(select(Sku).where(Sku.id == identity.id)
+                               .with_for_update(read=True).execution_options(populate_existing=True))
+    if (sku is None or not sku.is_active or document.sku != sku.code
+            or identity.code != sku.code or identity.title != sku.title
+            or identity.unit != sku.unit):
+        raise service.AccountingError("SKU directory record changed; select it again")
+    return sku
 
 
 def belongs(code, root):
@@ -119,9 +155,11 @@ def posting_for(document, cost):
 
 
 async def prepare(session, org_id, document, *, procurement=None, source_allocations=False,
-                  require_current_buyer=False):
+                  require_current_buyer=False, require_current_sku=False):
     if require_current_buyer:
         await verified_buyer(session, document)
+    if require_current_sku:
+        await verified_sku(session, document)
     _, vat, gross = commercial_lines(document)
     issue = InventoryIssueDocument(**document.model_dump(include=set(InventoryIssueDocument.model_fields)))
     cost_request = InventoryIssuePreviewInput(**issue.model_dump(include=set(InventoryIssuePreviewInput.model_fields)))
@@ -226,7 +264,7 @@ async def verify_receipt(session, organization_id, entry_id, *, procurement=None
 
 
 async def confirm(session, org_id, document, basis_digest, digest, actor, event_bus=None, *, procurement=None,
-                  source_allocations=False, require_current_buyer=False):
+                  source_allocations=False, require_current_buyer=False, require_current_sku=False):
     await service.lock_organization(session, org_id)
     existing = await session.scalar(select(Entry).where(
         Entry.organization_id == org_id, Entry.source == document.source,
@@ -244,7 +282,8 @@ async def confirm(session, org_id, document, basis_digest, digest, actor, event_
         await verify_receipt(session, org_id, existing.id, procurement=procurement)
         return existing
     prepared = await prepare(session, org_id, document, procurement=procurement,
-                             source_allocations=source_allocations, require_current_buyer=require_current_buyer)
+                             source_allocations=source_allocations, require_current_buyer=require_current_buyer,
+                             require_current_sku=require_current_sku)
     if prepared["cost"]["basis_digest"] != basis_digest or prepared["digest"] != digest:
         raise service.AccountingError("Sale or inventory cost basis changed; preview again")
     entry = await service.post(session, org_id, PostingInput(**prepared["posting"]), actor, event_bus, inventory_sale=True)

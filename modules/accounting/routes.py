@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import HTMLResponse
 
-from core.domain.models import Counterparty
+from core.domain.models import Counterparty, Sku
 from core.runtime.deps import get_core, get_session
 from core.services.auth import (
     EffectiveIdentityLookupError,
@@ -1260,6 +1260,23 @@ async def inventory_lots(org_id: int, response: Response, data: InventoryLotQuer
     return await inventory_cost.available_lots(ctx[0], org_id, data, procurement=getattr(core.services, "procurement_source", None))
 
 
+@router.get("/organizations/{org_id}/inventory/skus")
+async def inventory_sku_options(org_id: int, response: Response, q: str = Query("", max_length=100),
+                                ctx=Depends(member)):
+    response.headers["Cache-Control"] = "private, no-store"
+    term = q.strip()
+    if not term:
+        return {"organization_id": org_id, "items": [], "truncated": False}
+    filters = [Sku.code.icontains(term, autoescape=True), Sku.title.icontains(term, autoescape=True)]
+    if term.isascii() and term.isdecimal() and int(term) <= 2147483647:
+        filters.append(Sku.id == int(term))
+    rows = (await ctx[0].scalars(select(Sku).where(Sku.is_active.is_(True), or_(*filters))
+            .order_by(Sku.code, Sku.id).limit(51))).all()
+    return {"organization_id": org_id, "items": [
+        {"id": row.id, "code": row.code, "title": row.title, "unit": row.unit}
+        for row in rows[:50]], "truncated": len(rows) > 50}
+
+
 @router.post("/organizations/{org_id}/inventory/issues/preview")
 async def preview_inventory_issue(org_id: int, data: InventoryIssuePreviewInput, ctx=Depends(member), core=Depends(get_core)):
     return await inventory_cost.preview_issue(ctx[0], org_id, data, procurement=getattr(core.services, "procurement_source", None))
@@ -1290,7 +1307,7 @@ async def sale_buyer_options(org_id: int, response: Response, q: str = Query("",
 @router.post("/organizations/{org_id}/sales/posting-preview")
 async def preview_sale_posting(org_id: int, data: sales.SaleDocument, ctx=Depends(member), core=Depends(get_core)):
     return await sales.prepare(ctx[0], org_id, data, procurement=getattr(core.services, "procurement_source", None),
-                               source_allocations=True, require_current_buyer=True)
+                               source_allocations=True, require_current_buyer=True, require_current_sku=True)
 
 
 @router.post("/organizations/{org_id}/sales/confirm", status_code=201)
@@ -1298,7 +1315,7 @@ async def confirm_sale_posting(org_id: int, data: sales.SaleConfirm, ctx=Depends
     document = sales.SaleDocument(**data.model_dump(exclude={"basis_digest", "digest"}))
     row = await sales.confirm(ctx[0], org_id, document, data.basis_digest, data.digest, ctx[1], core.services.event_bus,
                               procurement=getattr(core.services, "procurement_source", None), source_allocations=True,
-                              require_current_buyer=True)
+                              require_current_buyer=True, require_current_sku=True)
     return serialize(row)
 
 
