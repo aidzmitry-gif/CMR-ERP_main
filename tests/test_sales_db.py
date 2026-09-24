@@ -90,6 +90,36 @@ async def test_update_deal_flags(api):
     assert r2["starred"] is True
 
 
+async def test_deal_field_history_records_actor_time_before_after_and_exact_deal(api):
+    deal = (await api.post("/sales/deals", json={
+        "number": "AUD-1", "title": "Первый", "counterparty": "ООО Тест", "amount": 100,
+    })).json()
+    other = (await api.post("/sales/deals", json={
+        "number": "AUD-2", "title": "Другой", "counterparty": "ООО Тест", "amount": 50,
+    })).json()
+    path = f"/sales/deals/{deal['id']}"
+    assert (await api.patch(path, json={"title": "Второй", "amount": 120})).status_code == 200
+    first = (await api.get(f"{path}/field-history")).json()
+    assert first["deal_id"] == deal["id"]
+    assert first["next_before_id"] is None
+    assert len(first["items"]) == 1
+    row = first["items"][0]
+    assert row["actor"] and row["changed_at"] and row["deal_number"] == "AUD-1"
+    assert row["organization_id"] is None  # No inferred owner for an unbound legacy deal.
+    assert row["changes"] == {"title": {"before": "Первый", "after": "Второй"},
+                              "amount": {"before": "100.00", "after": "120.00"}}
+    assert (await api.patch(path, json={"title": "Второй"})).status_code == 200
+    assert len((await api.get(f"{path}/field-history")).json()["items"]) == 1
+    assert (await api.patch(path, json={"title": "Третий"})).status_code == 200
+    latest = (await api.get(f"{path}/field-history?limit=1")).json()
+    assert latest["items"][0]["changes"]["title"]["after"] == "Третий"
+    assert latest["next_before_id"] == latest["items"][0]["id"]
+    older = (await api.get(f"{path}/field-history?limit=1&before_id={latest['next_before_id']}")).json()
+    assert older["items"][0]["id"] == row["id"]
+    assert (await api.get(f"/sales/deals/{other['id']}/field-history")).json()["items"] == []
+    assert (await api.get("/sales/deals/999999/field-history")).status_code == 404
+
+
 async def test_update_deal_next_step_at(api):
     """next_step_at (дата+время шага) сохраняется и читается независимо от next_step (текст)."""
     created = (

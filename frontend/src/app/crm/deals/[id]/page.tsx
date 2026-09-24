@@ -13,6 +13,7 @@ import { DealClient360 } from "@/components/deal-client-360";
 import { DealContacts } from "@/components/deal-contacts";
 import { DealLinkedDeals } from "@/components/deal-linked-deals";
 import { DealEditButton } from "@/components/deal-edit-button";
+import { DealFieldHistory } from "@/components/deal-field-history";
 import { DealDocuments } from "@/components/deal-documents";
 import { DocumentEmailPanel } from "@/components/kanban/document-email-panel";
 import { DealHandoffBlock } from "@/components/deal-handoff";
@@ -131,6 +132,7 @@ export default async function DealDetailPage({ params, searchParams }: { params:
                 penaltyCapPct={d.penaltyCapPct ?? null}
                 penaltyTerms={d.penaltyTerms ?? ""}
               />
+              <DealFieldHistory dealId={id} />
             </div>
           </div>
 
