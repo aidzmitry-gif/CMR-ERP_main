@@ -14,8 +14,9 @@ One accepted OSV pair is now labelled `reconciliation_ready` only. The API's
 top-level `cutover_ready` remains false for new and replayed receipts until
 the independent external-source, two-month, quarter/year, recovery and release
 gates are evidenced. The source HR gitlink `f8a6e014` exists in the local HR
-repository but was absent from all four advertised HR-10 branches in the
-2026-09-24 read-only remote check; a clean release fetch remains unproven.
+repository but failed an exact fetch from its declared GitHub remote and was
+absent from all advertised heads and tags in the 2026-09-24 read-only check.
+The full gitlink audit below identifies five more such objects.
 
 Current local synthetic PostgreSQL upgrade/restore and payroll-guard evidence
 for source head `0172` is recorded in
@@ -173,7 +174,26 @@ The isolated source `agent/crm-acc-prod009` is at `9dd63c4b622888d941202e4571031
 
 - `git rev-list --left-right --count integration...source` reports 112 integration-only commit identities and 194 source-only identities. `git cherry source integration` marks all 112 integration commits as patch-equivalent to commits in source (zero unmatched integration patches); the reverse check marks 112 source commits as equivalent and 82 as additional patches. This is evidence against copying the older integration branch into source. Patch equivalence does not prove that the final trees, runtime behavior or release package match.
 - `alembic heads` reports one head in each checkout: `0158` in integration and `0174` in source. A deployment must inspect the target database history and rehearse the complete candidate transition on its owned copy. Neither local head is evidence of the target's installed revision.
-- Source records `modules/hr` at `f8a6e0142f1920b07ec56818f42d156a602ff9c3`. That object exists in the local HR repository under `agent/crm-acc-hr-safety-001`; its configured `origin` is another local repository, while the parent `.gitmodules` declares `https://github.com/aidzmitry-gif/HR-10.git`. The separate parallel HR checkout does not contain the object, and no advertised remote-tracking branch in the local HR repository contains it. Fetchability from the declared release remote and a clean parent/submodule checkout remain unproven. Check all recorded submodule objects against their declared remotes before packaging; do not substitute materialized local directories for a clean checkout.
+- Source records `modules/hr` at `f8a6e0142f1920b07ec56818f42d156a602ff9c3`. That object exists in the local HR repository under `agent/crm-acc-hr-safety-001`; its configured `origin` is another local repository, while the parent `.gitmodules` declares `https://github.com/aidzmitry-gif/HR-10.git`. The separate parallel HR checkout does not contain the object. The exact remote audit below now confirms that this and five other gitlinks are unavailable from their declared GitHub remotes. Do not substitute materialized local directories for a clean checkout.
 - The source worktree has an unrelated untracked `reports/CRM-ACC-001/` directory and the integration checkout has an untracked coordination file; both were left untouched. No merge, push, target inspection, package build or deployment occurred.
 
 The next release candidate should be assembled from the reviewed source commit and exact fetchable submodule commits, then tested against the actual target baseline by the migration-plus-frontend route in `ops/belakb-deploy/START-HERE.md`. The current v1 backend-only runner is not a path for this change. Real policies, opening balances, primary documents and accountant closes remain independent acceptance gates.
+
+## Declared GitHub gitlink audit — 2026-09-24
+
+Source `198d89982bd24b95b7fe6d5d5f241a87cfe990da` pins ten submodule commits. Each `.gitmodules` URL was checked in a new temporary bare repository with a direct, depth-one fetch of the exact SHA. Four commits loaded as Git commits. For every failed direct fetch, all advertised heads and tags were fetched without the depth limit; the pinned object was absent from that published history. A search of every published commit tree also found no byte-identical tree for any of the six missing objects. The probes were removed after validation.
+
+| Module | Pinned SHA | Declared remote result |
+| --- | --- | --- |
+| finance | `59832b2f14a2ee02d8db266a67f8206616bdcd94` | Exact fetch failed; absent from heads/tags; no identical tree |
+| hr | `f8a6e0142f1920b07ec56818f42d156a602ff9c3` | Exact fetch failed; absent from heads/tags; no identical tree |
+| leads | `9a304f771ba74369ded199168e0e1da3ad6348d2` | Exact fetch failed; absent from heads/tags; no identical tree |
+| logistics | `6923d2e021980ef2546f382364d38dc34a0fef29` | Exact fetch succeeded |
+| marketing | `d4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282` | Exact fetch succeeded |
+| procurement | `c2483d60b4bc22526cd8e2694053fd9eddfdc273` | Exact fetch succeeded |
+| production | `be7d7e198bf09cc41c642d22125db401da5adc48` | Exact fetch failed; absent from heads/tags; no identical tree |
+| sales | `326b02034df21d137c2c9edf1bee3f9ae0682901` | Exact fetch failed; absent from heads/tags; no identical tree |
+| service | `3d33800c44865cd7a7373b29192c5d59d3c4bec8` | Exact fetch succeeded |
+| wms | `c84ec34592fc984f9421ae264d406d9a258c6df9` | Exact fetch failed; absent from heads/tags; no identical tree |
+
+This is a concrete clean-checkout blocker for the exact source commit, not a reason to change the pinned code silently. Publishing the six exact submodule commits or deliberately integrating reviewed equivalent code into fetchable commits is required before packaging. Neither happened in this audit. The test says nothing about a production image, target schema, accountant reconciliation or permission to retire 1C.
