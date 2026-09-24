@@ -61,6 +61,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0172_payroll_statutory_binding_coverage.py",
     "0173_payroll_work_schedule_source.py",
     "0174_reconciliation_erp_snapshot_blocker.py",
+    "0175_payroll_applicability_review.py",
 )
 
 
@@ -535,6 +536,82 @@ async def pg_book(pg_factory, db, book):
             await session.flush()
         await session.commit()
     return book
+
+
+async def test_payroll_applicability_review_postgres_guards(pg_factory, pg_book, tmp_path, monkeypatch):
+    """The real migration accepts a sourced review and rejects forged history."""
+    import base64
+
+    from sqlalchemy.exc import DBAPIError
+
+    from modules.accounting.models import PayrollApplicabilityReview
+    from modules.accounting.payroll_applicability_review import (
+        PayrollApplicabilityInput,
+    )
+    from modules.accounting.payroll_applicability_review import (
+        create as review_fact,
+    )
+    from modules.accounting.payroll_employment import PayrollEmploymentInput
+    from modules.accounting.payroll_employment import create as bind_employee
+    from modules.accounting.payroll_evidence_files import PayrollEvidenceFileInput
+    from modules.accounting.payroll_evidence_files import create as save_file
+    from modules.hr.models import Employee
+
+    root = tmp_path / "private-payroll"
+    root.mkdir()
+    monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
+    org_id = pg_book[0]
+    async with pg_factory() as session:
+        employee = Employee(full_name="Synthetic applicability employee", department="repair")
+        session.add(employee)
+        await session.flush()
+        bound = await bind_employee(session, org_id, PayrollEmploymentInput.model_validate({
+            "request_key": str(uuid4()), "employee_id": employee.id,
+            "contract_ref": "synthetic-applicability", "effective_from": "2026-10-01",
+            "state": "active", "source_document": "synthetic-contract",
+            "evidence": "Synthetic employment proof for database guard acceptance",
+        }), "tester")
+        source = await save_file(session, org_id, PayrollEvidenceFileInput.model_validate({
+            "request_key": str(uuid4()), "kind": "payroll_applicability",
+            "employment_binding_id": bound["binding_id"], "month": "2026-10",
+            "reference": "synthetic-fact-dossier", "filename": "facts.pdf",
+            "data_url": "data:application/pdf;base64," + base64.b64encode(
+                b"%PDF-1.7\nsynthetic applicability facts\n").decode(),
+            "evidence": "Synthetic private source for database guard acceptance",
+        }), "tester")
+        accepted = await review_fact(session, org_id, "2026-10", PayrollApplicabilityInput.model_validate({
+            "request_key": str(uuid4()), "employment_binding_id": bound["binding_id"],
+            "source_file_id": source["file_id"], "source_document": source["reference"],
+            "facts": [{"code": "main_workplace_and_deduction_basis",
+                       "finding": "Synthetic workplace fact checked by chief",
+                       "source_locator": "page 1, line 2"}],
+            "evidence": "Synthetic chief inspected the cited page",
+        }), "tester")
+        await session.commit()
+    assert accepted["revision"] == 1
+
+    for sql in (
+        "UPDATE accounting.payroll_applicability_review SET evidence='forged'",
+        "DELETE FROM accounting.payroll_applicability_review",
+        "TRUNCATE accounting.payroll_applicability_review",
+    ):
+        async with pg_factory() as session:
+            with pytest.raises(DBAPIError, match="immutable"):
+                await session.execute(text(sql))
+            await session.rollback()
+
+    async with pg_factory() as session:
+        first = await session.get(PayrollApplicabilityReview, accepted["review_id"])
+        forged = dict(first.snapshot)
+        forged.update(revision=2, supersedes_id=first.id,
+                      source_file_sha256="0" * 64, request_key=str(uuid4()))
+        session.add(PayrollApplicabilityReview(
+            **forged, request_digest="a" * 64, digest="b" * 64,
+            snapshot=forged, actor="tester",
+        ))
+        with pytest.raises(DBAPIError, match="source file mismatch"):
+            await session.flush()
+        await session.rollback()
 
 
 async def test_payroll_employment_closed_period_guard_in_postgres(pg_factory, pg_book):

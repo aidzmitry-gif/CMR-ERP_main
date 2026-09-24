@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AccountingPayrollApplicabilityReview } from "./accounting-payroll-applicability-review";
 
 type Amounts = {
   gross_byn: string;
@@ -62,7 +63,7 @@ type Candidate = {
     reference_scope: "selected_mns_topics_only" | "no_period_source_checked";
     references: { topic: string; url: string }[];
     organization_gap_codes: string[];
-    bindings: { employment_binding_id: number; unrecorded_fact_codes: string[] }[];
+    bindings: { employment_binding_id: number; review_id: number | null; review_digest: string | null; reviewed_fact_codes: string[]; unrecorded_fact_codes: string[] }[];
     statutory_completeness_verified: false;
   };
   arithmetic_scope_complete: boolean;
@@ -222,6 +223,7 @@ export function AccountingPayrollControl({ org, month, onEntry }: {
           : <details><summary className="cursor-pointer">Данные по договорам: {loaded.candidate.applicability.bindings.length}</summary>
             <div className="mt-2 space-y-2">{loaded.candidate.applicability.bindings.map((binding) => <div key={binding.employment_binding_id} className="rounded border border-line p-2">
               <strong>Договор № {binding.employment_binding_id}</strong>
+              {binding.review_id && <p>Квитанция главбуха № {binding.review_id}: рассмотрено фактов {binding.reviewed_fact_codes.length}. Выводы требуют проверки по применимым правилам.</p>}
               <ul className="list-disc pl-5">{binding.unrecorded_fact_codes.map((code) => <li key={code}>{applicabilityLabels[code] ?? code}</li>)}</ul>
             </div>)}</div>
           </details>}
@@ -229,6 +231,7 @@ export function AccountingPayrollControl({ org, month, onEntry }: {
           ? <p className="text-xs text-muted">Проверенные страницы МНС за {loaded.candidate.applicability.reference_year} год описывают только отдельные налоговые условия: {loaded.candidate.applicability.references.map((source, index) => <span key={source.topic}>{index > 0 ? ", " : ""}<a className="underline" href={source.url} target="_blank" rel="noreferrer">{referenceLabels[source.topic] ?? source.topic}</a></span>)}. Они не подтверждают полноту расчёта.</p>
           : <p className="text-xs text-muted">Для {loaded.candidate.applicability.reference_year} года официальные налоговые источники в этом контроле ещё не проверены.</p>}
       </div>
+      <AccountingPayrollApplicabilityReview org={org} month={month} bindingIds={loaded.candidate.applicability.bindings.map((row) => row.employment_binding_id)} onReviewed={() => setReload((value) => value + 1)} />
       <p className="break-all text-xs text-muted">Отпечаток исходной версии: {loaded.candidate.candidate_digest}. Проведение, выплата и обязательная отчётность недоступны.</p>
     </div>}
 

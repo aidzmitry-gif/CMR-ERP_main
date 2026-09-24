@@ -25,7 +25,7 @@ from modules.accounting.timesheet_preflight import UnsupportedWorkbook, scan_byt
 PayrollEvidenceKind = Literal[
     "employment_contract", "timesheet", "work_schedule", "payroll_policy", "base_adjustment",
     "payroll_zero_activity", "payroll_population", "payroll_zero_individual",
-    "payroll_statutory_zero", "payroll_stat_zero_person",
+    "payroll_statutory_zero", "payroll_stat_zero_person", "payroll_applicability",
 ]
 
 
@@ -219,7 +219,7 @@ async def create(session, org_id: int, data: PayrollEvidenceFileInput, actor: st
         return result(existing)
 
     if data.kind in {"payroll_zero_activity", "payroll_population", "payroll_zero_individual",
-                     "payroll_statutory_zero", "payroll_stat_zero_person"}:
+                     "payroll_statutory_zero", "payroll_stat_zero_person", "payroll_applicability"}:
         from modules.accounting.models import Period
 
         closed = await session.scalar(select(Period.id).where(
@@ -227,7 +227,7 @@ async def create(session, org_id: int, data: PayrollEvidenceFileInput, actor: st
             Period.closed.is_(True),
         ))
         if closed is not None:
-            raise AccountingError("A closed month cannot receive new zero-activity payroll evidence")
+            raise AccountingError("A closed month cannot receive new payroll evidence")
 
     if data.employment_binding_id is not None:
         binding = await session.scalar(select(PayrollEmploymentBinding).where(

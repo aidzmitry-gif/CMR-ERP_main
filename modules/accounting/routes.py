@@ -38,6 +38,7 @@ from modules.accounting import (
     inventory_issues,
     opening_import,
     output_vat_register,
+    payroll_applicability_review,
     payroll_candidate,
     payroll_employment,
     payroll_evidence_files,
@@ -95,6 +96,7 @@ from modules.accounting.output_vat_register import (
     OutputVatRegisterConfirmInput,
     OutputVatRegisterInput,
 )
+from modules.accounting.payroll_applicability_review import PayrollApplicabilityInput
 from modules.accounting.payroll_calculation import PayrollComponentPreviewInput
 from modules.accounting.payroll_employment import PayrollEmploymentInput
 from modules.accounting.payroll_evidence_files import PayrollEvidenceFileInput, PayrollEvidenceKind
@@ -1638,6 +1640,45 @@ async def payroll_own_candidate(org_id: int, month: str, response: Response,
     return await payroll_candidate.preview(ctx[0], org_id, month)
 
 
+@router.post('/organizations/{org_id}/periods/{month}/payroll-applicability-reviews')
+async def create_payroll_applicability_review(
+        org_id: int, month: str, data: PayrollApplicabilityInput,
+        response: Response, ctx=Depends(member)):
+    valid_month(month)
+    chief(ctx)
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        return await payroll_applicability_review.create(ctx[0], org_id, month, data, ctx[1])
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get('/organizations/{org_id}/periods/{month}/payroll-applicability-reviews/{binding_id}')
+async def payroll_applicability_review_for_binding(
+        org_id: int, month: str, binding_id: int, response: Response,
+        ctx=Depends(member)):
+    valid_month(month)
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    row = await payroll_applicability_review.latest(ctx[0], org_id, month, binding_id)
+    if row is None:
+        raise HTTPException(404, "Payroll applicability review was not found")
+    current = await payroll_applicability_review.current_for(ctx[0], org_id, month, [binding_id])
+    receipt = payroll_applicability_review.result(row)
+    response.headers['Cache-Control'] = 'private, no-store'
+    return {**receipt, "source_file_bytes_verified_now": bool(current)}
+
+
+@router.get('/organizations/{org_id}/payroll-applicability-reviews/by-request/{request_key}')
+async def payroll_applicability_review_by_request(
+        org_id: int, request_key: UUID, response: Response,
+        ctx=Depends(member)):
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    response.headers['Cache-Control'] = 'private, no-store'
+    return await payroll_applicability_review.by_request(ctx[0], org_id, request_key)
+
+
 @router.get('/organizations/{org_id}/periods/{month}/payroll-source-reconciliation')
 async def payroll_source_reconciliation(org_id: int, month: str, response: Response,
                                         ctx=Depends(member)):
@@ -1676,7 +1717,7 @@ async def create_payroll_evidence_file(org_id: int, data: PayrollEvidenceFileInp
     if ctx[2] not in {"accountant", "chief"}:
         raise HTTPException(403, "Accountant or chief access required")
     if data.kind in {"payroll_zero_activity", "payroll_population", "payroll_zero_individual",
-                     "payroll_statutory_zero", "payroll_stat_zero_person"}:
+                     "payroll_statutory_zero", "payroll_stat_zero_person", "payroll_applicability"}:
         chief(ctx)
     response.headers['Cache-Control'] = 'private, no-store'
     try:

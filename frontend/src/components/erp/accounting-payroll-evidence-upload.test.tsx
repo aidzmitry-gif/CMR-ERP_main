@@ -88,4 +88,24 @@ describe("AccountingPayrollEvidenceUpload", () => {
       reference: "approved-schedule-10", filename: "schedule.pdf",
     });
   });
+
+  it("keeps an applicability dossier inside the selected employee and month", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => key });
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => Promise.resolve(response(receipt(JSON.parse(init.body as string)))));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AccountingPayrollEvidenceUpload org="7" month="2026-10" bindingId={12} applicabilityOnly disabled={false} onUploaded={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("Номер документа"), { target: { value: "facts-2026-10" } });
+    fireEvent.change(screen.getByLabelText("Файл источника зарплаты"), {
+      target: { files: [new File(["%PDF-1.7\nfictional"], "facts.pdf", { type: "application/pdf" })] },
+    });
+    fireEvent.change(screen.getByLabelText("Пояснение документа"), {
+      target: { value: "Подтверждение условий сотрудника" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить документ" }));
+    expect(await screen.findByText(/Файл № 87 сохранён/)).toBeInTheDocument();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toMatchObject({
+      kind: "payroll_applicability", employment_binding_id: 12, month: "2026-10",
+      reference: "facts-2026-10", filename: "facts.pdf",
+    });
+  });
 });

@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from modules.accounting.models import PayrollWorkpaperReview
 from modules.accounting.payroll_applicability import assess as assess_applicability
+from modules.accounting.payroll_applicability_review import current_for as current_applicability
 from modules.accounting.payroll_calculation import (
     effective_percentage_rate,
     month_bounds,
@@ -136,7 +137,12 @@ async def preview(session, org_id: int, month: str) -> dict:
                 totals[field] += amounts[field]
     if stale_rule:
         blockers.append("rule_version_changed")
-    applicability = assess_applicability(month, population["known_binding_ids"])
+    applicability_reviews = await current_applicability(
+        session, org_id, month, population["known_binding_ids"],
+    )
+    applicability = assess_applicability(
+        month, population["known_binding_ids"], applicability_reviews,
+    )
     # A configured percentage list is not proof that every legally applicable
     # deduction, exemption, cap, benefit or employee-specific fact was covered.
     blockers.append("statutory_rule_completeness_unverified")

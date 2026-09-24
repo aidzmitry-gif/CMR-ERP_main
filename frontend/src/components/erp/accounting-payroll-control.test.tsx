@@ -3,6 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AccountingPayrollControl } from "@/components/erp/accounting-payroll-control";
 
+vi.mock("@/components/erp/accounting-payroll-applicability-review", () => ({
+  AccountingPayrollApplicabilityReview: () => null,
+}));
+
 const amounts = {
   gross_byn: "100.00",
   listed_employee_deductions_byn: "10.00",
@@ -53,7 +57,8 @@ function reports(organizationId: number) {
         reference_year: 2026, reference_scope: "selected_mns_topics_only",
         references: [{ topic: "standard_deductions_and_main_workplace", url: "https://nalog.gov.by/individuals/income_taxation/tax_deductions/9332/" }],
         organization_gap_codes: ["period_income_tax_withholding_rule", "period_fszn_rules_and_limits"],
-        bindings: [{ employment_binding_id: 9, unrecorded_fact_codes: ["main_workplace_and_deduction_basis", "year_to_date_taxable_income"] }],
+        bindings: [{ employment_binding_id: 9, review_id: null, review_digest: null,
+          reviewed_fact_codes: [], unrecorded_fact_codes: ["main_workplace_and_deduction_basis", "year_to_date_taxable_income"] }],
         statutory_completeness_verified: false,
       },
     },

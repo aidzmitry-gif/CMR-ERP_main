@@ -706,6 +706,9 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert applicability["statutory_completeness_verified"] is False
     assert applicability["bindings"] == [{
         "employment_binding_id": binding["binding_id"],
+        "review_id": None,
+        "review_digest": None,
+        "reviewed_fact_codes": [],
         "unrecorded_fact_codes": [
             "income_kind_and_tax_agent_treatment", "year_to_date_taxable_income",
             "main_workplace_and_deduction_basis",

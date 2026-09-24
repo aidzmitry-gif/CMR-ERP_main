@@ -20,7 +20,7 @@ _MNS_2026_SOURCES = [
     },
 ]
 
-_EMPLOYEE_FACT_CODES = [
+EMPLOYEE_FACT_CODES = [
     "income_kind_and_tax_agent_treatment",
     "year_to_date_taxable_income",
     "main_workplace_and_deduction_basis",
@@ -36,12 +36,14 @@ _ORGANIZATION_RULE_CODES = [
 ]
 
 
-def assess(month: str, binding_ids: list[int]) -> dict:
+def assess(month: str, binding_ids: list[int],
+           reviews: dict[int, dict] | None = None) -> dict:
     """List facts ERP does not record; never infer that a deduction is zero."""
     year = int(month[:4])
     organization_gaps = list(_ORGANIZATION_RULE_CODES)
     if year != 2026:
         organization_gaps.insert(0, "period_income_tax_sources_unverified")
+    reviews = reviews or {}
     return {
         "status": "facts_and_rules_unverified",
         "population_scope": "known_erp_bindings_only",
@@ -51,7 +53,12 @@ def assess(month: str, binding_ids: list[int]) -> dict:
         "organization_gap_codes": organization_gaps,
         "bindings": [
             {"employment_binding_id": binding_id,
-             "unrecorded_fact_codes": list(_EMPLOYEE_FACT_CODES)}
+             "review_id": reviews[binding_id]["review_id"] if binding_id in reviews else None,
+             "review_digest": reviews[binding_id]["digest"] if binding_id in reviews else None,
+             "reviewed_fact_codes": reviews[binding_id]["reviewed_fact_codes"]
+             if binding_id in reviews else [],
+             "unrecorded_fact_codes": [code for code in EMPLOYEE_FACT_CODES
+                                       if code not in reviews.get(binding_id, {}).get("reviewed_fact_codes", [])]}
             for binding_id in sorted(set(binding_ids))
         ],
         "statutory_completeness_verified": False,

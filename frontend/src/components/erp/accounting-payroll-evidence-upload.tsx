@@ -9,7 +9,7 @@ export type PayrollEvidenceReceipt = {
   file_id: number;
   organization_id: number;
   employment_binding_id: number | null;
-  kind: "employment_contract" | "timesheet" | "work_schedule" | "base_adjustment" | "payroll_policy";
+  kind: "employment_contract" | "timesheet" | "work_schedule" | "base_adjustment" | "payroll_policy" | "payroll_applicability";
   month: string | null;
   reference: string;
   filename: string;
@@ -19,7 +19,7 @@ export type PayrollEvidenceReceipt = {
   request_key: string;
 };
 
-type UploadKind = "employment_contract" | "timesheet" | "work_schedule" | "base_adjustment" | "payroll_policy";
+type UploadKind = "employment_contract" | "timesheet" | "work_schedule" | "base_adjustment" | "payroll_policy" | "payroll_applicability";
 type UploadCommand = {
   request_key: string;
   kind: UploadKind;
@@ -36,6 +36,7 @@ type Props = {
   bindingId?: number;
   contractReference?: string;
   policyOnly?: boolean;
+  applicabilityOnly?: boolean;
   disabled: boolean;
   onUploaded: (receipt: PayrollEvidenceReceipt) => void;
   onBusyChange?: (busy: boolean) => void;
@@ -93,8 +94,8 @@ function validReceipt(receipt: PayrollEvidenceReceipt, command: UploadCommand, o
     && /^[a-f0-9]{64}$/.test(receipt.sha256);
 }
 
-export function AccountingPayrollEvidenceUpload({ org, month, bindingId, contractReference, policyOnly = false, disabled, onUploaded, onBusyChange }: Props) {
-  const [kind, setKind] = useState<UploadKind>(policyOnly ? "payroll_policy" : "employment_contract");
+export function AccountingPayrollEvidenceUpload({ org, month, bindingId, contractReference, policyOnly = false, applicabilityOnly = false, disabled, onUploaded, onBusyChange }: Props) {
+  const [kind, setKind] = useState<UploadKind>(policyOnly ? "payroll_policy" : applicabilityOnly ? "payroll_applicability" : "employment_contract");
   const [reference, setReference] = useState("");
   const [evidence, setEvidence] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -161,11 +162,11 @@ export function AccountingPayrollEvidenceUpload({ org, month, bindingId, contrac
   }
 
   const locked = disabled || busy || pending !== null;
-  return <div className="space-y-3 rounded-lg border border-line p-3" aria-label={policyOnly ? "Загрузка правил зарплаты" : "Загрузка источника зарплаты"}>
+  return <div className="space-y-3 rounded-lg border border-line p-3" aria-label={policyOnly ? "Загрузка правил зарплаты" : applicabilityOnly ? "Загрузка оснований налоговых условий" : "Загрузка источника зарплаты"}>
     <h3 className="font-semibold">Добавить подтверждающий документ</h3>
     <p className="text-sm text-muted">{policyOnly ? "Файл правил хранится для выбранного юрлица." : "Файл хранится отдельно для выбранного юрлица и договора."} Квитанция подтверждает байты, но содержание проверяет бухгалтер.</p>
     <div className="grid gap-3 md:grid-cols-2">
-      {policyOnly ? <p className="text-sm">Вид документа: правила расчёта зарплаты</p> : <label className="text-sm">Вид документа<Select aria-label="Вид документа" value={kind} disabled={locked} onChange={(event) => { setKind(event.target.value as UploadKind); setError(""); }}><option value="employment_contract">Договор</option><option value="timesheet">Табель за {month}</option><option value="work_schedule">График работы и норма за {month}</option><option value="base_adjustment">Основание корректировки за {month}</option></Select></label>}
+      {policyOnly ? <p className="text-sm">Вид документа: правила расчёта зарплаты</p> : applicabilityOnly ? <p className="text-sm">Вид документа: основания налоговых условий за {month}</p> : <label className="text-sm">Вид документа<Select aria-label="Вид документа" value={kind} disabled={locked} onChange={(event) => { setKind(event.target.value as UploadKind); setError(""); }}><option value="employment_contract">Договор</option><option value="timesheet">Табель за {month}</option><option value="work_schedule">График работы и норма за {month}</option><option value="base_adjustment">Основание корректировки за {month}</option></Select></label>}
       <label className="text-sm">Номер или ссылка на документ<Input aria-label="Номер документа" value={currentReference} disabled={locked || kind === "employment_contract"} onChange={(event) => setReference(event.target.value)} /></label>
     </div>
     <label className="block text-sm">Файл PDF, изображение или Office до 10 МБ<Input key={fileInputKey} aria-label={policyOnly ? "Файл правил зарплаты" : "Файл источника зарплаты"} type="file" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xlsx" disabled={locked} onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
