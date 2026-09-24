@@ -104,7 +104,7 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
   return data as T;
 }
 
-export function AccountingView({ suggestedOrg }: { suggestedOrg?: string }) {
+export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?: string; suggestedEntry?: string }) {
   const today = new Date().toISOString().slice(0, 10);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [organizationRefresh, setOrganizationRefresh] = useState(0);
@@ -139,6 +139,7 @@ export function AccountingView({ suggestedOrg }: { suggestedOrg?: string }) {
   const entryGeneration = useRef(0);
   const previewGeneration = useRef(0);
   const appliedSuggestedOrg = useRef<string | undefined>(undefined);
+  const openedSuggestedEntry = useRef("");
 
   useEffect(() => {
     let active = true;
@@ -175,6 +176,20 @@ export function AccountingView({ suggestedOrg }: { suggestedOrg?: string }) {
       .catch((e: Error) => { if (token === generation.current) { setError(e.message); setReport(null); setAccountActivity(null); } });
     return () => { generation.current += 1; };
   }, [org, start, end, operationDate]);
+  useEffect(() => {
+    const hint = organizationHint(suggestedOrg);
+    const entry = organizationHint(suggestedEntry);
+    if (!hint || org !== hint || !entry) return;
+    const key = `${hint}/${entry}`;
+    if (openedSuggestedEntry.current === key) return;
+    openedSuggestedEntry.current = key;
+    const token = generation.current;
+    const entryToken = ++entryGeneration.current;
+    setTab("reports");
+    void request<EntryDetail>(`/organizations/${org}/entries/${entry}`)
+      .then((result) => { if (token === generation.current && entryToken === entryGeneration.current) setDetail(result); })
+      .catch((reason: Error) => { if (token === generation.current && entryToken === entryGeneration.current) setError(reason.message); });
+  }, [org, suggestedOrg, suggestedEntry]);
   function invalidatePreview() { previewGeneration.current += 1; setPreview(null); setPrepared(null); }
   function changeDate(kind: "start" | "end" | "operation", value: string) {
     generation.current += 1; invalidatePreview(); setReport(null); setAccountActivity(null); setDetail(null); setNotice("");

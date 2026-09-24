@@ -66,6 +66,25 @@ describe("AccountingView", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/organizations/2/reports?"))).toBe(true);
   });
 
+  it("opens a requested posting in the authorized book without needing it in the current report period", async () => {
+    render(<AccountingView suggestedOrg="1" suggestedEntry="5" />);
+    expect(await screen.findByRole("region", { name: "Карточка проводки" })).toHaveTextContent("Контрольное поступление");
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/accounting/organizations/1/entries/5")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Отчёты", exact: true })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("does not open a posting for an unavailable book", async () => {
+    render(<AccountingView suggestedOrg="3" suggestedEntry="5" />);
+    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/entries/5"))).toBe(false);
+  });
+
+  it("ignores malformed posting hints", async () => {
+    render(<AccountingView suggestedOrg="1" suggestedEntry="5junk" />);
+    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/entries/5"))).toBe(false);
+  });
+
   it("не возвращает query-hint после ручного выбора и обновления списка", async () => {
     render(<AccountingView suggestedOrg="2" />);
     await waitFor(() => expect(screen.getByLabelText("Организация")).toHaveValue("2"));

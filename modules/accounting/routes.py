@@ -698,6 +698,40 @@ async def purchase_confirm(org_id: int, data: PurchaseDocument, ctx=Depends(memb
     return serialize(await service.post(ctx[0], org_id, posting, ctx[1], core.services.event_bus))
 
 
+@router.get("/organizations/{org_id}/purchases/unlinked-primary")
+async def purchases_without_primary(org_id: int, response: Response,
+                                    after_id: int | None = Query(default=None, gt=0),
+                                    limit: int = Query(default=100, ge=1, le=200),
+                                    ctx=Depends(member)):
+    """Find posted purchases without a saved procurement primary source."""
+    from modules.procurement.receipt_documents import ReceiptDocument, ReceiptPosting
+
+    linked = select(ReceiptPosting.entry_id).join(
+        ReceiptDocument, ReceiptDocument.id == ReceiptPosting.receipt_id,
+    ).where(
+        ReceiptPosting.entry_id == Entry.id,
+        ReceiptDocument.organization_id == org_id,
+    ).exists()
+    query = select(Entry).where(
+        Entry.organization_id == org_id,
+        Entry.operation == "inventory_purchase",
+        ~linked,
+    )
+    if after_id is not None:
+        query = query.where(Entry.id < after_id)
+    found = (await ctx[0].scalars(query.order_by(Entry.id.desc()).limit(limit + 1))).all()
+    page = found[:limit]
+    response.headers["Cache-Control"] = "private, no-store"
+    return {
+        "organization_id": org_id,
+        "rows": [{"entry_id": row.id, "document_date": row.document_date,
+                  "posting_date": row.posting_date, "source": row.source,
+                  "source_version": row.source_version,
+                  "reason": "procurement_primary_not_linked"} for row in page],
+        "next_after_id": page[-1].id if len(found) > limit else None,
+    }
+
+
 @router.get("/organizations/{org_id}/entries")
 async def entries(org_id: int, start: date, end: date, ctx=Depends(member)):
     rows = (await ctx[0].scalars(select(Entry).where(

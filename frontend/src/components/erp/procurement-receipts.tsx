@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Input, Select } from "@/components/ui/input";
 
 import { ProcurementReceiptDrafts } from "./procurement-receipt-drafts";
+import { ProcurementUnlinkedPurchases } from "./procurement-unlinked-purchases";
 
 type Organization = { id: number; name: string; unp: string };
 type Account = { code: string; title: string; category: string; cash: boolean; quantity_tracking: boolean };
@@ -58,6 +59,7 @@ export function ProcurementReceipts({ initialOrganization, initialReceipt }: { i
     {error && <p role="alert" className="text-red-700">{error}</p>}
     {!org && !error && <p>Выберите юрлицо перед просмотром или созданием накладной.</p>}
     {org && <ProcurementReceiptDrafts key={`draft:${org}`} org={org} initialReceipt={org === initialOrganization ? initialReceipt : undefined} accounts={current?.accounts ?? []} policyId={policy?.id} date={date} onPosted={() => setGeneration((v) => v + 1)} />}
+    {org && <ProcurementUnlinkedPurchases key={`unlinked:${org}:${generation}`} org={org} />}
     {org && !current && !error && <p role="status">Загрузка поступлений…</p>}
     {current && <section className="rounded-xl border border-line bg-surface p-4"><h2 className="font-semibold">Проведённые поступления с начала месяца по {date}</h2>
       <ul className="divide-y divide-line">{current.entries.filter((entry) => entry.operation === "inventory_purchase").map((entry) => <li key={entry.id} className="py-3">{entry.document_date} · {entry.source} · версия {entry.source_version}<p className="text-sm text-muted">{entry.explanation} · проводка № {entry.id}</p></li>)}</ul>
