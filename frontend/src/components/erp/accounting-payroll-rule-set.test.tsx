@@ -51,6 +51,7 @@ async function fill() {
     ["Учётная политика для зарплаты", "5"], ["Файл правил", "61"],
     ["Метод начисления", "monthly_salary_by_hours"], ["Округление зарплаты", "half_up_cent"],
     ["Ставка 1", "SYNTHETIC-RATE"], ["Вид суммы 1", "employee_deduction"], ["База 1", "gross"],
+    ["Обязательство 1", "period_income_tax_withholding_rule"],
     ["Основание классификации 1", "Подтверждено главбухом как удержание"],
     ["Основание правил", "Проверены выбранные ставки и метод"],
   ]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
@@ -66,6 +67,11 @@ it("requires explicit policy, source, method, rate role and basis before creatin
   expect(await screen.findByRole("alert")).toHaveTextContent("Выберите действующую подтверждённую учётную политику");
   expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   await fill();
+  fireEvent.change(screen.getByLabelText("Обязательство 1"), { target: { value: "" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить новую редакцию" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("выберите уникальный код, вид, базу, обязательство");
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  fireEvent.change(screen.getByLabelText("Обязательство 1"), { target: { value: "period_income_tax_withholding_rule" } });
   fireEvent.click(screen.getByRole("button", { name: "Сохранить новую редакцию" }));
   expect(await screen.findByText(/Редакция 1 сохранена/)).toBeInTheDocument();
   const post = fetchMock.mock.calls.find(([url, init]) => url.endsWith("/payroll-rule-sets") && init?.method === "POST");
@@ -73,7 +79,8 @@ it("requires explicit policy, source, method, rate role and basis before creatin
   expect(body).toMatchObject({ request_key: key, policy_id: 5, effective_from: "2026-10-01",
     source_reference: source.reference, source_digest: source.sha256, source_file_id: 61,
     gross_method: "monthly_salary_by_hours", rounding: "half_up_cent",
-    rate_rules: [{ code: rate.code, role: "employee_deduction", base_mode: "gross" }],
+    rate_rules: [{ code: rate.code, role: "employee_deduction", base_mode: "gross",
+      obligation_code: "period_income_tax_withholding_rule" }],
     expected_rate_versions: [{ code: rate.code, requirement_id: 31, requirement_digest: rate.digest }],
   });
   expect(screen.getByText(/Проверка содержания источника и нормативной полноты: не выполнена/)).toBeInTheDocument();

@@ -105,18 +105,30 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await services.db.connect()
-        await _run_hooks(core.startup_hooks)
-        background_task = asyncio.create_task(_background_loop(services, core.tick_hooks))
-        currency_task = asyncio.create_task(sync_nbrb(services))
+        async_writers_disabled = os.getenv("AIOS_DISABLE_ASYNC_WRITERS") == "1"
+        app.state.async_writers_disabled = async_writers_disabled
+        background_task = None
+        currency_task = None
+        if async_writers_disabled:
+            logger.warning("Фоновые процессы и startup-хуки отключены для контролируемого запуска")
+        else:
+            await _run_hooks(core.startup_hooks)
+            background_task = asyncio.create_task(_background_loop(services, core.tick_hooks))
+            currency_task = asyncio.create_task(sync_nbrb(services))
         logger.info("Приложение запущено")
-        yield
-        background_task.cancel()
-        currency_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await currency_task
-        await _run_hooks(core.shutdown_hooks)
-        await services.db.disconnect()
-        logger.info("Приложение остановлено")
+        try:
+            yield
+        finally:
+            if background_task is not None and currency_task is not None:
+                background_task.cancel()
+                currency_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await background_task
+                with suppress(asyncio.CancelledError):
+                    await currency_task
+                await _run_hooks(core.shutdown_hooks)
+            await services.db.disconnect()
+            logger.info("Приложение остановлено")
 
     app = FastAPI(title=services.config.app_name, version="0.1.0", lifespan=lifespan)
     app.state.core = core
@@ -156,5 +168,17 @@ def create_app() -> FastAPI:
 
     # ограничение доступа к модулям по матрице ролей (config/access.py)
     app.add_middleware(AccessControlMiddleware, prefixes=build_prefix_map(core))
+
+    block_http_writes = os.getenv("AIOS_BLOCK_HTTP_WRITES") == "1"
+    app.state.http_writes_blocked = block_http_writes
+
+    @app.middleware("http")
+    async def pilot_http_write_gate(request: Request, call_next):
+        if block_http_writes and request.method not in {"GET", "HEAD", "OPTIONS"}:
+            return JSONResponse(status_code=503, content={
+                "detail": {"code": "pilot_http_writes_disabled",
+                           "message": "Изменение данных временно недоступно"},
+            })
+        return await call_next(request)
 
     return app

@@ -697,7 +697,8 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
         "review_id": attested["review_id"], "snapshot_digest": attested["snapshot_digest"],
     }]
     assert candidate["blockers"] == [
-        "population_review_missing_or_stale", "statutory_rule_completeness_unverified",
+        "population_review_missing_or_stale", "payroll_rate_obligation_unmapped",
+        "statutory_rule_completeness_unverified",
     ]
     assert candidate["posting_available"] is False
     assert candidate["statutory_payroll_certified"] is False
@@ -803,7 +804,9 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert roster_review.status_code == 200, roster_review.text
     roster_candidate = (await client.get(candidate_url)).json()
     assert roster_candidate["arithmetic_scope_complete"] is True
-    assert roster_candidate["blockers"] == ["statutory_rule_completeness_unverified"]
+    assert roster_candidate["blockers"] == [
+        "payroll_rate_obligation_unmapped", "statutory_rule_completeness_unverified",
+    ]
     assert roster_candidate["candidate_digest"] != candidate["candidate_digest"]
     assert roster_candidate["source_basis"]["population_review_id"] == roster_review.json()["review_id"]
     roster_path = root / str(book[0]) / (roster_file.json()["request_key"].replace("-", "") + ".pdf")

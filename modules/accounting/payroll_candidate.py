@@ -148,6 +148,21 @@ async def preview(session, org_id: int, month: str) -> dict:
         month, population["known_binding_ids"], applicability_reviews,
         organization_review,
     )
+    decisions = applicability["organization"]["rule_decisions"]
+    rate_obligations = [{
+        "rate_code": rate_rule["code"],
+        "obligation_code": rate_rule.get("obligation_code"),
+        "chief_decision": decisions.get(rate_rule.get("obligation_code")),
+    } for rate_rule in (rule["rate_rules"] if rule else [])]
+    applicability["rate_obligations"] = rate_obligations
+    if any(row["obligation_code"] is None for row in rate_obligations):
+        blockers.append("payroll_rate_obligation_unmapped")
+    if any(row["obligation_code"] is not None
+           and row["chief_decision"] in (None, "unresolved")
+           for row in rate_obligations):
+        blockers.append("payroll_rate_obligation_unreviewed")
+    if any(row["chief_decision"] == "not_applicable" for row in rate_obligations):
+        blockers.append("payroll_rate_conflicts_with_organization_review")
     # A configured percentage list is not proof that every legally applicable
     # deduction, exemption, cap, benefit or employee-specific fact was covered.
     blockers.append("statutory_rule_completeness_unverified")
@@ -177,8 +192,12 @@ async def preview(session, org_id: int, month: str) -> dict:
         "unattested_review_ids": summary["source_fact_unattested_review_ids"],
         "bindings": bindings, "totals": formatted, "blockers": blockers,
         "applicability": applicability,
-        "arithmetic_scope_complete": not any(code != "statutory_rule_completeness_unverified"
-                                             for code in blockers),
+        "arithmetic_scope_complete": not any(code not in {
+            "statutory_rule_completeness_unverified",
+            "payroll_rate_obligation_unmapped",
+            "payroll_rate_obligation_unreviewed",
+            "payroll_rate_conflicts_with_organization_review",
+        } for code in blockers),
         "population_source_facts_verified_by_software": False,
         "statutory_payroll_certified": False,
         "posting_available": False,

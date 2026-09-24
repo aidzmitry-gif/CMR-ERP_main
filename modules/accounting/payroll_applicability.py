@@ -50,6 +50,7 @@ def assess(month: str, binding_ids: list[int],
         "review_digest": None,
         "reviewed_rule_codes": [],
         "unresolved_rule_codes": list(ORGANIZATION_RULE_CODES),
+        "rule_decisions": {},
     }
     return {
         "status": "facts_and_rules_unverified",

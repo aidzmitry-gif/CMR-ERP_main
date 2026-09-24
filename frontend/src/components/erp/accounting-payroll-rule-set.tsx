@@ -10,8 +10,9 @@ import { AccountingPayrollEvidenceUpload, type PayrollEvidenceReceipt } from "./
 type Policy = { id: number; effective_from: string; reference: string; normative_verified: boolean };
 type Role = "employee_deduction" | "employer_contribution";
 type BaseMode = "gross" | "gross_less_adjustment";
-type RuleDraft = { code: string; role: Role | ""; base_mode: BaseMode | ""; classification_evidence: string };
-type RateRule = { code: string; role: Role; base_mode: BaseMode; classification_evidence: string };
+type ObligationCode = "period_income_tax_withholding_rule" | "period_fszn_rules_and_limits" | "period_work_injury_insurance_tariff";
+type RuleDraft = { code: string; role: Role | ""; base_mode: BaseMode | ""; obligation_code: ObligationCode | ""; classification_evidence: string };
+type RateRule = { code: string; role: Role; base_mode: BaseMode; obligation_code?: ObligationCode; classification_evidence: string };
 type RateVersion = { code: string; requirement_id: number; requirement_digest: string };
 type RuleCommand = {
   request_key: string; policy_id: number; effective_from: string;
@@ -31,7 +32,12 @@ type Props = {
 
 class RuleError extends Error { constructor(message: string, readonly status?: number) { super(message); } }
 class ReceiptMismatchError extends Error {}
-const blankRule = (): RuleDraft => ({ code: "", role: "", base_mode: "", classification_evidence: "" });
+const blankRule = (): RuleDraft => ({ code: "", role: "", base_mode: "", obligation_code: "", classification_evidence: "" });
+const obligationLabels: Record<ObligationCode, string> = {
+  period_income_tax_withholding_rule: "Подоходный налог",
+  period_fszn_rules_and_limits: "Взносы ФСЗН",
+  period_work_injury_insurance_tariff: "Страхование от несчастных случаев",
+};
 const message = (cause: unknown) => cause instanceof Error ? cause.message : "Запрос не выполнен.";
 const validOrg = (org: string) => /^[1-9]\d*$/.test(org) && Number.isSafeInteger(Number(org));
 const validMonth = (month: string) => /^\d{4}-(0[1-9]|1[0-2])$/.test(month);
@@ -67,7 +73,7 @@ function sameVersions(actual: RateVersion[], expected: RateVersion[]) {
 function sameRules(actual: RateRule[], expected: RateRule[]) {
   return Array.isArray(actual) && actual.length === expected.length && actual.every((row, i) =>
     row.code === expected[i].code && row.role === expected[i].role
-    && row.base_mode === expected[i].base_mode
+    && row.base_mode === expected[i].base_mode && row.obligation_code === expected[i].obligation_code
     && row.classification_evidence === expected[i].classification_evidence);
 }
 
@@ -148,9 +154,9 @@ function ScopedPayrollRuleSet({ org, month, policies, disabled, onOpenRates, onB
     if (!selectedFile || !policyFile(selectedFile, org)) throw new Error("Выберите сохранённый файл правил зарплаты.");
     if (grossMethod !== "monthly_salary_by_hours" || rounding !== "half_up_cent") throw new Error("Явно выберите метод начисления и округления.");
     if (evidence.trim().length < 10) throw new Error("Укажите основание набора правил не короче 10 символов.");
-    if (!rules.length || rules.length > 20 || rules.some((row) => !row.code || !row.role || !row.base_mode || row.classification_evidence.trim().length < 10)
+    if (!rules.length || rules.length > 20 || rules.some((row) => !row.code || !row.role || !row.base_mode || !row.obligation_code || row.classification_evidence.trim().length < 10)
         || new Set(rules.map((row) => row.code)).size !== rules.length) {
-      throw new Error("Для каждой ставки выберите уникальный код, вид, базу и основание классификации.");
+      throw new Error("Для каждой ставки выберите уникальный код, вид, базу, обязательство и основание классификации.");
     }
     const selectedRates = rules.map((row) => rates.find((rate) => rate.code === row.code));
     if (selectedRates.some((row) => !row || !digest(row.digest))) throw new Error("Каталог ставок изменился; обновите данные.");
@@ -158,7 +164,8 @@ function ScopedPayrollRuleSet({ org, month, policies, disabled, onOpenRates, onB
       request_key: crypto.randomUUID(), policy_id: policy.id, effective_from: monthStart,
       gross_method: "monthly_salary_by_hours", rounding: "half_up_cent",
       rate_rules: rules.map((row) => ({ code: row.code, role: row.role as Role,
-        base_mode: row.base_mode as BaseMode, classification_evidence: row.classification_evidence.trim() })),
+        base_mode: row.base_mode as BaseMode, obligation_code: row.obligation_code as ObligationCode,
+        classification_evidence: row.classification_evidence.trim() })),
       expected_rate_versions: selectedRates.map((rate) => ({ code: rate!.code,
         requirement_id: rate!.requirement_id, requirement_digest: rate!.digest })),
       source_reference: selectedFile.reference, source_digest: selectedFile.sha256,
@@ -211,7 +218,7 @@ function ScopedPayrollRuleSet({ org, month, policies, disabled, onOpenRates, onB
     {loading && <p role="status">Загрузка правил…</p>}
     {error && <p role="alert" className="text-red-700">{error}</p>}
     {notice && <p role="status">{notice}</p>}
-    {current && <div className="space-y-2 rounded-lg border border-line p-3 text-sm"><h3 className="font-semibold">Действующая редакция № {current.revision} с {current.effective_from}</h3><p>Политика № {current.policy_id}; основание: {current.source_reference}{current.source_file_id ? ` · файл № ${current.source_file_id}` : " · файл не привязан"}.</p><ul className="list-disc pl-5">{current.rate_rules.map((rule) => { const version = current.rate_versions.find((row) => row.code === rule.code); return <li key={rule.code}>{rule.code}: {rule.role === "employee_deduction" ? "удержание работника" : "взнос нанимателя"}, {rule.base_mode === "gross" ? "от начисленного" : "с корректировкой базы"}; ставка № {version?.requirement_id ?? "не найдена"}.</li>; })}</ul><p>Проверка содержания источника и нормативной полноты: не выполнена.</p></div>}
+    {current && <div className="space-y-2 rounded-lg border border-line p-3 text-sm"><h3 className="font-semibold">Действующая редакция № {current.revision} с {current.effective_from}</h3><p>Политика № {current.policy_id}; основание: {current.source_reference}{current.source_file_id ? ` · файл № ${current.source_file_id}` : " · файл не привязан"}.</p><ul className="list-disc pl-5">{current.rate_rules.map((rule) => { const version = current.rate_versions.find((row) => row.code === rule.code); return <li key={rule.code}>{rule.code}: {rule.role === "employee_deduction" ? "удержание работника" : "взнос нанимателя"}, {rule.base_mode === "gross" ? "от начисленного" : "с корректировкой базы"}, {rule.obligation_code ? obligationLabels[rule.obligation_code] : "обязательство не сопоставлено"}; ставка № {version?.requirement_id ?? "не найдена"}.</li>; })}</ul><p>Проверка содержания источника и нормативной полноты: не выполнена.</p></div>}
     {!current && !loading && catalog && <p className="text-sm text-muted">На выбранный месяц набор правил ещё не задан.</p>}
     {access && !access.can_review && <p className="text-sm text-muted">Новую редакцию настраивает главный бухгалтер.</p>}
     {access?.can_review && <>
@@ -229,6 +236,7 @@ function ScopedPayrollRuleSet({ org, month, policies, disabled, onOpenRates, onB
           <label className="text-sm">Ставка {index + 1}<Select aria-label={`Ставка ${index + 1}`} value={row.code} disabled={locked} onChange={(event) => updateRule(index, { code: event.target.value })}><option value="">Выберите ставку</option>{rates.map((rate) => <option key={rate.requirement_id} value={rate.code}>{rate.code} · {rate.title} · {rate.rate_value}% от {rate.rate_basis} · версия {rate.revision}</option>)}</Select></label>
           <label className="text-sm">Вид суммы<Select aria-label={`Вид суммы ${index + 1}`} value={row.role} disabled={locked} onChange={(event) => updateRule(index, { role: event.target.value as Role | "" })}><option value="">Выберите вид</option><option value="employee_deduction">Удержание работника</option><option value="employer_contribution">Взнос нанимателя</option></Select></label>
           <label className="text-sm">База<Select aria-label={`База ${index + 1}`} value={row.base_mode} disabled={locked} onChange={(event) => updateRule(index, { base_mode: event.target.value as BaseMode | "" })}><option value="">Выберите базу</option><option value="gross">Начисленная сумма</option><option value="gross_less_adjustment">Начисленная сумма за вычетом подтверждённой корректировки</option></Select></label>
+          <label className="text-sm md:col-span-3">Обязательство<Select aria-label={`Обязательство ${index + 1}`} value={row.obligation_code} disabled={locked} onChange={(event) => updateRule(index, { obligation_code: event.target.value as ObligationCode | "" })}><option value="">Выберите обязательство</option>{(Object.entries(obligationLabels) as [ObligationCode, string][]).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</Select></label>
           <label className="text-sm md:col-span-3">Основание классификации<Textarea aria-label={`Основание классификации ${index + 1}`} value={row.classification_evidence} disabled={locked} onChange={(event) => updateRule(index, { classification_evidence: event.target.value })} /></label>
           {rules.length > 1 && <Button variant="ghost" disabled={locked} onClick={() => setRules((rows) => rows.filter((_, i) => i !== index))}>Удалить ставку {index + 1}</Button>}
         </div>)}
