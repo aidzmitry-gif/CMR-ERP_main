@@ -172,7 +172,10 @@ it("keeps an edited receipt open after the server rejects Save and Close", async
   expect(screen.getByRole("button", { name: "Сохранить и закрыть" })).toBeEnabled();
 });
 
-it("does not close when a successful HTTP response names another receipt", async () => {
+it.each([
+  { caseName: "another receipt", returnedId: 42, returnedVersion: 2 },
+  { caseName: "the old version", returnedId: 41, returnedVersion: 1 },
+])("does not close when a successful HTTP response names $caseName", async ({ returnedId, returnedVersion }) => {
   const original = {
     currency: "BYN", invoice_reference: "INV-OLD", document_date: "2026-09-24",
     operation_date: "2026-09-24", supplier: "Поставщик", supplier_id: 19,
@@ -181,8 +184,9 @@ it("does not close when a successful HTTP response names another receipt", async
   const row = { id: 41, version: 1, status: "draft", posting: null,
     revisions: [{ version: 1, actor: "buyer", created_at: "2026-09-24", document: original }] };
   vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => init?.method === "PUT"
-    ? { ok: true, json: async () => ({ ...row, id: 42, version: 2,
-      revisions: [...row.revisions, { version: 2, actor: "buyer", created_at: "2026-09-24", document: original }] }) }
+    ? { ok: true, json: async () => ({ ...row, id: returnedId, version: returnedVersion,
+      revisions: returnedVersion === 1 ? row.revisions : [...row.revisions,
+        { version: 2, actor: "buyer", created_at: "2026-09-24", document: original }] }) }
     : { ok: true, json: async () => _url.includes("purchase-ownership") ? [] : [row] }));
   render(<ProcurementReceiptDrafts org="7" />);
   fireEvent.click(await screen.findByRole("button", { name: /INV-OLD/ }));

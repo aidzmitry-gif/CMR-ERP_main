@@ -106,7 +106,8 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       });
       const revision = row?.revisions?.at(-1);
       if (!Number.isSafeInteger(row?.id) || row.id < 1 || !Number.isSafeInteger(row.version)
-        || row.version < 1 || revision?.version !== row.version || !revision.document
+        || row.version !== (selected?.version ?? 0) + 1
+        || revision?.version !== row.version || !revision.document
         || (selected && row.id !== selected.id)) {
         throw new Error("Сервер не подтвердил сохранённую версию этой накладной. Форма оставлена открытой.");
       }
