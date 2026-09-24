@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
-import { useUnsavedDocumentGuard } from "./use-unsaved-document-guard";
+import { confirmProgrammaticDocumentNavigation, useUnsavedDocumentGuard } from "./use-unsaved-document-guard";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -35,4 +35,21 @@ it("blocks internal links and reload while unsaved, then releases them after sav
   const afterSave = new Event("beforeunload", { cancelable: true });
   window.dispatchEvent(afterSave);
   expect(afterSave.defaultPrevented).toBe(false);
+});
+
+it("asks before a programmatic route change while a document has pending edits", () => {
+  const confirm = vi.fn(() => false);
+  vi.stubGlobal("confirm", confirm);
+  function Editor({ pending }: { pending: boolean }) {
+    useUnsavedDocumentGuard(pending);
+    return null;
+  }
+  const view = render(<Editor pending />);
+  expect(confirmProgrammaticDocumentNavigation()).toBe(false);
+  expect(confirm).toHaveBeenCalledTimes(1);
+  confirm.mockReturnValue(true);
+  expect(confirmProgrammaticDocumentNavigation()).toBe(true);
+  view.rerender(<Editor pending={false} />);
+  expect(confirmProgrammaticDocumentNavigation()).toBe(true);
+  expect(confirm).toHaveBeenCalledTimes(2);
 });
