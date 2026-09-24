@@ -24,7 +24,7 @@ const sourceFiles = [
 ];
 const matchingFiles = (input: string) => sourceFiles.filter((row) => row.kind === new URL(input, "http://localhost").searchParams.get("kind"));
 const access = { organization_id: 7, can_preview: true, can_upload: true, can_review: true };
-const summary = { status: "arithmetic_reviews_aggregate_only", organization_id: 7, month: "2026-10", bindings: [{ employment_binding_id: 12, segments: [{ review_id: 55, revision: 1, work_from: "2026-10-01", work_to: "2026-10-31", basis_digest: "e".repeat(64) }] }] };
+const summary = { status: "arithmetic_reviews_aggregate_only", organization_id: 7, month: "2026-10", bindings: [{ employment_binding_id: 12, segments: [{ review_id: 55, revision: 1, work_from: "2026-10-01", work_to: "2026-10-31", basis_digest: "e".repeat(64), source_facts_attested_by_chief: false }] }] };
 const result = {
   status: "arithmetic_workpaper_only", basis_digest: "f".repeat(64),
   gross_byn: "750.00", listed_employee_deductions_byn: "75.00", after_listed_deductions_byn: "675.00",
@@ -52,10 +52,14 @@ describe("AccountingPayrollWorkpaper", () => {
         ...result, schedule_numeric_hours_verified: true,
         basis: { ...result.basis, work_schedule_cell: "B5" },
       }));
-      if (input.includes("payroll-arithmetic-summary")) return Promise.resolve(response(summary));
+      if (input.includes("payroll-arithmetic-summary")) return Promise.resolve(response({
+        ...summary, bindings: [{ ...summary.bindings[0], segments: [{
+          ...summary.bindings[0].segments[0], basis_digest: "f".repeat(64),
+        }] }],
+      }));
       if (input.includes("payroll-workpaper-reviews") && init.method === "POST") {
         const command = JSON.parse(init.body as string);
-        return Promise.resolve(response({ review_id: 56, organization_id: 7, employment_binding_id: 12, month: "2026-10", work_from: "2026-10-01", work_to: "2026-10-31", request_key: command.request_key, basis_digest: command.basis_digest, revision: 2, supersedes_review_id: 55, status: "arithmetic_review_only", posting_available: false, statutory_payroll_certified: false }));
+        return Promise.resolve(response({ review_id: 56, organization_id: 7, employment_binding_id: 12, month: "2026-10", work_from: "2026-10-01", work_to: "2026-10-31", request_key: command.request_key, basis_digest: command.basis_digest, revision: 2, supersedes_review_id: 55, status: "arithmetic_review_only", source_facts_attested_by_chief: Boolean(command.source_fact_attestation), posting_available: false, statutory_payroll_certified: false }));
       }
       throw new Error(`Unexpected request: ${input} ${init.method}`);
     });
@@ -92,13 +96,16 @@ describe("AccountingPayrollWorkpaper", () => {
     });
     expect(screen.getByText(/не сумма зарплаты к выплате/)).toBeInTheDocument();
     expect(screen.getByText(/сверен по ячейке B5/)).toHaveTextContent("подлинность и применимость графика подтверждает бухгалтер");
-    expect(await screen.findByText(/Исправление квитанции № 55/)).toBeInTheDocument();
+    expect(await screen.findByText(/Эта арифметика уже рассмотрена: квитанция № 55/)).toHaveTextContent("Исходные данные отдельно не подтверждены");
     fireEvent.change(screen.getByLabelText("Основание проверки главбуха"), { target: { value: "Проверены строки договора, табеля и корректировки" } });
+    expect(screen.getByRole("button", { name: "Подтвердить исправление" })).toBeDisabled();
+    fireEvent.click(screen.getByLabelText("Подтверждаю исходные данные"));
+    fireEvent.change(screen.getByLabelText("Основание подтверждения исходных данных"), { target: { value: "Оклад в договоре, часы в табеле, норма в графике" } });
     fireEvent.click(screen.getByRole("button", { name: "Подтвердить исправление" }));
     expect(await screen.findByText(/Квитанция № 56, редакция 2, сохранена без проводок/)).toBeInTheDocument();
     const reviewPosts = fetchMock.mock.calls.filter(([url, init]) => String(url).includes("payroll-workpaper-reviews") && init.method === "POST");
     expect(reviewPosts).toHaveLength(1);
-    expect(JSON.parse(reviewPosts[0][1].body as string)).toMatchObject({ request_key: expect.any(String), basis_digest: "f".repeat(64), supersedes_review_id: 55, reviewer_evidence: "Проверены строки договора, табеля и корректировки" });
+    expect(JSON.parse(reviewPosts[0][1].body as string)).toMatchObject({ request_key: expect.any(String), basis_digest: "f".repeat(64), supersedes_review_id: 55, reviewer_evidence: "Проверены строки договора, табеля и корректировки", source_fact_attestation: "contract_salary_time_norm_checked", source_fact_evidence: "Оклад в договоре, часы в табеле, норма в графике" });
   });
 
   it("rejects foreign-organization sources before rendering a preview", async () => {

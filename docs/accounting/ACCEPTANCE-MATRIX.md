@@ -51,6 +51,10 @@ restore and targeted payroll guards, not the target database.
   whose declared employee and binding IDs match the ERP book. The file is
   byte-checked at close, but its contents and complete real-world population
   still require accountant verification.
+- The chief may separately attest the contract salary, timesheet hours and
+  schedule norm in an immutable workpaper revision with cited document locations.
+  Monthly control counts only the latest attested segments and identifies missing
+  attestations; this human check does not certify rates, payroll posting or forms.
 - External payroll import lines may carry a stable employer-binding ID; the
   preview rejects cross-entity, unknown, future and name-mismatched mappings.
   Legacy free-text lines remain accepted and are marked as incompletely mapped.

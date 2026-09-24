@@ -5,10 +5,11 @@ import hashlib
 import json
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
+from typing import Literal
 from uuid import UUID
 
 from fastapi import HTTPException
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from sqlalchemy import func, select
 from starlette.concurrency import run_in_threadpool
 
@@ -128,6 +129,8 @@ class PayrollWorkpaperReviewInput(PayrollWorkpaperInput):
     basis_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
     reviewer_evidence: str = Field(min_length=10, max_length=2000)
     supersedes_review_id: int | None = Field(default=None, gt=0, strict=True)
+    source_fact_attestation: Literal["contract_salary_time_norm_checked"] | None = None
+    source_fact_evidence: str | None = Field(default=None, max_length=2000)
 
     @field_validator("reviewer_evidence")
     @classmethod
@@ -135,6 +138,14 @@ class PayrollWorkpaperReviewInput(PayrollWorkpaperInput):
         if len(value.strip()) < 10:
             raise ValueError("Chief review evidence must have meaningful text")
         return value
+
+    @model_validator(mode="after")
+    def paired_source_fact_attestation(self):
+        if (self.source_fact_attestation is None) != (self.source_fact_evidence is None):
+            raise ValueError("Source fact attestation and its evidence must be supplied together")
+        if self.source_fact_evidence is not None and len(self.source_fact_evidence.strip()) < 20:
+            raise ValueError("Source fact evidence must identify the checked document locations")
+        return self
 
 
 def _digest(value: dict) -> str:
@@ -148,6 +159,12 @@ def result(row: PayrollWorkpaperReview) -> dict:
         raise HTTPException(409, "Payroll arithmetic review integrity requires reconciliation")
     if row.snapshot.get("basis_digest") != row.basis_digest:
         raise HTTPException(409, "Payroll arithmetic review basis differs from receipt")
+    attestation = row.snapshot.get("source_fact_attestation")
+    if attestation is not None and (not isinstance(attestation, dict)
+                                    or attestation.get("scope") != "contract_salary_time_norm_checked"
+                                    or not isinstance(attestation.get("evidence"), str)
+                                    or len(attestation["evidence"].strip()) < 20):
+        raise HTTPException(409, "Payroll source fact attestation requires reconciliation")
     return {
         "review_id": row.id,
         "organization_id": row.organization_id,
@@ -166,6 +183,7 @@ def result(row: PayrollWorkpaperReview) -> dict:
         "status": "arithmetic_review_only",
         "bytes_verified_at_review": True,
         "current_file_bytes_verified": False,
+        "source_facts_attested_by_chief": attestation is not None,
         "posting_available": False,
         "statutory_payroll_certified": False,
     }
@@ -175,6 +193,10 @@ async def create(session, org_id: int, month: str,
                  data: PayrollWorkpaperReviewInput, actor: str) -> dict:
     await lock_organization(session, org_id)
     command = data.model_dump(mode="json")
+    # Preserve request digests of receipts created before these optional fields existed.
+    for field in ("source_fact_attestation", "source_fact_evidence"):
+        if command[field] is None:
+            command.pop(field)
     request_digest = _digest(command)
     existing = await session.scalar(select(PayrollWorkpaperReview).where(
         PayrollWorkpaperReview.organization_id == org_id,
@@ -240,6 +262,12 @@ async def create(session, org_id: int, month: str,
             raise AccountingError("Payroll review correction must supersede the latest receipt")
         revision = latest.revision + 1
 
+    snapshot = dict(preview)
+    if data.source_fact_attestation is not None:
+        snapshot["source_fact_attestation"] = {
+            "scope": data.source_fact_attestation,
+            "evidence": data.source_fact_evidence.strip(),
+        }
     row = PayrollWorkpaperReview(
         organization_id=org_id,
         employment_binding_id=data.employment_binding_id,
@@ -251,8 +279,8 @@ async def create(session, org_id: int, month: str,
         request_key=str(data.request_key),
         request_digest=request_digest,
         basis_digest=data.basis_digest,
-        snapshot_digest=_digest(preview),
-        snapshot=preview,
+        snapshot_digest=_digest(snapshot),
+        snapshot=snapshot,
         reviewer_evidence=data.reviewer_evidence,
         actor=actor,
     )
@@ -354,6 +382,7 @@ async def monthly_arithmetic_summary(session, org_id: int, month: str) -> dict:
     totals = {field: Decimal("0") for field in AMOUNT_FIELDS}
     by_binding: dict[int, dict] = {}
     selected_receipts = []
+    unattested_review_ids = []
     for (binding_id, work_from, work_to), revisions in sorted(grouped.items()):
         previous = None
         for row, _ in revisions:
@@ -363,6 +392,9 @@ async def monthly_arithmetic_summary(session, org_id: int, month: str) -> dict:
             previous = row
         row, amounts = revisions[-1]
         await _verify_current_review_files(session, row)
+        attested = result(row)["source_facts_attested_by_chief"]
+        if not attested:
+            unattested_review_ids.append(row.id)
         binding = by_binding.setdefault(binding_id, {
             "employment_binding_id": binding_id,
             "segments": [],
@@ -377,6 +409,7 @@ async def monthly_arithmetic_summary(session, org_id: int, month: str) -> dict:
             "work_to": work_to.isoformat(),
             "basis_digest": row.basis_digest,
             "snapshot_digest": row.snapshot_digest,
+            "source_facts_attested_by_chief": attested,
         })
         selected_receipts.append({"review_id": row.id, "snapshot_digest": row.snapshot_digest})
         for field in AMOUNT_FIELDS:
@@ -396,6 +429,9 @@ async def monthly_arithmetic_summary(session, org_id: int, month: str) -> dict:
         "month": month,
         "review_count": len(rows),
         "selected_segment_count": len(selected_receipts),
+        "source_fact_attested_segment_count": len(selected_receipts) - len(unattested_review_ids),
+        "source_fact_unattested_review_ids": unattested_review_ids,
+        "all_selected_source_facts_attested_by_chief": bool(selected_receipts) and not unattested_review_ids,
         "selection_digest": selection_digest,
         "coverage_digest": coverage_digest,
         "summary_digest": _digest({"organization_id": org_id, "month": month,

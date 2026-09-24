@@ -17,10 +17,10 @@ type WorkpaperCommand = { policy_id: number; rule_set_id: number; employment_bin
 type Preview = { status: string; basis_digest: string; gross_byn: string; listed_employee_deductions_byn: string; after_listed_deductions_byn: string; listed_employer_contributions_byn: string; cost_including_listed_contributions_byn: string; contract_and_timesheet_hashes_verified: boolean; timesheet_numeric_hours_verified: boolean; timesheet_name_matches_binding: boolean; timesheet_identifier_matches_binding: boolean; schedule_file_bytes_verified: boolean; schedule_numeric_hours_verified: boolean; rule_source_file_bytes_verified: boolean; posting_available: boolean; statutory_payroll_certified: boolean; basis: { organization_id: number; month: string; employee_name: string; work_from: string; work_to: string; timesheet_row: number | null; timesheet_uninterpreted_code_days: number | null; work_schedule_cell: string | null; components: { rate_code: string; role: string; base_byn: string; rate_value: string; amount_byn: string }[] } };
 type Adjustment = { amount: string; fileId: string; evidence: string };
 type Access = { organization_id: number; can_preview: boolean; can_upload: boolean; can_review: boolean };
-type ReviewSegment = { review_id: number; revision: number; work_from: string; work_to: string; basis_digest: string };
+type ReviewSegment = { review_id: number; revision: number; work_from: string; work_to: string; basis_digest: string; source_facts_attested_by_chief: boolean };
 type ReviewSummary = { status: string; organization_id: number; month: string; bindings: { employment_binding_id: number; segments: ReviewSegment[] }[] };
-type ReviewCommand = WorkpaperCommand & { request_key: string; basis_digest: string; reviewer_evidence: string; supersedes_review_id?: number };
-type ReviewReceipt = { review_id: number; organization_id: number; employment_binding_id: number; month: string; work_from: string; work_to: string; request_key: string; basis_digest: string; revision: number; supersedes_review_id: number | null; status: string; posting_available: boolean; statutory_payroll_certified: boolean };
+type ReviewCommand = WorkpaperCommand & { request_key: string; basis_digest: string; reviewer_evidence: string; supersedes_review_id?: number; source_fact_attestation?: "contract_salary_time_norm_checked"; source_fact_evidence?: string };
+type ReviewReceipt = { review_id: number; organization_id: number; employment_binding_id: number; month: string; work_from: string; work_to: string; request_key: string; basis_digest: string; revision: number; supersedes_review_id: number | null; status: string; source_facts_attested_by_chief: boolean; posting_available: boolean; statutory_payroll_certified: boolean };
 
 const monthPattern = /^\d{4}-(0[1-9]|1[0-2])$/;
 const moneyPattern = /^(0|[1-9]\d*)\.\d{2}$/;
@@ -103,6 +103,8 @@ function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange, onOpenRule
   const [latestReview, setLatestReview] = useState<ReviewSegment | null>(null);
   const [reviewReceipt, setReviewReceipt] = useState<ReviewReceipt | null>(null);
   const [reviewEvidence, setReviewEvidence] = useState("");
+  const [sourceFactsChecked, setSourceFactsChecked] = useState(false);
+  const [sourceFactEvidence, setSourceFactEvidence] = useState("");
   const [pendingReview, setPendingReview] = useState<ReviewCommand | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
@@ -144,7 +146,7 @@ function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange, onOpenRule
   function invalidate() {
     previewController.current?.abort();
     setPreview(null);
-    setPreviewCommand(null); setLatestReview(null); setReviewReceipt(null); setReviewError(""); setReviewEvidence("");
+    setPreviewCommand(null); setLatestReview(null); setReviewReceipt(null); setReviewError(""); setReviewEvidence(""); setSourceFactsChecked(false); setSourceFactEvidence("");
     setError("");
   }
 
@@ -304,7 +306,7 @@ function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange, onOpenRule
     const controller = new AbortController();
     previewController.current = controller;
     setBusy(true); setError(""); setPreview(null); setPreviewCommand(null);
-    setLatestReview(null); setReviewReceipt(null); setReviewError(""); setReviewLoading(false);
+    setLatestReview(null); setReviewReceipt(null); setReviewError(""); setReviewLoading(false); setSourceFactsChecked(false); setSourceFactEvidence("");
     try {
       const result = await request<Preview>(`/organizations/${encodeURIComponent(org)}/periods/${month}/payroll-workpaper-preview`, controller.signal, command);
       if (token !== generation.current || controller.signal.aborted) return;
@@ -334,11 +336,12 @@ function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange, onOpenRule
     if (receipt.organization_id !== Number(org) || receipt.employment_binding_id !== command.employment_binding_id
         || receipt.month !== month || receipt.work_from !== command.work_from || receipt.work_to !== command.work_to
         || receipt.request_key !== command.request_key || receipt.basis_digest !== command.basis_digest
-        || receipt.supersedes_review_id !== (command.supersedes_review_id ?? null)
+         || receipt.supersedes_review_id !== (command.supersedes_review_id ?? null)
+         || receipt.source_facts_attested_by_chief !== Boolean(command.source_fact_attestation)
         || receipt.status !== "arithmetic_review_only" || receipt.posting_available || receipt.statutory_payroll_certified) {
       throw new Error("Квитанция проверки относится к другому расчёту или имеет неожиданный статус.");
     }
-    setReviewReceipt(receipt); setLatestReview({ review_id: receipt.review_id, revision: receipt.revision, work_from: receipt.work_from, work_to: receipt.work_to, basis_digest: receipt.basis_digest });
+    setReviewReceipt(receipt); setLatestReview({ review_id: receipt.review_id, revision: receipt.revision, work_from: receipt.work_from, work_to: receipt.work_to, basis_digest: receipt.basis_digest, source_facts_attested_by_chief: receipt.source_facts_attested_by_chief });
     setPendingReview(null); setReviewError("");
   }
 
@@ -347,11 +350,13 @@ function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange, onOpenRule
     const stored = pendingReview;
     if (!stored && (reviewLoading || reviewError || !preview.rule_source_file_bytes_verified
         || !preview.schedule_file_bytes_verified
-        || !preview.contract_and_timesheet_hashes_verified || reviewEvidence.trim().length < 10
-        || latestReview?.basis_digest === preview.basis_digest)) return;
+         || !preview.contract_and_timesheet_hashes_verified || reviewEvidence.trim().length < 10
+         || (sourceFactsChecked && sourceFactEvidence.trim().length < 20)
+         || (latestReview?.basis_digest === preview.basis_digest && (!sourceFactsChecked || latestReview.source_facts_attested_by_chief)))) return;
     const command: ReviewCommand = stored ?? {
       ...previewCommand, request_key: crypto.randomUUID(), basis_digest: preview.basis_digest,
       reviewer_evidence: reviewEvidence.trim(),
+      ...(sourceFactsChecked ? { source_fact_attestation: "contract_salary_time_norm_checked" as const, source_fact_evidence: sourceFactEvidence.trim() } : {}),
       ...(latestReview ? { supersedes_review_id: latestReview.review_id } : {}),
     };
     reviewing.current = true; setReviewBusy(true); setReviewError(""); setPendingReview(command);
@@ -437,11 +442,14 @@ function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange, onOpenRule
       {reviewError && <p role="alert" className="text-red-700">{reviewError}</p>}
       {!preview.rule_source_file_bytes_verified && <p role="status">Для проверки привяжите сохранённый файл политики к действующему набору правил.</p>}
       {!preview.schedule_file_bytes_verified && <p role="status">Для проверки приложите график работы с месячной нормой и укажите место нормы в документе.</p>}
-      {latestReview?.basis_digest === preview.basis_digest && <p role="status">Эта арифметика уже рассмотрена: квитанция № {latestReview.review_id}, редакция {latestReview.revision}.</p>}
+      {latestReview?.basis_digest === preview.basis_digest && <p role="status">Эта арифметика уже рассмотрена: квитанция № {latestReview.review_id}, редакция {latestReview.revision}. {latestReview.source_facts_attested_by_chief ? "Исходные данные подтверждены главбухом." : "Исходные данные отдельно не подтверждены."}</p>}
       {latestReview && latestReview.basis_digest !== preview.basis_digest && <p className="text-sm">Исправление квитанции № {latestReview.review_id}; прежняя редакция сохранится в истории.</p>}
-      {latestReview?.basis_digest !== preview.basis_digest && <>
+      {(!latestReview || latestReview.basis_digest !== preview.basis_digest || !latestReview.source_facts_attested_by_chief) && <>
         <label className="block text-sm">Что именно проверено в документах<Textarea aria-label="Основание проверки главбуха" value={reviewEvidence} disabled={formLocked} onChange={(event) => setReviewEvidence(event.target.value)} /></label>
-        <Button disabled={disabled || reviewBusy || reviewLoading || (needsXlsxCheck && timesheetCheck?.status !== "structure_checked") || (!pendingReview && (!preview.rule_source_file_bytes_verified || !preview.schedule_file_bytes_verified || !preview.contract_and_timesheet_hashes_verified || !!reviewError || reviewEvidence.trim().length < 10))} onClick={() => void confirmReview()}>{pendingReview ? "Проверить или повторить подтверждение" : latestReview ? "Подтвердить исправление" : "Подтвердить арифметику"}</Button>
+        <label className="flex items-start gap-2 text-sm"><input type="checkbox" aria-label="Подтверждаю исходные данные" checked={sourceFactsChecked} disabled={formLocked} onChange={(event) => setSourceFactsChecked(event.target.checked)} />Я сверил оклад с договором, отработанные часы с табелем и месячную норму с графиком.</label>
+        {sourceFactsChecked && <label className="block text-sm">Где проверены исходные данные<Textarea aria-label="Основание подтверждения исходных данных" value={sourceFactEvidence} disabled={formLocked} onChange={(event) => setSourceFactEvidence(event.target.value)} /></label>}
+        <p className="text-xs text-muted">Это подтверждение фактов главбухом; оно не заменяет проверку применимости ставок и обязательной отчётности. В новой редакции подтверждение не переносится автоматически.</p>
+        <Button disabled={disabled || reviewBusy || reviewLoading || (needsXlsxCheck && timesheetCheck?.status !== "structure_checked") || (!pendingReview && (!preview.rule_source_file_bytes_verified || !preview.schedule_file_bytes_verified || !preview.contract_and_timesheet_hashes_verified || !!reviewError || reviewEvidence.trim().length < 10 || (sourceFactsChecked && sourceFactEvidence.trim().length < 20) || (latestReview?.basis_digest === preview.basis_digest && !sourceFactsChecked)))} onClick={() => void confirmReview()}>{pendingReview ? "Проверить или повторить подтверждение" : latestReview ? "Подтвердить исправление" : "Подтвердить арифметику"}</Button>
       </>}
       {pendingReview && <p className="break-all text-xs text-muted">Ключ подтверждения: {pendingReview.request_key}. Ввод заблокирован до получения квитанции.</p>}
       {reviewReceipt && <p role="status">Квитанция № {reviewReceipt.review_id}, редакция {reviewReceipt.revision}, сохранена без проводок.</p>}

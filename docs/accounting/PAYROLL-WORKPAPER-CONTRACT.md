@@ -119,6 +119,17 @@ records the bytes verified at review time but does not claim that files remain
 unchanged later, that their figures are true, or that statutory payroll is
 complete. It does not post to the ledger.
 
+The chief may separately attest that the salary amount, worked hours and
+monthly norm were checked against the contract, timesheet and work schedule.
+This is an explicit `source_fact_attestation` plus a document-location
+`source_fact_evidence` in the same immutable receipt; neither field is inferred
+from file hashes or arithmetic. Historical arithmetic-only receipts remain
+unattested. A later attestation of the same calculation is a new linked
+revision, and a corrected calculation does not inherit the earlier attestation.
+The monthly summary counts attested selected segments and lists those still
+missing this human check. `source_facts_verified` remains false because the
+application has not independently verified document truth or applicability.
+
 A new dated employer/contract binding is also blocked once its month or any
 later accounting period is closed; a repeat of an already accepted request
 still returns its original receipt. Revision `0165` enforces this at the

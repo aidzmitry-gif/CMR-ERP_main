@@ -588,6 +588,7 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert receipt["revision"] == 1
     assert receipt["bytes_verified_at_review"] is True
     assert receipt["current_file_bytes_verified"] is False
+    assert receipt["source_facts_attested_by_chief"] is False
     assert receipt["posting_available"] is False
     assert receipt["statutory_payroll_certified"] is False
     assert receipt["snapshot"]["basis_digest"] == accepted.json()["basis_digest"]
@@ -651,6 +652,35 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert summary["current_file_bytes_verified"] is True
     assert summary["posting_available"] is False
     assert summary["statutory_payroll_certified"] is False
+    assert summary["source_fact_attested_segment_count"] == 0
+    assert summary["source_fact_unattested_review_ids"] == [corrected.json()["review_id"]]
+    attestation = {
+        **correction, "request_key": str(uuid4()),
+        "supersedes_review_id": corrected.json()["review_id"],
+        "source_fact_attestation": "contract_salary_time_norm_checked",
+        "source_fact_evidence": "Synthetic contract salary clause, timesheet row and schedule norm cell checked",
+    }
+    assert (await client.post(review_url, json={
+        **attestation, "source_fact_evidence": "short",
+    })).status_code == 422
+    attested_response = await client.post(review_url, json=attestation)
+    assert attested_response.status_code == 200, attested_response.text
+    attested = attested_response.json()
+    assert attested["revision"] == 3
+    assert attested["source_facts_attested_by_chief"] is True
+    assert attested["snapshot"]["source_fact_attestation"]["evidence"] == attestation["source_fact_evidence"]
+    assert (await client.post(review_url, json=attestation)).json() == attested
+    assert (await client.post(review_url, json=review_command)).json() == receipt
+    assert (await client.post(review_url, json={
+        **attestation, "source_fact_evidence": "Changed attestation on the same request key",
+    })).status_code == 409
+    attested_summary = (await client.get(summary_url)).json()
+    assert attested_summary["selected_segment_count"] == 1
+    assert attested_summary["source_fact_attested_segment_count"] == 1
+    assert attested_summary["source_fact_unattested_review_ids"] == []
+    assert attested_summary["all_selected_source_facts_attested_by_chief"] is True
+    assert attested_summary["source_facts_verified"] is False
+    assert attested_summary["posting_available"] is False
     reconcile_url = (f"/accounting/organizations/{book[0]}/periods/2026-10/"
                      "payroll-source-reconciliation")
     empty_reconcile = await client.get(reconcile_url)
@@ -849,9 +879,9 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert stale_coverage["known_binding_coverage_complete"] is False
     assert stale_coverage["expected_intervals"][0]["work_to"] == "2026-10-14"
     assert stale_coverage["issues"][0]["kind"] == "outside_current_binding"
-    assert stale_summary["selection_digest"] == summary["selection_digest"]
-    assert stale_summary["coverage_digest"] != summary["coverage_digest"]
-    assert stale_summary["summary_digest"] != summary["summary_digest"]
+    assert stale_summary["selection_digest"] == attested_summary["selection_digest"]
+    assert stale_summary["coverage_digest"] != attested_summary["coverage_digest"]
+    assert stale_summary["summary_digest"] != attested_summary["summary_digest"]
 
     period = await db.scalar(select(Period).where(
         Period.organization_id == book[0], Period.month == "2026-10"))

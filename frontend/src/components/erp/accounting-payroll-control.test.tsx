@@ -15,7 +15,8 @@ function reports(organizationId: number) {
   return {
     summary: {
       organization_id: organizationId, month: "2026-10", review_count: 2,
-      selected_segment_count: 1, totals: amounts, current_file_bytes_verified: true,
+      selected_segment_count: 1, source_fact_attested_segment_count: 0,
+      source_fact_unattested_review_ids: [5], totals: amounts, current_file_bytes_verified: true,
       statutory_payroll_certified: false,
       bindings: [{ employment_binding_id: 9, segments: [{ review_id: 5, revision: 2, work_from: "2026-10-01", work_to: "2026-10-31" }], totals: amounts }],
       known_binding_coverage: {
@@ -62,6 +63,7 @@ describe("AccountingPayrollControl", () => {
     expect(screen.getByText(/Нет рассмотренного расчётного отрезка: договор № 10/)).toBeInTheDocument();
     expect(screen.getByText(/полноту работников, применимость ставок/)).toBeInTheDocument();
     expect(screen.getByText(/файлы-основания действующих отрезков повторно сверены по байтам/)).toBeInTheDocument();
+    expect(screen.getByText(/Без отдельного подтверждения исходных данных: квитанции № 5/)).toBeInTheDocument();
     expect(screen.getByText(/Удержания: расчёт 10.00, импорт 11.00, разница 1.00 BYN/)).toBeInTheDocument();
     expect(screen.getByText(/Источники для сравнения: собраны; суммы всё ещё могут расходиться/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Начисление · проводка № 41" }));
