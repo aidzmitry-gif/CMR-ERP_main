@@ -182,6 +182,37 @@ the software has not verified the legal text, employer tariff or policy.
 Closed periods reject new files and reviews; no rate is inferred, and posting,
 payment and forms stay disabled.
 
+Each newly configured percentage rate may now carry an explicit obligation
+code for income-tax withholding, FSZN or work-injury insurance. The accountant
+UI requires this selection for a new rule-set revision. Historical rules without
+it remain replayable but the monthly candidate reports
+`payroll_rate_obligation_unmapped`. The candidate compares the mapped code
+with the current chief's organization/month rule review: absent or unresolved
+decisions report `payroll_rate_obligation_unreviewed`; `not_applicable` with a
+configured rate reports `payroll_rate_conflicts_with_organization_review`.
+This is source-trace and conflict detection, not verification of a rate, base,
+cap, exemption or the completeness of mandatory payroll obligations. The
+statutory blocker, posting/payment prohibition and external-import path remain.
+
+The organization/month chief review may additionally record the preceding
+month's national average wage for an applicable FSZN fact: exact BYN amount,
+month, publication date and official Belstat URL. Its existing private
+`payroll_organization_rule` file is the source receipt, rechecked by bytes on
+current reads; the accountant identifies the amount within the document.
+The accountant form can submit only the FSZN fact from that wage source; it
+does not require inventing decisions about income tax or work-injury insurance
+from an unrelated Belstat document.
+Historical reviews without this optional fact retain their request digests.
+A wrong wage month is rejected. The monthly candidate then compares five times
+that explicit wage with the sum of **listed, chief-attested** FSZN component
+bases across all selected workpaper segments for the same ERP employee. A
+different FSZN base within one segment blocks the comparison. Exceeding the
+ceiling raises a specific recalculation blocker while the earlier percentage
+amounts remain unchanged. The comparison is not a statutory contribution
+base: unrecorded payments, excluded categories, professional pension insurance,
+minimum contributions and special rules still require separate evidence.
+Posting, payment and mandatory forms remain unavailable.
+
 The current rule-set API exposes `rate_versions` (the immutable configured
 requirement IDs and digests) together with the rate roles and base modes. The
 accountant workspace's **Расчётный лист** tab uses those IDs, an explicitly
