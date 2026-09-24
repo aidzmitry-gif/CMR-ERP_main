@@ -59,7 +59,15 @@ For a monthly norm, the accountant can attach a private `work_schedule` file
 scoped to the same legal entity, employment binding and month, with the exact
 location of the norm in that document. The workpaper rechecks its bytes and
 records the file reference, SHA-256 and ID in the immutable calculation basis.
-It does not parse the schedule or certify that the entered norm is correct.
+For a non-XLSX schedule, it does not parse the document or certify the entered norm.
+For a stored XLSX work schedule, the accountant selects the exact cell on its
+single month-labelled sheet. The preview rereads the stored bytes, requires a
+literal numeric value (not a formula or cached formula result), and compares
+it with the entered monthly norm. A missing cell, wrong month or differing
+number blocks a new arithmetic review. The selected cell and comparison result
+are retained in the basis. PDF and other supported schedules still require
+manual confirmation of the norm; a matching XLSX cell does not establish the
+schedule's approval, legal applicability or employee identity.
 The chief can also select `source_file_id` when recording the rule-set revision.
 The configuration compares the stored file reference and SHA-256 with the
 declared policy source; every subsequent workpaper preview rechecks its bytes.

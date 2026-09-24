@@ -21,6 +21,7 @@ from modules.accounting.models import (
 from modules.hr.models import Employee
 from tests.accounting.test_payroll_calculation import rate_input
 from tests.accounting.test_timesheet_preflight import make_timesheet
+from tests.accounting.test_work_schedule_norm import make_schedule
 
 
 @pytest_asyncio.fixture
@@ -425,6 +426,52 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert accepted.json()["basis"]["norm_hours_evidence"] == fields["norm_hours_evidence"]
     assert accepted.json()["rule_source_file_bytes_verified"] is True
     assert accepted.json()["basis"]["contract_file_id"] == contract["file_id"]
+
+    schedule_xlsx_path = tmp_path / "october-schedule.xlsx"
+    make_schedule(schedule_xlsx_path)
+    schedule_xlsx = await client.post(url, json={
+        "request_key": str(uuid4()), "kind": "work_schedule",
+        "employment_binding_id": binding["binding_id"], "month": "2026-10",
+        "reference": "approved-xlsx-work-schedule-2026-10",
+        "filename": schedule_xlsx_path.name,
+        "data_url": "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,"
+                    + base64.b64encode(schedule_xlsx_path.read_bytes()).decode(),
+        "evidence": "Fictional approved monthly schedule with a numeric norm cell",
+    })
+    assert schedule_xlsx.status_code == 200, schedule_xlsx.text
+    xlsx_schedule = schedule_xlsx.json()
+    xlsx_schedule_command = {
+        **reviewed_command,
+        "work_schedule_document": xlsx_schedule["reference"],
+        "work_schedule_digest": xlsx_schedule["sha256"],
+        "work_schedule_file_id": xlsx_schedule["file_id"],
+        "work_schedule_cell": "B5",
+    }
+    assert (await client.post(preview_url, json={
+        key: value for key, value in xlsx_schedule_command.items()
+        if key != "work_schedule_cell"
+    })).status_code == 422
+    checked_norm = await client.post(preview_url, json=xlsx_schedule_command)
+    assert checked_norm.status_code == 200, checked_norm.text
+    assert checked_norm.json()["schedule_numeric_hours_verified"] is True
+    assert checked_norm.json()["basis"]["work_schedule_cell"] == "B5"
+    missing_cell_review = await client.post(
+        f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-reviews",
+        json={
+            **{key: value for key, value in xlsx_schedule_command.items()
+               if key != "work_schedule_cell"},
+            "request_key": str(uuid4()),
+            "basis_digest": checked_norm.json()["basis_digest"],
+            "reviewer_evidence": "Synthetic chief review cannot accept an unverified norm",
+        },
+    )
+    assert missing_cell_review.status_code == 422
+    assert (await client.post(preview_url, json={
+        **xlsx_schedule_command, "month_norm_hours": "161.00",
+    })).status_code == 422
+    assert (await client.post(preview_url, json={
+        **xlsx_schedule_command, "work_schedule_cell": "C5",
+    })).status_code == 422
 
     schedule_path = root / str(book[0]) / (schedule["request_key"].replace("-", "") + ".pdf")
     schedule_path.write_bytes(b"%PDF-1.7\ntampered schedule\n")

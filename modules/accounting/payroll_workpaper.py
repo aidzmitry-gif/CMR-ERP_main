@@ -28,6 +28,7 @@ from modules.accounting.payroll_rule_set import result as rule_set_result
 from modules.accounting.schemas import Input, Money, exact
 from modules.accounting.service import AccountingError
 from modules.accounting.timesheet_preflight import UnsupportedWorkbook, row_numeric_hours
+from modules.accounting.work_schedule_norm import numeric_norm
 
 Hours = Annotated[Decimal, BeforeValidator(exact), Field(ge=0, max_digits=5, decimal_places=2)]
 CENT = Decimal("0.01")
@@ -60,6 +61,7 @@ class PayrollWorkpaperInput(Input):
     work_schedule_document: str | None = Field(default=None, min_length=1, max_length=160)
     work_schedule_digest: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     work_schedule_file_id: int | None = Field(default=None, gt=0, strict=True)
+    work_schedule_cell: str | None = Field(default=None, pattern=r"^[A-Z]{1,3}[1-9][0-9]{0,6}$")
     norm_hours_evidence: str | None = Field(default=None, min_length=10, max_length=2000)
     month_norm_hours: Hours = Field(gt=0, le=744)
     worked_hours: Hours = Field(le=744)
@@ -76,6 +78,8 @@ class PayrollWorkpaperInput(Input):
         if any(value is not None for value in schedule) and not all(
                 value is not None for value in schedule):
             raise ValueError("Work schedule file, digest, reference and norm evidence must be supplied together")
+        if self.work_schedule_cell is not None and self.work_schedule_file_id is None:
+            raise ValueError("Monthly norm cell requires a stored work schedule")
         identities = [component.requirement_id for component in self.components]
         if len(identities) != len(set(identities)):
             raise ValueError("Rate requirement cannot appear twice in one workpaper")
@@ -127,6 +131,7 @@ async def preview_workpaper(session, org_id: int, month: str,
     source_files_verified = data.contract_file_id is not None
     timesheet_row_check = None
     schedule_bytes_verified = False
+    schedule_norm_check = None
     if source_files_verified:
         contract_file = await evidence_file_for(
             session, org_id, data.contract_file_id, kind="employment_contract",
@@ -180,6 +185,21 @@ async def preview_workpaper(session, org_id: int, month: str,
                 or schedule_file.sha256 != data.work_schedule_digest):
             raise AccountingError("Monthly work schedule differs from stored source file")
         schedule_bytes_verified = True
+        if schedule_file.content_type == (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"):
+            if data.work_schedule_cell is None:
+                raise AccountingError("Select the monthly norm cell of the XLSX work schedule")
+            raw = await run_in_threadpool(verify_evidence_bytes, schedule_file)
+            try:
+                schedule_norm_check = await run_in_threadpool(
+                    numeric_norm, raw, month, data.work_schedule_cell)
+            except UnsupportedWorkbook as exc:
+                raise AccountingError("XLSX work schedule norm cell failed source verification") from exc
+            if (schedule_norm_check["source_sha256"] != schedule_file.sha256
+                    or Decimal(schedule_norm_check["numeric_hours"]) != data.month_norm_hours):
+                raise AccountingError("Monthly norm differs from the selected XLSX schedule cell")
+        elif data.work_schedule_cell is not None:
+            raise AccountingError("Monthly norm cell applies only to an XLSX work schedule")
 
     with localcontext() as context:
         context.prec = 64
@@ -295,6 +315,8 @@ async def preview_workpaper(session, org_id: int, month: str,
         "work_schedule_digest": data.work_schedule_digest,
         "work_schedule_file_id": data.work_schedule_file_id,
         "schedule_file_bytes_verified": schedule_bytes_verified,
+        "work_schedule_cell": data.work_schedule_cell,
+        "schedule_numeric_hours_verified": schedule_norm_check is not None,
         "norm_hours_evidence": data.norm_hours_evidence,
         "month_norm_hours": format(data.month_norm_hours, ".2f"),
         "worked_hours": format(data.worked_hours, ".2f"),
@@ -323,6 +345,7 @@ async def preview_workpaper(session, org_id: int, month: str,
         "timesheet_identifier_matches_binding": bool(
             timesheet_row_check and timesheet_row_check["row_identifier_matches_binding"]),
         "schedule_file_bytes_verified": schedule_bytes_verified,
+        "schedule_numeric_hours_verified": schedule_norm_check is not None,
         "rule_set_configured": True,
         "rule_source_file_bytes_verified": rule_source_bytes_verified,
         "method_and_rate_classification_verified": False,

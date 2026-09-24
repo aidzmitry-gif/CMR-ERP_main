@@ -29,7 +29,7 @@ const result = {
   status: "arithmetic_workpaper_only", basis_digest: "f".repeat(64),
   gross_byn: "750.00", listed_employee_deductions_byn: "75.00", after_listed_deductions_byn: "675.00",
   listed_employer_contributions_byn: "130.00", cost_including_listed_contributions_byn: "880.00",
-  contract_and_timesheet_hashes_verified: true, schedule_file_bytes_verified: true, rule_source_file_bytes_verified: true,
+  contract_and_timesheet_hashes_verified: true, schedule_file_bytes_verified: true, schedule_numeric_hours_verified: false, rule_source_file_bytes_verified: true,
   posting_available: false, statutory_payroll_certified: false,
   basis: { organization_id: 7, month: "2026-10", employee_name: "Тестовый работник", work_from: "2026-10-01", work_to: "2026-10-31", components: [
     { rate_code: "SYNTHETIC-EMPLOYEE", role: "employee_deduction", base_byn: "750.00", rate_value: "10.00", amount_byn: "75.00" },
@@ -46,8 +46,12 @@ describe("AccountingPayrollWorkpaper", () => {
       if (input.includes("payroll-rule-sets/current")) return Promise.resolve(response(rules));
       if (input.includes("payroll-workpaper-access")) return Promise.resolve(response(access));
       if (input.includes("payroll-employments")) return Promise.resolve(response(employment));
-      if (input.includes("payroll-evidence-files")) return Promise.resolve(response(matchingFiles(input)));
-      if (input.includes("payroll-workpaper-preview")) return Promise.resolve(response(result));
+      if (input.includes("payroll-evidence-files")) return Promise.resolve(response(matchingFiles(input).map((file) => file.kind === "work_schedule"
+        ? { ...file, filename: "schedule.xlsx", content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" } : file)));
+      if (input.includes("payroll-workpaper-preview")) return Promise.resolve(response({
+        ...result, schedule_numeric_hours_verified: true,
+        basis: { ...result.basis, work_schedule_cell: "B5" },
+      }));
       if (input.includes("payroll-arithmetic-summary")) return Promise.resolve(response(summary));
       if (input.includes("payroll-workpaper-reviews") && init.method === "POST") {
         const command = JSON.parse(init.body as string);
@@ -63,6 +67,7 @@ describe("AccountingPayrollWorkpaper", () => {
     fireEvent.change(screen.getByLabelText("Файл договора"), { target: { value: "71" } });
     fireEvent.change(screen.getByLabelText("Файл табеля"), { target: { value: "72" } });
     fireEvent.change(screen.getByLabelText("Файл графика работы"), { target: { value: "74" } });
+    fireEvent.change(screen.getByLabelText("Ячейка нормы XLSX"), { target: { value: "b5" } });
     fireEvent.change(screen.getByLabelText("Оклад по договору"), { target: { value: "1500.00" } });
     fireEvent.change(screen.getByLabelText("Норма часов"), { target: { value: "160.00" } });
     fireEvent.change(screen.getByLabelText("Отработано часов"), { target: { value: "80.00" } });
@@ -82,10 +87,11 @@ describe("AccountingPayrollWorkpaper", () => {
       policy_id: 3, rule_set_id: 41, employment_binding_id: 12,
       monthly_salary_byn: "1500.00", month_norm_hours: "160.00", worked_hours: "80.00",
       contract_file_id: 71, contract_digest: "c".repeat(64), timesheet_file_id: 72, timesheet_digest: "d".repeat(64),
-      work_schedule_file_id: 74, work_schedule_digest: "f".repeat(64), norm_hours_evidence: "Утверждённая норма в графике",
+      work_schedule_file_id: 74, work_schedule_digest: "f".repeat(64), work_schedule_cell: "B5", norm_hours_evidence: "Утверждённая норма в графике",
       components: [{ requirement_id: 61, adjustment_byn: "0.00" }, { requirement_id: 62, adjustment_byn: "100.00", adjustment_file_id: 73 }],
     });
     expect(screen.getByText(/не сумма зарплаты к выплате/)).toBeInTheDocument();
+    expect(screen.getByText(/сверен по ячейке B5/)).toHaveTextContent("подлинность и применимость графика подтверждает бухгалтер");
     expect(await screen.findByText(/Исправление квитанции № 55/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Основание проверки главбуха"), { target: { value: "Проверены строки договора, табеля и корректировки" } });
     fireEvent.click(screen.getByRole("button", { name: "Подтвердить исправление" }));
