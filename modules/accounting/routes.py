@@ -7,11 +7,12 @@ from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
-from sqlalchemy import inspect, select
+from sqlalchemy import inspect, or_, select
 from sqlalchemy.exc import IntegrityError
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import HTMLResponse
 
+from core.domain.models import Counterparty
 from core.runtime.deps import get_core, get_session
 from core.services.auth import (
     EffectiveIdentityLookupError,
@@ -1251,17 +1252,40 @@ async def preview_inventory_issue(org_id: int, data: InventoryIssuePreviewInput,
     return await inventory_cost.preview_issue(ctx[0], org_id, data, procurement=getattr(core.services, "procurement_source", None))
 
 
+@router.get("/organizations/{org_id}/sales/buyers")
+async def sale_buyer_options(org_id: int, response: Response, q: str = Query("", max_length=100),
+                             ctx=Depends(member)):
+    """Search active MDM buyers within a book member's accounting session."""
+    response.headers["Cache-Control"] = "private, no-store"
+    term = q.strip()
+    if not term:
+        return {"organization_id": org_id, "items": [], "truncated": False}
+    filters = [Counterparty.name.icontains(term, autoescape=True),
+               Counterparty.display_name.icontains(term, autoescape=True),
+               Counterparty.legal_name.icontains(term, autoescape=True),
+               Counterparty.unp.icontains(term, autoescape=True)]
+    if term.isascii() and term.isdecimal() and int(term) <= 2147483647:
+        filters.append(Counterparty.id == int(term))
+    rows = (await ctx[0].scalars(select(Counterparty).where(
+        Counterparty.is_active.is_(True), Counterparty.merged_into_id.is_(None), or_(*filters))
+        .order_by(Counterparty.name, Counterparty.id).limit(51))).all()
+    return {"organization_id": org_id, "items": [
+        {"id": row.id, "name": row.legal_name or row.name, "unp": row.unp or "",
+         "revision": row.revision} for row in rows[:50]], "truncated": len(rows) > 50}
+
+
 @router.post("/organizations/{org_id}/sales/posting-preview")
 async def preview_sale_posting(org_id: int, data: sales.SaleDocument, ctx=Depends(member), core=Depends(get_core)):
     return await sales.prepare(ctx[0], org_id, data, procurement=getattr(core.services, "procurement_source", None),
-                               source_allocations=True)
+                               source_allocations=True, require_current_buyer=True)
 
 
 @router.post("/organizations/{org_id}/sales/confirm", status_code=201)
 async def confirm_sale_posting(org_id: int, data: sales.SaleConfirm, ctx=Depends(member), core=Depends(get_core)):
     document = sales.SaleDocument(**data.model_dump(exclude={"basis_digest", "digest"}))
     row = await sales.confirm(ctx[0], org_id, document, data.basis_digest, data.digest, ctx[1], core.services.event_bus,
-                              procurement=getattr(core.services, "procurement_source", None), source_allocations=True)
+                              procurement=getattr(core.services, "procurement_source", None), source_allocations=True,
+                              require_current_buyer=True)
     return serialize(row)
 
 

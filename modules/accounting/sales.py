@@ -1,11 +1,13 @@
 """Pilot BYN goods sale preview; recognition and VAT basis are accountant inputs."""
 import json
+import re
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 from typing import Annotated
 
 from pydantic import BeforeValidator, Field
 from sqlalchemy import select, text
 
+from core.domain.models import Counterparty
 from modules.accounting import inventory_cost, inventory_issues, service
 from modules.accounting.models import Entry, InventorySaleReceipt
 from modules.accounting.schemas import (
@@ -45,6 +47,23 @@ class SaleConfirm(SaleDocument):
 def rule_version(document, basis_digest, *, allocation_version=None):
     issue_rule = inventory_issues.rule_version(document, basis_digest, allocation_version=allocation_version)
     return "sale-v1:" + issue_rule.removeprefix("inventory-issue-v2:")
+
+
+async def verified_buyer(session, document):
+    """Authenticate the MDM snapshot for a new accountant-entered sale."""
+    dimensions = document.buyer_dimensions
+    raw_id = dimensions.get("counterparty_id", "")
+    if (not isinstance(raw_id, str) or not re.fullmatch(r"[1-9][0-9]*", raw_id)
+            or len(raw_id) > 10 or int(raw_id) > 2147483647):
+        raise service.AccountingError("Select the buyer from the counterparty directory")
+    buyer = await session.scalar(select(Counterparty).where(Counterparty.id == int(raw_id))
+                                 .with_for_update(read=True).execution_options(populate_existing=True))
+    if (buyer is None or not buyer.is_active or buyer.merged_into_id is not None
+            or dimensions.get("counterparty") != (buyer.legal_name or buyer.name)
+            or dimensions.get("counterparty_unp") != (buyer.unp or "")
+            or dimensions.get("counterparty_revision") != str(buyer.revision)):
+        raise service.AccountingError("Buyer directory record changed; select it again")
+    return buyer
 
 
 def belongs(code, root):
@@ -99,7 +118,10 @@ def posting_for(document, cost):
                               "lines": lines})
 
 
-async def prepare(session, org_id, document, *, procurement=None, source_allocations=False):
+async def prepare(session, org_id, document, *, procurement=None, source_allocations=False,
+                  require_current_buyer=False):
+    if require_current_buyer:
+        await verified_buyer(session, document)
     _, vat, gross = commercial_lines(document)
     issue = InventoryIssueDocument(**document.model_dump(include=set(InventoryIssueDocument.model_fields)))
     cost_request = InventoryIssuePreviewInput(**issue.model_dump(include=set(InventoryIssuePreviewInput.model_fields)))
@@ -204,7 +226,7 @@ async def verify_receipt(session, organization_id, entry_id, *, procurement=None
 
 
 async def confirm(session, org_id, document, basis_digest, digest, actor, event_bus=None, *, procurement=None,
-                  source_allocations=False):
+                  source_allocations=False, require_current_buyer=False):
     await service.lock_organization(session, org_id)
     existing = await session.scalar(select(Entry).where(
         Entry.organization_id == org_id, Entry.source == document.source,
@@ -221,7 +243,8 @@ async def confirm(session, org_id, document, basis_digest, digest, actor, event_
             raise service.AccountingError("Sale already posted with different content")
         await verify_receipt(session, org_id, existing.id, procurement=procurement)
         return existing
-    prepared = await prepare(session, org_id, document, procurement=procurement, source_allocations=source_allocations)
+    prepared = await prepare(session, org_id, document, procurement=procurement,
+                             source_allocations=source_allocations, require_current_buyer=require_current_buyer)
     if prepared["cost"]["basis_digest"] != basis_digest or prepared["digest"] != digest:
         raise service.AccountingError("Sale or inventory cost basis changed; preview again")
     entry = await service.post(session, org_id, PostingInput(**prepared["posting"]), actor, event_bus, inventory_sale=True)

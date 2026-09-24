@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 
+from core.domain.models import Counterparty
 from modules.accounting import models, sales, service
 from modules.accounting.schemas import PostingInput
 from tests.accounting.test_inventory_cost import move, request
@@ -21,7 +22,9 @@ async def setup_sale(db, book, posting, **changes):
             "expense_account": "90.4", "explanation": "Synthetic sale preview",
             "net_amount": "20.00", "vat_rate": "20", "vat_basis": "Synthetic accountant-approved basis",
             "buyer_account": "62", "revenue_account": "90.1", "vat_revenue_account": "90.2", "vat_payable_account": "68.2",
-            "buyer_dimensions": {"counterparty": "buyer", "contract": "contract", "settlement_document": "sale-1"}, **changes}
+            "buyer_dimensions": {"counterparty_id": "1", "counterparty": "supplier1",
+                                 "counterparty_unp": "190000001", "counterparty_revision": "1",
+                                 "contract": "contract", "settlement_document": "sale-1"}, **changes}
 
 
 async def test_sale_preview_balanced_net_income_cost_and_no_writes(client, db, book, posting):
@@ -41,6 +44,50 @@ async def test_sale_preview_balanced_net_income_cost_and_no_writes(client, db, b
     with pytest.raises(service.AccountingError, match="dedicated"):
         await service.post(db, book[0], PostingInput(**result["posting"]), "tester")
     assert (await client.post("/accounting/organizations/999/sales/posting-preview", json=data)).status_code == 403
+
+
+async def test_sale_buyer_must_be_current_directory_record_and_replay_preserves_history(client, db, book, posting):
+    data = await setup_sale(db, book, posting)
+    base = f"/accounting/organizations/{book[0]}/sales"
+    assert (await client.get(base + "/buyers")).json()["items"] == []
+    options = await client.get(base + "/buyers?q=supplier1")
+    assert options.status_code == 200
+    assert options.json()["items"] == [{"id": 1, "name": "supplier1", "unp": "190000001", "revision": 1}]
+    assert (await client.get("/accounting/organizations/999/sales/buyers?q=supplier1")).status_code == 403
+    free_text = {**data, "buyer_dimensions": {"counterparty": "supplier1",
+        "contract": "contract", "settlement_document": "sale-1"}}
+    assert (await client.post(base + "/posting-preview", json=free_text)).status_code == 422
+    forged = {**data, "buyer_dimensions": {**data["buyer_dimensions"], "counterparty": "Forged"}}
+    assert (await client.post(base + "/posting-preview", json=forged)).status_code == 422
+    preview = (await client.post(base + "/posting-preview", json=data)).json()
+    payload = {**data, "basis_digest": preview["cost"]["basis_digest"], "digest": preview["digest"]}
+    first = await client.post(base + "/confirm", json=payload)
+    assert first.status_code == 201, first.text
+    buyer = await db.get(Counterparty, 1)
+    buyer.legal_name = "Renamed buyer"
+    await db.commit()
+    assert (await client.post(base + "/posting-preview", json=data)).status_code == 422
+    repeated = await client.post(base + "/confirm", json=payload)
+    assert repeated.status_code == 201 and repeated.json()["id"] == first.json()["id"]
+    assert await db.scalar(select(func.count()).select_from(models.InventorySaleReceipt)) == 1
+
+
+async def test_sale_confirmation_rechecks_buyer_after_preview(client, db, book, posting):
+    data = await setup_sale(db, book, posting)
+    base = f"/accounting/organizations/{book[0]}/sales"
+    preview = (await client.post(base + "/posting-preview", json=data)).json()
+    buyer = await db.get(Counterparty, 1)
+    buyer.legal_name = "Current legal name"
+    await db.commit()
+    await db.refresh(buyer)
+    buyer_revision = buyer.revision
+    stale = await client.post(base + "/confirm", json={**data,
+        "basis_digest": preview["cost"]["basis_digest"], "digest": preview["digest"]})
+    assert stale.status_code == 422, stale.text
+    assert await db.scalar(select(func.count()).select_from(models.InventorySaleReceipt)) == 0
+    current = {**data, "buyer_dimensions": {**data["buyer_dimensions"],
+        "counterparty": "Current legal name", "counterparty_revision": str(buyer_revision)}}
+    assert (await client.post(base + "/posting-preview", json=current)).status_code == 200
 
 
 @pytest.mark.parametrize(("method", "expected_cost", "expected_lines"), [
@@ -64,7 +111,9 @@ async def test_sale_preview_preserves_policy_selected_inventory_layers(client, d
             "net_amount": "80.00", "vat_rate": "0", "vat_basis": "Synthetic explicit zero VAT basis",
             "buyer_account": "62", "revenue_account": "90.1", "vat_revenue_account": "90.2",
             "vat_payable_account": "68.2",
-            "buyer_dimensions": {"counterparty": "buyer", "contract": "contract", "settlement_document": method}}
+            "buyer_dimensions": {"counterparty_id": "1", "counterparty": "supplier1",
+                                 "counterparty_unp": "190000001", "counterparty_revision": "1",
+                                 "contract": "contract", "settlement_document": method}}
     response = await client.post(f"/accounting/organizations/{book[0]}/sales/posting-preview", json=data)
     assert response.status_code == 200, response.text
     result = response.json()

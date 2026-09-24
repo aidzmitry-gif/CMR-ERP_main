@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
+import { searchAccountingBuyers, type AccountingBuyer } from "@/lib/accounting-buyers";
 
 const dimensionNames: Record<string, string> = { counterparty: "Контрагент", contract: "Договор", settlement_document: "Документ расчётов", department: "Подразделение", employee: "Сотрудник", asset: "Основное средство", warehouse: "Склад", sku: "Номенклатура", lot: "Партия", order: "Заказ" };
 
@@ -15,6 +16,9 @@ export function AccountingInventoryIssue({ org, date, policyId, inventoryMethod 
   const [form, setForm] = useState({ source: "", source_version: 1, document_date: date, operation_date: date, account: "", warehouse: "", sku: "", lot: "", quantity: "", expense_account: "", expense_dimensions: {} as Record<string, string>, explanation: "" });
   const [prepared, setPrepared] = useState<{ key: string; body: Record<string, unknown>; calculation: Calculation } | null>(null);
   const [saleForm, setSaleForm] = useState({ net_amount: "", vat_rate: "", vat_basis: "", buyer_account: "", revenue_account: "", vat_revenue_account: "", vat_payable_account: "", buyer_dimensions: {} as Record<string, string>, revenue_dimensions: {} as Record<string, string>, vat_dimensions: {} as Record<string, string> });
+  const [buyerSearch, setBuyerSearch] = useState("");
+  const [buyerOptions, setBuyerOptions] = useState<AccountingBuyer[]>([]);
+  const buyerLookup = useRef(0);
   const [busy, setBusy] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -31,11 +35,28 @@ export function AccountingInventoryIssue({ org, date, policyId, inventoryMethod 
   function changeSaleAccount(field: "buyer_account" | "revenue_account" | "vat_revenue_account" | "vat_payable_account", value: string) {
     changeSale(filteredSale({ ...saleForm, [field]: value }));
   }
+  async function findBuyers() {
+    const token = ++buyerLookup.current;
+    setError("");
+    try {
+      const items = await searchAccountingBuyers(org, buyerSearch);
+      if (mounted.current && token === buyerLookup.current) setBuyerOptions(items);
+    } catch (cause) { if (mounted.current && token === buyerLookup.current)
+      setError(cause instanceof Error ? cause.message : "Не удалось найти покупателя"); }
+  }
+  function selectBuyer(id: number) {
+    const buyer = buyerOptions.find(item => item.id === id);
+    if (!buyer) return;
+    changeSale({ buyer_dimensions: { ...saleForm.buyer_dimensions,
+      counterparty_id: String(buyer.id), counterparty: buyer.name,
+      counterparty_unp: buyer.unp, counterparty_revision: String(buyer.revision) } });
+  }
   function filteredSale(next: typeof saleForm) {
     const required = (code: string) => accounts.find((a) => a.code === code)?.required_dimensions ?? [];
     const keep = (values: Record<string, string>, keys: string[]) => Object.fromEntries(Object.entries(values).filter(([key]) => keys.includes(key)));
     return { ...next,
-      buyer_dimensions: keep(next.buyer_dimensions, ["counterparty", "contract", "settlement_document", ...required(next.buyer_account)]),
+      buyer_dimensions: keep(next.buyer_dimensions, ["counterparty_id", "counterparty",
+        "counterparty_unp", "counterparty_revision", "contract", "settlement_document", ...required(next.buyer_account)]),
       revenue_dimensions: keep(next.revenue_dimensions, required(next.revenue_account)),
       vat_dimensions: keep(next.vat_dimensions, [...required(next.vat_revenue_account), ...required(next.vat_payable_account)]),
     };
@@ -72,13 +93,26 @@ export function AccountingInventoryIssue({ org, date, policyId, inventoryMethod 
       <label>Счёт расходов<Select aria-label="Счёт расходов" value={form.expense_account} onChange={(e) => change({ expense_account: e.target.value, expense_dimensions: {} })}><option value="">Выберите счёт</option>{expense.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.title}</option>)}</Select></label>
       {accounts.find((a) => a.code === form.expense_account)?.required_dimensions.map((dimension) => <label key={dimension}>Аналитика расходов: {dimensionNames[dimension] ?? dimension}<Input value={form.expense_dimensions[dimension] ?? ""} onChange={(e) => change({ expense_dimensions: { ...form.expense_dimensions, [dimension]: e.target.value } })} /></label>)}
       {sale && <>
+        <div className="space-y-2 md:col-span-2">
+          <label>Поиск покупателя в справочнике<Input value={buyerSearch} onChange={(event) => {
+            buyerLookup.current++; setBuyerSearch(event.target.value); setBuyerOptions([]);
+            changeSale({ buyer_dimensions: { ...saleForm.buyer_dimensions, counterparty_id: "",
+              counterparty: "", counterparty_unp: "", counterparty_revision: "" } });
+          }} /></label>
+          <Button variant="secondary" onClick={() => void findBuyers()} disabled={!buyerSearch.trim()}>Найти покупателя</Button>
+          <label className="block">Покупатель из справочника<Select aria-label="Покупатель из справочника"
+            value={saleForm.buyer_dimensions.counterparty_id || ""} onChange={(event) => selectBuyer(Number(event.target.value))}>
+            <option value="">Выберите покупателя</option>
+            {buyerOptions.map(item => <option key={item.id} value={item.id}>{item.name} · {item.unp || "без УНП"} · ID {item.id}</option>)}
+          </Select></label>
+        </div>
         {([["net_amount", "Стоимость продажи без НДС, BYN"], ["vat_rate", "Ставка НДС, %"], ["vat_basis", "Основание применения НДС"]] as const).map(([field, label]) => <label key={field}>{label}<Input value={saleForm[field]} onChange={(e) => changeSale({ [field]: e.target.value })} /></label>)}
         {([["buyer_account", "Счёт покупателя", "62", "asset"], ["revenue_account", "Счёт выручки", "90.1", "income"], ["vat_revenue_account", "Счёт НДС из выручки", "90.2", "income"], ["vat_payable_account", "Счёт расчётов по НДС", "68", "liability"]] as const).map(([field, label, root, category]) => <label key={field}>{label}<Select aria-label={label} value={saleForm[field]} onChange={(e) => changeSaleAccount(field, e.target.value)}><option value="">Выберите счёт</option>{accounts.filter((a) => belongs(a.code, root) && a.category === category && !a.cash && !a.quantity_tracking).map((a) => <option key={a.code} value={a.code}>{a.code} · {a.title}</option>)}</Select></label>)}
-        {([["buyer_dimensions", "Покупатель", ["counterparty", "contract", "settlement_document", ...(accounts.find((a) => a.code === saleForm.buyer_account)?.required_dimensions ?? [])]], ["revenue_dimensions", "Выручка", accounts.find((a) => a.code === saleForm.revenue_account)?.required_dimensions ?? []], ["vat_dimensions", "НДС", [...(accounts.find((a) => a.code === saleForm.vat_revenue_account)?.required_dimensions ?? []), ...(accounts.find((a) => a.code === saleForm.vat_payable_account)?.required_dimensions ?? [])]]] as const).map(([field, label, dimensions]) => [...new Set(dimensions)].filter((d) => d !== "vat_rate" && d !== "vat_basis").map((dimension) => <label key={`${field}/${dimension}`}>{label}: {dimensionNames[dimension] ?? dimension}<Input value={saleForm[field][dimension] ?? ""} onChange={(e) => changeSale({ [field]: { ...saleForm[field], [dimension]: e.target.value } })} /></label>))}
+        {([["buyer_dimensions", "Покупатель", ["contract", "settlement_document", ...(accounts.find((a) => a.code === saleForm.buyer_account)?.required_dimensions ?? [])]], ["revenue_dimensions", "Выручка", accounts.find((a) => a.code === saleForm.revenue_account)?.required_dimensions ?? []], ["vat_dimensions", "НДС", [...(accounts.find((a) => a.code === saleForm.vat_revenue_account)?.required_dimensions ?? []), ...(accounts.find((a) => a.code === saleForm.vat_payable_account)?.required_dimensions ?? [])]]] as const).map(([field, label, dimensions]) => [...new Set(dimensions)].filter((d) => !["vat_rate", "vat_basis", "counterparty", "counterparty_id", "counterparty_unp", "counterparty_revision"].includes(d)).map((dimension) => <label key={`${field}/${dimension}`}>{label}: {dimensionNames[dimension] ?? dimension}<Input value={saleForm[field][dimension] ?? ""} onChange={(e) => changeSale({ [field]: { ...saleForm[field], [dimension]: e.target.value } })} /></label>))}
       </>}
     </fieldset>
     <p>Дата отражения: {date}.</p>
-    <Button disabled={busy || !org || !policyId} onClick={() => void execute(false)}>{sale ? "Рассчитать продажу" : "Рассчитать списание"}</Button>
+    <Button disabled={busy || !org || !policyId || (sale && !saleForm.buyer_dimensions.counterparty_id)} onClick={() => void execute(false)}>{sale ? "Рассчитать продажу" : "Рассчитать списание"}</Button>
     {busy && <p role="status">{sale ? "Обработка продажи…" : "Обработка списания…"}</p>}{error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {current && <div className="space-y-2 rounded border border-accent p-3">
       {sale && current.calculation.kind !== "quantity_only_receipt" && <p>Без НДС: {current.calculation.net_amount_byn} BYN · НДС: {current.calculation.vat_amount_byn} BYN · К оплате: {current.calculation.gross_amount_byn} BYN</p>}
