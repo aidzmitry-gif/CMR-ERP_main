@@ -95,7 +95,7 @@ export function AccountingInventoryIssue({ org, date, policyId, inventoryMethod 
         if (!confirmedIssueReceipt(result, org, current!.body, current!.calculation, sale))
           throw new Error("ERP не подтвердила именно эту операцию. Проверенный пакет оставлен для сверки и точного повтора.");
         setPrepared(null);
-        setNotice(result.kind === "quantity_only_receipt" ? `Запись списания № ${result.receipt_id} зарегистрирована.` : sale ? `Продажа № ${result.id} проведена.` : `Бухгалтерское списание № ${result.id} проведено.`);
+        setNotice(result.kind === "quantity_only_receipt" ? `Запись списания № ${result.receipt_id} зарегистрирована.` : sale ? `Проводки по продаже вне CRM № ${result.id} проведены.` : `Бухгалтерское списание № ${result.id} проведено.`);
         onPosted();
       }
       else setPrepared({ key, body, calculation: result });
@@ -105,9 +105,9 @@ export function AccountingInventoryIssue({ org, date, policyId, inventoryMethod 
   const belongs = (code: string, root: string) => code === root || code.startsWith(`${root}.`);
   const inventory = accounts.filter((account) => account.category === "asset" && !account.cash && account.quantity_tracking && (sale ? belongs(account.code, "41") || belongs(account.code, "43") : /^(10|41|43)(\.|$)/.test(account.code)));
   const expense = accounts.filter((account) => account.category === "expense" && !account.cash && !account.quantity_tracking && (!sale || belongs(account.code, "90.4")));
-  return <section aria-label={sale ? "Бухгалтерская продажа товаров" : "Бухгалтерское списание запасов"} className="space-y-4 rounded-xl border border-line bg-surface p-4">
-    <h2 className="font-semibold">{sale ? "Ручная продажа: только исключения" : "Бухгалтерское списание партии"}</h2>
-    <p>{sale ? `Эта форма не создаёт счёт CRM, резерв или складскую отгрузку. Для обычной продажи используйте сделку CRM и проводки по акту отгрузки. Ручной документ нужен только для согласованного бухгалтером исключения, не отражённого через CRM. Расчёт себестоимости в BYN по методу ${inventoryMethod === "specific" ? "индивидуальной оценки" : inventoryMethod === "fifo" ? "ФИФО" : "средневзвешенной стоимости"}.` : `Расчёт себестоимости в BYN по методу ${inventoryMethod === "specific" ? "индивидуальной оценки" : inventoryMethod === "fifo" ? "ФИФО" : "средневзвешенной стоимости"}. Для ФИФО и средней стоимости партия может быть пустой: расчёт использует явные слои выбранного склада и SKU. Физическое движение склада оформляется отдельно.`}</p>
+  return <section aria-label={sale ? "Исключение: бухгалтерские проводки по продаже вне CRM" : "Бухгалтерское списание запасов"} className="space-y-4 rounded-xl border border-line bg-surface p-4">
+    <h2 className="font-semibold">{sale ? "Продажа вне CRM: только исключения" : "Бухгалтерское списание партии"}</h2>
+    <p>{sale ? `Эта форма создаёт только бухгалтерские записи: счёт CRM, резерв и физическое движение склада она не создаёт. Для обычной продажи используйте сделку CRM и проводки по акту отгрузки. Исключение согласовывает бухгалтер по первичному документу продажи, оформленной вне CRM; складское выбытие и сверку остатков нужно подтвердить отдельно. Расчёт себестоимости в BYN по методу ${inventoryMethod === "specific" ? "индивидуальной оценки" : inventoryMethod === "fifo" ? "ФИФО" : "средневзвешенной стоимости"}.` : `Расчёт себестоимости в BYN по методу ${inventoryMethod === "specific" ? "индивидуальной оценки" : inventoryMethod === "fifo" ? "ФИФО" : "средневзвешенной стоимости"}. Для ФИФО и средней стоимости партия может быть пустой: расчёт использует явные слои выбранного склада и SKU. Физическое движение склада оформляется отдельно.`}</p>
     {!policyId && <p role="alert">Нет действующей учётной политики на дату отражения.</p>}
     <fieldset disabled={busy || !org} className="grid gap-3 md:grid-cols-2">
       {([['source', 'Идентификатор основания'], ['warehouse', 'Склад партии'], ['sku', 'Номенклатура партии'], ['lot', inventoryMethod === "specific" ? 'Партия' : 'Партия (необязательно)'], ['quantity', 'Количество списания'], ['explanation', 'Содержание списания']] as const).map(([field, label]) => sale && field === "sku"

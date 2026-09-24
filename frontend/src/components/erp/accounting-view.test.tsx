@@ -55,8 +55,8 @@ describe("AccountingView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Отгрузки, ожидающие проводок" }));
     expect(screen.getByText("Раздел контроля: inbox")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Документы", exact: true }));
-    fireEvent.click(screen.getByRole("button", { name: "Ручная продажа" }));
-    expect(screen.getByText("Ручная продажа: только исключения")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Исключение: продажа вне CRM" }));
+    expect(screen.getByText("Продажа вне CRM: только исключения")).toBeInTheDocument();
   });
   it("uses seven sections and keeps home shortcuts in the selected section", async () => {
     render(<AccountingView />);
@@ -145,11 +145,17 @@ describe("AccountingView", () => {
     fetchMock.mockImplementation((url: string, init?: RequestInit) => url.endsWith("/entries/5") ? respond({
       id: 5, source: "Correction FX", operation: "manual", explanation: "Historical snapshot", source_version: 3,
       document_date: "2026-08-28", operation_date: "2026-08-29", posting_date: "2026-09-01",
-      created_at: "2026-09-02T10:11:12+03:00", rule_version: "manual-v1", correction_of: 4,
+      created_at: "2026-09-02T10:11:12+03:00", actor: "chief-accountant", rule_version: "manual-v1", correction_of: 4,
+      changes: { fields: [{ field: "explanation", before: "Original posting", after: "Historical snapshot" }],
+        posting_changed: true,
+        before_lines: [{ side: "credit", account_code: "60", amount: "300.00", currency: "BYN", dimensions: {} }],
+        after_lines: [{ side: "credit", account_code: "60", amount: "321.00", currency: "BYN", dimensions: {} }] },
       lines: [{ id: 1, account_code: "60", account_title: "Историческое название", side: "credit", amount: "321.00",
         dimensions: { counterparty: "Поставщик A", contract: "Договор 7", lot: "Партия 9", settlement_document: "sales:document:27", bank_statement: "Выписка 9", order: "sales:document:99" }, currency: "USD",
         original_amount: "100.00", rate: "3.210000", rate_scale: 1, rate_date: "2026-08-29", rate_source: "Учебный источник", quantity: "2.000000" }],
-    }) : url.endsWith("/entries/4") ? respond({ id: 4, source: "Original", explanation: "Original posting", lines: [] }) : original(url, init));
+    }) : url.endsWith("/entries/4") ? respond({ id: 4, source: "Original", explanation: "Original posting", lines: [], corrections: [
+      { id: 5, source_version: 3, actor: "chief-accountant", posting_date: "2026-09-01", created_at: "2026-09-02T10:11:12+03:00" },
+    ] }) : original(url, init));
     render(<AccountingView />);
     await screen.findByText(/включительно: 0\./);
     openPage("Отчёты", "ОСВ и отчёты");
@@ -157,11 +163,17 @@ describe("AccountingView", () => {
     await screen.findByText("Historical snapshot");
     for (const value of ["2026-08-28", "2026-08-29", "2026-09-01", "2026-09-02T10:11:12+03:00", "manual-v1", "Поставщик A", "Договор 7", "Партия 9", "Количество: 2.000000", "Сумма в валюте: 100.00 USD", "Курс: 3.210000 BYN за 1 USD"]) expect(screen.getByText(value, { exact: true })).toBeInTheDocument();
     expect(screen.getByText("Дата курса: 2026-08-29 · Источник: Учебный источник")).toBeInTheDocument();
+    expect(screen.getByText("chief-accountant")).toBeInTheDocument();
+    expect(screen.getByText("Содержание: было «Original posting», стало «Historical snapshot».")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Проводки до и после"));
+    expect(screen.getByText(/Кт 60 · 300.00 BYN/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Оригинал документа № 27" })).toHaveAttribute("href", "/api/sales/organizations/1/documents/27/original");
     expect(screen.queryByRole("link", { name: "Оригинал документа № 99" })).not.toBeInTheDocument();
     expect(screen.getByText("Банковская выписка")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Исправляет операцию № 4" }));
     expect(await screen.findByText("Original posting")).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Страницы раздела Отчёты" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Операция № 5 · версия 3 · 2026-09-01 · chief-accountant/ })).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/accounting/organizations/1/entries/4")).toBe(true);
   });
   it("keeps the latest entry selection and ignores responses after closing", async () => {

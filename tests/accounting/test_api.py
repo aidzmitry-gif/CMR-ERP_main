@@ -44,6 +44,31 @@ async def test_organization_setup_accounts_policy_and_permissions(client, db, bo
     assert (await client.get("/accounting/organizations")).status_code == 403
 
 
+async def test_entry_card_shows_immutable_correction_history_with_actor_and_changes(client, db, book, posting):
+    original = await service.post(db, book[0], posting("accountant-note"), "tester")
+    corrected = await service.post(db, book[0], posting(
+        "accountant-note", source_version=2, correction_of=original.id,
+        amount="120.00", explanation="Corrected approved amount",
+    ), "tester")
+    await db.commit()
+    base = f"/accounting/organizations/{book[0]}/entries"
+    before = (await client.get(f"{base}/{original.id}")).json()
+    after = (await client.get(f"{base}/{corrected.id}")).json()
+    assert before["actor"] == after["actor"] == "tester"
+    assert before["created_at"] and after["created_at"]
+    assert before["corrections"] == [{
+        "id": corrected.id, "source_version": 2, "actor": "tester",
+        "created_at": after["created_at"], "posting_date": "2026-09-01",
+    }]
+    assert before["changes"] is None
+    assert after["correction_of"] == original.id
+    assert after["changes"]["posting_changed"] is True
+    assert after["changes"]["before_lines"][0]["amount"] == "100.00"
+    assert after["changes"]["after_lines"][0]["amount"] == "120.00"
+    assert {item["field"] for item in after["changes"]["fields"]} == {"source_version", "explanation"}
+    assert (await client.get(f"/accounting/organizations/999/entries/{corrected.id}")).status_code == 403
+
+
 async def test_platform_accountant_requires_separate_book_access_grant(client, db, book):
     org_id = book[0]
     prefix = f"/accounting/organizations/{org_id}"

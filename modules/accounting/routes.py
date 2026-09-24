@@ -767,9 +767,40 @@ async def entry_detail(org_id: int, entry_id: int, ctx=Depends(member)):
     ))
     if row is None:
         raise HTTPException(404, "Entry not found")
-    lines = (await ctx[0].scalars(select(Line).where(Line.entry_id == row.id))).all()
+    lines = (await ctx[0].scalars(select(Line).where(Line.entry_id == row.id).order_by(Line.id))).all()
+    corrections = (await ctx[0].scalars(select(Entry).where(
+        Entry.organization_id == org_id, Entry.correction_of == row.id,
+    ).order_by(Entry.id))).all()
+    changes = None
+    if row.correction_of is not None:
+        previous = await ctx[0].scalar(select(Entry).where(
+            Entry.organization_id == org_id, Entry.id == row.correction_of,
+        ))
+        if previous is not None and previous.source == row.source and previous.operation == row.operation:
+            before_lines = (await ctx[0].scalars(select(Line).where(
+                Line.entry_id == previous.id,
+            ).order_by(Line.id))).all()
+            tracked = ("source_version", "document_date", "operation_date", "posting_date",
+                       "policy_id", "explanation")
+            fields = [{"field": key, "before": getattr(previous, key), "after": getattr(row, key)}
+                      for key in tracked if getattr(previous, key) != getattr(row, key)]
+            def posting_line(line):
+                stored = serialize(line)
+                return {key: stored[key] for key in (
+                    "account_code", "side", "amount", "quantity", "dimensions", "currency",
+                    "original_amount", "rate", "rate_scale", "rate_date", "rate_source",
+                )}
+            old_posting = [posting_line(line) for line in before_lines]
+            new_posting = [posting_line(line) for line in lines]
+            changes = {"fields": fields, "posting_changed": old_posting != new_posting,
+                       "before_lines": old_posting if old_posting != new_posting else [],
+                       "after_lines": new_posting if old_posting != new_posting else []}
     # Explicit decimal string serialization is applied at the HTTP boundary below.
-    return {**serialize(row), "lines": [serialize(line) for line in lines]}
+    return {**serialize(row), "lines": [serialize(line) for line in lines],
+            "corrections": [{"id": item.id, "source_version": item.source_version,
+                             "actor": item.actor, "created_at": item.created_at,
+                             "posting_date": item.posting_date} for item in corrections],
+            "changes": changes}
 
 
 @router.get("/organizations/{org_id}/entries/{entry_id}/shipment-package")

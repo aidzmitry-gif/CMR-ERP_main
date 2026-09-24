@@ -47,7 +47,8 @@ type PostedEntryReceipt = { id: number; organization_id: number; source: string;
 type Trial = ExportTrial;
 type Movement = AccountMovement;
 type Report = { from: string; to: string; organization_id: number; status: string; pending_documents: number; review_items?: { code: string; count: number; message: string }[]; trial_balance: Trial[]; movements: Movement[]; opening_movements: Movement[]; balance: Record<string, string>; pnl: { income: string; expenses: string; profit: string }; cashflow: Record<string, string> };
-type EntryDetail = { id: number; operation: string; source: string; explanation: string; posting_date: string; document_date: string; operation_date: string; created_at: string; source_version: number; rule_version: string; correction_of: number | null; lines: (CurrencyFields & { id: number; account_code: string; account_title: string; side: string; amount: string; dimensions: Record<string, string> })[] };
+type EntryChangeLine = CurrencyFields & { account_code: string; side: string; amount: string; dimensions: Record<string, string> };
+type EntryDetail = { id: number; operation: string; source: string; explanation: string; posting_date: string; document_date: string; operation_date: string; created_at: string; actor?: string; source_version: number; rule_version: string; correction_of: number | null; lines: (EntryChangeLine & { id: number; account_title: string })[]; corrections?: { id: number; source_version: number; actor: string; created_at: string; posting_date: string }[]; changes?: { fields: { field: string; before: string | number; after: string | number }[]; posting_changed: boolean; before_lines: EntryChangeLine[]; after_lines: EntryChangeLine[] } | null };
 const organizationHint = (value: string | undefined) => value && /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value)) ? value : undefined;
 
 const labels: Record<string, string> = { counterparty: "Контрагент", contract: "Договор", settlement_document: "Документ расчётов", warehouse: "Склад", sku: "Номенклатура", lot: "Партия", order: "Заказ", employee: "Сотрудник", asset: "Основное средство", department: "Подразделение", owner: "Владелец", serial: "Серийный номер" };
@@ -59,7 +60,7 @@ const accountingSections: AccountingSection[] = [
     { id: "crm-sales", label: "Продажи CRM" }, { id: "inventory-issue", label: "Списание запасов" },
     { id: "entry", label: "Ручная операция" }, { id: "production", label: "Производство" },
     { id: "repairs", label: "Ремонты" }, { id: "fixed-assets", label: "ОС и амортизация" },
-    { id: "sale", label: "Ручная продажа" },
+    { id: "sale", label: "Исключение: продажа вне CRM" },
   ], hiddenTabs: ["shipment-preview"] },
   { id: "banking", label: "Банк и платежи", pages: [
     { id: "bank", label: "Банк" }, { id: "bank-import", label: "Импорт выписки" },
@@ -345,9 +346,12 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
       <dl className="my-3 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">{[
         ["Дата документа", detail.document_date], ["Дата хозяйственной операции", detail.operation_date],
         ["Дата отражения", detail.posting_date], ["Время регистрации (как сохранено)", detail.created_at],
+        ["Кем проведено", detail.actor],
         ["Версия документа", detail.source_version], ["Версия правила", detail.rule_version],
       ].map(([label, value]) => <div key={label}><dt className="text-muted">{label}</dt><dd>{value ?? "Не получено"}</dd></div>)}</dl>
       {detail.correction_of != null && <button className="text-accent underline" onClick={() => void openEntry(detail.correction_of!)}>Исправляет операцию № {detail.correction_of}</button>}
+      {!!detail.corrections?.length && <section aria-label="История исправлений" className="my-3 space-y-2 rounded border border-line p-3"><h3 className="font-semibold">Позднейшие исправления</h3>{detail.corrections.map((item) => <button key={item.id} className="block text-left text-accent underline" onClick={() => void openEntry(item.id)}>Операция № {item.id} · версия {item.source_version} · {item.posting_date} · {item.actor} · {item.created_at}</button>)}</section>}
+      {detail.changes && <section aria-label="Изменения бухгалтерской справки" className="my-3 space-y-2 rounded border border-line p-3"><h3 className="font-semibold">Отличия от предыдущей версии</h3><p className="text-sm text-muted">Старая запись сохранена; исправление добавлено отдельной операцией.</p>{detail.changes.fields.map((item) => <p key={item.field} className="text-sm">{({ source_version: "Версия документа", document_date: "Дата документа", operation_date: "Дата хозяйственной операции", posting_date: "Дата отражения", policy_id: "Учётная политика", explanation: "Содержание" } as Record<string, string>)[item.field] ?? item.field}: было «{item.before}», стало «{item.after}».</p>)}{detail.changes.posting_changed && <details><summary>Проводки до и после</summary><div className="grid gap-3 md:grid-cols-2"><div><h4 className="font-semibold">Предыдущая запись</h4>{detail.changes.before_lines.map((line, index) => <p key={index}>{line.side === "debit" ? "Дт" : "Кт"} {line.account_code} · {line.amount} {line.currency ?? "BYN"} · {JSON.stringify(line.dimensions)}</p>)}</div><div><h4 className="font-semibold">Новая запись</h4>{detail.changes.after_lines.map((line, index) => <p key={index}>{line.side === "debit" ? "Дт" : "Кт"} {line.account_code} · {line.amount} {line.currency ?? "BYN"} · {JSON.stringify(line.dimensions)}</p>)}</div></div></details>}</section>}
       <p className="my-2 text-muted">{detail.explanation}</p>
       {detail.lines.map((line) => <div key={line.id} className="border-t border-line py-3">
         <p>{line.side === "debit" ? "Дт" : "Кт"} {line.account_code} · {line.account_title} — {line.amount} BYN</p>
