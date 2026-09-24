@@ -24,6 +24,7 @@ async def setup(api, session, services):
     org = await book(api)
     session.add(Counterparty(id=1, name="supplier1", unp="190000001"))
     session.add(Supplier(id=1, counterparty_id=1, name="supplier1", unp="190000001", status="active"))
+    session.add(Sku(id=1, code="sku1", title="Synthetic receipt item", unit="кг"))
     await session.commit()
     data = document()
     data["items"][0].update(quantity="2.00", unit="кг")
@@ -48,6 +49,9 @@ async def test_partial_primary_receipts_preserve_source_and_replay_without_stock
     again = await create_from_primary(session, core, user, org, source, first_command)
     assert again.receipt_id == first.receipt_id
     assert first.actor == "wms-owner-test"
+    assert first.source_snapshot["document"]["warehouse"] == "warehouse1"
+    assert (await session.get(Receipt, first.receipt_id)).warehouse == "Main"
+    assert first.command["evidence"] == "Synthetic explicit SKU and warehouse correspondence"
     assert first.source_snapshot["lines"][0]["unit"] == "кг"
     assert first.line_bindings[0]["source_line"] == f"procurement:receipt:{source}:1:1"
     with pytest.raises(ValueError, match="exceed"):
@@ -61,8 +65,7 @@ async def test_partial_primary_receipts_preserve_source_and_replay_without_stock
     assert [line.expected_qty for line in lines] == [Decimal("1.25"), Decimal("0.75")]
     assert all(line.batch_ref == "lot1" and line.accepted_qty is None for line in lines)
     assert (await session.get(Receipt, first.receipt_id)).status == "pending_qc"
-    report = await api.get(f"/accounting/organizations/{org}/receipts/{source}/warehouse-reconciliation",
-                           headers={"X-User-Roles": "finance"})
+    report = await api.get(f"/accounting/organizations/{org}/receipts/{source}/warehouse-reconciliation")
     assert report.status_code == 200, report.text
     assert report.headers["cache-control"] == "private, no-store"
     totals = report.json()["rows"][0]
@@ -81,7 +84,7 @@ async def test_primary_change_requires_reconciliation_after_physical_preparation
     await session.commit()
     data["items"][0]["quantity"] = "3.00"
     response = await api.put(f"/procurement/organizations/{org}/receipt-documents/{source}",
-                             json={"expected_version": 1, "document": data})
+                             json={"key": "physical-source-v2", "expected_version": 1, "document": data})
     assert response.status_code == 200, response.text
     with pytest.raises(ValueError, match="reconciliation required"):
         await create_from_primary(session, core, user, org, source, command(expected_version=2))
@@ -139,7 +142,7 @@ async def test_bound_acceptance_requires_explicit_qc_and_posts_only_accepted(api
     assert movement.qty == Decimal("1.00") and movement.organization_id == org
     assert movement.batch_ref == "lot1" and movement.sku_code == "WAREHOUSE-SKU"
     path = f"/accounting/organizations/{org}/receipts/{source}/warehouse-reconciliation"
-    report = await api.get(path, headers={"X-User-Roles": "finance"})
+    report = await api.get(path)
     assert report.status_code == 200, report.text
     totals = report.json()["rows"][0]
     assert Decimal(totals["accepted"]) == Decimal("1.00")
@@ -169,7 +172,7 @@ async def test_bound_acceptance_rechecks_source_and_physical_mapping(api, sessio
     if change == "source":
         data["invoice_reference"] = "Changed after physical preparation"
         response = await api.put(f"/procurement/organizations/{org}/receipt-documents/{source}",
-                                 json={"expected_version": 1, "document": data})
+                                 json={"key": "physical-source-corrupted-v2", "expected_version": 1, "document": data})
         assert response.status_code == 200, response.text
     response = await api.post(f"/wms/receipts/{binding.receipt_id}/accept")
     assert response.status_code == 409, response.text

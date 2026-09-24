@@ -19,7 +19,8 @@ it("restores the identical command after unknown delivery and verifies saved rec
       if (bodies.length === 1) throw new Error("Network lost");
       return { ok: true, json: async () => ({ organization_id: 1, source_receipt_id: 9, source_version: 2, request_key: JSON.parse(options.body as string).request_key, receipt_id: 12 }) };
     }
-    return { ok: true, json: async () => url.endsWith("/receipts/12") ? { id: 12, organization_id: 1, entity_ref: "procurement:receipt:9:2" } : source };
+    return { ok: true, json: async () => url.endsWith("/receipts/12") ? { id: 12, organization_id: 1,
+      entity_ref: "procurement:receipt:9:2", source: "procurement", warehouse: "Склад А" } : source };
   });
   vi.stubGlobal("fetch", fetcher);
   const view = render(<WmsPrimaryReceipt org="1" receipt="9" version="2" />);
@@ -33,6 +34,31 @@ it("restores the identical command after unknown delivery and verifies saved rec
   expect(await screen.findByRole("link", { name: "Открыть контроль качества" })).toHaveAttribute("href", "/erp/wms/receipts/12");
   expect(bodies[0]).toBe(bodies[1]);
   expect(sessionStorage.getItem("wms-primary-receipt:1:9:2")).toBeNull();
+});
+it("keeps the exact command when the stored receipt names a different warehouse", async () => {
+  let actualWarehouse = "Чужой склад";
+  const bodies: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string, options?: RequestInit) => {
+    if (options?.method === "POST") {
+      const body = String(options.body);
+      bodies.push(body);
+      return { ok: true, json: async () => ({ organization_id: 1, source_receipt_id: 9,
+        source_version: 2, request_key: JSON.parse(body).request_key, receipt_id: 12 }) };
+    }
+    return { ok: true, json: async () => url.endsWith("/receipts/12") ? { id: 12, organization_id: 1,
+      entity_ref: "procurement:receipt:9:2", source: "procurement", warehouse: actualWarehouse } : source };
+  }));
+  render(<WmsPrimaryReceipt org="1" receipt="9" version="2" />);
+  await fill();
+  fireEvent.click(screen.getByRole("button", { name: "Создать приёмку для QC" }));
+  await screen.findByText("Сохранённая приёмка не соответствует накладной и выбранному складу.");
+  expect(screen.queryByRole("link", { name: "Открыть контроль качества" })).not.toBeInTheDocument();
+  expect(sessionStorage.getItem("wms-primary-receipt:1:9:2")).toBe(bodies[0]);
+  actualWarehouse = "Склад А";
+  fireEvent.click(screen.getByRole("button", { name: "Повторить ту же команду" }));
+  expect(await screen.findByRole("link", { name: "Открыть контроль качества" })).toBeInTheDocument();
+  expect(bodies).toHaveLength(2);
+  expect(bodies[1]).toBe(bodies[0]);
 });
 it("allows fixing an explicitly rejected warehouse SKU without claiming creation", async () => {
   vi.stubGlobal("fetch", vi.fn(async (_url: string, options?: RequestInit) => options?.method === "POST"

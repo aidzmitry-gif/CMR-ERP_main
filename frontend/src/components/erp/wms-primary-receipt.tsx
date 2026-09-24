@@ -83,7 +83,10 @@ export function WmsPrimaryReceipt({ org, receipt, version }: { org: string; rece
       const stored = await fetch(`/api/wms/receipts/${result.receipt_id}`, { cache: "no-store" });
       if (!stored.ok) throw new Error("Не удалось проверить сохранённую приёмку. Повторите ту же команду.");
       const detail = await stored.json();
-      if (detail.id !== result.receipt_id || detail.organization_id !== Number(org) || detail.entity_ref !== `procurement:receipt:${receipt}:${version}`) throw new Error("Сохранённая приёмка не соответствует накладной.");
+      if (detail.id !== result.receipt_id || detail.organization_id !== Number(org)
+        || detail.entity_ref !== `procurement:receipt:${receipt}:${version}`
+        || detail.source !== "procurement" || detail.warehouse !== cmd.warehouse)
+        throw new Error("Сохранённая приёмка не соответствует накладной и выбранному складу.");
       sessionStorage.removeItem(storageKey);
       if (active.current) setCreated(result.receipt_id);
     } catch (reason) { if (active.current) setError(reason instanceof Error ? reason.message : "Не удалось создать приёмку."); }
