@@ -45,7 +45,11 @@ the caller must also select an exact employee row. The server sums only numeric
 day cells of that row over `work_from`–`work_to` and requires equality with
 `worked_hours`. The selected row and count of uninterpreted text-coded days
 are kept in the calculation basis. The accountant must still confirm that the
-row belongs to the employee and interpret all codes; the salary amount and
+row belongs to the employee and interpret all codes. The server rejects an XLSX
+row whose name in column C does not match the binding's stored employee name;
+the preview stores only a name-match boolean, not the private source name. A
+name match is not a personnel-ID or contract match and cannot prove identity.
+The salary amount and
 monthly norm remain documented inputs rather than parsed contract facts.
 For a monthly norm, the accountant can attach a private `work_schedule` file
 scoped to the same legal entity, employment binding and month, with the exact

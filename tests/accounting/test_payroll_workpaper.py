@@ -439,7 +439,8 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     })).status_code == 422
 
     xlsx_path = tmp_path / "october.xlsx"
-    make_timesheet(xlsx_path, month="2026-10", coded_day=True)
+    make_timesheet(xlsx_path, month="2026-10", coded_day=True,
+                   name_1="Synthetic Employee", hours_2=8)
     xlsx_upload = await client.post(url, json={
         "request_key": str(uuid4()), "kind": "timesheet",
         "employment_binding_id": binding["binding_id"], "month": "2026-10",
@@ -469,10 +470,17 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert (await client.post(preview_url, json={
         **xlsx_command, "timesheet_row": 11, "worked_hours": "7.00",
     })).status_code == 422
+    wrong_person = await client.post(preview_url, json={
+        **xlsx_command, "timesheet_row": 12,
+    })
+    assert wrong_person.status_code == 422
+    assert "name differs" in wrong_person.text
+    assert "Employee B" not in wrong_person.text
     checked_xlsx = await client.post(preview_url, json={**xlsx_command, "timesheet_row": 11})
     assert checked_xlsx.status_code == 200, checked_xlsx.text
     assert checked_xlsx.json()["timesheet_numeric_hours_verified"] is True
     assert checked_xlsx.json()["basis"]["timesheet_row"] == 11
+    assert checked_xlsx.json()["basis"]["timesheet_name_matches_binding"] is True
     assert checked_xlsx.json()["basis"]["timesheet_uninterpreted_code_days"] == 1
 
     review_url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-reviews"

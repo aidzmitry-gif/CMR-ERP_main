@@ -169,7 +169,7 @@ describe("AccountingPayrollWorkpaper", () => {
       ? { ...file, filename: "sheet.xlsx", content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }
       : file);
     const checkedResult = {
-      ...result, timesheet_numeric_hours_verified: true,
+      ...result, timesheet_numeric_hours_verified: true, timesheet_name_matches_binding: true,
       basis: { ...result.basis, timesheet_row: 11, timesheet_uninterpreted_code_days: 1 },
     };
     const fetchMock = vi.fn((input: string) => {
@@ -213,6 +213,7 @@ describe("AccountingPayrollWorkpaper", () => {
     expect(previewPost).toBeDefined();
     expect(JSON.parse(previewPost![1].body as string)).toMatchObject({ timesheet_row: 11, worked_hours: "8.00" });
     expect(screen.getByText(/Числовые часы проверены по строке 11/)).toHaveTextContent("не интерпретированы");
+    expect(screen.getByText(/ФИО строки совпало с карточкой работника/)).toHaveTextContent("это ещё не подтверждает личность");
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("payroll-workpaper-reviews"))).toBe(false);
   });
 });

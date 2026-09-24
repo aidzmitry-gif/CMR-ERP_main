@@ -21,7 +21,8 @@ from modules.hr.models import Employee
 
 
 def make_timesheet(path, *, month="2026-06", truncated=False, duplicate=False,
-                   wrong_days=False, row_after_gap=False, coded_day=False):
+                   wrong_days=False, row_after_gap=False, coded_day=False,
+                   name_1="Employee A", hours_2=4):
     year, month_number = map(int, month.split("-"))
     days = calendar.monthrange(year, month_number)[1]
     day_columns = [_column(index) for index in range(5, 5 + days)]
@@ -37,7 +38,7 @@ def make_timesheet(path, *, month="2026-06", truncated=False, duplicate=False,
     extra_2 = f'<c r="{day_columns[-2]}12"><v>3</v></c>' if truncated else ""
     code = '<c r="F11" t="inlineStr"><is><t>В</t></is></c>' if coded_day else ""
     hours_1 = "8"
-    hours_2 = "4"
+    hours_2 = str(hours_2)
     days_1 = "1" if wrong_days or not truncated else "2"
     days_2 = "2" if truncated else "1"
     extra_row = (f'<row r="14"><c r="B14" t="inlineStr"><is><t>worker-c</t></is></c>'
@@ -51,8 +52,8 @@ def make_timesheet(path, *, month="2026-06", truncated=False, duplicate=False,
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <sheetData>
  <row r="8">{header}<c r="{days_col}8" t="inlineStr"><is><t>Рабочее время</t></is></c><c r="{hours_col}8" t="inlineStr"><is><t>Часы</t></is></c></row>
- <row r="11"><c r="B11" t="inlineStr"><is><t>worker-a</t></is></c><c r="C11" t="inlineStr"><is><t>Employee A</t></is></c><c r="E11"><v>8</v></c>{code}{extra_1}<c r="{days_col}11"><v>{days_1}</v></c><c r="{hours_col}11"><f t="shared" si="0" ref="{hours_col}11:{hours_col}12">SUM(E11:{last_column}11)</f><v>{hours_1}</v></c></row>
- <row r="12"><c r="B12" t="inlineStr"><is><t>{identifier_2}</t></is></c><c r="C12" t="inlineStr"><is><t>Employee B</t></is></c><c r="E12"><v>4</v></c>{extra_2}<c r="{days_col}12"><v>{days_2}</v></c><c r="{hours_col}12"><f t="shared" si="0"/><v>{hours_2}</v></c></row>
+ <row r="11"><c r="B11" t="inlineStr"><is><t>worker-a</t></is></c><c r="C11" t="inlineStr"><is><t>{name_1}</t></is></c><c r="E11"><v>8</v></c>{code}{extra_1}<c r="{days_col}11"><v>{days_1}</v></c><c r="{hours_col}11"><f t="shared" si="0" ref="{hours_col}11:{hours_col}12">SUM(E11:{last_column}11)</f><v>{hours_1}</v></c></row>
+ <row r="12"><c r="B12" t="inlineStr"><is><t>{identifier_2}</t></is></c><c r="C12" t="inlineStr"><is><t>Employee B</t></is></c><c r="E12"><v>{hours_2}</v></c>{extra_2}<c r="{days_col}12"><v>{days_2}</v></c><c r="{hours_col}12"><f t="shared" si="0"/><v>{hours_2}</v></c></row>
  <row r="13"><c r="D13" t="inlineStr"><is><t>Total</t></is></c></row>
  {extra_row}
 </sheetData></worksheet>'''
@@ -82,6 +83,11 @@ def test_selected_row_hours_are_limited_to_interval_and_codes_remain_uninterpret
     selected = row_numeric_hours(raw, "2026-10", 11, date(2026, 10, 1), date(2026, 10, 2))
     assert selected["numeric_hours"] == "8.00"
     assert selected["uninterpreted_code_days"] == 1
+    assert row_numeric_hours(raw, "2026-10", 11, date(2026, 10, 1),
+                             date(2026, 10, 2), "  employee   A ")["row_name_matches_binding"] is True
+    assert row_numeric_hours(raw, "2026-10", 11, date(2026, 10, 1),
+                             date(2026, 10, 2), "Different Employee")["row_name_matches_binding"] is False
+    assert "Employee A" not in str(selected)
     assert selected["employee_identity_verified"] is False
     assert selected["code_meanings_verified"] is False
     with pytest.raises(UnsupportedWorkbook):
