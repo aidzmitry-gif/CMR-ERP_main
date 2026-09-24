@@ -532,9 +532,10 @@ async def pg_book(pg_factory, db, book):
     from sqlalchemy import select
 
     from modules.accounting.models import AccessGrant, Account, Organization, Policy
+    from modules.procurement.models import Supplier
 
     async with pg_factory() as session:
-        for model in (Organization, AccessGrant, Account, Policy):
+        for model in (Organization, AccessGrant, Account, Policy, Supplier):
             rows = (await db.scalars(select(model))).all()
             for row in rows:
                 session.add(model(**{c.key: getattr(row, c.key) for c in model.__table__.columns}))
