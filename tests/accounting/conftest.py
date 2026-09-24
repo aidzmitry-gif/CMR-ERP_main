@@ -66,7 +66,8 @@ async def db():
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
         session.add_all([Currency(code="USD", title="Test USD"), Currency(code="RUB", title="Test RUB"),
-                         Supplier(id=1, name="supplier1", unp="190000001", status="active")])
+                         Counterparty(id=1, name="supplier1", unp="190000001"),
+                         Supplier(id=1, counterparty_id=1, name="supplier1", unp="190000001", status="active")])
         await session.commit()
         yield session
     await engine.dispose()

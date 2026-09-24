@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 
-from core.domain.models import IdentityInvitationRequest, Sku, User
+from core.domain.models import Counterparty, IdentityInvitationRequest, Sku, User
 from modules.procurement.models import PurchaseOrder, PurchaseOrderLine, PurchaseRequest, Supplier
 from modules.procurement.order_creation import (
     OrderCommand,
@@ -35,7 +35,11 @@ async def test_pg_catalog_supplier_and_sku_receipts_survive_replay_and_reject_dr
     org = organization.json()["id"]
     prefix = f"/procurement/organizations/{org}"
     async with factory() as session:
-        supplier = Supplier(name="Supplier catalog", unp="999999901", status="active")
+        party = Counterparty(name="Supplier catalog", unp="999999901")
+        session.add(party)
+        await session.flush()
+        supplier = Supplier(name="Supplier catalog", unp="999999901", status="active",
+                            counterparty_id=party.id)
         sku = Sku(code="CAT-ORDER-1", title="Catalog order item", unit="pcs", is_active=True)
         session.add_all([supplier, sku])
         await session.commit()
@@ -53,8 +57,10 @@ async def test_pg_catalog_supplier_and_sku_receipts_survive_replay_and_reject_dr
         assert (await session.scalar(select(PurchaseOrderCreation).where(
             PurchaseOrderCreation.order_id == saved["order_id"]))).command["document"]["lines"][0]["sku_id"] == sku_id
         supplier = await session.get(Supplier, supplier_id)
+        party = await session.get(Counterparty, supplier.counterparty_id)
         sku = await session.get(Sku, sku_id)
         supplier.name = "Supplier renamed"
+        party.name = "Supplier renamed"
         sku.title = "Item renamed"
         await session.commit()
     replay = await api.post(prefix + "/orders", json=body, headers=HEADERS)

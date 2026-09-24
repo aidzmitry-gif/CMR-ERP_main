@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy import func, select
 
-from core.domain.models import Sku
+from core.domain.models import Counterparty, Sku
 from core.services.auth import CurrentUser
 from modules.procurement.models import Supplier
 from modules.wms.models import Receipt, ReceiptLine, StockMovement
@@ -22,7 +22,8 @@ from tests.test_wms_organization import book
 
 async def setup(api, session, services):
     org = await book(api)
-    session.add(Supplier(id=1, name="supplier1", unp="190000001", status="active"))
+    session.add(Counterparty(id=1, name="supplier1", unp="190000001"))
+    session.add(Supplier(id=1, counterparty_id=1, name="supplier1", unp="190000001", status="active"))
     await session.commit()
     data = document()
     data["items"][0].update(quantity="2.00", unit="кг")

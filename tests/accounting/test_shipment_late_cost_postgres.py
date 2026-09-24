@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import func, select, update
 
+from core.domain.models import Counterparty
 from modules.accounting.late_cost_receipts import LateCostCommand
 from modules.accounting.models import AccessGrant, Entry, LateCostReceipt, Policy, SourceControl
 from modules.procurement.models import Supplier
@@ -32,7 +33,10 @@ async def test_physical_shipment_consumes_verified_late_cost(physical_pg, same_c
         await session.commit()
     receipt_root = f"/procurement/organizations/{org}/receipt-documents"
     async with factory() as session:
-        supplier = Supplier(name="supplier", unp="", status="active")
+        party = Counterparty(name="supplier")
+        session.add(party)
+        await session.flush()
+        supplier = Supplier(name="supplier", unp="", status="active", counterparty_id=party.id)
         session.add(supplier)
         await session.flush()
         supplier_id = supplier.id
