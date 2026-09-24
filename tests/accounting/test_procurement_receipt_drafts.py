@@ -76,6 +76,40 @@ async def test_new_text_only_receipt_is_rejected_but_legacy_replay_and_upgrade_w
     assert upgraded.json()["revisions"][1]["document"]["supplier_id"] == 1
 
 
+async def test_unbound_legacy_draft_cannot_be_posted_or_sent_to_warehouse(client, db, book):
+    from modules.procurement.receipt_documents import ReceiptDocument, ReceiptPosting
+    from modules.procurement.source_gateway import ProcurementSourceService
+
+    old = {key: value for key, value in document().items() if key not in {"supplier_id", "supplier_unp"}}
+    old["items"][0]["unit"] = "кг"
+    old["items"][0]["quantity"] = "2.00"
+    row = ReceiptDocument(organization_id=book[0], source_key="legacy-unbound",
+                          current_version=1, status="draft", created_by="historical")
+    db.add(row)
+    await db.flush()
+    receipt_id = row.id
+    db.add(ReceiptRevision(receipt_id=receipt_id, version=1, document=old, actor="historical"))
+    await db.commit()
+
+    preview = await client.post(f"/procurement/organizations/{book[0]}/receipt-documents/{receipt_id}/preview",
+                                json={"expected_version": 1, "posting_date": "2026-09-03", "policy_id": book[1],
+                                      "settlement_account": "60", "vat_account": None,
+                                      "inventory_accounts": ["41"]})
+    assert preview.status_code == 409 and "supplier" in preview.text.lower()
+    with pytest.raises(ValueError, match="supplier"):
+        await ProcurementSourceService().warehouse_receipt_source(db, book[0], receipt_id, 1)
+    assert await db.get(ReceiptPosting, receipt_id) is None
+
+    # A previously posted historical source is still readable for reconciliation.
+    row.status = "posted"
+    db.add(ReceiptPosting(receipt_id=receipt_id, version=1, entry_id=12345,
+                          options={}, digest="a" * 64, actor="historical"))
+    await db.commit()
+    gateway = ProcurementSourceService()
+    assert (await gateway.receipt_source(db, book[0], receipt_id))["document"] == old
+    assert (await gateway.warehouse_receipt_source(db, book[0], receipt_id, 1))["document"] == old
+
+
 async def test_order_line_without_order_rejected_and_legacy_payload_unchanged(client, book):
     from modules.procurement.receipt_documents import ReceiptContent
     data = document()
