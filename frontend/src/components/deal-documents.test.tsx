@@ -84,7 +84,7 @@ describe("DealDocuments — сумма выпущенного счёта", () =>
     render(<DealDocuments dealId="1" />);
     await moneySummary().findByText("360 BYN");
     expect(screen.queryByRole("button", { name: "Выпустить версию" })).toBeNull();
-    expect(screen.getAllByText("Замена счёта пока недоступна; оригинал и история сохраняются.").length).toBeGreaterThan(0);
+    expect(screen.getByText(/Выпуск замены доступен после подтверждённого аннулирования/)).toBeInTheDocument();
     expect(moneySummary().getByRole("link")).toHaveAttribute("href", "/api/sales/documents/50/render");
     expect(moneySummary().getAllByText("Нет данных")).toHaveLength(2);
     expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(0);

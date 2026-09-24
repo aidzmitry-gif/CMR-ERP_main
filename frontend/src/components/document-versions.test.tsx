@@ -40,12 +40,12 @@ describe("DocumentVersions", () => {
     expect(screen.queryByText("Оригинал #1")).toBeNull();
   });
 
-  it("replacement счёта не выпускается без поддержанного ERP workflow", () => {
+  it("не выпускает черновик замены до аннулирования старого счёта", () => {
     const fetch = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetch);
     render(<DocumentVersions docs={[{ ...base, id: 2, status: "draft", original_state: "draft", supersedes_id: 1 }]} refresh={vi.fn()} />);
     expect(screen.queryByText("Выпустить версию")).toBeNull();
-    expect(screen.getByText(/Замена счёта пока недоступна/)).toBeInTheDocument();
+    expect(screen.getByText(/Выпуск замены доступен после подтверждённого аннулирования/)).toBeInTheDocument();
     expect(fetch).not.toHaveBeenCalled();
   });
 

@@ -346,6 +346,72 @@ async def test_atomic_cancellation_releases_once_preserves_original_and_records_
     assert await session.scalar(select(func.count()).select_from(PhysicalShipmentAct)) == 0
 
 
+async def exercise_cancelled_invoice_replacement(api, session):
+    from modules.sales.invoice_cancellation import InvoiceCancellationReceipt
+    from modules.sales.invoice_issuance import InvoiceIssuanceReceipt
+    from modules.wms.invoice_reservations import InvoiceReservation
+
+    ids, base = await seed(api, session)
+    first_command, _ = await command(api, ids, base)
+    first = await create(api, ids, first_command)
+    assert first.status_code == 201, first.text
+    old_id = first.json()["document"]["id"]
+    old = await session.get(DealDocument, old_id)
+    original = (old.original_html, old.content_sha256, old.version, old.amount)
+    revision = await api.post(f"/sales/documents/{old_id}/revision", json={
+        "reason": "Corrected synthetic price", "request_key": "replacement-draft-key",
+    })
+    assert revision.status_code == 201, revision.text
+    child_id = revision.json()["id"]
+    before = await api.post(f"/sales/deals/{ids['deal']}/invoice-preview", json={
+        **base, "document_id": child_id,
+    })
+    assert before.status_code == 409, before.text
+    assert (await session.get(DealDocument, child_id)).original_html is None
+
+    facts = await SalesReservationSource().invoice_reservation(session, old_id)
+    await session.commit()
+    path, data = await cancel_request(api, ids["org"], facts)
+    cancelled = await api.post(path, json=data)
+    assert cancelled.status_code == 201, cancelled.text
+    assert await session.scalar(select(func.count()).select_from(InvoiceCancellationReceipt)) == 1
+    wrong_mode = await api.post(f"/sales/deals/{ids['deal']}/invoice-preview", json={
+        **base, "document_id": child_id, "reserve_mode": "on_order",
+    })
+    assert wrong_mode.status_code == 409, wrong_mode.text
+
+    replacement_command, preview = await command(
+        api, ids, base, doc_id=child_id, key="replacement-issue-key",
+    )
+    assert preview["document_version"] == 2
+    issued = await api.post(f"/sales/documents/{child_id}/issue", json=replacement_command)
+    assert issued.status_code == 200, issued.text
+    assert issued.json()["document"]["supersedes_id"] == old_id
+    repeated = await api.post(f"/sales/documents/{child_id}/issue", json=replacement_command)
+    assert repeated.status_code == 200 and repeated.json()["replayed"] is True
+    await session.refresh(old)
+    assert (old.original_html, old.content_sha256, old.version, old.amount) == original
+    assert old.status == "cancelled" and old.reserve_status == "released"
+    assert old.superseded_by_id == child_id
+    assert await session.scalar(select(func.count()).select_from(InvoiceIssuanceReceipt)) == 2
+    assert await session.scalar(select(func.count()).select_from(InvoiceReservation)) == 2
+
+
+async def test_cancelled_erp_invoice_can_issue_linked_replacement_without_reusing_old_reserve(api, session):
+    await exercise_cancelled_invoice_replacement(api, session)
+
+
+@pytest.mark.integration
+async def test_pg_cancelled_invoice_replacement_preserves_original_and_new_reserve(issuance_pg):
+    client, factory = issuance_pg
+    async with factory() as session:
+        connection = await session.connection()
+        for model in (CarrierBid, CarrierRfqInvite, User):
+            await connection.run_sync(lambda c, model=model: model.__table__.create(c, checkfirst=True))
+        await session.commit()
+        await exercise_cancelled_invoice_replacement(client, session)
+
+
 async def test_cancel_failure_after_release_rolls_back_entire_package(api, session, monkeypatch):
     from modules.sales.invoice_cancellation import InvoiceCancellationReceipt
     from modules.wms.invoice_reservations import InvoiceReservationRelease

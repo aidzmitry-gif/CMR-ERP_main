@@ -26,8 +26,8 @@ export function DocumentVersions({ dealId, docs, refresh }: { dealId?: string; d
     if (action === "revision") requestKey.current ??= crypto.randomUUID();
     try {
       if (action === "issue" && doc.kind === "invoice") {
-        if (!dealId || doc.supersedes_id) throw new Error("Замена счёта пока недоступна. Для первого черновика откройте его сделку.");
-        if (await openInvoiceIssuance(dealId, doc.id)) await refresh();
+        if (!dealId) throw new Error("Откройте сделку для выпуска счёта.");
+        if (await openInvoiceIssuance(dealId, doc.id, doc.reserve_mode === "on_order" ? "on_order" : "stock")) await refresh();
         return;
       }
       const res = await fetch(`/api/sales/documents/${doc.id}/${action}`, {
@@ -54,10 +54,15 @@ export function DocumentVersions({ dealId, docs, refresh }: { dealId?: string; d
   return (
     <details className="mt-3 rounded-lg border border-line p-3">
       <summary className="cursor-pointer text-sm font-medium">История версий ({docs.length})</summary>
-      <p className="my-2 text-xs text-muted">Новая версия создаётся как черновик. Оплата остаётся у прежнего документа.</p>
+      <p className="my-2 text-xs text-muted">Новая версия создаётся как черновик. Для замены счёта сначала подтвердите аннулирование прежнего: возврат оплаты, отсутствие отгрузки и освобождение резерва.</p>
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
       <ul className="space-y-3">
-        {docs.map((doc) => (
+        {docs.map((doc) => {
+          const old = docs.find(candidate => candidate.id === doc.supersedes_id);
+          const replacementReady = doc.kind === "invoice" && !!doc.supersedes_id
+            && old?.status === "cancelled" && old.reserve_status === "released";
+          const hasActiveChild = docs.some(candidate => candidate.supersedes_id === doc.id && candidate.status !== "rejected");
+          return (
           <li key={doc.id} className="border-t border-line pt-2 text-xs" aria-label={`Документ ${doc.id}`}>
             <div>{doc.kind === "invoice" ? "Счёт" : doc.kind === "contract" ? "Договор" : "Заказ"} · версия {doc.version ?? 1} · ID {doc.id} · {doc.amount.toFixed(2)} · валюта в оригинале</div>
             {doc.reserve_mode === "on_order" && <p className="text-amber-700">Выпущен под заказ{doc.reserve_status === "unreserved" ? " — товар не зарезервирован" : ""}.</p>}
@@ -71,25 +76,26 @@ export function DocumentVersions({ dealId, docs, refresh }: { dealId?: string; d
                 {doc.original_state === "issued" ? "Оригинал" : "На согласовании"} #{doc.id}
               </a>
             )}
-            {doc.status === "draft" && !(doc.kind === "invoice" && doc.supersedes_id) && <>
+            {doc.status === "draft" && (doc.kind !== "invoice" || !doc.supersedes_id || replacementReady) && <>
               {doc.kind !== "invoice" && <a className="mr-3 text-accent-ink underline" href={`/api/sales/documents/${doc.id}/preview`} target="_blank" rel="noreferrer">Предпросмотр черновика</a>}
               <button className="underline" disabled={busy} onClick={() => void mutate(doc, "issue")}>
                 {doc.kind === "contract" ? "Отправить версию на согласование" : "Выпустить версию"}
               </button>
             </>}
-            {doc.kind !== "invoice" && !doc.superseded_by_id && ["posted", "paid", "cancelled", "rejected"].includes(doc.status) && (
+            {(!doc.superseded_by_id && ((doc.kind !== "invoice" && ["posted", "paid", "cancelled", "rejected"].includes(doc.status))
+              || (doc.kind === "invoice" && doc.status === "cancelled" && doc.reserve_status === "released" && !hasActiveChild))) && (
               <button className="underline" disabled={busy} onClick={() => { setEditing(doc.id); setReason(""); requestKey.current = null; }}>
                 Новая версия #{doc.id}
               </button>
             )}
-            {doc.kind === "invoice" && (doc.status !== "draft" || doc.supersedes_id) && <p className="text-amber-700">Замена счёта пока недоступна; оригинал и история сохраняются.</p>}
+            {doc.kind === "invoice" && doc.status === "draft" && doc.supersedes_id && !replacementReady && <p className="text-amber-700">Выпуск замены доступен после подтверждённого аннулирования исходного счёта.</p>}
             {editing === doc.id && <div className="mt-2 flex flex-wrap gap-2">
               <input aria-label="Причина новой версии" className="rounded border border-line bg-surface p-2" value={reason}
                 maxLength={500} onChange={(e) => { setReason(e.target.value); requestKey.current = null; }} />
               <button disabled={busy || reason.trim().length < 3} onClick={() => void mutate(doc, "revision")}>Создать черновик</button>
             </div>}
           </li>
-        ))}
+        ); })}
       </ul>
     </details>
   );
