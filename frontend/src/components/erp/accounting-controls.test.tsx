@@ -279,6 +279,62 @@ it("previews and confirms only the exact package for the selected organization",
   expect(changed).toHaveBeenCalledTimes(1);
 });
 
+it("discards the reviewed opening package when the legal entity changes", async () => {
+  const command = openingCommand();
+  fetchMock.mockImplementation((url: string) => {
+    if (url.endsWith("/imports/preview")) return respond(openingPreview(command, url.includes("/organizations/2/") ? 2 : 1));
+    if (url.endsWith("/imports/confirm")) return respond({ ...openingReceipt(command), organization_id: 2 });
+    return respond(url.endsWith("catalog") ? { version: "test", accounts: [] } : []);
+  });
+  const view = render(<AccountingControls org="1" initialSection="import" onChanged={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
+  await screen.findByRole("button", { name: "Подтвердить перенос остатков" });
+  view.rerender(<AccountingControls org="2" initialSection="import" onChanged={vi.fn()} />);
+  expect(screen.queryByRole("button", { name: "Подтвердить перенос остатков" })).not.toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/organizations/2/imports/confirm"))).toBe(false);
+  fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
+  await screen.findByRole("button", { name: "Подтвердить перенос остатков" });
+  fireEvent.click(screen.getByRole("button", { name: "Подтвердить перенос остатков" }));
+  await screen.findByText(/Квитанция №8/);
+  expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/imports/confirm")).map(([url]) => url)).toEqual(["/api/accounting/organizations/2/imports/confirm"]);
+});
+
+it("ignores a preview response that arrives after switching the legal entity", async () => {
+  const command = openingCommand();
+  let resolveOld!: (response: unknown) => void;
+  fetchMock.mockImplementation((url: string) => {
+    if (url.endsWith("/organizations/1/imports/preview")) return new Promise((resolve) => { resolveOld = resolve; });
+    return respond(url.endsWith("catalog") ? { version: "test", accounts: [] } : []);
+  });
+  const view = render(<AccountingControls org="1" initialSection="import" onChanged={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
+  await waitFor(() => expect(resolveOld).toBeDefined());
+  view.rerender(<AccountingControls org="2" initialSection="import" onChanged={vi.fn()} />);
+  await act(async () => resolveOld({ ok: true, json: async () => openingPreview(command) }));
+  expect(screen.queryByText(/Пакет: opening-2026-09/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Подтвердить перенос остатков" })).not.toBeInTheDocument();
+});
+
+it("does not show an old book confirmation after switching the legal entity", async () => {
+  const command = openingCommand();
+  const changed = vi.fn();
+  let resolveOld!: (response: unknown) => void;
+  fetchMock.mockImplementation((url: string) => {
+    if (url.endsWith("/imports/preview")) return respond(openingPreview(command));
+    if (url.endsWith("/organizations/1/imports/confirm")) return new Promise((resolve) => { resolveOld = resolve; });
+    return respond(url.endsWith("catalog") ? { version: "test", accounts: [] } : []);
+  });
+  const view = render(<AccountingControls org="1" initialSection="import" onChanged={changed} />);
+  fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
+  fireEvent.click(await screen.findByRole("button", { name: "Подтвердить перенос остатков" }));
+  await waitFor(() => expect(resolveOld).toBeDefined());
+  view.rerender(<AccountingControls org="2" initialSection="import" onChanged={changed} />);
+  await act(async () => resolveOld({ ok: true, json: async () => openingReceipt(command) }));
+  expect(screen.queryByText(/Остатки перенесены/)).not.toBeInTheDocument();
+  expect(changed).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "Подтвердить перенос остатков" })).not.toBeInTheDocument();
+});
+
 it("rejects a preview returned for another organization before it can be confirmed", async () => {
   const command = openingCommand();
   fetchMock.mockImplementation((url: string) => {
