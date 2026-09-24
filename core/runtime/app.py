@@ -169,4 +169,16 @@ def create_app() -> FastAPI:
     # ограничение доступа к модулям по матрице ролей (config/access.py)
     app.add_middleware(AccessControlMiddleware, prefixes=build_prefix_map(core))
 
+    block_http_writes = os.getenv("AIOS_BLOCK_HTTP_WRITES") == "1"
+    app.state.http_writes_blocked = block_http_writes
+
+    @app.middleware("http")
+    async def pilot_http_write_gate(request: Request, call_next):
+        if block_http_writes and request.method not in {"GET", "HEAD", "OPTIONS"}:
+            return JSONResponse(status_code=503, content={
+                "detail": {"code": "pilot_http_writes_disabled",
+                           "message": "Изменение данных временно недоступно"},
+            })
+        return await call_next(request)
+
     return app
