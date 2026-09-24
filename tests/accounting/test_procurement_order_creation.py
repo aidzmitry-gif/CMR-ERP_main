@@ -1,4 +1,6 @@
 from copy import deepcopy
+from datetime import date
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
@@ -10,11 +12,13 @@ from core.services.auth import CurrentUser, get_current_user
 from modules.accounting.models import AccessGrant, Organization
 from modules.procurement import order_creation, routes, scoped_reads
 from modules.procurement.models import PurchaseOrder, PurchaseOrderLine, PurchaseRequest, Supplier
-from modules.procurement.order_creation import PurchaseOrderCreation
+from modules.procurement.order_creation import OrderCommand, PurchaseOrderCreation, line_result
 from modules.procurement.ownership import (
     OrderRequestLink,
     PurchaseOwnership,
     PurchaseRequestCreation,
+    request_command_hash,
+    source_snapshot,
 )
 
 HEADERS = {"X-Expected-Principal": "tester"}
@@ -33,7 +37,8 @@ async def order_routes(client, db):
 
 
 def command():
-    return {"request_key": str(uuid4()), "document": {"supplier": "Поставщик", "eta_date": "2026-10-01", "freight_byn": "10.00", "lines": [
+    return {"request_key": str(uuid4()), "document": {"supplier": "supplier1", "supplier_id": 1,
+        "supplier_unp": "190000001", "eta_date": "2026-10-01", "freight_byn": "10.00", "lines": [
         {"sku_code": "SKU-A", "qty": "1.25", "goods_value_byn": "100.00", "weight": "1.123", "volume": "0.1234"},
         {"sku_code": "SKU-B", "qty": "2.00", "goods_value_byn": "200.00", "weight": "2.000", "volume": "1.0000"}]},
         "ownership_evidence": "Reviewed owner", "request_basis": None}
@@ -119,6 +124,53 @@ async def test_incomplete_catalog_reference_rejected_before_receipt(client, db, 
     result = await client.post(prefix(book) + "/orders", json=data, headers=HEADERS)
     assert result.status_code == 422
     assert (await counts(db))["PurchaseOrderCreation"] == 0
+
+
+async def test_new_text_only_order_is_rejected_without_blocking_existing_replay(client, db, book):
+    data = command()
+    created = await create(client, book, data)
+    legacy = deepcopy(data)
+    legacy["request_key"] = str(uuid4())
+    legacy["document"].pop("supplier_id")
+    legacy["document"].pop("supplier_unp")
+    rejected = await client.post(prefix(book) + "/orders", json=legacy, headers=HEADERS)
+    assert rejected.status_code == 422
+    assert (await counts(db))["PurchaseOrderCreation"] == 1
+    assert await create(client, book, data) == created
+
+
+async def test_historical_text_only_order_command_still_replays(client, db, book):
+    legacy = command()
+    legacy["document"].pop("supplier_id")
+    legacy["document"].pop("supplier_unp")
+    frozen = OrderCommand.model_validate(legacy).model_dump(mode="json")
+    order = PurchaseOrder(number="PO-LEGACY", supplier="supplier1", status="draft",
+                          eta_date=date(2026, 10, 1), freight_byn=Decimal("10.00"))
+    db.add(order)
+    await db.flush()
+    lines = [PurchaseOrderLine(order_id=order.id, sku_code=item["sku_code"],
+              qty=Decimal(item["qty"]), goods_value_byn=Decimal(item["goods_value_byn"]),
+              weight=Decimal(item["weight"]), volume=Decimal(item["volume"]))
+             for item in frozen["document"]["lines"]]
+    db.add_all(lines)
+    await db.flush()
+    owner = PurchaseOwnership(organization_id=book[0], kind="order", source_id=order.id,
+        snapshot=await source_snapshot(db, "order", order.id),
+        evidence=frozen["ownership_evidence"], actor="tester")
+    db.add(owner)
+    await db.flush()
+    result = {"organization_id": book[0], "request_key": frozen["request_key"],
+        "principal": "tester", "outcome": "created", "order_id": order.id,
+        "ownership_id": owner.id, "number": order.number, "status": "draft",
+        "supplier": order.supplier, "eta_date": "2026-10-01", "freight_byn": "10.00",
+        "lines": [line_result(line) for line in lines], "request_id": None,
+        "request_ownership_id": None, "link_id": None, "request_snapshot": None}
+    db.add(PurchaseOrderCreation(organization_id=book[0], request_key=frozen["request_key"],
+        outcome="created", order_id=order.id, ownership_id=owner.id, command=frozen,
+        command_hash=request_command_hash(frozen), result=result, actor="tester"))
+    await db.commit()
+    replay = await client.post(prefix(book) + "/orders", json=legacy, headers=HEADERS)
+    assert replay.status_code == 201 and replay.json() == result
 
 
 async def test_supplier_selection_is_scoped_and_snapshotted_on_order_creation(client, db, book):
@@ -284,10 +336,10 @@ async def test_duplicate_sku_canonical_whitespace_and_immutable_receipt(client, 
     data["document"]["lines"][1]["sku_code"] = " SKU-A "
     assert (await client.post(prefix(book) + "/orders", json=data, headers=HEADERS)).status_code == 422
     data = command()
-    data["document"]["supplier"] = "\x1c Поставщик\u00a0"
+    data["document"]["supplier"] = "\x1c supplier1\u00a0"
     first = await create(client, book, data)
-    assert first["supplier"] == "Поставщик"
-    data["document"]["supplier"] = "Поставщик"
+    assert first["supplier"] == "supplier1"
+    data["document"]["supplier"] = "supplier1"
     assert await create(client, book, data) == first
     row = await db.scalar(select(PurchaseOrderCreation))
     row.outcome = "rejected"

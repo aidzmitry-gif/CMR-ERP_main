@@ -5,7 +5,8 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import func, select, text
+import pytest_asyncio
+from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import DBAPIError
 
 from core.domain.models import Counterparty, IdentityInvitationRequest, Sku, User
@@ -25,6 +26,16 @@ from tests.accounting.test_procurement_request_creation_postgres import schedule
 from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 HEADERS = {"X-Expected-Principal": "issuer"}
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def selected_supplier_for_order_commands(issuance_pg):  # noqa: F811
+    _, factory = issuance_pg
+    async with factory() as session:
+        session.add(Counterparty(id=1, name="supplier1", unp="190000001"))
+        session.add(Supplier(id=1, name="supplier1", unp="190000001", status="active",
+                             counterparty_id=1))
+        await session.commit()
 
 
 async def test_pg_catalog_supplier_and_sku_receipts_survive_replay_and_reject_drift(issuance_pg):  # noqa: F811
@@ -252,3 +263,20 @@ async def test_pg_deferred_guard_rejects_corrupted_package_at_commit(issuance_pg
         assert await session.scalar(select(func.count()).select_from(PurchaseOrderCreation)) == 0
         assert await session.scalar(select(func.count()).select_from(PurchaseOrder)) == 0
         assert await session.scalar(select(func.count()).select_from(PurchaseOrderLine)) == 0
+
+
+async def test_pg_deferred_guard_rejects_supplier_mdm_drift_before_commit(issuance_pg):  # noqa: F811
+    api, factory = issuance_pg
+    response = await api.post("/accounting/organizations", json={
+        "name": "Deferred supplier identity", "unp": "999999919"})
+    assert response.status_code == 201, response.text
+    org = response.json()["id"]
+    async with factory() as session:
+        await create_order(org, OrderCommand.model_validate(command()), ctx=(session, "issuer"))
+        await session.execute(update(Counterparty).where(Counterparty.id == 1).values(name="Changed before commit"))
+        with pytest.raises(DBAPIError, match="Order creation supplier MDM identity changed"):
+            await session.commit()
+        await session.rollback()
+    async with factory() as session:
+        assert await session.scalar(select(func.count()).select_from(PurchaseOrderCreation)) == 0
+        assert await session.scalar(select(func.count()).select_from(PurchaseOrder)) == 0
