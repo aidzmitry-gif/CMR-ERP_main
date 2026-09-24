@@ -1,6 +1,7 @@
 "use client";
 
 import { DocumentVersions } from "@/components/document-versions";
+import { DealDocumentCard } from "@/components/deal-document-card";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 
 import { Check, FileText, Plus, X } from "lucide-react";
@@ -238,10 +239,8 @@ function DealDocumentsForDeal({ dealId }: { dealId: string }) {
               key={d.id}
               className="flex items-center justify-between gap-2 rounded-lg bg-sunken px-3 py-2"
             >
-              <div className="min-w-0">
-                <div className="truncate text-sm text-ink">
-                  {KIND_LABEL[d.kind] ?? d.kind} · {d.number}
-                </div>
+              <div className="min-w-0 flex-1">
+                <DealDocumentCard doc={d} refresh={refresh} label={`${KIND_LABEL[d.kind] ?? d.kind} · ${d.number}`} />
                 <div className="mt-0.5 flex flex-wrap items-center gap-1">
                   <span className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${s.cls}`}>
                     {s.label}

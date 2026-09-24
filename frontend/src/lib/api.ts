@@ -1097,6 +1097,9 @@ export interface DealDoc {
   status: string;
   onec_ref: string | null;
   amount: number;
+  payment_terms?: string | null;
+  delivery_terms?: string | null;
+  draft_edit_token?: string;
   valid_until: string | null; // SALES-51: срок действия счёта (резерв), ISO-дата
   reserve_mode?: "stock" | "on_order" | null;
   reserve_status: string; // none | unreserved | reserved | consumed | released
