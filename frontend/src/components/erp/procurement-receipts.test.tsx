@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { ProcurementReceiptDrafts } from "./procurement-receipt-drafts";
@@ -49,4 +49,33 @@ it("shows draft and posted invoices from every date in the procurement register"
   expect(screen.queryByRole("button", { name: /INV-NEW/ })).not.toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Статус накладной"), { target: { value: "draft" } });
   expect(screen.getByText("Накладных по выбранному фильтру нет.")).toBeInTheDocument();
+});
+
+it("requires a selected supplier and saves its directory snapshot in a new receipt", async () => {
+  let submitted: Record<string, unknown> | null = null;
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("purchase-ownership")) return { ok: true, json: async () => [] };
+    if (url.includes("supplier-options")) return { ok: true, json: async () => ({
+      organization_id: 7, items: [{ id: 19, name: "Поставщик из каталога", unp: "190000001" }], truncated: false,
+    }) };
+    if (init?.method === "POST") {
+      submitted = JSON.parse(String(init.body));
+      return { ok: true, json: async () => ({ id: 41, version: 1, status: "draft", posting: null,
+        revisions: [{ version: 1, actor: "buyer", created_at: "2026-09-24", document: submitted!.document }] }) };
+    }
+    return { ok: true, json: async () => [] };
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  await screen.findByText("Показано 0 из 0 накладных выбранного юрлица за все даты.");
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить первичную накладную" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("Выберите поставщика накладной из справочника");
+  expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  fireEvent.change(screen.getByLabelText("Поиск поставщика накладной"), { target: { value: "Поставщик" } });
+  await screen.findByRole("option", { name: "Поставщик из каталога · 190000001" });
+  fireEvent.change(screen.getByLabelText("Поставщик накладной из справочника"), { target: { value: "19" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить первичную накладную" }));
+  await waitFor(() => expect(submitted).not.toBeNull());
+  expect(submitted!.document).toMatchObject({ supplier: "Поставщик из каталога", supplier_id: 19,
+    supplier_unp: "190000001" });
 });

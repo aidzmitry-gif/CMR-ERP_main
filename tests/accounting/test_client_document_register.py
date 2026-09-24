@@ -62,6 +62,24 @@ async def claim(client, org, deal, cp):
     return payload, response.json()
 
 
+async def test_client_picker_returns_distinct_active_directory_ids_in_owned_deal(db, book, client):
+    cps, deals, _, other_org = await seed(db, book, client)
+    base = deal_base(book[0], deals[0])
+    found = await client.get(base + "/client-options", params={"q": "Same legal name"})
+    assert found.status_code == 200, found.text
+    assert [row["id"] for row in found.json()["items"]] == cps
+    assert [row["unp"] for row in found.json()["items"]] == ["111111111", "222222222"]
+    by_unp = await client.get(base + "/client-options", params={"q": "222222222"})
+    assert [row["id"] for row in by_unp.json()["items"]] == [cps[1]]
+    deal = await db.get(Deal, deals[0])
+    deal.counterparty_id = cps[1]
+    await db.commit()
+    linked = await client.get(base + "/client-options", params={"q": "Same"})
+    assert [row["id"] for row in linked.json()["items"]] == [cps[1]]
+    assert (await client.get(deal_base(other_org, deals[0]) + "/client-options", params={"q": "Same"})).status_code == 404
+    assert await db.scalar(select(func.count()).select_from(client_register.DealClientBinding)) == 0
+
+
 async def test_preview_refreshes_cached_document_before_confirmation(db, book, client):
     from sqlalchemy import update
 

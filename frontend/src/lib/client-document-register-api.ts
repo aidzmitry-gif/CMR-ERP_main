@@ -59,6 +59,19 @@ export async function claimClientBinding(org: string, deal: string, body: Bindin
   if (!binding(value, Number(org), Number(deal), body.counterparty_id)) invalid();
   return value;
 }
+
+export type ClientOption = { id: number; name: string; unp: string | null; revision: number };
+export async function fetchClientOptions(org: string, deal: string, search: string): Promise<ClientOption[]> {
+  ids(org, deal);
+  const term = search.trim();
+  if (!term || term.length > 100) invalid();
+  const value = await json(`/api/sales/organizations/${org}/deals/${deal}/client-options?q=${encodeURIComponent(term)}`);
+  if (!object(value) || value.organization_id !== Number(org) || value.deal_id !== Number(deal)
+    || typeof value.truncated !== "boolean" || !Array.isArray(value.items) || value.items.length > 50
+    || value.items.some((row: unknown) => !object(row) || !positive(row.id) || typeof row.name !== "string"
+      || !row.name || !nullableString(row.unp) || !positive(row.revision))) invalid();
+  return value.items as ClientOption[];
+}
 function clientBase(org: string, client: string) { ids(org, client); return `/api/sales/organizations/${org}/counterparties/${client}`; }
 function document(v: unknown, org: string, client: string): ClientDocument {
   if (!object(v) || !positive(v.id) || !positive(v.deal_id) || v.organization_id !== Number(org) || v.counterparty_id !== Number(client) || !identity(v.client_snapshot, Number(client))
