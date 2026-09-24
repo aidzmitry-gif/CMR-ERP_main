@@ -596,6 +596,12 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert (await client.get(
         f"/accounting/organizations/{book[0]}/payroll-workpaper-reviews/{review_command['request_key']}"
     )).json() == receipt
+    candidate_url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-own-candidate"
+    unconfirmed_candidate = (await client.get(candidate_url)).json()
+    assert unconfirmed_candidate["included_segment_count"] == 0
+    assert unconfirmed_candidate["totals"]["gross_byn"] == "0.00"
+    assert "source_facts_not_attested" in unconfirmed_candidate["blockers"]
+    assert unconfirmed_candidate["unattested_review_ids"] == [receipt["review_id"]]
     assert await db.scalar(select(func.count(PayrollWorkpaperReview.id))) == 1
     assert (await client.post(review_url, json={
         **review_command, "reviewer_evidence": "Changed evidence on same key",
@@ -681,6 +687,21 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert attested_summary["all_selected_source_facts_attested_by_chief"] is True
     assert attested_summary["source_facts_verified"] is False
     assert attested_summary["posting_available"] is False
+    candidate_response = await client.get(candidate_url)
+    assert candidate_response.status_code == 200, candidate_response.text
+    assert candidate_response.headers["cache-control"] == "private, no-store"
+    candidate = candidate_response.json()
+    assert candidate["included_segment_count"] == 1
+    assert candidate["totals"] == attested_summary["totals"]
+    assert candidate["source_basis"]["included_reviews"] == [{
+        "review_id": attested["review_id"], "snapshot_digest": attested["snapshot_digest"],
+    }]
+    assert candidate["blockers"] == [
+        "population_review_missing_or_stale", "statutory_rule_completeness_unverified",
+    ]
+    assert candidate["posting_available"] is False
+    assert candidate["statutory_payroll_certified"] is False
+    assert (await client.get(candidate_url)).json()["candidate_digest"] == candidate["candidate_digest"]
     reconcile_url = (f"/accounting/organizations/{book[0]}/periods/2026-10/"
                      "payroll-source-reconciliation")
     empty_reconcile = await client.get(reconcile_url)
@@ -761,6 +782,16 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
             "evidence": "Synthetic chief matched the employee to ERP binding",
         })
     assert roster_review.status_code == 200, roster_review.text
+    roster_candidate = (await client.get(candidate_url)).json()
+    assert roster_candidate["arithmetic_scope_complete"] is True
+    assert roster_candidate["blockers"] == ["statutory_rule_completeness_unverified"]
+    assert roster_candidate["candidate_digest"] != candidate["candidate_digest"]
+    assert roster_candidate["source_basis"]["population_review_id"] == roster_review.json()["review_id"]
+    roster_path = root / str(book[0]) / (roster_file.json()["request_key"].replace("-", "") + ".pdf")
+    roster_raw = roster_path.read_bytes()
+    roster_path.write_bytes(b"%PDF-1.7\ntampered roster for own candidate\n")
+    assert (await client.get(candidate_url)).status_code == 409
+    roster_path.write_bytes(roster_raw)
     matched = (await client.get(reconcile_url)).json()
     assert matched["status"] == "matched_arithmetic_only"
     assert matched["comparison_ready"] is True
@@ -776,6 +807,7 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
         source_path.write_bytes(original)
     schedule_path.write_bytes(b"%PDF-1.7\ntampered after chief review\n")
     assert (await client.get(summary_url)).status_code == 409
+    assert (await client.get(candidate_url)).status_code == 409
     assert (await client.get(reconcile_url)).status_code == 409
     stale_controls = (await client.get(
         f"/accounting/organizations/{book[0]}/periods/2026-10/closing-controls")).json()
@@ -821,6 +853,7 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert "payroll_arithmetic_difference" not in {
         item["code"] for item in reader_controls["review_items"]}
     assert (await client.get(reconcile_url)).status_code == 403
+    assert (await client.get(candidate_url)).status_code == 403
     grant.role = "chief"
     await db.commit()
     assert (await client.post(review_url, json={

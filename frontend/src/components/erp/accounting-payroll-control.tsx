@@ -45,7 +45,21 @@ type Comparison = {
   source_facts_verified: false;
   statutory_payroll_certified: false;
 };
-type Loaded = { summary: Summary | null; comparison: Comparison | null; summaryError: string; comparisonError: string; loading: boolean };
+type Candidate = {
+  organization_id: number;
+  month: string;
+  status: "provisional_payroll_candidate_only";
+  candidate_digest: string;
+  included_segment_count: number;
+  selected_segment_count: number;
+  unattested_review_ids: number[];
+  totals: Amounts;
+  blockers: string[];
+  arithmetic_scope_complete: boolean;
+  posting_available: false;
+  statutory_payroll_certified: false;
+};
+type Loaded = { summary: Summary | null; comparison: Comparison | null; candidate: Candidate | null; summaryError: string; comparisonError: string; candidateError: string; loading: boolean };
 
 const amountLabels: [keyof Amounts, string][] = [
   ["gross_byn", "Начислено"],
@@ -62,6 +76,17 @@ const differenceLabels: [keyof ComparisonAmounts, string][] = [
 const issueLabels: Record<string, string> = {
   unreviewed_interval: "Нет рассмотренного расчётного отрезка",
   outside_current_binding: "Расчётный отрезок вне действующего договора",
+};
+const candidateBlockers: Record<string, string> = {
+  no_reviewed_segments: "Нет рассмотренных расчётных отрезков.",
+  source_facts_not_attested: "Главбух не подтвердил исходные данные всех выбранных отрезков.",
+  known_binding_coverage_incomplete: "Отрезки известных договоров покрыты не полностью.",
+  population_review_missing_or_stale: "Нет актуального подтверждённого реестра работников.",
+  rule_set_missing: "Для месяца не задан набор правил расчёта.",
+  accounting_policy_changed_or_unverified: "Учётная политика для месяца изменилась или не подтверждена.",
+  rule_source_file_missing: "К набору правил не приложен сохранённый файл политики.",
+  rule_version_changed: "Версия правила или ставки изменилась после проверки расчётного листа.",
+  statutory_rule_completeness_unverified: "Полнота применимых удержаний, взносов, вычетов и льгот не подтверждена.",
 };
 
 async function readScoped<T extends { organization_id: number; month: string }>(
@@ -94,7 +119,8 @@ export function AccountingPayrollControl({ org, month, onEntry }: {
 }) {
   const [reload, setReload] = useState(0);
   const [loaded, setLoaded] = useState<Loaded>({
-    summary: null, comparison: null, summaryError: "", comparisonError: "", loading: true,
+    summary: null, comparison: null, candidate: null,
+    summaryError: "", comparisonError: "", candidateError: "", loading: true,
   });
 
   useEffect(() => {
@@ -103,13 +129,21 @@ export function AccountingPayrollControl({ org, month, onEntry }: {
     void Promise.allSettled([
       readScoped<Summary>("payroll-arithmetic-summary", org, month, controller.signal),
       readScoped<Comparison>("payroll-source-reconciliation", org, month, controller.signal),
-    ]).then(([summary, comparison]) => {
+      readScoped<Candidate>("payroll-own-candidate", org, month, controller.signal),
+    ]).then(([summary, comparison, candidate]) => {
       if (controller.signal.aborted) return;
+      const candidateValue = candidate.status === "fulfilled" ? candidate.value : null;
+      const candidateSafe = candidateValue?.status === "provisional_payroll_candidate_only"
+        && candidateValue.posting_available === false
+        && candidateValue.statutory_payroll_certified === false;
       setLoaded({
         summary: summary.status === "fulfilled" ? summary.value : null,
         comparison: comparison.status === "fulfilled" ? comparison.value : null,
+        candidate: candidateSafe ? candidateValue : null,
         summaryError: summary.status === "rejected" ? String(summary.reason?.message ?? summary.reason) : "",
         comparisonError: comparison.status === "rejected" ? String(comparison.reason?.message ?? comparison.reason) : "",
+        candidateError: candidate.status === "rejected" ? String(candidate.reason?.message ?? candidate.reason)
+          : candidateSafe ? "" : "Ответ черновика имеет неожиданный статус.",
         loading: false,
       });
     });
@@ -123,7 +157,7 @@ export function AccountingPayrollControl({ org, month, onEntry }: {
         <p className="mt-1 text-sm text-muted">Расчётные листы здесь показывают только проверенную арифметику перечисленных компонентов. Сверка с проводками не подтверждает исходные данные, полноту работников, применимость ставок или обязательную отчётность.</p>
       </div>
       <Button variant="secondary" disabled={!org || loaded.loading} onClick={() => {
-        setLoaded({ summary: null, comparison: null, summaryError: "", comparisonError: "", loading: true });
+        setLoaded({ summary: null, comparison: null, candidate: null, summaryError: "", comparisonError: "", candidateError: "", loading: true });
         setReload((value) => value + 1);
       }}>Обновить контроль</Button>
     </div>
@@ -141,6 +175,16 @@ export function AccountingPayrollControl({ org, month, onEntry }: {
       <p className="text-sm">{loaded.summary.known_binding_coverage.active_binding_count === 0 ? "На этот месяц нет известных активных договоров. Проверьте реестр работников и основание нулевых начислений." : loaded.summary.known_binding_coverage.known_binding_coverage_complete ? "Все отрезки известных договоров рассмотрены; полнота реального штата не подтверждена." : "Есть нерассмотренные или устаревшие отрезки известных договоров."}</p>
       {!!loaded.summary.known_binding_coverage.issues.length && <ul className="list-disc space-y-1 pl-5 text-sm">{loaded.summary.known_binding_coverage.issues.map((issue, index) => <li key={`${issue.kind}-${issue.employment_binding_id}-${index}`}>{issueLabels[issue.kind] ?? issue.kind}: договор № {issue.employment_binding_id}, {issue.work_from}–{issue.work_to}</li>)}</ul>}
       {!!loaded.summary.bindings.length && <div className="space-y-2">{loaded.summary.bindings.map((binding) => <div key={binding.employment_binding_id} className="rounded-lg border border-line p-3 text-sm"><strong>Договор № {binding.employment_binding_id}</strong><span className="ml-3">Начислено: {binding.totals.gross_byn} BYN</span><span className="ml-3">Отрезков: {binding.segments.length}</span></div>)}</div>}
+    </div>}
+
+    {loaded.candidateError && <p role="alert" className="text-red-700">Черновик собственного расчёта: {loaded.candidateError}</p>}
+    {loaded.candidate && <div className="space-y-3 rounded-lg border border-line p-4">
+      <h3 className="font-semibold">Черновик собственного расчёта</h3>
+      <p className="text-sm">Включено подтверждённых отрезков: {loaded.candidate.included_segment_count} из {loaded.candidate.selected_segment_count}. Суммы ниже относятся только к ним и не являются начисленной зарплатой.</p>
+      <dl className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{amountLabels.map(([key, label]) => <div key={key} className="rounded-lg bg-canvas p-3"><dt className="text-xs text-muted">{label}</dt><dd className="font-semibold tabular-nums">{loaded.candidate!.totals[key]} BYN</dd></div>)}</dl>
+      <p className="text-sm">{loaded.candidate.arithmetic_scope_complete ? "Исходные расчётные отрезки собраны; нормативная полнота ещё не подтверждена." : "Черновик неполон: проверьте причины ниже."}</p>
+      <ul className="list-disc space-y-1 pl-5 text-sm">{loaded.candidate.blockers.map((code) => <li key={code}>{candidateBlockers[code] ?? code}</li>)}</ul>
+      <p className="break-all text-xs text-muted">Отпечаток исходной версии: {loaded.candidate.candidate_digest}. Проведение, выплата и обязательная отчётность недоступны.</p>
     </div>}
 
     {loaded.comparisonError && <p role="alert" className="text-red-700">Сверка с проводками: {loaded.comparisonError}</p>}

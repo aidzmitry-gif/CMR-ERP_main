@@ -55,6 +55,10 @@ restore and targeted payroll guards, not the target database.
   schedule norm in an immutable workpaper revision with cited document locations.
   Monthly control counts only the latest attested segments and identifies missing
   attestations; this human check does not certify rates, payroll posting or forms.
+- The monthly own-payroll candidate combines only attested workpaper segments,
+  binds the current review/roster/rule selection to a digest and lists missing
+  coverage and rule-completeness gates. It is read-only and excludes un-attested
+  amounts; no salary accrual, payment or compulsory form is created.
 - External payroll import lines may carry a stable employer-binding ID; the
   preview rejects cross-entity, unknown, future and name-mismatched mappings.
   Legacy free-text lines remain accepted and are marked as incompletely mapped.

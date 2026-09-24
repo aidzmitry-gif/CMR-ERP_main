@@ -154,6 +154,19 @@ unknown. Therefore `organization_payroll_population_verified`,
 `statutory_payroll_certified` remain false. No ledger entry, payroll run or
 external form is created.
 
+`GET /accounting/organizations/{org_id}/periods/{YYYY-MM}/payroll-own-candidate`
+returns a read-only, content-addressed monthly candidate built only from the
+latest chief-attested workpaper segments. It repeats current source-file byte
+checks, checks the known binding intervals, the chief's current population
+roster and its file, and the configured rule-source and rate versions. A stable
+`candidate_digest` identifies the exact source selection and blockers; a roster
+or review change produces a different digest. The totals omit un-attested
+segments and cannot be treated as a full payroll amount when coverage is
+incomplete. The configured list of percentage rules still does not prove all
+applicable employee-specific deductions, caps, benefits and exemptions. The
+candidate always reports this normative blocker and cannot post, pay or create
+compulsory forms. No candidate receipt is persisted by this read-only API.
+
 The current rule-set API exposes `rate_versions` (the immutable configured
 requirement IDs and digests) together with the rate roles and base modes. The
 accountant workspace's **Расчётный лист** tab uses those IDs, an explicitly

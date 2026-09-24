@@ -40,6 +40,15 @@ function reports(organizationId: number) {
       }],
       source_facts_verified: false, statutory_payroll_certified: false,
     },
+    candidate: {
+      organization_id: organizationId, month: "2026-10",
+      status: "provisional_payroll_candidate_only", candidate_digest: "a".repeat(64),
+      included_segment_count: 0, selected_segment_count: 1,
+      unattested_review_ids: [5], totals: { ...amounts, gross_byn: "0.00" },
+      blockers: ["source_facts_not_attested", "statutory_rule_completeness_unverified"],
+      arithmetic_scope_complete: false, posting_available: false,
+      statutory_payroll_certified: false,
+    },
   };
 }
 
@@ -54,7 +63,7 @@ describe("AccountingPayrollControl", () => {
     const data = reports(7);
     const onEntry = vi.fn();
     const fetchMock = vi.fn((input: string) => Promise.resolve(response(
-      input.includes("payroll-arithmetic-summary") ? data.summary : data.comparison,
+      input.includes("payroll-own-candidate") ? data.candidate : input.includes("payroll-arithmetic-summary") ? data.summary : data.comparison,
     )));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -64,22 +73,24 @@ describe("AccountingPayrollControl", () => {
     expect(screen.getByText(/полноту работников, применимость ставок/)).toBeInTheDocument();
     expect(screen.getByText(/файлы-основания действующих отрезков повторно сверены по байтам/)).toBeInTheDocument();
     expect(screen.getByText(/Без отдельного подтверждения исходных данных: квитанции № 5/)).toBeInTheDocument();
+    expect(screen.getByText(/Включено подтверждённых отрезков: 0 из 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Полнота применимых удержаний, взносов, вычетов и льгот не подтверждена/)).toBeInTheDocument();
     expect(screen.getByText(/Удержания: расчёт 10.00, импорт 11.00, разница 1.00 BYN/)).toBeInTheDocument();
     expect(screen.getByText(/Источники для сравнения: собраны; суммы всё ещё могут расходиться/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Начисление · проводка № 41" }));
     expect(onEntry).toHaveBeenCalledWith(41);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls.every(([url]) => String(url).includes("/organizations/7/periods/2026-10/"))).toBe(true);
   });
 
   it("rejects a response scoped to another organization", async () => {
     const data = reports(7);
     vi.stubGlobal("fetch", vi.fn((input: string) => Promise.resolve(response(
-      input.includes("payroll-arithmetic-summary") ? data.summary : data.comparison,
+      input.includes("payroll-own-candidate") ? data.candidate : input.includes("payroll-arithmetic-summary") ? data.summary : data.comparison,
     ))));
     render(<AccountingPayrollControl org="8" month="2026-10" onEntry={vi.fn()} />);
     const alerts = await screen.findAllByRole("alert");
-    expect(alerts).toHaveLength(2);
+    expect(alerts).toHaveLength(3);
     expect(alerts[0]).toHaveTextContent("другому юридическому лицу");
     expect(screen.queryByText("100.00 BYN")).not.toBeInTheDocument();
   });
@@ -90,7 +101,7 @@ describe("AccountingPayrollControl", () => {
     data.summary.known_binding_coverage.issues = [];
     data.summary.bindings = [];
     vi.stubGlobal("fetch", vi.fn((input: string) => Promise.resolve(response(
-      input.includes("payroll-arithmetic-summary") ? data.summary : data.comparison,
+      input.includes("payroll-own-candidate") ? data.candidate : input.includes("payroll-arithmetic-summary") ? data.summary : data.comparison,
     ))));
     render(<AccountingPayrollControl org="7" month="2026-10" onEntry={vi.fn()} />);
     expect(await screen.findByText(/нет известных активных договоров/)).toBeInTheDocument();
@@ -103,7 +114,7 @@ describe("AccountingPayrollControl", () => {
     const oldResolvers: ((value: ReturnType<typeof response>) => void)[] = [];
     const oldSignals: AbortSignal[] = [];
     vi.stubGlobal("fetch", vi.fn((input: string, init: RequestInit) => {
-      const value = input.includes("payroll-arithmetic-summary") ? "summary" : "comparison";
+      const value = input.includes("payroll-own-candidate") ? "candidate" : input.includes("payroll-arithmetic-summary") ? "summary" : "comparison";
       if (input.includes("/organizations/7/")) {
         oldSignals.push(init.signal as AbortSignal);
         return new Promise<ReturnType<typeof response>>((resolve) => oldResolvers.push(resolve));
@@ -113,12 +124,13 @@ describe("AccountingPayrollControl", () => {
     const onEntry = vi.fn();
     const { rerender } = render(<AccountingPayrollControl key="7" org="7" month="2026-10" onEntry={onEntry} />);
     rerender(<AccountingPayrollControl key="8" org="8" month="2026-10" onEntry={onEntry} />);
-    expect(oldSignals).toHaveLength(2);
+    expect(oldSignals).toHaveLength(3);
     expect(oldSignals.every((signal) => signal.aborted)).toBe(true);
     expect(await screen.findByText("Есть расхождения по договорам: 1.")).toBeInTheDocument();
     await act(async () => {
       oldResolvers[0](response(first.summary));
       oldResolvers[1](response(first.comparison));
+      oldResolvers[2](response(first.candidate));
     });
     expect(screen.getByText("Есть расхождения по договорам: 1.")).toBeInTheDocument();
     expect(screen.queryByText(/другому юридическому лицу/)).not.toBeInTheDocument();

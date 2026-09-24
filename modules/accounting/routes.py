@@ -38,6 +38,7 @@ from modules.accounting import (
     inventory_issues,
     opening_import,
     output_vat_register,
+    payroll_candidate,
     payroll_employment,
     payroll_evidence_files,
     payroll_population,
@@ -1625,6 +1626,16 @@ async def payroll_arithmetic_summary(org_id: int, month: str, response: Response
         raise HTTPException(403, "Accountant or chief access required")
     response.headers['Cache-Control'] = 'private, no-store'
     return await payroll_workpaper_review.monthly_arithmetic_summary(ctx[0], org_id, month)
+
+
+@router.get('/organizations/{org_id}/periods/{month}/payroll-own-candidate')
+async def payroll_own_candidate(org_id: int, month: str, response: Response,
+                                ctx=Depends(member)):
+    valid_month(month)
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    response.headers['Cache-Control'] = 'private, no-store'
+    return await payroll_candidate.preview(ctx[0], org_id, month)
 
 
 @router.get('/organizations/{org_id}/periods/{month}/payroll-source-reconciliation')
