@@ -63,13 +63,14 @@ async def test_receipt_sku_selection_freezes_snapshot_and_rejects_catalog_drift(
     })).status_code == 409
 
 
-async def test_old_text_sku_draft_needs_explicit_selection_before_posting_or_warehouse(client, db, book):
+@pytest.mark.parametrize("missing", [{"sku_id", "sku_title"}, {"sku_title"}])
+async def test_old_text_sku_draft_needs_explicit_selection_before_posting_or_warehouse(client, db, book, missing):
     from modules.procurement.receipt_documents import ReceiptDocument
     from modules.procurement.source_gateway import ProcurementSourceService
 
     facts = document()
     legacy = {**facts, "items": [{k: v for k, v in facts["items"][0].items()
-                                  if k not in {"sku_id", "sku_title"}}]}
+                                  if k not in missing}]}
     row = ReceiptDocument(organization_id=book[0], source_key="legacy-text-sku",
                           current_version=1, status="draft", created_by="historical")
     db.add(row)
@@ -90,7 +91,7 @@ async def test_old_text_sku_draft_needs_explicit_selection_before_posting_or_war
     edited = await client.put(path, json={"expected_version": 1, "document": facts})
     assert edited.status_code == 200, edited.text
     assert edited.json()["version"] == 2
-    assert "sku_id" not in edited.json()["revisions"][0]["document"]["items"][0]
+    assert all(field not in edited.json()["revisions"][0]["document"]["items"][0] for field in missing)
     assert edited.json()["revisions"][1]["document"]["items"][0]["sku_id"] == 1
 
 
