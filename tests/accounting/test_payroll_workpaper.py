@@ -38,6 +38,8 @@ async def workpaper_sources(client, db, book):
         "effective_from": "2026-01-01",
         "state": "active",
         "source_document": "signed-contract-2026-7",
+        "personnel_identifier": "worker-a",
+        "personnel_identifier_evidence": "Synthetic personnel number checked against the staff register",
         "evidence": "Synthetic accountant supplied contract evidence",
     })
     assert binding.status_code == 200, binding.text
@@ -440,7 +442,7 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
 
     xlsx_path = tmp_path / "october.xlsx"
     make_timesheet(xlsx_path, month="2026-10", coded_day=True,
-                   name_1="Synthetic Employee", hours_2=8)
+                   name_1="Synthetic Employee", name_2="Synthetic Employee", hours_2=8)
     xlsx_upload = await client.post(url, json={
         "request_key": str(uuid4()), "kind": "timesheet",
         "employment_binding_id": binding["binding_id"], "month": "2026-10",
@@ -474,13 +476,14 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
         **xlsx_command, "timesheet_row": 12,
     })
     assert wrong_person.status_code == 422
-    assert "name differs" in wrong_person.text
-    assert "Employee B" not in wrong_person.text
+    assert "personnel code differs" in wrong_person.text
+    assert "worker-b" not in wrong_person.text
     checked_xlsx = await client.post(preview_url, json={**xlsx_command, "timesheet_row": 11})
     assert checked_xlsx.status_code == 200, checked_xlsx.text
     assert checked_xlsx.json()["timesheet_numeric_hours_verified"] is True
     assert checked_xlsx.json()["basis"]["timesheet_row"] == 11
     assert checked_xlsx.json()["basis"]["timesheet_name_matches_binding"] is True
+    assert checked_xlsx.json()["basis"]["timesheet_identifier_matches_binding"] is True
     assert checked_xlsx.json()["basis"]["timesheet_uninterpreted_code_days"] == 1
 
     review_url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-reviews"
@@ -832,3 +835,53 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     with pytest.raises(ValueError, match="immutable"):
         await db.flush()
     await db.rollback()
+
+
+async def test_xlsx_preview_requires_personnel_number_in_employer_binding(
+        client, db, book, workpaper_sources, tmp_path, monkeypatch):
+    binding, deduction, contribution, ruleset = workpaper_sources
+    root = tmp_path / "payroll"
+    root.mkdir()
+    monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
+    employer = await client.post(f"/accounting/organizations/{book[0]}/payroll-employments", json={
+        "request_key": str(uuid4()), "employee_id": binding["employee_id"],
+        "contract_ref": "contract-without-number", "effective_from": "2026-01-01",
+        "state": "active", "source_document": "signed-contract-without-number",
+        "evidence": "Synthetic employer binding without a personnel number",
+    })
+    assert employer.status_code == 200, employer.text
+    assert employer.json()["personnel_identifier"] is None
+    source_url = f"/accounting/organizations/{book[0]}/payroll-evidence-files"
+    xlsx = tmp_path / "hours.xlsx"
+    make_timesheet(xlsx, month="2026-10", name_1="Synthetic Employee")
+
+    async def upload(kind, reference, filename, raw, content_type, month=None):
+        response = await client.post(source_url, json={
+            "request_key": str(uuid4()), "kind": kind,
+            "employment_binding_id": employer.json()["binding_id"], "month": month,
+            "reference": reference, "filename": filename,
+            "data_url": f"data:{content_type};base64," + base64.b64encode(raw).decode(),
+            "evidence": "Synthetic source for personnel-number guard",
+        })
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    contract = await upload("employment_contract", "signed-contract-without-number",
+                            "contract.pdf", b"%PDF-1.7\nsynthetic contract\n", "application/pdf")
+    timesheet = await upload(
+        "timesheet", "xlsx-without-personnel-binding", xlsx.name, xlsx.read_bytes(),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "2026-10")
+    args = (book[1], employer.json()["binding_id"], deduction["requirement_id"],
+            contribution["requirement_id"], ruleset["rule_set_id"])
+    payload = command(*args, work_to="2026-10-02", worked_hours="8.00",
+                      contract_document=contract["reference"],
+                      contract_digest=contract["sha256"], contract_file_id=contract["file_id"],
+                      timesheet_document=timesheet["reference"],
+                      timesheet_digest=timesheet["sha256"], timesheet_file_id=timesheet["file_id"],
+                      timesheet_row=11)
+    response = await client.post(
+        f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-preview",
+        json=payload)
+    assert response.status_code == 422
+    assert "personnel identifier" in response.text
+    assert "worker-a" not in response.text

@@ -19,6 +19,8 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 from zipfile import BadZipFile, ZipFile
 
+from modules.accounting.payroll_identity import normalized_identifier
+
 MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 NS = {"x": MAIN}
@@ -283,8 +285,9 @@ def scan_bytes(raw: bytes, month: str) -> dict:
 
 def row_numeric_hours(raw: bytes, month: str, row_number: int,
                       work_from: date, work_to: date,
-                      expected_employee_name: str | None = None) -> dict:
-    """Check selected numeric hours and name; neither proves employee identity."""
+                      expected_employee_name: str | None = None,
+                      expected_personnel_identifier: str | None = None) -> dict:
+    """Check numeric hours, name and claimed code; no identity certification."""
     report = scan_bytes(raw, month)
     if not report["structure_ok"]:
         raise UnsupportedWorkbook("timesheet structure is not accepted")
@@ -295,8 +298,13 @@ def row_numeric_hours(raw: bytes, month: str, row_number: int,
     _, rows, strings = _workbook(raw)
     cells = rows[row_number]
     row_name = _value(cells.get(f"C{row_number}"), strings)
+    row_identifier = _value(cells.get(f"B{row_number}"), strings)
     name_matches = bool(expected_employee_name and _normalized_name(row_name)
                         and _normalized_name(row_name) == _normalized_name(expected_employee_name))
+    identifier_matches = bool(expected_personnel_identifier
+                              and normalized_identifier(row_identifier)
+                              and normalized_identifier(row_identifier)
+                              == normalized_identifier(expected_personnel_identifier))
     hours = Decimal(0)
     coded_days = 0
     for day in range(work_from.day, work_to.day + 1):
@@ -314,6 +322,7 @@ def row_numeric_hours(raw: bytes, month: str, row_number: int,
         "uninterpreted_code_days": coded_days,
         "source_sha256": report["source_sha256"],
         "row_name_matches_binding": name_matches,
+        "row_identifier_matches_binding": identifier_matches,
         "employee_identity_verified": False,
         "code_meanings_verified": False,
     }

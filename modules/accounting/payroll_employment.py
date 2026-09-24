@@ -8,10 +8,11 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import HTTPException
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 from sqlalchemy import func, select
 
 from modules.accounting.models import PayrollEmploymentBinding, Period
+from modules.accounting.payroll_identity import normalized_identifier
 from modules.accounting.schemas import Input
 from modules.accounting.service import AccountingError, lock_organization
 from modules.hr.models import Employee
@@ -25,6 +26,27 @@ class PayrollEmploymentInput(Input):
     state: Literal["active", "ended"]
     source_document: str = Field(min_length=1, max_length=160)
     evidence: str = Field(min_length=10, max_length=2000)
+    personnel_identifier: str | None = Field(default=None, min_length=1, max_length=40)
+    personnel_identifier_evidence: str | None = Field(default=None, min_length=10, max_length=2000)
+
+    @field_validator("personnel_identifier")
+    @classmethod
+    def validate_personnel_identifier(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned or any(char.isspace() or ord(char) < 32 for char in cleaned):
+            raise ValueError("Personnel identifier must be a single nonblank code")
+        return cleaned
+
+    @model_validator(mode="after")
+    def personnel_identifier_needs_evidence(self):
+        if (self.personnel_identifier is None) != (self.personnel_identifier_evidence is None):
+            raise ValueError("Personnel identifier and its source evidence must be supplied together")
+        if (self.personnel_identifier_evidence is not None
+                and len(self.personnel_identifier_evidence.strip()) < 10):
+            raise ValueError("Personnel identifier needs meaningful source evidence")
+        return self
 
 
 def _digest(value: dict) -> str:
@@ -49,6 +71,9 @@ def result(row: PayrollEmploymentBinding) -> dict:
         "employee_name": row.snapshot["employee_name"],
         "department": row.snapshot["department"],
         "position": row.snapshot["position"],
+        "personnel_identifier": row.snapshot.get("personnel_identifier"),
+        "personnel_identifier_evidence": row.snapshot.get("personnel_identifier_evidence"),
+        "personnel_identifier_source_verified": False,
         "request_key": row.request_key,
         "digest": row.digest,
         "actor": row.actor,
@@ -71,7 +96,7 @@ async def current(session, org_id: int, employee_id: int, contract_ref: str,
 
 async def create(session, org_id: int, data: PayrollEmploymentInput, actor: str) -> dict:
     await lock_organization(session, org_id)
-    command = data.model_dump(mode="json")
+    command = data.model_dump(mode="json", exclude_none=True)
     request_digest = _digest(command)
     existing = await session.scalar(select(PayrollEmploymentBinding).where(
         PayrollEmploymentBinding.organization_id == org_id,
@@ -96,6 +121,26 @@ async def create(session, org_id: int, data: PayrollEmploymentInput, actor: str)
     previous = await current(session, org_id, data.employee_id, data.contract_ref, data.effective_from)
     if data.state == "ended" and (previous is None or previous.state != "active"):
         raise AccountingError("Ending employment requires a prior active binding")
+    if data.state == "active" and data.personnel_identifier is not None:
+        history = (await session.scalars(select(PayrollEmploymentBinding).where(
+            PayrollEmploymentBinding.organization_id == org_id,
+        ).order_by(PayrollEmploymentBinding.effective_from,
+                   PayrollEmploymentBinding.revision))).all()
+        events = {}
+        for row in history:
+            result(row)
+            events.setdefault((row.employee_id, row.contract_ref), {})[row.effective_from] = row
+        wanted = normalized_identifier(data.personnel_identifier)
+        for (employee_id, contract_ref), dated in events.items():
+            if (employee_id, contract_ref) == (data.employee_id, data.contract_ref):
+                continue
+            ordered = sorted(dated.items())
+            for index, (starts, row) in enumerate(ordered):
+                ends = ordered[index + 1][0] if index + 1 < len(ordered) else None
+                if (row.state == "active" and normalized_identifier(
+                        row.snapshot.get("personnel_identifier") or "") == wanted
+                        and (ends is None or ends > data.effective_from)):
+                    raise AccountingError("Personnel identifier is already active for another contract")
     revision = (await session.scalar(select(func.max(PayrollEmploymentBinding.revision)).where(
         PayrollEmploymentBinding.organization_id == org_id,
         PayrollEmploymentBinding.employee_id == data.employee_id,

@@ -147,15 +147,20 @@ async def preview_workpaper(session, org_id: int, month: str,
             if preflight["status"] == "structure_checked":
                 if data.timesheet_row is None:
                     raise AccountingError("Select the employee row of the XLSX timesheet")
+                if not employment["personnel_identifier"]:
+                    raise AccountingError("XLSX payroll requires a personnel identifier in the employment binding")
                 raw = await run_in_threadpool(verify_evidence_bytes, timesheet_file)
                 try:
                     timesheet_row_check = await run_in_threadpool(
                         row_numeric_hours, raw, month, data.timesheet_row,
-                        data.work_from, data.work_to, employment["employee_name"])
+                        data.work_from, data.work_to, employment["employee_name"],
+                        employment["personnel_identifier"])
                 except UnsupportedWorkbook as exc:
                     raise AccountingError("XLSX row or work interval failed source verification") from exc
                 if not timesheet_row_check["row_name_matches_binding"]:
                     raise AccountingError("Selected XLSX row name differs from employment binding")
+                if not timesheet_row_check["row_identifier_matches_binding"]:
+                    raise AccountingError("Selected XLSX personnel code differs from employment binding")
                 if (timesheet_row_check["source_sha256"] != timesheet_file.sha256
                         or Decimal(timesheet_row_check["numeric_hours"]) != data.worked_hours):
                     raise AccountingError("Worked hours differ from the selected XLSX row and interval")
@@ -281,6 +286,8 @@ async def preview_workpaper(session, org_id: int, month: str,
         "timesheet_numeric_hours_verified": timesheet_row_check is not None,
         "timesheet_name_matches_binding": bool(
             timesheet_row_check and timesheet_row_check["row_name_matches_binding"]),
+        "timesheet_identifier_matches_binding": bool(
+            timesheet_row_check and timesheet_row_check["row_identifier_matches_binding"]),
         "timesheet_uninterpreted_code_days": (
             timesheet_row_check["uninterpreted_code_days"] if timesheet_row_check else None),
         "timesheet_evidence": data.timesheet_evidence,
@@ -313,6 +320,8 @@ async def preview_workpaper(session, org_id: int, month: str,
         "timesheet_numeric_hours_verified": timesheet_row_check is not None,
         "timesheet_name_matches_binding": bool(
             timesheet_row_check and timesheet_row_check["row_name_matches_binding"]),
+        "timesheet_identifier_matches_binding": bool(
+            timesheet_row_check and timesheet_row_check["row_identifier_matches_binding"]),
         "schedule_file_bytes_verified": schedule_bytes_verified,
         "rule_set_configured": True,
         "rule_source_file_bytes_verified": rule_source_bytes_verified,

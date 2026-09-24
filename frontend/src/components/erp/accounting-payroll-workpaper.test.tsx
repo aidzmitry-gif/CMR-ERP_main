@@ -15,7 +15,7 @@ const rules = {
     { code: "SYNTHETIC-EMPLOYER", requirement_id: 62, requirement_digest: "b".repeat(64) },
   ],
 };
-const employment = [{ binding_id: 12, organization_id: 7, employee_name: "Тестовый работник", contract_ref: "contract-1", source_document: "signed-contract", state: "active", effective_from: "2026-01-01" }];
+const employment = [{ binding_id: 12, organization_id: 7, employee_id: 27, employee_name: "Тестовый работник", contract_ref: "contract-1", source_document: "signed-contract", personnel_identifier: "worker-a", state: "active", effective_from: "2026-01-01" }];
 const sourceFiles = [
   { file_id: 71, organization_id: 7, employment_binding_id: 12, kind: "employment_contract", month: null, reference: "signed-contract", filename: "contract.pdf", content_type: "application/pdf", sha256: "c".repeat(64), size_bytes: 100 },
   { file_id: 72, organization_id: 7, employment_binding_id: 12, kind: "timesheet", month: "2026-10", reference: "timesheet-10", filename: "sheet.pdf", content_type: "application/pdf", sha256: "d".repeat(64), size_bytes: 100 },
@@ -170,6 +170,7 @@ describe("AccountingPayrollWorkpaper", () => {
       : file);
     const checkedResult = {
       ...result, timesheet_numeric_hours_verified: true, timesheet_name_matches_binding: true,
+      timesheet_identifier_matches_binding: true,
       basis: { ...result.basis, timesheet_row: 11, timesheet_uninterpreted_code_days: 1 },
     };
     const fetchMock = vi.fn((input: string) => {
@@ -213,7 +214,55 @@ describe("AccountingPayrollWorkpaper", () => {
     expect(previewPost).toBeDefined();
     expect(JSON.parse(previewPost![1].body as string)).toMatchObject({ timesheet_row: 11, worked_hours: "8.00" });
     expect(screen.getByText(/Числовые часы проверены по строке 11/)).toHaveTextContent("не интерпретированы");
-    expect(screen.getByText(/ФИО строки совпало с карточкой работника/)).toHaveTextContent("это ещё не подтверждает личность");
+    expect(screen.getByText(/ФИО и табельный номер строки совпали/)).toHaveTextContent("подлинность источника подтверждает бухгалтер");
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("payroll-workpaper-reviews"))).toBe(false);
+  });
+
+  it("blocks XLSX payroll when the employer binding has no personnel number", async () => {
+    const xlsxFiles = sourceFiles.map((file) => file.kind === "timesheet"
+      ? { ...file, filename: "sheet.xlsx", content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }
+      : file);
+    let registered = false;
+    const fetchMock = vi.fn((input: string, init: RequestInit) => {
+      if (input.includes("timesheet-preflight")) return Promise.resolve(response({
+        file_id: 72, organization_id: 7, employment_binding_id: 12, period: "2026-10",
+        source_sha256: "d".repeat(64), status: "structure_checked", structure_ok: true,
+        employee_row_numbers: [11], document_facts_verified: false, issues: [],
+      }));
+      if (input.includes("payroll-rule-sets/current")) return Promise.resolve(response(rules));
+      if (input.includes("payroll-workpaper-access")) return Promise.resolve(response(access));
+      if (input.includes("payroll-employments") && init.method === "POST") {
+        registered = true;
+        return Promise.resolve(response({ ...employment[0], binding_id: 19, effective_from: "2026-10-01" }));
+      }
+      if (input.includes("payroll-employments")) return Promise.resolve(response([
+        registered ? { ...employment[0], binding_id: 19, effective_from: "2026-10-01" }
+          : { ...employment[0], personnel_identifier: null },
+      ]));
+      if (input.includes("payroll-evidence-files")) return Promise.resolve(response(
+        input.includes("employment_binding_id=19") ? [] : xlsxFiles.filter(
+        (file) => file.kind === new URL(input, "http://localhost").searchParams.get("kind"))));
+      throw new Error(`Unexpected request: ${input}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AccountingPayrollWorkpaper org="7" month="2026-10" disabled={false} />);
+    await screen.findByText(/Набор правил № 41/);
+    fireEvent.change(screen.getByLabelText("Договор работника"), { target: { value: "12" } });
+    await screen.findByRole("option", { name: /timesheet-10/ });
+    fireEvent.change(screen.getByLabelText("Файл табеля"), { target: { value: "72" } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("табельный номер");
+    expect(screen.getByRole("button", { name: "Проверить арифметику" })).toBeDisabled();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("payroll-workpaper-preview"))).toBe(false);
+    fireEvent.change(screen.getByLabelText("Табельный номер работника"), { target: { value: "worker-a" } });
+    fireEvent.change(screen.getByLabelText("Основание табельного номера"), { target: { value: "Номер проверен по кадровому реестру" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить новую редакцию договора" }));
+    expect(await screen.findByText(/Новая редакция привязки сохранена/)).toBeInTheDocument();
+    const post = fetchMock.mock.calls.find(([url, init]) => String(url).includes("payroll-employments") && init.method === "POST");
+    expect(post).toBeDefined();
+    expect(JSON.parse(post![1].body as string)).toMatchObject({
+      request_key: expect.any(String), employee_id: 27, effective_from: "2026-10-01",
+      personnel_identifier: "worker-a", personnel_identifier_evidence: "Номер проверен по кадровому реестру",
+    });
+    expect(screen.getByLabelText("Договор работника")).toHaveValue("19");
   });
 });

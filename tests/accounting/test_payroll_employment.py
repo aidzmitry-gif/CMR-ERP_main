@@ -44,6 +44,7 @@ async def test_binding_is_explicit_idempotent_and_retains_identity_snapshot(clie
     assert again.status_code == 200
     assert again.json() == created.json()
     assert await db.scalar(select(func.count(PayrollEmploymentBinding.id))) == 1
+    assert created.json()["personnel_identifier"] is None
 
     changed = await client.post(url, json={**payload, "contract_ref": "different-contract"})
     assert changed.status_code == 409
@@ -157,3 +158,43 @@ async def test_closed_period_rejects_new_backdated_binding_but_keeps_idempotent_
     assert changed.status_code == 422
     assert "Closed period blocks" in changed.text
     assert await db.scalar(select(func.count(PayrollEmploymentBinding.id))) == 1
+
+
+async def test_personnel_identifier_is_unique_while_active_and_can_be_reused_after_end(
+        client, db, book):
+    first = Employee(full_name="First Worker", department="repair", position="worker")
+    second = Employee(full_name="Second Worker", department="repair", position="worker")
+    db.add_all([first, second])
+    await db.flush()
+    first_id, second_id = first.id, second.id
+    url = f"/accounting/organizations/{book[0]}/payroll-employments"
+    original = binding_command(
+        first_id, personnel_identifier=" AB-001 ",
+        personnel_identifier_evidence="Synthetic signed staff register, row one")
+    created = await client.post(url, json=original)
+    assert created.status_code == 200, created.text
+    assert created.json()["personnel_identifier"] == "AB-001"
+    assert created.json()["personnel_identifier_source_verified"] is False
+    assert (await client.post(url, json=original)).json() == created.json()
+    assert (await client.post(url, json={**original, "personnel_identifier": "AB-002"})).status_code == 409
+
+    duplicate = await client.post(url, json=binding_command(
+        second_id, contract_ref="second-contract", personnel_identifier="ab-001",
+        personnel_identifier_evidence="Synthetic signed staff register, row two"))
+    assert duplicate.status_code == 422
+    assert "already active" in duplicate.text
+    assert (await client.post(url, json=binding_command(
+        second_id, contract_ref="second-contract", personnel_identifier="   ",
+        personnel_identifier_evidence="Synthetic signed staff register"))).status_code == 422
+    assert (await client.post(url, json=binding_command(
+        second_id, contract_ref="second-contract", personnel_identifier="AB-002"))).status_code == 422
+
+    ended = await client.post(url, json=binding_command(
+        first_id, state="ended", effective_from="2026-09-30"))
+    assert ended.status_code == 200, ended.text
+    reused = await client.post(url, json=binding_command(
+        second_id, contract_ref="second-contract", effective_from="2026-10-01",
+        personnel_identifier="ab-001",
+        personnel_identifier_evidence="Synthetic replacement staff register, row three"))
+    assert reused.status_code == 200, reused.text
+    assert reused.json()["personnel_identifier"] == "ab-001"
