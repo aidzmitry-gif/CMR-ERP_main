@@ -27,6 +27,7 @@ EMPLOYEE_FACT_CODES = [
     "dependants_special_status_and_deduction_documents",
     "other_deduction_claims_and_documents",
     "insurance_applicability_and_base",
+    "fszn_minimum_condition",
 ]
 
 ORGANIZATION_RULE_CODES = [
@@ -66,6 +67,8 @@ def assess(month: str, binding_ids: list[int],
              "review_digest": reviews[binding_id]["digest"] if binding_id in reviews else None,
              "reviewed_fact_codes": reviews[binding_id]["reviewed_fact_codes"]
              if binding_id in reviews else [],
+             "fszn_minimum_condition": reviews[binding_id].get("fszn_minimum_condition")
+             if binding_id in reviews else None,
              "unrecorded_fact_codes": [code for code in EMPLOYEE_FACT_CODES
                                        if code not in reviews.get(binding_id, {}).get("reviewed_fact_codes", [])]}
             for binding_id in sorted(set(binding_ids))

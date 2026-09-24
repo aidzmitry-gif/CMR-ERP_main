@@ -151,6 +151,19 @@ describe("AccountingPayrollControl", () => {
       all_selected_segments_attested: true, statutory_base_certified: false,
       contributions_recalculated: false,
     } });
+    const minimum = { wage_month: "2026-10", wage_byn: "858.00", published_on: "2026-07-13",
+      url: "https://nalog.gov.by/news/36005/", source_file_id: 88,
+      source_file_sha256: "e".repeat(64), source_locator: "page 1, amount" };
+    Object.assign(data.candidate.applicability.organization, { fszn_minimum_wage: minimum });
+    Object.assign(data.candidate, { fszn_minimum_preview: {
+      scope: "attested_erp_segments_and_listed_rates_only", month: "2026-10", minimum_wage: minimum,
+      employees: [{ employee_id: 41, review_ids: [101, 102], status: "comparison", chief_condition: "applies",
+        worked_hours: "80.00", full_month_norm_hours: "160.00", time_adjusted_minimum_base_byn: "429.00",
+        listed_fszn_components_byn: "60.00", minimum_of_listed_components_byn: "85.80",
+        indicative_shortfall_byn: "25.80" }],
+      all_selected_segments_attested: true, statutory_minimum_certified: false,
+      contributions_recalculated: false,
+    } });
     vi.stubGlobal("fetch", vi.fn((input: string) => Promise.resolve(response(
       input.includes("payroll-own-candidate") ? data.candidate : input.includes("payroll-arithmetic-summary") ? data.summary : data.comparison,
     ))));
@@ -158,6 +171,8 @@ describe("AccountingPayrollControl", () => {
     expect(await screen.findByText("Предварительное сравнение с месячным пределом ФСЗН")).toBeInTheDocument();
     expect(screen.getByText(/Работник № 41: показанные базы 16000.00 BYN, после ограничения 15679.50 BYN/)).toBeInTheDocument();
     expect(screen.getByText(/Показанные выше суммы взносов не пересчитаны; проведение и выплата недоступны/)).toBeInTheDocument();
+    expect(screen.getByText("Предварительная проверка минимальной суммы ФСЗН · статья 9")).toBeInTheDocument();
+    expect(screen.getByText(/ориентир базы 429.00 BYN, минимум перечисленных компонентов 85.80 BYN/)).toBeInTheDocument();
   });
 
   it("does not call an empty month an uncovered employment interval", async () => {

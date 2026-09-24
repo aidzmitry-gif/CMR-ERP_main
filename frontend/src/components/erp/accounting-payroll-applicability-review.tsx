@@ -13,9 +13,21 @@ const factLabels: Record<string, string> = {
   dependants_special_status_and_deduction_documents: "Иждивенцы, особый статус и документы",
   other_deduction_claims_and_documents: "Другие заявленные вычеты и документы",
   insurance_applicability_and_base: "Страховой статус и база",
+  fszn_minimum_condition: "Применимость минимальной суммы взносов ФСЗН (статья 9)",
 };
 const factCodes = Object.keys(factLabels).sort();
-type Fact = { code: string; finding: string; source_locator: string };
+type MinimumCondition = "applies" | "excluded_civil_contract" | "excluded_correctional_or_ltp"
+  | "excluded_public_religious" | "excluded_employee_fault_norm" | "unresolved";
+const minimumOptions: { value: MinimumCondition; label: string }[] = [
+  { value: "applies", label: "Минимум применяется" },
+  { value: "excluded_civil_contract", label: "Исключение: гражданско-правовой договор" },
+  { value: "excluded_correctional_or_ltp", label: "Исключение: исправительное учреждение или ЛТП" },
+  { value: "excluded_public_religious", label: "Исключение: общественная или религиозная организация" },
+  { value: "excluded_employee_fault_norm", label: "Есть выплата при невыполнении нормы по вине работника: нужна разбивка выплат" },
+  { value: "unresolved", label: "Не удалось определить" },
+];
+type Fact = { code: string; finding: string; source_locator: string; fszn_minimum_condition?: MinimumCondition;
+  fszn_minimum_full_month_norm_hours?: string; fszn_minimum_full_norm_locator?: string };
 type FileReceipt = Pick<PayrollEvidenceReceipt, "file_id" | "organization_id" | "employment_binding_id" | "kind" | "month" | "reference" | "sha256">;
 type ReviewReceipt = {
   review_id: number; organization_id: number; employment_binding_id: number; month: string;
@@ -50,10 +62,15 @@ async function api<T>(path: string, body?: unknown, signal?: AbortSignal): Promi
   return data as T;
 }
 
-function asFactMap(facts: Fact[]): Record<string, { selected: boolean; finding: string; source_locator: string }> {
+function asFactMap(facts: Fact[]): Record<string, { selected: boolean; finding: string; source_locator: string;
+  fszn_minimum_condition: MinimumCondition | ""; fszn_minimum_full_month_norm_hours: string;
+  fszn_minimum_full_norm_locator: string }> {
   return Object.fromEntries(factCodes.map((code) => {
     const current = facts.find((row) => row.code === code);
-    return [code, { selected: !!current, finding: current?.finding ?? "", source_locator: current?.source_locator ?? "" }];
+    return [code, { selected: !!current, finding: current?.finding ?? "", source_locator: current?.source_locator ?? "",
+      fszn_minimum_condition: current?.fszn_minimum_condition ?? "",
+      fszn_minimum_full_month_norm_hours: current?.fszn_minimum_full_month_norm_hours ?? "",
+      fszn_minimum_full_norm_locator: current?.fszn_minimum_full_norm_locator ?? "" }];
   }));
 }
 
@@ -112,9 +129,24 @@ export function AccountingPayrollApplicabilityReview({ org, month, bindingIds, o
     if (!selectedFile) throw new Error("Выберите сохранённый файл оснований.");
     const selectedFacts = factCodes.filter((code) => facts[code].selected).map((code) => ({
       code, finding: facts[code].finding.trim(), source_locator: facts[code].source_locator.trim(),
+      ...(code === "fszn_minimum_condition" && facts[code].fszn_minimum_condition
+        ? { fszn_minimum_condition: facts[code].fszn_minimum_condition as MinimumCondition } : {}),
+      ...(code === "fszn_minimum_condition" && facts[code].fszn_minimum_condition === "applies"
+        ? { fszn_minimum_full_month_norm_hours: facts[code].fszn_minimum_full_month_norm_hours.trim(),
+            fszn_minimum_full_norm_locator: facts[code].fszn_minimum_full_norm_locator.trim() } : {}),
     }));
     if (!selectedFacts.length || selectedFacts.some((row) => row.finding.length < 10 || row.source_locator.length < 3)) {
       throw new Error("Укажите вывод и место в документе для каждого отмеченного факта.");
+    }
+    if (facts.fszn_minimum_condition.selected && !facts.fszn_minimum_condition.fszn_minimum_condition) {
+      throw new Error("Выберите решение по применимости минимальной суммы ФСЗН.");
+    }
+    if (facts.fszn_minimum_condition.selected && facts.fszn_minimum_condition.fszn_minimum_condition === "applies"
+        && (!/^\d{1,3}\.\d{2}$/.test(facts.fszn_minimum_condition.fszn_minimum_full_month_norm_hours.trim())
+          || Number(facts.fszn_minimum_condition.fszn_minimum_full_month_norm_hours) <= 0
+          || Number(facts.fszn_minimum_condition.fszn_minimum_full_month_norm_hours) > 744
+          || facts.fszn_minimum_condition.fszn_minimum_full_norm_locator.trim().length < 3)) {
+      throw new Error("Для применимого минимума укажите полную норму месяца и место её подтверждения в файле.");
     }
     if (evidence.trim().length < 10) throw new Error("Поясните проверку главбуха не короче 10 символов.");
     return {
@@ -192,6 +224,10 @@ export function AccountingPayrollApplicabilityReview({ org, month, bindingIds, o
       <div className="space-y-2">{factCodes.map((code) => <div key={code} className="rounded border border-line p-2">
         <label className="flex items-center gap-2"><input type="checkbox" checked={facts[code].selected} disabled={busy || pending !== null} onChange={(event) => changeFact(code, { selected: event.target.checked })} />{factLabels[code]}</label>
         {facts[code].selected && <div className="mt-2 grid gap-2 md:grid-cols-2"><label>Вывод по документу<Textarea aria-label={`Вывод ${code}`} value={facts[code].finding} disabled={busy || pending !== null} onChange={(event) => changeFact(code, { finding: event.target.value })} /></label><label>Страница, строка или пункт<Input aria-label={`Место ${code}`} value={facts[code].source_locator} disabled={busy || pending !== null} onChange={(event) => changeFact(code, { source_locator: event.target.value })} /></label></div>}
+        {code === "fszn_minimum_condition" && facts[code].selected && <label className="mt-2 block">Решение по статье 9<Select aria-label="Решение о минимуме ФСЗН" value={facts[code].fszn_minimum_condition} disabled={busy || pending !== null} onChange={(event) => changeFact(code, { fszn_minimum_condition: event.target.value as MinimumCondition | "" })}>
+          <option value="">Выберите решение</option>{minimumOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </Select></label>}
+        {code === "fszn_minimum_condition" && facts[code].selected && facts[code].fszn_minimum_condition === "applies" && <div className="mt-2 grid gap-2 md:grid-cols-2"><label>Полная норма часов месяца для сравнения<Input aria-label="Полная норма часов месяца ФСЗН" value={facts[code].fszn_minimum_full_month_norm_hours} disabled={busy || pending !== null} onChange={(event) => changeFact(code, { fszn_minimum_full_month_norm_hours: event.target.value })} placeholder="160.00" /></label><label>Место полной нормы в файле<Input aria-label="Место полной нормы ФСЗН" value={facts[code].fszn_minimum_full_norm_locator} disabled={busy || pending !== null} onChange={(event) => changeFact(code, { fszn_minimum_full_norm_locator: event.target.value })} /></label><p className="md:col-span-2 text-muted">Укажите полную норму месяца по проверенному основанию. Индивидуальная норма неполного рабочего времени не служит знаменателем.</p></div>}
       </div>)}</div>
       <label className="block">Пояснение проверки<Textarea aria-label="Пояснение проверки налоговых условий" value={evidence} disabled={busy || pending !== null} onChange={(event) => setEvidence(event.target.value)} /></label>
       <Button disabled={busy || loading || (!pending && (!selectedFile || evidence.trim().length < 10))} onClick={() => void submit()}>{pending ? "Проверить или повторить сохранение" : latest ? "Сохранить исправление фактов" : "Подтвердить факты"}</Button>

@@ -213,6 +213,23 @@ base: unrecorded payments, excluded categories, professional pension insurance,
 minimum contributions and special rules still require separate evidence.
 Posting, payment and mandatory forms remain unavailable.
 
+The chief may also cite the payroll month's minimum wage for an Article 9
+comparison, using a separate byte-checked organization/month evidence file,
+its digest, official MNS or Mintrud URL, publication date and exact location.
+The employee applicability review records whether the chief found the general
+minimum applicable or one of Article 9's listed exceptions, with a private
+employee/month source. When applicable, the chief also records the sourced
+full-month norm of hours separately from the employee's individual schedule.
+Without it, the candidate gives no number. Existing review digests remain unchanged when these
+optional facts are absent. From already attested segments of one ERP employee,
+the candidate sums worked time, checks one binding, consistent segment norms
+and the separately attested full-month norm, then checks one
+set of listed FSZN rates, and compares the existing listed components with a
+time-adjusted minimum from the explicit wage. Ambiguous inputs produce a
+blocker instead of a number. The comparison is provisional: unlisted payments,
+true tariff/category, source authenticity and employer-specific policy remain
+unverified; it never changes contribution totals or permits posting/payment.
+
 The current rule-set API exposes `rate_versions` (the immutable configured
 requirement IDs and digests) together with the rate roles and base modes. The
 accountant workspace's **Расчётный лист** tab uses those IDs, an explicitly

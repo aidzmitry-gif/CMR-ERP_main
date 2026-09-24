@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from fastapi import HTTPException
-from pydantic import Field, field_validator
+from pydantic import Field, ValidationError, field_validator, model_validator
 from sqlalchemy import select
 
 from modules.accounting.models import PayrollApplicabilityReview, Period
@@ -27,6 +30,35 @@ class ReviewedFact(Input):
     code: str = Field(min_length=1, max_length=80)
     finding: str = Field(min_length=10, max_length=500)
     source_locator: str = Field(min_length=3, max_length=200)
+    fszn_minimum_condition: Literal[
+        "applies", "excluded_civil_contract", "excluded_correctional_or_ltp",
+        "excluded_public_religious", "excluded_employee_fault_norm", "unresolved",
+    ] | None = None
+    fszn_minimum_full_month_norm_hours: Decimal | None = Field(default=None, gt=0, le=744)
+    fszn_minimum_full_norm_locator: str | None = Field(default=None, min_length=3, max_length=200)
+
+    @field_validator("fszn_minimum_full_month_norm_hours", mode="before")
+    @classmethod
+    def exact_full_norm(cls, value):
+        if value is not None and (not isinstance(value, str)
+                                  or re.fullmatch(r"\d{1,3}\.\d{2}", value) is None):
+            raise ValueError("Full-month norm must be a two-decimal hour string")
+        return value
+
+    @model_validator(mode="after")
+    def minimum_condition_is_scoped(self):
+        if ((self.code == "fszn_minimum_condition") !=
+                (self.fszn_minimum_condition is not None)):
+            raise ValueError("FSZN minimum decision belongs to its source-backed fact")
+        has_norm = (self.fszn_minimum_full_month_norm_hours is not None
+                    or self.fszn_minimum_full_norm_locator is not None)
+        if self.code == "fszn_minimum_condition" and self.fszn_minimum_condition == "applies":
+            if (self.fszn_minimum_full_month_norm_hours is None
+                    or self.fszn_minimum_full_norm_locator is None):
+                raise ValueError("Applicable FSZN minimum needs sourced full-month norm")
+        elif has_norm:
+            raise ValueError("Full-month norm belongs only to applicable FSZN minimum")
+        return self
 
     @field_validator("code")
     @classmethod
@@ -41,6 +73,11 @@ class ReviewedFact(Input):
         if not value.strip() or "\x00" in value:
             raise ValueError("Payroll applicability evidence must be nonempty")
         return value.strip()
+
+    @field_validator("fszn_minimum_full_norm_locator")
+    @classmethod
+    def meaningful_norm_locator(cls, value: str | None) -> str | None:
+        return cls.meaningful_text(value) if value is not None else None
 
 
 class PayrollApplicabilityInput(Input):
@@ -89,6 +126,10 @@ def result(row: PayrollApplicabilityReview) -> dict:
     if (row.snapshot != snapshot or row.digest != _digest(snapshot)
             or row.request_digest != _digest(command)):
         raise HTTPException(409, "Payroll applicability review integrity requires reconciliation")
+    try:
+        [ReviewedFact.model_validate(fact) for fact in row.facts]
+    except (ValidationError, TypeError) as exc:
+        raise HTTPException(409, "Payroll applicability facts require reconciliation") from exc
     return {
         "review_id": row.id, **snapshot, "digest": row.digest, "actor": row.actor,
         "source_file_bytes_verified_now": False,
@@ -150,6 +191,12 @@ async def current_for(session, org_id: int, month: str,
             "review_id": row.id, "digest": row.digest,
             "source_file_id": source.id, "source_file_sha256": source.sha256,
             "reviewed_fact_codes": [fact["code"] for fact in row.facts],
+            "fszn_minimum_condition": next((fact["fszn_minimum_condition"]
+                for fact in row.facts if fact["code"] == "fszn_minimum_condition"), None),
+            "fszn_minimum_full_month_norm_hours": next((fact.get("fszn_minimum_full_month_norm_hours")
+                for fact in row.facts if fact["code"] == "fszn_minimum_condition"), None),
+            "fszn_minimum_full_norm_locator": next((fact.get("fszn_minimum_full_norm_locator")
+                for fact in row.facts if fact["code"] == "fszn_minimum_condition"), None),
             "source_file_bytes_verified_now": True,
         }
     return current
@@ -159,6 +206,11 @@ async def create(session, org_id: int, month: str, data: PayrollApplicabilityInp
                  actor: str) -> dict:
     await lock_organization(session, org_id)
     command = data.model_dump(mode="json")
+    for fact in command["facts"]:
+        for optional in ("fszn_minimum_condition", "fszn_minimum_full_month_norm_hours",
+                         "fszn_minimum_full_norm_locator"):
+            if fact[optional] is None:
+                fact.pop(optional)  # Keep old receipt digests stable.
     command_digest = _digest(command)
     existing = await session.scalar(select(PayrollApplicabilityReview).where(
         PayrollApplicabilityReview.organization_id == org_id,

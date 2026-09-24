@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -44,11 +44,28 @@ from modules.accounting.payroll_workpaper_review import (
 )
 from modules.accounting.service import AccountingError, lock_organization
 
+FSZN_MINIMUM_EXCEPTIONS = {
+    "excluded_civil_contract", "excluded_correctional_or_ltp",
+    "excluded_public_religious",
+}
+
 
 def _digest(value: dict) -> str:
     return hashlib.sha256(json.dumps(
         value, sort_keys=True, ensure_ascii=False, separators=(",", ":"),
     ).encode()).hexdigest()
+
+
+def _rate(value: object) -> Decimal:
+    if not isinstance(value, str):
+        raise HTTPException(409, "Payroll FSZN rate requires reconciliation")
+    try:
+        rate = Decimal(value)
+    except InvalidOperation as exc:
+        raise HTTPException(409, "Payroll FSZN rate requires reconciliation") from exc
+    if not rate.is_finite() or rate < 0:
+        raise HTTPException(409, "Payroll FSZN rate requires reconciliation")
+    return rate
 
 
 def _monthly_fszn_cap_rows(segments: list[tuple[int, int, Decimal]],
@@ -74,6 +91,84 @@ def _monthly_fszn_cap_rows(segments: list[tuple[int, int, Decimal]],
             "capped_listed_base_byn": format(min(listed_base, cap), ".2f"),
         })
     return rows, exceeded
+
+
+def _monthly_fszn_minimum_rows(segments: list[dict],
+                               conditions: dict[int, dict],
+                               minimum_wage: Decimal) -> tuple[list[dict], set[str]]:
+    """Compare listed FSZN components with Article 9's time-adjusted reference.
+
+    Decisions, payment scope and configured rates are supplied by the chief;
+    these rows are not a statutory contribution calculation.
+    """
+    grouped: dict[int, list[dict]] = {}
+    for segment in segments:
+        grouped.setdefault(segment["employee_id"], []).append(segment)
+    rows: list[dict] = []
+    issues: set[str] = set()
+    for employee_id, parts in sorted(grouped.items()):
+        binding_ids = {part["binding_id"] for part in parts}
+        row = {"employee_id": employee_id,
+               "review_ids": [part["review_id"] for part in parts]}
+        if len(binding_ids) != 1:
+            row["status"] = "ambiguous_multiple_bindings"
+            issues.add("fszn_minimum_inputs_ambiguous")
+        else:
+            reviewed = conditions.get(next(iter(binding_ids)), {})
+            condition = reviewed.get("condition")
+            row["chief_condition"] = condition
+            if condition not in FSZN_MINIMUM_EXCEPTIONS | {"applies", "excluded_employee_fault_norm"}:
+                row["status"] = "unreviewed"
+                issues.add("fszn_minimum_condition_unreviewed")
+            elif condition == "excluded_employee_fault_norm":
+                # Article 9 names a payment for work below the norm, not a
+                # blanket exemption for every payment to this employee.
+                row["status"] = "requires_payment_breakdown"
+                issues.add("fszn_minimum_payment_exception_needs_breakdown")
+            elif condition in FSZN_MINIMUM_EXCEPTIONS:
+                row["status"] = "chief_recorded_exception"
+            else:
+                norms = {part["norm_hours"] for part in parts}
+                rate_sets = {part["rates"] for part in parts}
+                worked = sum((part["worked_hours"] for part in parts), Decimal("0"))
+                full_norm_text = reviewed.get("full_month_norm_hours")
+                if full_norm_text is None:
+                    row["status"] = "missing_full_norm"
+                    issues.add("fszn_minimum_full_norm_missing")
+                    rows.append(row)
+                    continue
+                try:
+                    full_norm = Decimal(full_norm_text)
+                except (InvalidOperation, TypeError) as exc:
+                    raise HTTPException(409, "FSZN full-month norm requires reconciliation") from exc
+                if (len(norms) != 1 or len(rate_sets) != 1
+                        or not norms or next(iter(norms)) <= 0
+                        or full_norm <= 0 or worked <= 0 or worked > full_norm):
+                    row["status"] = "ambiguous_inputs"
+                    issues.add("fszn_minimum_inputs_ambiguous")
+                else:
+                    floor = (minimum_wage * worked / full_norm).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP,
+                    )
+                    rates = next(iter(rate_sets))
+                    reference = sum(((floor * rate / Decimal("100")).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP,
+                    ) for _, rate in rates), Decimal("0"))
+                    listed = sum((part["listed_contributions"] for part in parts),
+                                 Decimal("0"))
+                    shortfall = max(Decimal("0"), reference - listed)
+                    row.update({
+                        "status": "comparison", "worked_hours": format(worked, ".2f"),
+                        "full_month_norm_hours": format(full_norm, ".2f"),
+                        "time_adjusted_minimum_base_byn": format(floor, ".2f"),
+                        "listed_fszn_components_byn": format(listed, ".2f"),
+                        "minimum_of_listed_components_byn": format(reference, ".2f"),
+                        "indicative_shortfall_byn": format(shortfall, ".2f"),
+                    })
+                    if shortfall:
+                        issues.add("fszn_minimum_recalculation_required")
+        rows.append(row)
+    return rows, issues
 
 
 async def preview(session, org_id: int, month: str) -> dict:
@@ -125,6 +220,7 @@ async def preview(session, org_id: int, month: str) -> dict:
     totals = {field: Decimal("0") for field in AMOUNT_FIELDS}
     binding_rows: dict[int, dict] = {}
     fszn_segments: list[tuple[int, int, Decimal]] = []
+    fszn_minimum_segments: list[dict] = []
     included = []
     stale_rule = False
     fszn_base_conflict = False
@@ -170,6 +266,20 @@ async def preview(session, org_id: int, month: str) -> dict:
                     if type(employee_id) is not int or employee_id <= 0:
                         raise HTTPException(409, "Payroll candidate employee identity requires reconciliation")
                     fszn_segments.append((employee_id, row.id, component_bases.pop()))
+                    fszn_minimum_segments.append({
+                        "employee_id": employee_id,
+                        "binding_id": binding["employment_binding_id"],
+                        "review_id": row.id,
+                        "worked_hours": _amount(basis["worked_hours"]),
+                        "norm_hours": _amount(basis["month_norm_hours"]),
+                        "rates": tuple(sorted((component["rate_code"],
+                                                _rate(component["rate_value"]))
+                                               for component in components)),
+                        "listed_contributions": sum(
+                            (_amount(component["amount_byn"]) for component in components),
+                            Decimal("0"),
+                        ),
+                    })
             item = binding_rows.setdefault(binding["employment_binding_id"], {
                 "employment_binding_id": binding["employment_binding_id"],
                 "review_ids": [],
@@ -206,6 +316,7 @@ async def preview(session, org_id: int, month: str) -> dict:
     if any(row["chief_decision"] == "not_applicable" for row in rate_obligations):
         blockers.append("payroll_rate_conflicts_with_organization_review")
     fszn_cap_preview = None
+    fszn_minimum_preview = None
     reference_wage = (organization_review or {}).get("fszn_reference_wage")
     if fszn_base_conflict:
         blockers.append("fszn_segment_bases_disagree")
@@ -229,6 +340,26 @@ async def preview(session, org_id: int, month: str) -> dict:
                 "statutory_base_certified": False,
                 "contributions_recalculated": False,
             }
+        minimum_wage = (organization_review or {}).get("fszn_minimum_wage")
+        if minimum_wage is None:
+            blockers.append("fszn_minimum_wage_missing")
+        elif not fszn_base_conflict:
+            minimum_rows, minimum_issues = _monthly_fszn_minimum_rows(
+                fszn_minimum_segments,
+                {binding_id: {"condition": review.get("fszn_minimum_condition"),
+                              "full_month_norm_hours": review.get("fszn_minimum_full_month_norm_hours")}
+                 for binding_id, review in applicability_reviews.items()},
+                _amount(minimum_wage["wage_byn"]),
+            )
+            blockers.extend(sorted(minimum_issues))
+            fszn_minimum_preview = {
+                "scope": "attested_erp_segments_and_listed_rates_only",
+                "month": month, "minimum_wage": minimum_wage,
+                "employees": minimum_rows,
+                "all_selected_segments_attested": not summary["source_fact_unattested_review_ids"],
+                "statutory_minimum_certified": False,
+                "contributions_recalculated": False,
+            }
     # A configured percentage list is not proof that every legally applicable
     # deduction, exemption, cap, benefit or employee-specific fact was covered.
     blockers.append("statutory_rule_completeness_unverified")
@@ -247,6 +378,7 @@ async def preview(session, org_id: int, month: str) -> dict:
         "included_reviews": included,
         "applicability": applicability,
         "fszn_monthly_cap_preview": fszn_cap_preview,
+        "fszn_minimum_preview": fszn_minimum_preview,
         "blockers": blockers,
         "totals": formatted,
     }
@@ -260,6 +392,7 @@ async def preview(session, org_id: int, month: str) -> dict:
         "bindings": bindings, "totals": formatted, "blockers": blockers,
         "applicability": applicability,
         "fszn_monthly_cap_preview": fszn_cap_preview,
+        "fszn_minimum_preview": fszn_minimum_preview,
         "arithmetic_scope_complete": not any(code not in {
             "statutory_rule_completeness_unverified",
             "payroll_rate_obligation_unmapped",

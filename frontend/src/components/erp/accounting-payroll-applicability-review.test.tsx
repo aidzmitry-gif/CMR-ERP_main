@@ -50,6 +50,22 @@ describe("AccountingPayrollApplicabilityReview", () => {
     fireEvent.change(screen.getByLabelText("Место main_workplace_and_deduction_basis"), {
       target: { value: "page 1, section 2" },
     });
+    fireEvent.click(screen.getByLabelText("Применимость минимальной суммы взносов ФСЗН (статья 9)"));
+    fireEvent.change(screen.getByLabelText("Вывод fszn_minimum_condition"), {
+      target: { value: "Ordinary employee subject to the source rule" },
+    });
+    fireEvent.change(screen.getByLabelText("Место fszn_minimum_condition"), {
+      target: { value: "page 1, employment category" },
+    });
+    fireEvent.change(screen.getByLabelText("Решение о минимуме ФСЗН"), {
+      target: { value: "applies" },
+    });
+    fireEvent.change(screen.getByLabelText("Полная норма часов месяца ФСЗН"), {
+      target: { value: "160.00" },
+    });
+    fireEvent.change(screen.getByLabelText("Место полной нормы ФСЗН"), {
+      target: { value: "page 1, full-month schedule" },
+    });
     fireEvent.change(screen.getByLabelText("Пояснение проверки налоговых условий"), {
       target: { value: "Synthetic chief checked the indicated paragraph" },
     });
@@ -59,7 +75,11 @@ describe("AccountingPayrollApplicabilityReview", () => {
       String(url).endsWith("/payroll-applicability-reviews") && init?.method === "POST")?.[1] as RequestInit).body as string);
     expect(sent).toMatchObject({
       employment_binding_id: 9, source_file_id: 7, source_document: "dossier-1", supersedes_id: null,
-      facts: [{ code: "main_workplace_and_deduction_basis", source_locator: "page 1, section 2" }],
+      facts: [{ code: "fszn_minimum_condition", fszn_minimum_condition: "applies",
+        fszn_minimum_full_month_norm_hours: "160.00",
+        fszn_minimum_full_norm_locator: "page 1, full-month schedule",
+        source_locator: "page 1, employment category" },
+      { code: "main_workplace_and_deduction_basis", source_locator: "page 1, section 2" }],
     });
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/payroll/accrue") || String(url).includes("/payroll/pay"))).toBe(false);
     expect(await screen.findByText(/Текущая редакция № 1/)).toBeInTheDocument();

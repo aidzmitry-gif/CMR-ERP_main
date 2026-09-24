@@ -13,6 +13,7 @@ const source = {
   kind: "payroll_organization_rule", month: "2026-10", reference: "rules-2026-10",
   sha256: "a".repeat(64),
 };
+const minimumSource = { ...source, file_id: 88, reference: "minimum-wage-2026-10", sha256: "c".repeat(64) };
 const ruleCodes = [
   "period_fszn_rules_and_limits",
   "period_income_tax_withholding_rule",
@@ -46,7 +47,7 @@ describe("AccountingPayrollOrganizationReview", () => {
     let saved: Record<string, unknown> | null = null;
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
       if (url.endsWith("/payroll-workpaper-access")) return Promise.resolve(response({ organization_id: 7, can_review: true }));
-      if (url.includes("/payroll-evidence-files?")) return Promise.resolve(response([source]));
+      if (url.includes("/payroll-evidence-files?")) return Promise.resolve(response([source, minimumSource]));
       if (url.endsWith("/payroll-organization-reviews/current")) return Promise.resolve(saved ? response({ ...saved, source_file_bytes_verified_now: true }) : response({}, 404));
       if (url.endsWith("/payroll-organization-reviews") && init?.method === "POST") {
         const command = JSON.parse(String(init.body));
@@ -59,7 +60,7 @@ describe("AccountingPayrollOrganizationReview", () => {
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("crypto", { randomUUID: () => key });
     render(<AccountingPayrollOrganizationReview org="7" month="2026-10" onReviewed={vi.fn()} />);
-    await screen.findByRole("option", { name: "rules-2026-10 · № 87" });
+    await screen.findByLabelText("Файл правил организации для обзора");
     fireEvent.change(screen.getByLabelText("Файл правил организации для обзора"), { target: { value: "87" } });
     fireEvent.change(screen.getByLabelText(`Решение ${ruleCodes[0]}`), { target: { value: "applicable" } });
     fireEvent.change(screen.getByLabelText(`Вывод ${ruleCodes[0]}`), { target: { value: "Synthetic wage finding for this employer" } });
@@ -68,11 +69,20 @@ describe("AccountingPayrollOrganizationReview", () => {
     fireEvent.change(screen.getByLabelText("Средняя зарплата Белстата BYN"), { target: { value: "003135.90" } });
     fireEvent.change(screen.getByLabelText("Дата публикации Белстата"), { target: { value: "2026-10-24" } });
     fireEvent.change(screen.getByLabelText("Ссылка на источник Белстата"), { target: { value: "https://www.belstat.gov.by/example/wage.pdf" } });
+    fireEvent.change(screen.getByLabelText("Месяц МЗП ФСЗН"), { target: { value: "2026-10" } });
+    fireEvent.change(screen.getByLabelText("МЗП ФСЗН BYN"), { target: { value: "000858" } });
+    fireEvent.change(screen.getByLabelText("Дата публикации МЗП ФСЗН"), { target: { value: "2026-07-13" } });
+    fireEvent.change(screen.getByLabelText("Ссылка на источник МЗП ФСЗН"), { target: { value: "https://nalog.gov.by/news/36005/" } });
+    fireEvent.change(screen.getByLabelText("Файл источника МЗП ФСЗН"), { target: { value: "88" } });
+    fireEvent.change(screen.getByLabelText("Место МЗП ФСЗН"), { target: { value: "page 1, amount" } });
     fireEvent.change(screen.getByLabelText("Пояснение проверки правил организации"), { target: { value: "Проверен отдельный источник месячной средней зарплаты" } });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить фактический обзор" }));
     expect(await screen.findByText(/Текущая редакция № 1, квитанция № 21/)).toBeInTheDocument();
     const post = fetchMock.mock.calls.find(([url, init]) => String(url).endsWith("/payroll-organization-reviews") && init?.method === "POST");
-    expect(JSON.parse(String(post?.[1]?.body)).facts).toMatchObject([{ reference_wage_byn: "3135.90" }]);
+    expect(JSON.parse(String(post?.[1]?.body)).facts).toMatchObject([{
+      reference_wage_byn: "3135.90", minimum_wage_byn: "858.00",
+      minimum_wage_source_file_id: 88, minimum_wage_source_file_sha256: minimumSource.sha256,
+    }]);
   });
 
   it("saves sorted factual rule decisions as an organization and month scoped revision", async () => {
@@ -101,7 +111,7 @@ describe("AccountingPayrollOrganizationReview", () => {
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("crypto", { randomUUID: () => key });
     render(<AccountingPayrollOrganizationReview org="7" month="2026-10" onReviewed={onReviewed} />);
-    await screen.findByRole("option", { name: "rules-2026-10 · № 87" });
+    await screen.findByLabelText("Файл правил организации для обзора");
     fireEvent.change(screen.getByLabelText("Файл правил организации для обзора"), { target: { value: "87" } });
     fillFacts();
     fireEvent.change(screen.getByLabelText(`Решение ${ruleCodes[0]}`), { target: { value: "applicable" } });
@@ -153,7 +163,7 @@ describe("AccountingPayrollOrganizationReview", () => {
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("crypto", { randomUUID: () => key });
     render(<AccountingPayrollOrganizationReview org="7" month="2026-10" onReviewed={vi.fn()} />);
-    await screen.findByRole("option", { name: "rules-2026-10 · № 87" });
+    await screen.findByLabelText("Файл правил организации для обзора");
     fireEvent.change(screen.getByLabelText("Файл правил организации для обзора"), { target: { value: "87" } });
     fillFacts();
     fireEvent.click(screen.getByRole("button", { name: "Сохранить фактический обзор" }));
