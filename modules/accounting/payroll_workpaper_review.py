@@ -131,6 +131,9 @@ class PayrollWorkpaperReviewInput(PayrollWorkpaperInput):
     supersedes_review_id: int | None = Field(default=None, gt=0, strict=True)
     source_fact_attestation: Literal["contract_salary_time_norm_checked"] | None = None
     source_fact_evidence: str | None = Field(default=None, max_length=2000)
+    fszn_base_attestation: Literal["listed_salary_base_checked"] | None = None
+    fszn_base_evidence: str | None = Field(default=None, max_length=2000)
+    fszn_base_contract_locator: str | None = Field(default=None, max_length=200)
 
     @field_validator("reviewer_evidence")
     @classmethod
@@ -145,6 +148,17 @@ class PayrollWorkpaperReviewInput(PayrollWorkpaperInput):
             raise ValueError("Source fact attestation and its evidence must be supplied together")
         if self.source_fact_evidence is not None and len(self.source_fact_evidence.strip()) < 20:
             raise ValueError("Source fact evidence must identify the checked document locations")
+        classification = (self.fszn_base_attestation, self.fszn_base_evidence,
+                          self.fszn_base_contract_locator)
+        if any(value is not None for value in classification):
+            if (not all(value is not None for value in classification)
+                    or self.source_fact_attestation is None):
+                raise ValueError("FSZN base review needs complete evidence and source fact attestation")
+            if (len(self.fszn_base_evidence.strip()) < 20
+                    or len(self.fszn_base_contract_locator.strip()) < 3
+                    or "\x00" in self.fszn_base_evidence
+                    or "\x00" in self.fszn_base_contract_locator):
+                raise ValueError("FSZN base evidence must identify the salary and exclusion sources")
         return self
 
 
@@ -165,6 +179,17 @@ def result(row: PayrollWorkpaperReview) -> dict:
                                     or not isinstance(attestation.get("evidence"), str)
                                     or len(attestation["evidence"].strip()) < 20):
         raise HTTPException(409, "Payroll source fact attestation requires reconciliation")
+    fszn_base = row.snapshot.get("fszn_base_attestation")
+    if fszn_base is not None and (
+            attestation is None or not isinstance(fszn_base, dict)
+            or fszn_base.get("scope") != "listed_salary_base_checked"
+            or not isinstance(fszn_base.get("evidence"), str)
+            or len(fszn_base["evidence"].strip()) < 20
+            or "\x00" in fszn_base["evidence"]
+            or not isinstance(fszn_base.get("contract_locator"), str)
+            or len(fszn_base["contract_locator"].strip()) < 3
+            or "\x00" in fszn_base["contract_locator"]):
+        raise HTTPException(409, "Payroll FSZN base attestation requires reconciliation")
     return {
         "review_id": row.id,
         "organization_id": row.organization_id,
@@ -184,6 +209,7 @@ def result(row: PayrollWorkpaperReview) -> dict:
         "bytes_verified_at_review": True,
         "current_file_bytes_verified": False,
         "source_facts_attested_by_chief": attestation is not None,
+        "fszn_base_classified_by_chief": fszn_base is not None,
         "posting_available": False,
         "statutory_payroll_certified": False,
     }
@@ -194,7 +220,9 @@ async def create(session, org_id: int, month: str,
     await lock_organization(session, org_id)
     command = data.model_dump(mode="json")
     # Preserve request digests of receipts created before these optional fields existed.
-    for field in ("source_fact_attestation", "source_fact_evidence"):
+    for field in ("source_fact_attestation", "source_fact_evidence",
+                  "fszn_base_attestation", "fszn_base_evidence",
+                  "fszn_base_contract_locator"):
         if command[field] is None:
             command.pop(field)
     request_digest = _digest(command)
@@ -267,6 +295,12 @@ async def create(session, org_id: int, month: str,
         snapshot["source_fact_attestation"] = {
             "scope": data.source_fact_attestation,
             "evidence": data.source_fact_evidence.strip(),
+        }
+    if data.fszn_base_attestation is not None:
+        snapshot["fszn_base_attestation"] = {
+            "scope": data.fszn_base_attestation,
+            "evidence": data.fszn_base_evidence.strip(),
+            "contract_locator": data.fszn_base_contract_locator.strip(),
         }
     row = PayrollWorkpaperReview(
         organization_id=org_id,
@@ -392,7 +426,9 @@ async def monthly_arithmetic_summary(session, org_id: int, month: str) -> dict:
             previous = row
         row, amounts = revisions[-1]
         await _verify_current_review_files(session, row)
-        attested = result(row)["source_facts_attested_by_chief"]
+        receipt = result(row)
+        attested = receipt["source_facts_attested_by_chief"]
+        fszn_classified = receipt["fszn_base_classified_by_chief"]
         if not attested:
             unattested_review_ids.append(row.id)
         binding = by_binding.setdefault(binding_id, {
@@ -410,6 +446,7 @@ async def monthly_arithmetic_summary(session, org_id: int, month: str) -> dict:
             "basis_digest": row.basis_digest,
             "snapshot_digest": row.snapshot_digest,
             "source_facts_attested_by_chief": attested,
+            "fszn_base_classified_by_chief": fszn_classified,
         })
         selected_receipts.append({"review_id": row.id, "snapshot_digest": row.snapshot_digest})
         for field in AMOUNT_FIELDS:

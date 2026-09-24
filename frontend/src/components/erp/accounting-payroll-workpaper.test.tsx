@@ -8,7 +8,7 @@ const rules = {
   source_reference: "policy-2026", source_file_id: 90,
   rate_rules: [
     { code: "SYNTHETIC-EMPLOYEE", role: "employee_deduction", base_mode: "gross", classification_evidence: "Synthetic classification" },
-    { code: "SYNTHETIC-EMPLOYER", role: "employer_contribution", base_mode: "gross_less_adjustment", classification_evidence: "Synthetic classification" },
+    { code: "SYNTHETIC-EMPLOYER", role: "employer_contribution", base_mode: "gross_less_adjustment", obligation_code: "period_fszn_rules_and_limits", classification_evidence: "Synthetic classification" },
   ],
   rate_versions: [
     { code: "SYNTHETIC-EMPLOYEE", requirement_id: 61, requirement_digest: "a".repeat(64) },
@@ -24,7 +24,7 @@ const sourceFiles = [
 ];
 const matchingFiles = (input: string) => sourceFiles.filter((row) => row.kind === new URL(input, "http://localhost").searchParams.get("kind"));
 const access = { organization_id: 7, can_preview: true, can_upload: true, can_review: true };
-const summary = { status: "arithmetic_reviews_aggregate_only", organization_id: 7, month: "2026-10", bindings: [{ employment_binding_id: 12, segments: [{ review_id: 55, revision: 1, work_from: "2026-10-01", work_to: "2026-10-31", basis_digest: "e".repeat(64), source_facts_attested_by_chief: false }] }] };
+const summary = { status: "arithmetic_reviews_aggregate_only", organization_id: 7, month: "2026-10", bindings: [{ employment_binding_id: 12, segments: [{ review_id: 55, revision: 1, work_from: "2026-10-01", work_to: "2026-10-31", basis_digest: "e".repeat(64), source_facts_attested_by_chief: false, fszn_base_classified_by_chief: false }] }] };
 const result = {
   status: "arithmetic_workpaper_only", basis_digest: "f".repeat(64),
   gross_byn: "750.00", listed_employee_deductions_byn: "75.00", after_listed_deductions_byn: "675.00",
@@ -59,7 +59,7 @@ describe("AccountingPayrollWorkpaper", () => {
       }));
       if (input.includes("payroll-workpaper-reviews") && init.method === "POST") {
         const command = JSON.parse(init.body as string);
-        return Promise.resolve(response({ review_id: 56, organization_id: 7, employment_binding_id: 12, month: "2026-10", work_from: "2026-10-01", work_to: "2026-10-31", request_key: command.request_key, basis_digest: command.basis_digest, revision: 2, supersedes_review_id: 55, status: "arithmetic_review_only", source_facts_attested_by_chief: Boolean(command.source_fact_attestation), posting_available: false, statutory_payroll_certified: false }));
+        return Promise.resolve(response({ review_id: 56, organization_id: 7, employment_binding_id: 12, month: "2026-10", work_from: "2026-10-01", work_to: "2026-10-31", request_key: command.request_key, basis_digest: command.basis_digest, revision: 2, supersedes_review_id: 55, status: "arithmetic_review_only", source_facts_attested_by_chief: Boolean(command.source_fact_attestation), fszn_base_classified_by_chief: Boolean(command.fszn_base_attestation), posting_available: false, statutory_payroll_certified: false }));
       }
       throw new Error(`Unexpected request: ${input} ${init.method}`);
     });
@@ -101,11 +101,14 @@ describe("AccountingPayrollWorkpaper", () => {
     expect(screen.getByRole("button", { name: "Подтвердить исправление" })).toBeDisabled();
     fireEvent.click(screen.getByLabelText("Подтверждаю исходные данные"));
     fireEvent.change(screen.getByLabelText("Основание подтверждения исходных данных"), { target: { value: "Оклад в договоре, часы в табеле, норма в графике" } });
+    fireEvent.click(screen.getByLabelText("Подтверждаю состав базы ФСЗН"));
+    fireEvent.change(screen.getByLabelText("Место оклада для базы ФСЗН"), { target: { value: "page 1, salary clause" } });
+    fireEvent.change(screen.getByLabelText("Основание состава базы ФСЗН"), { target: { value: "Synthetic salary and adjustment sources checked for FSZN" } });
     fireEvent.click(screen.getByRole("button", { name: "Подтвердить исправление" }));
     expect(await screen.findByText(/Квитанция № 56, редакция 2, сохранена без проводок/)).toBeInTheDocument();
     const reviewPosts = fetchMock.mock.calls.filter(([url, init]) => String(url).includes("payroll-workpaper-reviews") && init.method === "POST");
     expect(reviewPosts).toHaveLength(1);
-    expect(JSON.parse(reviewPosts[0][1].body as string)).toMatchObject({ request_key: expect.any(String), basis_digest: "f".repeat(64), supersedes_review_id: 55, reviewer_evidence: "Проверены строки договора, табеля и корректировки", source_fact_attestation: "contract_salary_time_norm_checked", source_fact_evidence: "Оклад в договоре, часы в табеле, норма в графике" });
+    expect(JSON.parse(reviewPosts[0][1].body as string)).toMatchObject({ request_key: expect.any(String), basis_digest: "f".repeat(64), supersedes_review_id: 55, reviewer_evidence: "Проверены строки договора, табеля и корректировки", source_fact_attestation: "contract_salary_time_norm_checked", source_fact_evidence: "Оклад в договоре, часы в табеле, норма в графике", fszn_base_attestation: "listed_salary_base_checked", fszn_base_contract_locator: "page 1, salary clause", fszn_base_evidence: "Synthetic salary and adjustment sources checked for FSZN" });
   });
 
   it("rejects foreign-organization sources before rendering a preview", async () => {

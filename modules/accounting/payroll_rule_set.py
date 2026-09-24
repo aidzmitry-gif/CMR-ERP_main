@@ -28,7 +28,15 @@ class PayrollRateRuleInput(Input):
     role: Literal["employee_deduction", "employer_contribution"]
     base_mode: Literal["gross", "gross_less_adjustment"]
     obligation_code: str | None = Field(default=None, min_length=1, max_length=80)
+    fszn_scheme: Literal["general", "professional_pension"] | None = None
     classification_evidence: str = Field(min_length=10, max_length=2000)
+
+    @model_validator(mode="after")
+    def scheme_belongs_to_fszn(self):
+        if (self.fszn_scheme is not None
+                and self.obligation_code != "period_fszn_rules_and_limits"):
+            raise ValueError("FSZN scheme belongs only to a FSZN rate")
+        return self
 
     @field_validator("obligation_code")
     @classmethod
@@ -114,6 +122,8 @@ async def create(session, org_id: int, data: PayrollRuleSetInput, actor: str) ->
     for rule in command["rate_rules"]:
         if rule.get("obligation_code") is None:
             rule.pop("obligation_code", None)  # Preserve earlier command digests.
+        if rule.get("fszn_scheme") is None:
+            rule.pop("fszn_scheme", None)  # Preserve earlier command digests.
     if command["expected_rate_versions"] is None:
         del command["expected_rate_versions"]  # Preserve request digests for earlier clients.
     request_digest = _digest(command)

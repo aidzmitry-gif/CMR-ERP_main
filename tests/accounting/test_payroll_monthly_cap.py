@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from modules.accounting.models import AccessGrant, Organization
 from modules.accounting.payroll_candidate import (
+    _fszn_general_rate_scope,
     _monthly_fszn_cap_rows,
     _monthly_fszn_minimum_rows,
 )
@@ -28,6 +29,17 @@ def test_monthly_ceiling_aggregates_segments_for_the_same_employee():
     )
     assert exceeded_next_month is False
     assert next_month[0]["capped_listed_base_byn"] == "3000.00"
+
+
+def test_general_fszn_comparison_rejects_unclassified_or_professional_rates():
+    general = {"code": "GENERAL", "obligation_code": "period_fszn_rules_and_limits",
+               "fszn_scheme": "general"}
+    professional = {"code": "PROF", "obligation_code": "period_fszn_rules_and_limits",
+                    "fszn_scheme": "professional_pension"}
+    assert _fszn_general_rate_scope([general]) == ({"GENERAL"}, True)
+    assert _fszn_general_rate_scope([{**general, "fszn_scheme": None}]) == ({"GENERAL"}, False)
+    assert _fszn_general_rate_scope([general, professional]) == ({"GENERAL", "PROF"}, False)
+    assert _fszn_general_rate_scope([]) == (set(), False)
 
 
 def test_article_9_reference_aggregates_time_and_listed_rates_without_repricing():

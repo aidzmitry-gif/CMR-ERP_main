@@ -230,6 +230,15 @@ blocker instead of a number. The comparison is provisional: unlisted payments,
 true tariff/category, source authenticity and employer-specific policy remain
 unverified; it never changes contribution totals or permits posting/payment.
 
+For each listed salary segment the chief may separately attest the displayed
+FSZN base against the contract clause and stored adjustment files. A current
+rate set must explicitly distinguish general FSZN from professional pension
+insurance: missing or special scheme suppresses the general 5×/minimum
+numeric preview. Missing segment attestation likewise suppresses it and lists
+the unclassified receipt IDs. Existing receipts without either new field keep
+their original digests; they remain provisional and cannot be silently treated
+as having reviewed payment composition.
+
 The current rule-set API exposes `rate_versions` (the immutable configured
 requirement IDs and digests) together with the rate roles and base modes. The
 accountant workspace's **Расчётный лист** tab uses those IDs, an explicitly
