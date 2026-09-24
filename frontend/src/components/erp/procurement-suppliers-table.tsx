@@ -4,14 +4,15 @@ import clsx from "clsx";
 import { Plus, RefreshCw, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { SourceTag } from "@/components/source-tag";
 import { formatNumber } from "@/lib/format";
 import {
   createSupplier,
   emptySupplier,
   fetchSuppliers,
   filterSuppliers,
+  searchSupplierCounterparties,
   type Supplier,
+  type SupplierCounterparty,
   type SupplierInput,
   statusLabel,
   updateSupplier,
@@ -38,11 +39,13 @@ function Field({
   value,
   onChange,
   placeholder,
+  readOnly,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  readOnly?: boolean;
 }) {
   return (
     <label className="block">
@@ -51,6 +54,7 @@ function Field({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
+        readOnly={readOnly}
         className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
       />
     </label>
@@ -64,6 +68,22 @@ export function ProcurementSuppliersTable({ initial }: { initial: Supplier[] }) 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [mdmSearch, setMdmSearch] = useState("");
+  const [mdmOptions, setMdmOptions] = useState<SupplierCounterparty[]>([]);
+  const [mdmError, setMdmError] = useState("");
+  const drawerOpen = draft !== null;
+
+  useEffect(() => {
+    const term = mdmSearch.trim();
+    if (!drawerOpen || term.length < 2) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void searchSupplierCounterparties(term)
+        .then(items => { if (active) { setMdmOptions(items); setMdmError(""); } })
+        .catch(() => { if (active) { setMdmOptions([]); setMdmError("Справочник контрагентов недоступен"); } });
+    }, 250);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [drawerOpen, mdmSearch]);
 
   useEffect(() => {
     void fetchSuppliers().then((d) => {
@@ -83,22 +103,29 @@ export function ProcurementSuppliersTable({ initial }: { initial: Supplier[] }) 
 
   function openCreate() {
     setError("");
+    setMdmSearch(""); setMdmOptions([]); setMdmError("");
     setDraft({ ...emptySupplier() });
   }
   function openEdit(s: Supplier) {
     setError("");
+    setMdmSearch(""); setMdmOptions([]); setMdmError("");
     setDraft({ ...s });
   }
 
   async function save() {
-    if (!draft || !draft.name.trim()) {
-      setError("Имя поставщика обязательно");
+    if (!draft || !draft.name.trim() || (!draft.id && !draft.counterparty_id)) {
+      setError("Выберите поставщика из справочника контрагентов");
       return;
     }
     setSaving(true);
     setError("");
     const { id, ...input } = draft;
-    const saved = id ? await updateSupplier(id, input) : await createSupplier(input);
+    const patch: Partial<SupplierInput> = { ...input };
+    const original = rows.find(row => row.id === id);
+    if (original?.counterparty_id === input.counterparty_id) delete patch.counterparty_id;
+    if (original?.name === input.name) delete patch.name;
+    if (original?.unp === input.unp) delete patch.unp;
+    const saved = id ? await updateSupplier(id, patch) : await createSupplier(input);
     setSaving(false);
     if (!saved) {
       setError("Не удалось сохранить — попробуйте ещё раз");
@@ -112,8 +139,8 @@ export function ProcurementSuppliersTable({ initial }: { initial: Supplier[] }) 
     <div className="flex-1 overflow-auto p-6">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-muted">
-          Профили поставщиков: условия оплаты, срок поставки, incoterms, статус. УНП — из MDM
-          (эталон контрагента), здесь — закупочные атрибуты.
+          Профили поставщиков: реквизиты выбираются из MDM по ID; условия оплаты,
+          сроки и Incoterms хранятся в закупках. Старые профили без ID требуют сопоставления.
         </p>
         <div className="flex shrink-0 items-center gap-2">
           <button
@@ -178,7 +205,7 @@ export function ProcurementSuppliersTable({ initial }: { initial: Supplier[] }) 
               >
                 <td className="px-4 py-2.5">
                   <div className="font-medium text-ink">{s.name}</div>
-                  {s.unp && <SourceTag entity="Контрагент" source="mdm/1c" unp={s.unp} />}
+                  <div className="text-xs text-muted">{s.counterparty_id ? `MDM ID ${s.counterparty_id} · УНП ${s.unp || "не указан"}` : "Не сопоставлен с MDM"}</div>
                 </td>
                 <td className="px-4 py-2.5 text-muted">
                   {s.flag} {s.country}
@@ -220,9 +247,32 @@ export function ProcurementSuppliersTable({ initial }: { initial: Supplier[] }) 
             </div>
 
             <div className="mt-4 grid grid-cols-1 gap-3">
-              <Field label="Название*" value={draft.name} onChange={(v) => setDraft({ ...draft, name: v })} />
+              {!rows.find(row => row.id === draft.id)?.counterparty_id && <>
+                <label className="block text-sm">Поиск контрагента MDM
+                  <input aria-label="Поиск контрагента MDM" value={mdmSearch} onChange={event => {
+                    setMdmSearch(event.target.value); setMdmOptions([]); setMdmError("");
+                    const original = rows.find(row => row.id === draft.id);
+                    setDraft({ ...draft, counterparty_id: null, name: original?.name ?? "", unp: original?.unp ?? "" });
+                  }} className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-2" />
+                </label>
+                <label className="block text-sm">Поставщик из справочника
+                  <select aria-label="Поставщик из справочника" value={draft.counterparty_id ?? ""}
+                    onChange={event => {
+                      const selected = mdmOptions.find(row => row.id === Number(event.target.value));
+                      if (selected) setDraft({ ...draft, counterparty_id: selected.id, name: selected.name, unp: selected.unp });
+                    }} className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-2">
+                    <option value="">Выберите контрагента</option>
+                    {draft.counterparty_id && !mdmOptions.some(row => row.id === draft.counterparty_id) &&
+                      <option value={draft.counterparty_id}>{draft.name} · {draft.unp || "без УНП"} · ID {draft.counterparty_id}</option>}
+                    {mdmOptions.map(row => <option key={row.id} value={row.id}>{row.name} · {row.unp || "без УНП"} · ID {row.id}</option>)}
+                  </select>
+                </label>
+                {mdmError && <p role="alert" className="text-red-600">{mdmError}</p>}
+              </>}
+              {draft.id && !draft.counterparty_id && <p className="text-xs text-amber-700">Исторический профиль не сопоставлен; существующие реквизиты нельзя считать подтверждёнными MDM.</p>}
+              <Field label="Название" value={draft.name} onChange={() => {}} readOnly />
               <div className="grid grid-cols-2 gap-3">
-                <Field label="УНП (MDM)" value={draft.unp} onChange={(v) => setDraft({ ...draft, unp: v })} />
+                <Field label="УНП (MDM)" value={draft.unp} onChange={() => {}} readOnly />
                 <Field label="Страна" value={draft.country} onChange={(v) => setDraft({ ...draft, country: v })} />
               </div>
               <div className="grid grid-cols-2 gap-3">

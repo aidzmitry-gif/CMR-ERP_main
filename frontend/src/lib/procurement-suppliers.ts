@@ -1,11 +1,12 @@
 // Домен «Справочник поставщиков» поверх backend-API `/procurement/suppliers`.
-// Supplier — профиль закупок (условия/срок/incoterms/статус); `unp` — soft-ref на MDM-контрагента
-// (провенанс через <SourceTag>). SSR-загрузка ходит на BACKEND_URL, мутации — через прокси `/api`.
+// Supplier — профиль закупок; новый профиль явно связывается с MDM-контрагентом по ID.
+// Исторический профиль может оставаться без ID до ручной сверки.
 
 const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 export interface Supplier {
   id: number;
+  counterparty_id?: number | null;
   name: string;
   unp: string;
   country: string;
@@ -21,6 +22,21 @@ export interface Supplier {
 }
 
 export type SupplierInput = Omit<Supplier, "id">;
+
+export interface SupplierCounterparty { id: number; name: string; unp: string }
+
+export async function searchSupplierCounterparties(term: string): Promise<SupplierCounterparty[]> {
+  if (term.trim().length < 2) return [];
+  const response = await fetch(`/api/procurement/supplier-counterparties?q=${encodeURIComponent(term.trim())}`, { cache: "no-store" });
+  if (!response.ok) throw new Error("Справочник контрагентов недоступен");
+  const value: unknown = await response.json();
+  if (!value || typeof value !== "object" || !Array.isArray((value as { items?: unknown }).items)) throw new Error("Неверный ответ справочника");
+  const items = (value as { items: unknown[] }).items;
+  if (!items.every(item => !!item && typeof item === "object" && Number.isSafeInteger((item as SupplierCounterparty).id)
+      && (item as SupplierCounterparty).id > 0 && typeof (item as SupplierCounterparty).name === "string"
+      && typeof (item as SupplierCounterparty).unp === "string")) throw new Error("Неверный ответ справочника");
+  return items as SupplierCounterparty[];
+}
 
 const STATUS_LABEL: Record<string, string> = { active: "Активен", blocked: "Заблокирован" };
 
@@ -44,6 +60,7 @@ export function filterSuppliers(rows: Supplier[], q: string): Supplier[] {
 /** Пустой профиль для формы создания. */
 export function emptySupplier(): SupplierInput {
   return {
+    counterparty_id: null,
     name: "",
     unp: "",
     country: "",

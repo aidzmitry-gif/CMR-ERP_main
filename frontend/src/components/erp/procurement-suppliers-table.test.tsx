@@ -10,6 +10,7 @@ vi.mock("@/lib/procurement-suppliers", async (importActual) => {
     fetchSuppliers: vi.fn(),
     createSupplier: vi.fn(),
     updateSupplier: vi.fn(),
+    searchSupplierCounterparties: vi.fn(),
   };
 });
 
@@ -65,10 +66,18 @@ const rows: Supplier[] = [
 const fetchSuppliers = api.fetchSuppliers as ReturnType<typeof vi.fn>;
 const createSupplier = api.createSupplier as ReturnType<typeof vi.fn>;
 const updateSupplier = api.updateSupplier as ReturnType<typeof vi.fn>;
+const searchSupplierCounterparties = api.searchSupplierCounterparties as ReturnType<typeof vi.fn>;
 
 // Открыть drawer создания и вернуть input названия (Field без htmlFor — берём по метке).
 function nameInput(): HTMLInputElement {
-  return screen.getByText("Название*").parentElement!.querySelector("input") as HTMLInputElement;
+  return screen.getByText("Название").parentElement!.querySelector("input") as HTMLInputElement;
+}
+
+async function chooseMdm(name: string) {
+  fireEvent.change(screen.getByLabelText("Поиск контрагента MDM"), { target: { value: name } });
+  await waitFor(() => expect(searchSupplierCounterparties).toHaveBeenCalledWith(name));
+  await screen.findByRole("option", { name: new RegExp(name) });
+  fireEvent.change(screen.getByLabelText("Поставщик из справочника"), { target: { value: "12" } });
 }
 
 beforeEach(() => {
@@ -77,6 +86,7 @@ beforeEach(() => {
   fetchSuppliers.mockResolvedValue(null);
   createSupplier.mockResolvedValue(supplier({ id: 99 }));
   updateSupplier.mockResolvedValue(supplier());
+  searchSupplierCounterparties.mockImplementation(async (name: string) => [{ id: 12, name, unp: "190000012" }]);
 });
 
 describe("ProcurementSuppliersTable", () => {
@@ -137,21 +147,21 @@ describe("ProcurementSuppliersTable", () => {
     expect(screen.getByRole("heading", { name: "Новый поставщик" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
-    expect(screen.getByText("Имя поставщика обязательно")).toBeInTheDocument();
+    expect(screen.getByText("Выберите поставщика из справочника контрагентов")).toBeInTheDocument();
     expect(createSupplier).not.toHaveBeenCalled();
   });
 
-  it("создание с именем шлёт createSupplier, закрывает форму и обновляет список", async () => {
+  it("создание с выбранным MDM ID шлёт createSupplier, закрывает форму и обновляет список", async () => {
     render(<ProcurementSuppliersTable initial={rows} />);
     fireEvent.click(screen.getByRole("button", { name: /Добавить/ }));
-    fireEvent.change(nameInput(), { target: { value: "ООО Ромашка" } });
+    await chooseMdm("ООО Ромашка");
 
     // refresh после сохранения вернёт список с новым поставщиком
     fetchSuppliers.mockResolvedValueOnce([...rows, supplier({ id: 99, name: "ООО Ромашка" })]);
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
     await waitFor(() =>
-      expect(createSupplier).toHaveBeenCalledWith(expect.objectContaining({ name: "ООО Ромашка" })),
+      expect(createSupplier).toHaveBeenCalledWith(expect.objectContaining({ name: "ООО Ромашка", counterparty_id: 12, unp: "190000012" })),
     );
     expect(updateSupplier).not.toHaveBeenCalled(); // создание, не правка
     // форма закрылась
@@ -165,7 +175,7 @@ describe("ProcurementSuppliersTable", () => {
     createSupplier.mockResolvedValueOnce(null); // сеть/сервер упали
     render(<ProcurementSuppliersTable initial={rows} />);
     fireEvent.click(screen.getByRole("button", { name: /Добавить/ }));
-    fireEvent.change(nameInput(), { target: { value: "ООО Сбой" } });
+    await chooseMdm("ООО Сбой");
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
     expect(await screen.findByText("Не удалось сохранить — попробуйте ещё раз")).toBeInTheDocument();
@@ -173,7 +183,7 @@ describe("ProcurementSuppliersTable", () => {
     expect(screen.getByRole("heading", { name: "Новый поставщик" })).toBeInTheDocument();
   });
 
-  it("клик по строке открывает правку с предзаполненным именем и шлёт updateSupplier(id, …)", async () => {
+  it("исторический профиль сопоставляется с MDM ID без свободного ввода имени", async () => {
     render(<ProcurementSuppliersTable initial={rows} />);
     fireEvent.click(screen.getByText("МинскМеталл"));
 
@@ -182,13 +192,14 @@ describe("ProcurementSuppliersTable", () => {
     const input = nameInput();
     expect(input.value).toBe("МинскМеталл");
 
-    fireEvent.change(input, { target: { value: "МинскМеталл Плюс" } });
+    expect(input).toHaveAttribute("readonly");
+    await chooseMdm("МинскМеталл Плюс");
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
     await waitFor(() =>
       expect(updateSupplier).toHaveBeenCalledWith(
         2,
-        expect.objectContaining({ name: "МинскМеталл Плюс" }),
+        expect.objectContaining({ name: "МинскМеталл Плюс", counterparty_id: 12 }),
       ),
     );
     expect(createSupplier).not.toHaveBeenCalled(); // правка, не создание
