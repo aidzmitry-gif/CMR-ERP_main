@@ -35,7 +35,7 @@ export type PurchaseChain = {
   status: "complete" | "partial";
   blockers: string[];
 };
-export type Action = "add_line" | "delete_line" | "header" | "status" | "plan";
+export type Action = "add_line" | "delete_line" | "header" | "status" | "plan" | "save";
 export type Ack = { organization_id: number; principal: string; order_id: number; action: Action; affected_line_id: number | null; status: string; received_at: string | null };
 const prefix = (org: number) => `/api/procurement/organizations/${org}`;
 const id = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v > 0 && v <= 2147483647;
@@ -100,7 +100,7 @@ export async function fetchEditHistory(org: number, orderId: number, afterId = 0
       || !Array.isArray(value.items) || value.items.length > 50 || value.items.some((item, index) =>
         !id(item.id) || item.id <= afterId || (index > 0 && item.id <= value.items[index - 1].id)
         || typeof item.changed_at !== "string" || !item.changed_at || typeof item.changed_by !== "string" || !item.changed_by
-        || !["add_line", "delete_line", "header", "status", "plan"].includes(item.action)
+        || !["add_line", "delete_line", "header", "status", "plan", "save"].includes(item.action)
         || !Array.isArray(item.changes) || item.changes.length === 0 || item.changes.some((change) =>
           typeof change.field !== "string" || !change.field || !("before" in change) || !("after" in change)))
       || (value.next_after_id !== null && (!id(value.next_after_id) || value.items.length !== 50 || value.next_after_id !== value.items.at(-1)?.id))) {
@@ -182,6 +182,13 @@ const exactDecimal = (v: unknown, scale: number, positive = false) => typeof v =
 export function validCommand(v: unknown): v is EditCommand {
   if (!keys(v, ["version", "request_key", "order_id", "action", "payload"]) || v.version !== 1 || !uuid(v.request_key) || !id(v.order_id)) return false;
   const p = v.payload;
+  if (v.action === "save") {
+    if (!p || typeof p !== "object" || Array.isArray(p)) return false;
+    const changes = p as Record<string, unknown>;
+    const steps = Object.keys(changes);
+    return steps.length > 0 && steps.every(step => ["add_line", "header", "plan", "status"].includes(step)
+      && validCommand({ ...v, action: step, payload: changes[step] }));
+  }
   if (v.action === "add_line") {
     const base = ["sku_code", "qty", "goods_value_byn", "weight", "volume"];
     const selected = ["sku_id", "sku_title", "sku_unit"];
@@ -216,7 +223,10 @@ function consistentPlan(e: Record<string, unknown>) {
   for (const m of [...ms].reverse()) { if (m.planned_date !== cursor.toISOString().slice(0, 10)) return false; cursor = new Date(cursor.getTime() - Number(m.duration_days) * 86400000); if (Number.isNaN(cursor.getTime())) return false; days += Number(m.duration_days); }
   return days === e.total_days && cursor.toISOString().slice(0, 10) === e.start_date;
 }
-function validEffect(c: EditCommand, e: Record<string, unknown>, scope: Identity) {
+function validEffect(c: EditCommand, e: Record<string, unknown>, scope: Identity): boolean {
+  if (c.action === "save") return keys(e, Object.keys(c.payload)) && Object.entries(c.payload).every(([step, payload]) =>
+    !!e[step] && typeof e[step] === "object" && !Array.isArray(e[step])
+    && validEffect({ ...c, action: step as Action, payload: payload as Record<string, unknown> }, e[step] as Record<string, unknown>, scope));
   if (c.action === "add_line" || c.action === "delete_line") {
     if (!keys(e, ["line"]) || !keys(e.line, ["id", "sku_code", "qty", "goods_value_byn", "weight", "volume"])) return false;
     const l = e.line;

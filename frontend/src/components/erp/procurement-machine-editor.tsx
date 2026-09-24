@@ -187,22 +187,20 @@ function Editor({ org, orderId }: { org: number; orderId: number }) {
   }
   async function saveAndClose() {
     if (locked.current || busy || uncertain || needsPreparation || !scope || !order) return;
-    const changes: { action: EditCommand["action"]; payload: Record<string, unknown> }[] = [];
+    const changes: Record<string, Record<string, unknown>> = {};
     try {
       if (draftDirty) {
         if (!selectedSku || draft.sku_code !== selectedSku.code) throw new Error("Выберите номенклатуру из справочника для новой позиции.");
-        changes.push({ action: "add_line", payload: { sku_code: selectedSku.code, sku_id: selectedSku.id, sku_title: selectedSku.title, sku_unit: selectedSku.unit, qty: decimalInput(draft.qty, 2, true), goods_value_byn: decimalInput(draft.goods_value_byn, 2), weight: decimalInput(draft.weight, 3), volume: decimalInput(draft.volume, 4) } });
+        changes.add_line = { sku_code: selectedSku.code, sku_id: selectedSku.id, sku_title: selectedSku.title, sku_unit: selectedSku.unit, qty: decimalInput(draft.qty, 2, true), goods_value_byn: decimalInput(draft.goods_value_byn, 2), weight: decimalInput(draft.weight, 3), volume: decimalInput(draft.volume, 4) };
       }
-      if (freightDirty) changes.push({ action: "header", payload: { freight_byn: decimalInput(freight, 2) } });
+      if (freightDirty) changes.header = { freight_byn: decimalInput(freight, 2) };
       if (planDirty) {
         if (!target) throw new Error("Укажите дату «В Минске до» для изменённого плана.");
-        changes.push({ action: "plan", payload: { transport_method_code: method, target_arrival_date: target } });
+        changes.plan = { transport_method_code: method, target_arrival_date: target };
       }
-      if (statusTouched && status !== order.status) changes.push({ action: "status", payload: { status } });
+      if (statusTouched && status !== order.status) changes.status = { status };
     } catch (cause) { setError(message(cause)); return; }
-    for (const change of changes) {
-      if (!await perform(change.action, change.payload)) return;
-    }
+    if (Object.keys(changes).length && !await perform("save", changes)) return;
     router.push(`/erp/procurement/orders?org=${org}`);
   }
   async function allocate(lineId: number, candidate: DealDemandOrder["lines"][number]["candidates"][number], freeForClient: string) {
