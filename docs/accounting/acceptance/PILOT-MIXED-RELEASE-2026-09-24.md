@@ -11,10 +11,10 @@
 
 | Компонент | Точная версия | Что проверено |
 | --- | --- | --- |
-| Backend | Git `e5c81f92d087754d371e334a1ff138fa279894e8`, image `sha256:568d1040d04e9e73bae8043f73c345170893821eabc35de588564a23cf9a78dc` | Linux/amd64 образ из Git blobs; на изолированной копии текущей БД миграция `0116 → 0176`, 113 исходных таблиц и 49 959 старых строк без расхождений |
+| Backend-кандидат | Git `aa59bc61fb398333acb61751e43963af177e46d3`, image `sha256:d943ab510dbee847e41f9ddeeb1d50ce9e91639df80c5cfb16076e687c2468a8` | 2616 Git blobs; изолированный запуск с PostgreSQL без автомиграции/фоновых задач, health 200, отдельная явная миграция пустой синтетической БД до `0176`. Проверка наполненной копии этим image ещё нужна |
 | Frontend | Git `1fd4e0811eceee41681a5cac3da99cdfcf36a245`, image `sha256:cf25ac8862b04c56865729418f6ed20ee8b10cbc786d8cb11c8fe8919d09a15e` | Linux/amd64 standalone, `BUILD_ID=NugLquCeWhonBTHKU0uZf`, локальный запуск без сети, анонимный redirect и JS 200 |
 | Frontend-архив | `.harness/artifacts/CRM-ACC-001/frontend-runtime-1fd4e081.tar` | 99 745 792 байта, SHA-256 `02d6dadd86fbe4453ee0b570ada98ffd62cd18994ac79253aef8f6d2f94b63d1`, `docker load` дал тот же image ID |
-| Исходник для обзора | `agent/crm-acc-prod009` @ `e13ced0ff65adf91f5daa09750160b5f39a01a99` | Между backend-исходником и этим коммитом менялись только четыре квитанции, Dockerfile/config frontend и скрипт сравнения копий; app/migrations/gitlinks/requirements не изменились. `alembic heads`: единственный `0176` |
+| Исходник для обзора | `agent/crm-acc-prod009` @ `aa59bc61fb398333acb61751e43963af177e46d3` локально; публичная agent-ветка остаётся на `23a0ca63` | Новый backend меняет только контролируемый startup, runtime-зависимость PDF и безопасный лог БД; миграции и gitlink остались прежними. Квитанция: `CONTROLLED-BACKEND-START-2026-09-24.md` |
 
 Точные десять gitlink SHA находятся в
 `docs/accounting/acceptance/PILOT-RELEASE-SOURCE-2026-09-24.md`; список
@@ -23,6 +23,12 @@
 на GitHub. Чистый shallow clone с десятью submodule прошёл; прежнее
 препятствие доставки исходников закрыто. Это не разрешение на серверное
 переключение: остальные ворота ниже остаются обязательными.
+
+Прежний backend image `sha256:568d1040...` проверил миграцию наполненной
+live-read копии `0116 → 0176` без изменения 49 959 старых строк. Он
+заменён локальным кандидатом `sha256:d943ab51...`; проверку наполненной
+копии для **нового** образа ещё нужно повторить. Локальный образ не
+публиковался и не запускался на сервере.
 
 Read-only серверная проверка 24.09.2026, 08:34 UTC: действующий
 `cmr-frontend.service` активен; `/usr/bin/node` v22.22.3 (ABI 127),
@@ -134,9 +140,11 @@ image/BUILD_ID; проверки ролей, юрлица и документа;
 
 ## Итог локальной проверки
 
-Backend и frontend image IDs, hash tar, единственный head `0176` и отсутствие
-изменений backend-runtime путей между `e5c81f92` и `e13ced0f` повторно
-подтверждены локально. На сервере уже была успешная репетиция миграции
-**live-read копии**, но final write-frozen backup, испытанный маршрут
-systemd/frontend, текущий server preflight, authenticated UI и сверка с 1С
-отсутствуют. Поэтому решение остаётся `NO-GO`, а цель — активной.
+Точные локальные backend/frontend image IDs, hash frontend tar и единственный
+head `0176` подтверждены. Новый backend-кандидат стартовал с синтетической
+PostgreSQL без неявной миграции и фоновых процессов; на пустой БД отдельная
+миграция им же дошла до `0176`. Серверная репетиция наполненной **live-read
+копии** относится к прежнему backend image. Для нового image она не повторена;
+final write-frozen backup, испытанный systemd/frontend-switch, текущий
+server preflight, authenticated UI и сверка с 1С отсутствуют. Поэтому
+решение остаётся `NO-GO`, а цель — активной.
