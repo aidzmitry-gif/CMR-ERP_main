@@ -89,6 +89,7 @@ import {
   triggerIncomingCall,
   updateBranding,
   updateDeal,
+  updateDealFieldsIfCurrent,
   updateDealItem,
   updateDealStage,
   updateStage,
@@ -284,9 +285,9 @@ describe("api client — сделки/доска/KPI", () => {
   });
 
   it("fetchDealDetail маппит карточку с позициями", async () => {
-    stubFetch({ ...apiDeal, items: [{ title: "Лист", last_price: 1500, min_price: 1450 }] });
+    stubFetch({ ...apiDeal, edit_token: "a".repeat(64), items: [{ title: "Лист", last_price: 1500, min_price: 1450 }] });
     const detail = await fetchDealDetail("9");
-    expect(detail).toMatchObject({ company: "ООО Доска", items: [{ title: "Лист", minPrice: 1450 }] });
+    expect(detail).toMatchObject({ company: "ООО Доска", editToken: "a".repeat(64), items: [{ title: "Лист", minPrice: 1450 }] });
   });
 
   it("пустая карточка не выдумывает шаг, ответственного, время и переписку", async () => {
@@ -614,6 +615,19 @@ describe("api client — прочие операции и fallback'и", () => {
     expect(await qualifyLead(1)).toBeNull();
     expect(await aiDraftReply("1")).toBeNull();
     expect(await aiAssist("1", "summary")).toBeNull();
+  });
+
+  it("сохранение полей сделки передаёт версию и отличает конфликт от успеха", async () => {
+    const token = "b".repeat(64);
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 409 })
+      .mockResolvedValueOnce({ ok: true, status: 200 });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await updateDealFieldsIfCurrent("7", { title: "Новая" }, token)).toBe("conflict");
+    expect(await updateDealFieldsIfCurrent("7", { title: "Новая" }, token)).toBe("saved");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      title: "Новая", expected_edit_token: token,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("все мутаторы возвращают fallback при сетевой ошибке", async () => {

@@ -106,6 +106,7 @@ export interface DealItemView {
 
 export interface DealDetail {
   number: string;
+  editToken?: string;
   company: string;
   description: string;
   amount: number;

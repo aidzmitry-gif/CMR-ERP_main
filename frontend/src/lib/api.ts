@@ -21,6 +21,7 @@ function roleHeaders(roles?: string, accessToken?: string, devUsername?: string)
 
 interface ApiDeal {
   id: number;
+  edit_token?: string;
   number: string;
   title: string;
   counterparty: string;
@@ -378,6 +379,7 @@ export async function fetchDealDetail(
           }
         : undefined,
       description: d.title,
+      editToken: typeof d.edit_token === "string" && /^[0-9a-f]{64}$/.test(d.edit_token) ? d.edit_token : undefined,
       // Number(d.amount ?? 0) — на пустой/null сделке formatByn не нарисует «NaN BYN».
       amount: Number(d.amount ?? 0),
       priority: toPriority(d.priority),
@@ -921,6 +923,25 @@ export async function updateDeal(
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+/** Save the card editor only if its original fields are still current. */
+export async function updateDealFieldsIfCurrent(
+  id: string,
+  fields: Record<string, unknown>,
+  editToken: string,
+): Promise<"saved" | "conflict" | "unconfirmed"> {
+  if (!/^[0-9a-f]{64}$/.test(editToken)) return "unconfirmed";
+  try {
+    const res = await fetch(`/api/sales/deals/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...fields, expected_edit_token: editToken }),
+    });
+    return res.ok ? "saved" : res.status === 409 ? "conflict" : "unconfirmed";
+  } catch {
+    return "unconfirmed";
   }
 }
 

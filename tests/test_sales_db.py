@@ -120,6 +120,30 @@ async def test_deal_field_history_records_actor_time_before_after_and_exact_deal
     assert (await api.get("/sales/deals/999999/field-history")).status_code == 404
 
 
+async def test_deal_card_edit_rejects_stale_snapshot_without_changing_fields(api):
+    deal = (await api.post("/sales/deals", json={
+        "number": "EDIT-CAS-1", "title": "Первый", "counterparty": "ООО Тест", "amount": 100,
+    })).json()
+    path = f"/sales/deals/{deal['id']}"
+    original = (await api.get(path)).json()
+    token = original["edit_token"]
+    assert len(token) == 64
+    assert (await api.patch(path, json={"title": "Второй"})).status_code == 200
+    stale = await api.patch(path, json={"title": "Затёртый", "expected_edit_token": token})
+    assert stale.status_code == 409
+    current = (await api.get(path)).json()
+    assert current["title"] == "Второй"
+    assert current["edit_token"] != token
+    assert (await api.patch(path, json={"expected_edit_token": current["edit_token"],
+                                        "title": "Третий"})).status_code == 200
+    saved = (await api.get(path)).json()
+    assert saved["title"] == "Третий"
+    assert saved["edit_token"] != current["edit_token"]
+    history = (await api.get(f"{path}/field-history")).json()["items"]
+    assert len(history) == 2  # Rejected edit is absent from the audit.
+    assert (await api.patch(path, json={"expected_edit_token": None, "title": "Нет"})).status_code == 422
+
+
 async def test_update_deal_next_step_at(api):
     """next_step_at (дата+время шага) сохраняется и читается независимо от next_step (текст)."""
     created = (

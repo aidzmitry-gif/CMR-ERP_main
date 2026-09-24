@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
-vi.mock("@/lib/api", () => ({ updateDeal: vi.fn() }));
+vi.mock("@/lib/api", () => ({ updateDealFieldsIfCurrent: vi.fn() }));
 
 import { DealEditButton } from "@/components/deal-edit-button";
 import * as api from "@/lib/api";
@@ -11,13 +11,13 @@ const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 beforeEach(() => vi.clearAllMocks());
 
 function open() {
-  render(<DealEditButton dealId="1" title="Поставка" amount={100} nextStep="Звонок" dealDate="12.05.2024" />);
+  render(<DealEditButton dealId="1" editToken={"a".repeat(64)} title="Поставка" amount={100} nextStep="Звонок" dealDate="12.05.2024" />);
   fireEvent.click(screen.getByTitle("Редактировать сделку"));
 }
 
 describe("DealEditButton", () => {
   it("редактирует поля и сохраняет изменения", async () => {
-    mock(api.updateDeal).mockResolvedValue(true);
+    mock(api.updateDealFieldsIfCurrent).mockResolvedValue("saved");
     open();
     expect(screen.getByRole("heading", { name: "Редактировать сделку" })).toBeInTheDocument();
 
@@ -32,7 +32,7 @@ describe("DealEditButton", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
     await waitFor(() =>
-      expect(api.updateDeal).toHaveBeenCalledWith(
+      expect(api.updateDealFieldsIfCurrent).toHaveBeenCalledWith(
         "1",
         expect.objectContaining({
           title: "Новая поставка",
@@ -40,19 +40,29 @@ describe("DealEditButton", () => {
           deal_date: "01.06.2026",
           next_step: "2026-07-15T09:00",
         }),
+        "a".repeat(64),
       ),
     );
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Редактировать сделку" })).toBeNull());
   });
 
   it("сохраняет ввод и форму открытой, если сервер отказал", async () => {
-    mock(api.updateDeal).mockResolvedValue(false);
+    mock(api.updateDealFieldsIfCurrent).mockResolvedValue("unconfirmed");
     open();
     fireEvent.change(screen.getByRole("textbox", { name: "Описание" }), { target: { value: "Исправленная поставка" } });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Сервер не подтвердил сохранение");
     expect(screen.getByRole("textbox", { name: "Описание" })).toHaveValue("Исправленная поставка");
     expect(screen.getByRole("button", { name: "Сохранить и закрыть" })).toBeEnabled();
+  });
+
+  it("оставляет конфликтующие правки открытыми для сверки", async () => {
+    mock(api.updateDealFieldsIfCurrent).mockResolvedValue("conflict");
+    open();
+    fireEvent.change(screen.getByRole("textbox", { name: "Описание" }), { target: { value: "Моя версия" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Сделка изменена другим сотрудником");
+    expect(screen.getByRole("textbox", { name: "Описание" })).toHaveValue("Моя версия");
   });
 
   it("предупреждает о несохранённых правках при закрытии и уходе со страницы", () => {

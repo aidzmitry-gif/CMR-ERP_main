@@ -123,6 +123,7 @@ export default async function DealDetailPage({ params, searchParams }: { params:
             <div className="flex flex-wrap gap-2">
               <DealEditButton
                 dealId={id}
+                editToken={d.editToken}
                 title={d.description}
                 amount={d.amount}
                 nextStep={d.nextStep}

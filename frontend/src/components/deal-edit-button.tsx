@@ -3,13 +3,14 @@
 import { Pencil, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { updateDeal } from "@/lib/api";
+import { updateDealFieldsIfCurrent } from "@/lib/api";
 import { useUnsavedDocumentGuard } from "@/lib/use-unsaved-document-guard";
 
 const INPUT = "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent";
 
 export function DealEditButton({
   dealId,
+  editToken,
   title,
   amount,
   nextStep,
@@ -20,6 +21,7 @@ export function DealEditButton({
   penaltyTerms = "",
 }: {
   dealId: string;
+  editToken?: string;
   title: string;
   amount: number;
   nextStep: string;
@@ -61,11 +63,12 @@ export function DealEditButton({
 
   async function save() {
     if (submitting.current) return;
+    if (!editToken) { setError("Версия полей сделки не получена. Обновите карточку перед сохранением."); return; }
     submitting.current = true;
     setSaving(true);
     setError("");
     try {
-      const confirmed = await updateDeal(dealId, {
+      const result = await updateDealFieldsIfCurrent(dealId, {
         title: form.title,
         amount: Number(form.amount),
         next_step: form.next_step,
@@ -75,8 +78,9 @@ export function DealEditButton({
         penalty_rate_pct: form.penalty_rate_pct === "" ? null : Number(form.penalty_rate_pct),
         penalty_cap_pct: form.penalty_cap_pct === "" ? null : Number(form.penalty_cap_pct),
         penalty_terms: form.penalty_terms || null,
-      });
-      if (!confirmed) { setError("Сервер не подтвердил сохранение. Изменения оставлены в форме."); return; }
+      }, editToken);
+      if (result === "conflict") { setError("Сделка изменена другим сотрудником. Скопируйте свои правки и обновите карточку перед сохранением."); return; }
+      if (result !== "saved") { setError("Сервер не подтвердил сохранение. Изменения оставлены в форме; проверьте карточку перед повтором."); return; }
       setOpen(false);
       router.refresh();
     } catch {
