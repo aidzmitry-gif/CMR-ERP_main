@@ -7,7 +7,7 @@ the accountant's close.  It is therefore an operating checklist, not a claim
 that 1C can already be retired.
 
 Current source branch: `agent/crm-acc-prod009`; `alembic heads`
-reports the single source head `0174`. The local synthetic PostgreSQL
+reports the single source head `0176`. The local synthetic PostgreSQL
 [checkpoint](POSTGRES-ACCEPTANCE-2026-09-23.md) covers an empty-base upgrade,
 restore and targeted payroll guards, not the target database.
 
@@ -36,6 +36,10 @@ restore and targeted payroll guards, not the target database.
   the live ERP ledger export for the same book and period. An identical pair of
   uploaded CSVs alone cannot become a cutover receipt. Existing receipts
   without this verification remain readable but are not marked cutover-ready.
+- Offline and read-only live pilot preflight repeat the manifest and all artifact
+  hashes immediately before returning success. An in-flight change of a bank,
+  payroll or other attached source rejects the packet; later importer and
+  accountant acceptance still require the same bytes and provenance.
 - A matching closed pair now reports `reconciliation_ready`, which permits one
   accountant reconciliation receipt. It does not report `cutover_ready`: the
   external 1C origin and the required close, recovery and release sequence are

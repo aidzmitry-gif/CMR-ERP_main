@@ -29,6 +29,7 @@ from modules.accounting.service import AccountingError  # noqa: E402
 from scripts.accounting_pilot_preflight import (  # noqa: E402
     MAX_MANIFEST_BYTES,
     PreflightError,
+    _assert_packet_unchanged,
     _read_json_with_digest,
     _read_structured_artifact,
     _relative_file,
@@ -100,6 +101,8 @@ async def verify_live(session: AsyncSession, manifest_path: Path) -> dict:
         raise PreflightError("Current ERP OSV cannot be produced for this book and period") from exc
     if current_raw != right_raw:
         raise PreflightError("ERP OSV file differs from the current ledger export")
+
+    _assert_packet_unchanged(manifest_path, manifest, manifest_sha256)
 
     return {
         **offline,

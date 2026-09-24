@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+from scripts import accounting_pilot_preflight as pilot_preflight_module
 from scripts.accounting_pilot_preflight import PreflightError, main, preflight
 from tests.accounting.test_reconciliation import snapshot
 
@@ -230,6 +231,27 @@ def test_preflight_rejects_tampered_artifact_and_cli_returns_failure(tmp_path, c
     assert main(["--manifest", str(path)]) == 2
     assert json.loads(capsys.readouterr().out)["ok"] is False
     with pytest.raises(PreflightError, match="Artifact SHA-256 does not match"):
+        preflight(path)
+
+
+@pytest.mark.parametrize("mutation", ["changed", "removed"])
+def test_preflight_rejects_non_osv_source_changed_during_validation(
+        tmp_path, monkeypatch, mutation):
+    path, _ = valid_manifest(tmp_path)
+    compare = pilot_preflight_module.compare
+
+    def change_source_after_osv(*args):
+        result = compare(*args)
+        source = tmp_path / "bank_statement.txt"
+        if mutation == "removed":
+            source.unlink()
+        else:
+            source.write_text("changed during validation", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(pilot_preflight_module, "compare", change_source_after_osv)
+    expected = "Artifact file is missing" if mutation == "removed" else "Pilot artifact changed"
+    with pytest.raises(PreflightError, match=expected):
         preflight(path)
 
 

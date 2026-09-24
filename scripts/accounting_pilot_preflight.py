@@ -383,6 +383,19 @@ def _read_structured_artifact(path: Path) -> bytes:
     return raw
 
 
+def _assert_packet_unchanged(manifest_path: Path, manifest: dict[str, Any],
+                             manifest_sha256: str) -> None:
+    """Reject files changed while the pilot packet was being checked."""
+    for index, artifact in enumerate(manifest["artifacts"], start=1):
+        path = _relative_file(manifest_path.parent, artifact["path"],
+                              f"artifacts[{index}].path")
+        if _sha256(path) != artifact["sha256"]:
+            raise PreflightError(f"Pilot artifact changed during verification: {path.name}")
+    _, current_sha256 = _read_json_with_digest(manifest_path, limit=MAX_MANIFEST_BYTES)
+    if current_sha256 != manifest_sha256:
+        raise PreflightError("Pilot manifest changed during verification")
+
+
 def _validate_osv(left: dict[str, Any], right: dict[str, Any], month: str,
                   cutover: date, erp_book_id: str) -> dict[str, Any]:
     try:
@@ -463,6 +476,7 @@ def preflight(manifest_path: Path) -> dict[str, Any]:
         raise PreflightError("Opening package source_digest must match opening source file SHA-256")
     osv = _validate_osv(artifacts["osv_left"][0], artifacts["osv_right"][0],
                         month, cutover, erp_book_id)
+    _assert_packet_unchanged(manifest_path, manifest, manifest_sha256)
     return {
         "ok": True,
         "protocol_version": PROTOCOL_VERSION,

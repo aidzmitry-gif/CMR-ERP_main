@@ -66,6 +66,27 @@ async def test_live_preflight_matches_book_policy_and_exact_current_osv(tmp_path
         await db.execute(text("PRAGMA query_only = OFF"))
 
 
+@pytest.mark.parametrize("changed", ["payroll_register", "manifest"])
+async def test_live_preflight_rejects_packet_changed_during_database_check(
+        tmp_path, db, book, monkeypatch, changed):
+    path, _ = await current_packet(tmp_path, db, book)
+    snapshot = reconciliation.erp_snapshot
+
+    async def change_after_snapshot(*args):
+        raw = await snapshot(*args)
+        if changed == "manifest":
+            path.write_bytes(path.read_bytes() + b"\n")
+        else:
+            (tmp_path / "payroll-register.txt").write_text(
+                "changed during database check", encoding="utf-8")
+        return raw
+
+    monkeypatch.setattr(reconciliation, "erp_snapshot", change_after_snapshot)
+    expected = "manifest changed" if changed == "manifest" else "artifact changed"
+    with pytest.raises(PreflightError, match=expected):
+        await verify_live(db, path)
+
+
 @pytest.mark.parametrize("mismatch", ["unp", "policy", "osv"])
 async def test_live_preflight_rejects_declared_or_current_mismatch(
         tmp_path, db, book, mismatch):
