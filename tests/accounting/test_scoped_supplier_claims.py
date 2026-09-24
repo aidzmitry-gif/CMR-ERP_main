@@ -62,6 +62,7 @@ async def test_new_claim_is_owned_replayable_and_not_visible_in_other_book(clien
     result = first.json()
     assert result["organization_id"] == org
     assert result["claim"]["supplier_id"] == supplier_id
+    assert result["claim"]["amount_byn"] == "20.00"
     assert result["claim"]["source"] == "manual"
     assert result["ownership"]["actor"] == "tester"
     assert (await client.post(path, json=payload, headers=HEADERS)).json() == result

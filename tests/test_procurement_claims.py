@@ -9,7 +9,9 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
+from modules.procurement.models import SupplierClaim
 from core.runtime.app import create_app
 from core.runtime.deps import get_session
 from core.services.eventbus import EventContext
@@ -51,23 +53,23 @@ async def test_scrap_creates_claim(claims_app, session):
 
     await _relay(core, session)
 
-    claims = (await client.get("/procurement/claims")).json()
+    claims = (await session.scalars(select(SupplierClaim))).all()
     assert len(claims) == 1
     c = claims[0]
-    assert c["item"] == "АКБ 48V 100Ah"
-    assert c["reason"] == "Непропай БМС"
-    assert c["order_code"] == "№250"
-    assert c["status"] == "open"
-    assert c["source"] == "production"
-    assert c["supplier"] == ""  # поставщик неизвестен — проставит закупщик
-    assert c["entity_ref"].startswith("production:qc:")
+    assert c.item == "АКБ 48V 100Ah"
+    assert c.reason == "Непропай БМС"
+    assert c.order_code == "№250"
+    assert c.status == "open"
+    assert c.source == "production"
+    assert c.supplier == ""  # без юрлица и поставщика — на ручное сопоставление
+    assert c.entity_ref.startswith("production:qc:")
 
 
 async def test_accept_creates_no_claim(claims_app, session):
     client, core = claims_app
     await _scrap(client, decision="accept")  # приёмка, не брак
     await _relay(core, session)
-    assert (await client.get("/procurement/claims")).json() == []
+    assert (await session.scalars(select(SupplierClaim))).all() == []
 
 
 async def test_subscription_registered(claims_app):
@@ -78,30 +80,29 @@ async def test_subscription_registered(claims_app):
 
 async def test_claims_empty(claims_app):
     client, _ = claims_app
-    assert (await client.get("/procurement/claims")).json() == []
+    assert (await client.get("/procurement/claims")).status_code == 410
+    assert (await client.post("/procurement/claims", json={})).status_code == 410
 
 
-async def test_patch_claim_assign_supplier(claims_app, session):
+async def test_unscoped_patch_cannot_assign_supplier_or_close_claim(claims_app, session):
     client, core = claims_app
     await _scrap(client, reason="Скол корпуса")
     await _relay(core, session)
-    claim_id = (await client.get("/procurement/claims")).json()[0]["id"]
+    claim_id = (await session.scalar(select(SupplierClaim))).id
 
     r = await client.patch(
         f"/procurement/claims/{claim_id}",
         json={"supplier": "ООО Поставщик", "status": "resolved"},
     )
-    assert r.status_code == 200
-    body = r.json()
-    assert body["supplier"] == "ООО Поставщик"
-    assert body["status"] == "resolved"
-    assert body["item"] == "АКБ 48V 100Ah"  # прочие поля не затёрты
+    assert r.status_code == 410
+    body = await session.get(SupplierClaim, claim_id)
+    assert body.supplier == "" and body.status == "open"
 
 
-async def test_patch_claim_404(claims_app):
+async def test_unscoped_patch_410(claims_app):
     client, _ = claims_app
     r = await client.patch("/procurement/claims/999", json={"status": "resolved"})
-    assert r.status_code == 404
+    assert r.status_code == 410
 
 
 async def test_claims_newest_first(claims_app, session):
@@ -109,6 +110,6 @@ async def test_claims_newest_first(claims_app, session):
     await _scrap(client, order_code="№1", reason="брак 1")
     await _scrap(client, order_code="№2", reason="брак 2")
     await _relay(core, session)
-    claims = (await client.get("/procurement/claims")).json()
+    claims = (await session.scalars(select(SupplierClaim).order_by(SupplierClaim.id.desc()))).all()
     assert len(claims) == 2
-    assert claims[0]["order_code"] == "№2"  # последний — первым
+    assert claims[0].order_code == "№2"  # последний — первым
