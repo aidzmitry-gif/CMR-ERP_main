@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 from sqlalchemy import func, select
 
@@ -13,6 +15,7 @@ def document():
     return {"currency": "BYN", "invoice_reference": "INV1", "document_date": "2026-09-01",
             "operation_date": "2026-09-02", "supplier": "supplier1", "supplier_id": 1,
             "supplier_unp": "190000001", "contract": "contract1",
+            "contract_basis": "Synthetic purchase without a registered contract",
             "warehouse": "warehouse1", "explanation": "Synthetic primary invoice",
             "items": [{"sku_id": 1, "sku_title": "Synthetic receipt item", "sku": "sku1", "unit": "шт",
                        "lot": "lot1", "quantity": "2.000001",
@@ -34,6 +37,67 @@ async def ensure_receipt_catalog_sku(session, *, unit="шт"):
     else:
         sku.unit = unit
     await session.flush()
+
+
+async def test_supplier_contract_selection_is_company_supplier_and_date_scoped(client, db, book):
+    from modules.accounting.models import Organization
+    from modules.procurement.models import Supplier
+    from modules.procurement.supplier_contracts import SupplierContract
+
+    path = f"/procurement/organizations/{book[0]}/supplier-contracts"
+    command = {"supplier_id": 1, "number": "SC-1", "title": "Synthetic supply agreement",
+               "signed_on": "2026-01-01", "expires_on": "2026-12-31",
+               "evidence": "Synthetic signed original checked by purchaser"}
+    created = await client.post(path, json=command)
+    assert created.status_code == 201, created.text
+    contract_id = created.json()["id"]
+    assert (await client.post(path, json=command)).json()["id"] == contract_id
+    assert (await client.post(path, json={**command, "title": "Other facts"})).status_code == 409
+    options = await client.get(path, params={"supplier_id": 1})
+    assert options.status_code == 200, options.text
+    assert [(item["id"], item["number"]) for item in options.json()["items"]] == [(contract_id, "SC-1")]
+    assert (await client.get(f"/procurement/organizations/{book[0] + 999}/supplier-contracts",
+                             params={"supplier_id": 1})).status_code == 403
+
+    facts = document()
+    facts.pop("contract_basis")
+    facts.update(contract="SC-1", contract_id=contract_id)
+    receipt_path = f"/procurement/organizations/{book[0]}/receipt-documents"
+    accepted = await client.post(receipt_path, json={"key": "contract-linked", "document": facts})
+    assert accepted.status_code == 201, accepted.text
+    assert accepted.json()["revisions"][0]["document"]["contract_id"] == contract_id
+    for key, changes in (
+        ("contract-number-mismatch", {"contract": "SC-OTHER"}),
+        ("contract-expired", {"document_date": "2027-01-01"}),
+        ("contract-unregistered", {"contract_id": None}),
+    ):
+        response = await client.post(receipt_path, json={"key": key, "document": {**facts, **changes}})
+        assert response.status_code in {409, 422}, response.text
+
+    other = Organization(name="Other company", unp="999999994")
+    db.add(other)
+    await db.flush()
+    foreign = SupplierContract(organization_id=other.id, supplier_id=1, number="FOREIGN",
+                               title="Foreign company agreement", signed_on=date(2026, 1, 1),
+                               evidence="Synthetic unrelated agreement", created_by="other")
+    db.add(foreign)
+    await db.commit()
+    response = await client.post(receipt_path, json={"key": "foreign-contract", "document": {
+        **facts, "contract": "FOREIGN", "contract_id": foreign.id,
+    }})
+    assert response.status_code == 409, response.text
+    db.add(Counterparty(id=2, name="second supplier", unp="190000002"))
+    db.add(Supplier(id=2, counterparty_id=2, name="second supplier", unp="190000002", status="active"))
+    await db.flush()
+    wrong_supplier = SupplierContract(organization_id=book[0], supplier_id=2, number="SUPPLIER-2",
+                                      title="Second supplier agreement", signed_on=date(2026, 1, 1),
+                                      evidence="Synthetic other supplier agreement", created_by="other")
+    db.add(wrong_supplier)
+    await db.commit()
+    response = await client.post(receipt_path, json={"key": "other-supplier-contract", "document": {
+        **facts, "contract": "SUPPLIER-2", "contract_id": wrong_supplier.id,
+    }})
+    assert response.status_code == 409, response.text
 
 
 async def test_receipt_sku_selection_freezes_snapshot_and_rejects_catalog_drift(client, db, book):

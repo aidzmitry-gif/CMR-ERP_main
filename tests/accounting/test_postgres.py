@@ -67,6 +67,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0178_procurement_atomic_order_save.py",
     "0183_receipt_edit_request_key.py",
     "0184_organization_warehouse_directory.py",
+    "0185_supplier_contract_directory.py",
 )
 
 
@@ -1066,6 +1067,35 @@ async def test_procurement_draft_versions_serialize_and_cannot_be_truncated(pg_f
             await session.commit()
         await session.rollback()
         assert await session.scalar(text("SELECT current_version FROM procurement.receipt_document")) == 2
+
+
+async def test_supplier_contract_catalog_postgres_guards(pg_factory, pg_book):
+    from datetime import date
+
+    from sqlalchemy.exc import DBAPIError
+
+    from modules.procurement.supplier_contracts import SupplierContract
+
+    async with pg_factory() as session:
+        row = SupplierContract(organization_id=pg_book[0], supplier_id=1,
+                               number="PG-CONTRACT", title="Synthetic signed contract",
+                               signed_on=date(2026, 1, 1),
+                               evidence="Synthetic signed original", created_by="tester")
+        session.add(row)
+        await session.commit()
+        contract_id = row.id
+    for statement in (
+        f"UPDATE procurement.supplier_contract SET number='OTHER' WHERE id={contract_id}",
+        f"DELETE FROM procurement.supplier_contract WHERE id={contract_id}",
+        "TRUNCATE procurement.supplier_contract",
+    ):
+        async with pg_factory() as session:
+            with pytest.raises(DBAPIError, match="append-only"):
+                await session.execute(text(statement))
+            await session.rollback()
+    async with pg_factory() as session:
+        assert await session.scalar(text("SELECT number FROM procurement.supplier_contract WHERE id=:id"),
+                                    {"id": contract_id}) == "PG-CONTRACT"
 
 
 async def test_concurrent_replay_one_entry(pg_factory, pg_book, posting):

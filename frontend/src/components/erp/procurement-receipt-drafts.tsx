@@ -9,8 +9,9 @@ import { useUnsavedDocumentGuard } from "@/lib/use-unsaved-document-guard";
 import { ProcurementReceiptPosting, type ReceiptAccount } from "./procurement-receipt-posting";
 
 const item = () => ({ order_id: null as number | null, sku_id: null as number | null, sku_title: null as string | null, sku: "", unit: null as string | null, lot: "", quantity: "", net_amount: "", vat_amount: "", vat_rate: "", vat_basis: "" });
-const blank = () => ({ currency: "BYN", invoice_reference: "", document_date: "", operation_date: "", supplier: "", supplier_id: null as number | null, supplier_unp: null as string | null, contract: "", warehouse: "", explanation: "", items: [item()] });
+const blank = () => ({ currency: "BYN", invoice_reference: "", document_date: "", operation_date: "", supplier: "", supplier_id: null as number | null, supplier_unp: null as string | null, contract: "", contract_id: null as number | null, contract_basis: null as string | null, warehouse: "", explanation: "", items: [item()] });
 type Document = ReturnType<typeof blank>;
+type SupplierContract = { id: number; organization_id: number; supplier_id: number; number: string; title: string; signed_on: string; expires_on: string | null; evidence: string };
 type Receipt = { id: number; key?: string; version: number; status?: string; posting?: { entry_id: number; version: number } | null; revisions: { version: number; request_key?: string | null; actor: string; created_at: string; document: Document }[] };
 type PendingSave = { org: string; receiptId: number | null; version: number; key: string; document: Document; closeAfterSave: boolean };
 type OwnedOrder = { kind: string; source_id: number; snapshot: { number: string; supplier: string } };
@@ -27,6 +28,8 @@ function revisionChanges(previous: Document, current: Document) {
   add("Валюта", previous.currency, current.currency);
   for (const [field, label] of fields) add(label, previous[field], current[field]);
   add("Поставщик", supplierSnapshot(previous), supplierSnapshot(current));
+  add("ID договора", previous.contract_id, current.contract_id);
+  add("Основание без зарегистрированного договора", previous.contract_basis, current.contract_basis);
   for (let index = 0; index < Math.max(previous.items.length, current.items.length); index++) {
     const before = previous.items[index], after = current.items[index];
     if (!before || !after) add(`Строка ${index + 1}`, before ? "есть" : null, after ? "есть" : null);
@@ -41,7 +44,9 @@ function revisionChanges(previous: Document, current: Document) {
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`/api/procurement${path}`, { cache: "no-store", ...options });
   const data = await response.json();
-  if (!response.ok) throw Object.assign(new Error(response.status === 409 ? "Версия или ключ документа уже изменены. Обновите список и откройте актуальную накладную." : typeof data.detail === "string" ? data.detail : "Проверьте реквизиты, даты и суммы накладной."), { status: response.status });
+  if (!response.ok) throw Object.assign(new Error(response.status === 409
+    ? `Версия или ключ документа уже изменены. Обновите список и откройте актуальную накладную.${typeof data.detail === "string" ? ` Причина: ${data.detail}` : ""}`
+    : typeof data.detail === "string" ? data.detail : "Проверьте реквизиты, даты и суммы накладной."), { status: response.status });
   return data;
 }
 export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], policyId, date = "", onPosted, onPendingChange }: { org: string; initialReceipt?: string; accounts?: ReceiptAccount[]; policyId?: number; date?: string; onPosted?: () => void; onPendingChange?: (pending: boolean) => void }) {
@@ -52,6 +57,9 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   const [supplierSearch, setSupplierSearch] = useState("");
   const [supplierOptions, setSupplierOptions] = useState<ProcurementSupplierOption[]>([]);
   const [supplierError, setSupplierError] = useState("");
+  const [contracts, setContracts] = useState<SupplierContract[]>([]), [contractError, setContractError] = useState("");
+  const [newContract, setNewContract] = useState({ number: "", title: "", signed_on: "", expires_on: "", evidence: "" });
+  const [contractBusy, setContractBusy] = useState(false);
   const [skuSearch, setSkuSearch] = useState("");
   const [skuOptions, setSkuOptions] = useState<ProcurementSkuOption[]>([]);
   const [skuError, setSkuError] = useState("");
@@ -61,6 +69,8 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   const [error, setError] = useState(""), [notice, setNotice] = useState(""), [reload, setReload] = useState(0);
   const [loadedKey, setLoadedKey] = useState("");
   const pending = useRef<PendingSave | null>(null), active = useRef(true);
+  const contractFetchVersion = useRef(0), supplierContext = useRef("");
+  supplierContext.current = `${org}:${document.supplier_id ?? ""}`;
   const initialOpened = useRef(false);
   const [initialLoading, setInitialLoading] = useState(initialReceipt !== undefined);
   const path = `/organizations/${org}/receipt-documents`;
@@ -98,6 +108,21 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
     return () => { current = false; window.clearTimeout(timer); };
   }, [org, skuSearch]);
   useEffect(() => {
+    const supplierId = document.supplier_id;
+    const generation = ++contractFetchVersion.current;
+    if (!supplierId) return;
+    let current = true;
+    void request<{ organization_id: number; supplier_id: number; items: SupplierContract[] }>(
+      `/organizations/${org}/supplier-contracts?supplier_id=${supplierId}`,
+    ).then((data) => {
+      if (!current || generation !== contractFetchVersion.current) return;
+      if (data.organization_id !== Number(org) || data.supplier_id !== supplierId || !Array.isArray(data.items))
+        throw new Error("Справочник договоров вернул данные другого юрлица или поставщика.");
+      setContracts(data.items); setContractError("");
+    }).catch((cause: Error) => { if (current && generation === contractFetchVersion.current) { setContracts([]); setContractError(cause.message); } });
+    return () => { current = false; };
+  }, [org, document.supplier_id]);
+  useEffect(() => {
     let current = true;
     void request<OwnedOrder[]>(`/organizations/${org}/purchase-ownership`).then((data) => {
       if (current) setOrders(data.filter((row) => row.kind === "order"));
@@ -125,6 +150,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   }, [path, listKey, initialReceipt]);
   function open(row: Receipt | null) {
     if (!confirmDiscard()) return;
+    setContracts([]); setContractError("");
     setSelected(row); setDocument(row ? structuredClone(row.revisions.at(-1)!.document) : blank());
     setEditorOpen(true);
     pending.current = null; setUncertain(false); setError(""); setNotice("");
@@ -133,6 +159,9 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
     if (selected?.posting || busy || uncertain || pending.current) return;
     if (!document.supplier_id || document.supplier_unp == null) {
       setError("Выберите поставщика накладной из справочника."); return;
+    }
+    if (!document.contract_id && !document.contract_basis?.trim()) {
+      setError("Выберите договор из справочника или укажите основание покупки без зарегистрированного договора."); return;
     }
     if (document.items.some(row => !row.sku_id || !row.sku_title || !row.unit)) {
       setError("Выберите номенклатуру каждой строки накладной из справочника."); return;
@@ -182,6 +211,35 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
     if (busy || !pending.current || pending.current.org !== org) return;
     void submit(pending.current);
   }
+  async function registerContract() {
+    if (!document.supplier_id || contractBusy || uncertain || !newContract.number.trim()
+      || !newContract.title.trim() || !newContract.signed_on || !newContract.evidence.trim()) return;
+    const supplierId = document.supplier_id, context = `${org}:${supplierId}`;
+    ++contractFetchVersion.current;
+    setContractBusy(true); setContractError("");
+    try {
+      const response = await fetch(`/api/procurement/organizations/${org}/supplier-contracts`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ supplier_id: supplierId, number: newContract.number.trim(),
+          title: newContract.title.trim(), signed_on: newContract.signed_on,
+          expires_on: newContract.expires_on || null, evidence: newContract.evidence.trim() }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Не удалось зарегистрировать договор.");
+      if (data.organization_id !== Number(org) || data.supplier_id !== supplierId
+        || !Number.isSafeInteger(data.id) || data.id < 1 || data.number !== newContract.number.trim()
+        || data.title !== newContract.title.trim() || data.signed_on !== newContract.signed_on
+        || data.expires_on !== (newContract.expires_on || null) || data.evidence !== newContract.evidence.trim())
+        throw new Error("Сервер не подтвердил договор этого юрлица и поставщика.");
+      if (active.current && supplierContext.current === context) {
+        setContracts(current => [...current.filter(row => row.id !== data.id), data]);
+        setDocument(current => current.supplier_id === supplierId
+          ? { ...current, contract_id: data.id, contract: data.number, contract_basis: null } : current);
+        setNewContract({ number: "", title: "", signed_on: "", expires_on: "", evidence: "" });
+      }
+    } catch (cause) { if (active.current && supplierContext.current === context) setContractError(cause instanceof Error ? cause.message : "Не удалось зарегистрировать договор."); }
+    finally { if (active.current) setContractBusy(false); }
+  }
   if (initialLoading) return <section className="space-y-3 rounded-xl border border-line bg-surface p-4"><p role="status">Загрузка накладной из ссылки…</p>{error && <><p role="alert">{error}</p><Button onClick={() => setReload(value => value + 1)}>Повторить загрузку накладной</Button></>}</section>;
   return <section className="space-y-4 rounded-xl border border-line bg-surface p-4">
     <h2 className="font-semibold">Реестр первичных накладных</h2>
@@ -205,12 +263,29 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       {listLoaded && !visible.length && <p className="text-sm text-muted">Накладных по выбранному фильтру нет.</p>}
       {selected?.posting && <p role="status">Проведена · проводка № {selected.posting.entry_id}. Первичные данные доступны для просмотра.</p>}
       {editorOpen && <fieldset disabled={Boolean(selected?.posting) || uncertain} className="space-y-3">
-      <div className="grid gap-3 md:grid-cols-3">{fields.map(([field, label]) => <label key={field}>{label}<Input type={field.endsWith("date") ? "date" : "text"} value={document[field]} onChange={(e) => setDocument({ ...document, [field]: e.target.value })} /></label>)}</div>
-      <div className="grid gap-3 md:grid-cols-2"><label>Поиск поставщика<Input aria-label="Поиск поставщика накладной" maxLength={100} value={supplierSearch} onChange={(e) => { setSupplierSearch(e.target.value); setSupplierOptions([]); setSupplierError(""); setDocument((current) => ({ ...current, supplier: "", supplier_id: null, supplier_unp: null })); }} /></label><label>Поставщик накладной из справочника<Select aria-label="Поставщик накладной из справочника" value={document.supplier_id ?? ""} onChange={(e) => {
+      <div className="grid gap-3 md:grid-cols-3">{fields.map(([field, label]) => <label key={field}>{label}<Input type={field.endsWith("date") ? "date" : "text"} disabled={field === "contract" && Boolean(document.contract_id)} value={document[field]} onChange={(e) => setDocument({ ...document, [field]: e.target.value })} /></label>)}</div>
+      <div className="grid gap-3 md:grid-cols-2"><label>Поиск поставщика<Input aria-label="Поиск поставщика накладной" disabled={contractBusy} maxLength={100} value={supplierSearch} onChange={(e) => { setSupplierSearch(e.target.value); setSupplierOptions([]); setSupplierError(""); setContracts([]); setDocument((current) => ({ ...current, supplier: "", supplier_id: null, supplier_unp: null, contract: "", contract_id: null, contract_basis: null })); }} /></label><label>Поставщик накладной из справочника<Select aria-label="Поставщик накладной из справочника" disabled={contractBusy} value={document.supplier_id ?? ""} onChange={(e) => {
         const supplier = supplierOptions.find((option) => String(option.id) === e.target.value);
-        setDocument({ ...document, supplier: supplier?.name ?? "", supplier_id: supplier?.id ?? null, supplier_unp: supplier?.unp ?? null });
+        setContracts([]); setContractError("");
+        setDocument({ ...document, supplier: supplier?.name ?? "", supplier_id: supplier?.id ?? null, supplier_unp: supplier?.unp ?? null, contract: "", contract_id: null, contract_basis: null });
       }}><option value="">Выберите поставщика</option>{document.supplier_id && !supplierOptions.some((option) => option.id === document.supplier_id) && <option value={document.supplier_id}>{document.supplier} · {document.supplier_unp || "без УНП"} (сохранённый)</option>}{supplierOptions.map((option) => <option key={option.id} value={option.id}>{option.name} · {option.unp || "без УНП"}</option>)}</Select></label></div>
       {supplierError && <p role="alert">Справочник поставщиков недоступен: {supplierError}</p>}{selected && !document.supplier_id && <p>У этой версии нет связи со справочником. Выберите поставщика перед исправлением или проведением.</p>}
+      {document.supplier_id && <div className="space-y-2 rounded border border-line p-3">
+        <label>Договор поставщика из справочника<Select aria-label="Договор поставщика из справочника" value={document.contract_id ?? ""} onChange={(e) => {
+          const contract = contracts.find(row => String(row.id) === e.target.value);
+          setDocument({ ...document, contract_id: contract?.id ?? null, contract: contract?.number ?? "", contract_basis: null });
+        }}><option value="">Без зарегистрированного договора</option>{document.contract_id && !contracts.some(row => row.id === document.contract_id) && <option value={document.contract_id}>{document.contract} (сохранённый ID {document.contract_id})</option>}{contracts.map(row => <option key={row.id} value={row.id}>{row.number} · {row.title} · ID {row.id}</option>)}</Select></label>
+        {!document.contract_id && <label>Основание покупки без зарегистрированного договора<Input aria-label="Основание покупки без зарегистрированного договора" maxLength={500} value={document.contract_basis ?? ""} onChange={(e) => setDocument({ ...document, contract: document.contract || (e.target.value ? "Без договора" : ""), contract_basis: e.target.value || null })} /></label>}
+        <p className="text-sm text-muted">Если договор не зарегистрирован, укажите основание исключения. Исторический текст накладной не сопоставляется автоматически.</p>
+        {contractError && <p role="alert">Справочник договоров: {contractError}</p>}
+        <details><summary>Зарегистрировать договор поставщика</summary><div className="grid gap-2 md:grid-cols-2">
+          <label>Номер нового договора<Input aria-label="Номер нового договора" maxLength={200} value={newContract.number} onChange={e => setNewContract({ ...newContract, number: e.target.value })} /></label>
+          <label>Название нового договора<Input aria-label="Название нового договора" maxLength={255} value={newContract.title} onChange={e => setNewContract({ ...newContract, title: e.target.value })} /></label>
+          <label>Дата подписания договора<Input aria-label="Дата подписания договора" type="date" value={newContract.signed_on} onChange={e => setNewContract({ ...newContract, signed_on: e.target.value })} /></label>
+          <label>Дата окончания договора<Input aria-label="Дата окончания договора" type="date" value={newContract.expires_on} onChange={e => setNewContract({ ...newContract, expires_on: e.target.value })} /></label>
+          <label>Основание регистрации договора<Input aria-label="Основание регистрации договора" maxLength={500} value={newContract.evidence} onChange={e => setNewContract({ ...newContract, evidence: e.target.value })} /></label>
+        </div><Button variant="secondary" disabled={contractBusy} onClick={() => void registerContract()}>Зарегистрировать договор</Button></details>
+      </div>}
       <label>Поиск номенклатуры для строк накладной<Input aria-label="Поиск номенклатуры накладной" value={skuSearch} onChange={(e) => { setSkuSearch(e.target.value); setSkuOptions([]); setSkuError(""); }} /></label>
       {skuError && <p role="alert">Справочник номенклатуры недоступен: {skuError}</p>}
       {document.items.map((row, index) => <fieldset key={index} className="rounded-lg border border-line p-3"><legend>Строка накладной {index + 1}</legend>

@@ -22,7 +22,13 @@ from modules.accounting.gateway import AccountingService
 from modules.finance.models import BankAccount, BankTransaction, Payment, PaymentAllocation
 from modules.hr.models import Employee
 from modules.logistics import models as logistics_models
-from modules.procurement import deal_demands, expected_reservations, ownership, receipt_documents
+from modules.procurement import (
+    deal_demands,
+    expected_reservations,
+    ownership,
+    receipt_documents,
+    supplier_contracts,
+)
 from modules.procurement.models import PurchaseOrder, PurchaseOrderLine, PurchaseRequest, Supplier
 from modules.sales.accounting_ownership import DealOwnership
 from modules.sales.client_document_register import DealClientBinding
@@ -46,7 +52,7 @@ async def db():
               *[t for t in Base.metadata.sorted_tables if t.schema == "accounting"]]
     tables += [receipt_documents.ReceiptDocument.__table__, receipt_documents.ReceiptRevision.__table__]
     tables += [receipt_documents.ReceiptPosting.__table__]
-    tables += [PurchaseOrder.__table__, PurchaseRequest.__table__, Supplier.__table__, ownership.PurchaseOwnership.__table__, ownership.OrderRequestLink.__table__]
+    tables += [PurchaseOrder.__table__, PurchaseRequest.__table__, Supplier.__table__, supplier_contracts.SupplierContract.__table__, ownership.PurchaseOwnership.__table__, ownership.OrderRequestLink.__table__]
     tables += [PurchaseOrderLine.__table__]
     tables += [expected_reservations.ExpectedReservation.__table__, expected_reservations.ExpectedReservationEvent.__table__, expected_reservations.PhysicalReceiptAcceptance.__table__, expected_reservations.ExpectedConversionRequest.__table__]
     tables += [Stage.__table__, Deal.__table__, DealItem.__table__, DealDocument.__table__, DealOwnership.__table__]
@@ -115,6 +121,7 @@ async def client(db, book):
     app = FastAPI()
     app.include_router(routes.router, prefix="/accounting")
     app.include_router(receipt_documents.router, prefix="/procurement")
+    app.include_router(supplier_contracts.router, prefix="/procurement")
     app.include_router(deal_demands.router, prefix="/procurement")
     app.include_router(ownership.router, prefix="/procurement")
     app.include_router(expected_reservations.router, prefix="/procurement")
