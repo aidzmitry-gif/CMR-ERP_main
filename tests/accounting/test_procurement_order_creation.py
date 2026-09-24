@@ -5,6 +5,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import event, func, select, update
 
+from core.domain.models import Sku
 from core.services.auth import CurrentUser, get_current_user
 from modules.accounting.models import AccessGrant, Organization
 from modules.procurement import order_creation, routes
@@ -84,6 +85,38 @@ async def test_multiline_standalone_exact_creation_and_replay(client, db, book):
     await db.commit()
     assert await create(client, book, data) == first
     assert (await client.get(prefix(book) + f"/orders/{first['order_id']}")).json()["status"] == "ordered"
+
+
+async def test_catalog_selected_lines_keep_immutable_snapshot_and_reject_stale_selection(client, db, book):
+    products = [Sku(code="SKU-A", title="Первый товар", unit="шт"),
+                Sku(code="SKU-B", title="Второй товар", unit="уп")]
+    db.add_all(products)
+    await db.commit()
+    data = command()
+    for line, sku in zip(data["document"]["lines"], products, strict=True):
+        line.update(sku_id=sku.id, sku_title=sku.title, sku_unit=sku.unit)
+    first = await create(client, book, data)
+    assert first["lines"][0]["sku_code"] == "SKU-A" and "sku_id" not in first["lines"][0]
+    receipt = await db.scalar(select(PurchaseOrderCreation).where(PurchaseOrderCreation.order_id == first["order_id"]))
+    assert receipt.command["document"]["lines"][0]["sku_id"] == products[0].id
+    assert receipt.command["document"]["lines"][0]["sku_title"] == "Первый товар"
+    products[0].title = "Переименованный товар"
+    await db.commit()
+    assert await create(client, book, data) == first
+    stale = deepcopy(data)
+    stale["request_key"] = str(uuid4())
+    result = await client.post(prefix(book) + "/orders", json=stale, headers=HEADERS)
+    assert result.status_code == 409 and result.json()["code"] == "sku_catalog_changed"
+    assert result.json()["no_business_write"] is True
+    assert (await counts(db))["PurchaseOrder"] == 1
+
+
+async def test_incomplete_catalog_reference_rejected_before_receipt(client, db, book):
+    data = command()
+    data["document"]["lines"][0]["sku_id"] = 99
+    result = await client.post(prefix(book) + "/orders", json=data, headers=HEADERS)
+    assert result.status_code == 422
+    assert (await counts(db))["PurchaseOrderCreation"] == 0
 
 
 async def test_from_request_atomic_link_and_current_basis(client, db, book):
