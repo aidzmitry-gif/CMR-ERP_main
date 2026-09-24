@@ -7,7 +7,12 @@ const result = (org = 1) => ({
   organization_id: org, from: "2026-09-01", to: "2026-09-30", status: "preliminary",
   scope: "posted_accounts_60_62", due_dates_verified: false, statutory_certified: false,
   review_items: [{ code: "incomplete_analytics", count: 0 }, { code: "unclassified_balance", count: 0 },
-    { code: "mixed_currency_document", count: 0 }],
+    { code: "mixed_currency_document", count: 0 }, { code: "osv_document_mismatch", count: 0 }],
+  osv_reconciliation: { status: "matched" as "matched" | "mismatch", basis: "same_posted_journal", osv_line_count: 2,
+    document_line_count: 2, missing_osv_lines: 0, extra_document_lines: 0,
+    missing_postings: [] as { entry_id: number; line_id: number }[],
+    accounts: [] as { account: string; matched: boolean; osv_byn: Record<string, string>;
+      documents_byn: Record<string, string> }[] },
   totals_byn: { receivable: "60.00", payable: "0.00", customer_advance: "40.00",
     supplier_advance: "0.00", unclassified: "0.00" },
   rows: [{ key: "customer-doc", account: "62", account_title: "Покупатели",
@@ -36,6 +41,7 @@ it("shows real document balances, advances and linked ledger entries", async () 
   expect(await screen.findByText("Покупатель · sales:document:42")).toBeInTheDocument();
   expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/organizations/1/reports/trade-settlements?start=2026-09-01&end=2026-09-30"), expect.objectContaining({ cache: "no-store" }));
   expect(screen.getByText(/сроки оплаты и просрочка пока не подтверждены/i)).toBeInTheDocument();
+  expect(screen.getByText(/Внутренняя сверка с ОСВ: суммы в BYN и строки 60\/62 совпали \(количество: 2\)/i)).toBeInTheDocument();
   fireEvent.click(screen.getByText("Покупатель · sales:document:42"));
   const reportRow = screen.getByText("Покупатель · sales:document:42").closest("details")!;
   expect(within(reportRow).getByText("Зачёт аванса", { exact: false })).toBeInTheDocument();
@@ -44,6 +50,26 @@ it("shows real document balances, advances and linked ledger entries", async () 
   fireEvent.change(screen.getByRole("combobox", { name: "Вид расчётов" }), { target: { value: "advances" } });
   expect(screen.getByText("Покупатель · customer-advance:buyer-1")).toBeInTheDocument();
   expect(screen.queryByText("Покупатель · sales:document:42")).not.toBeInTheDocument();
+});
+
+it("warns on an OSV mismatch and links the missing posting", async () => {
+  const onEntry = vi.fn();
+  const data = result();
+  data.osv_reconciliation.status = "mismatch";
+  data.osv_reconciliation.osv_line_count = 3;
+  data.osv_reconciliation.missing_osv_lines = 1;
+  data.osv_reconciliation.missing_postings = [{ entry_id: 9, line_id: 19 }];
+  data.osv_reconciliation.accounts = [{ account: "62.9", matched: false,
+    osv_byn: { opening: "0.00", debit: "30.00", credit: "0.00", closing: "30.00" },
+    documents_byn: { opening: "0.00", debit: "0.00", credit: "0.00", closing: "0.00" } }];
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => data })));
+  render(<AccountingTradeSettlements org="1" start="2026-09-01" end="2026-09-30" onEntry={onEntry} />);
+  const warning = await screen.findByRole("alert");
+  expect(warning).toHaveTextContent("документная сводка неполна");
+  expect(warning).toHaveTextContent("Счёт 62.9, ОСВ / документы (BYN): начало 0.00 / 0.00; Дт 30.00 / 0.00");
+  expect(screen.queryByText("Авансы покупателей")).not.toBeInTheDocument();
+  fireEvent.click(within(warning).getByRole("button", { name: "Проводка № 9, строка 19" }));
+  expect(onEntry).toHaveBeenCalledWith(9);
 });
 
 it("clears old book data and rejects a response for the wrong organization", async () => {

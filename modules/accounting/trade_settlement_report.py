@@ -40,7 +40,49 @@ def _classification(code: str, category: str, document: str | None, complete: bo
     return "unclassified"
 
 
+def _reconcile_with_trial_balance(output: list[dict], osv: dict) -> dict:
+    fields = ("opening", "debit", "credit", "closing")
+    accounts = defaultdict(lambda: {field: Decimal("0") for field in fields})
+    documents = defaultdict(lambda: {field: Decimal("0") for field in fields})
+    osv_movements = {}
+    document_ids = []
+    for row in osv["trial_balance"]:
+        if row["account"].split(".", 1)[0] in {"60", "62"}:
+            for field in fields:
+                accounts[row["account"]][field] += Decimal(row[field])
+    for row in output:
+        for field in fields:
+            documents[row["account"]][field] += Decimal(row[field + "_byn"])
+        document_ids.extend(movement["line_id"] for movement in row["movements"])
+    for movement in (*osv["opening_movements"], *osv["movements"]):
+        if movement["account"].split(".", 1)[0] in {"60", "62"}:
+            osv_movements[movement["line_id"]] = movement
+    missing_ids = set(osv_movements) - set(document_ids)
+    extra_ids = set(document_ids) - set(osv_movements)
+    comparisons = [{
+        "account": code,
+        "osv_byn": {field: _money(accounts[code][field]) for field in fields},
+        "documents_byn": {field: _money(documents[code][field]) for field in fields},
+        "matched": accounts[code] == documents[code],
+    } for code in sorted(set(accounts) | set(documents))]
+    line_counts_match = len(document_ids) == len(osv_movements)
+    matched = (all(row["matched"] for row in comparisons)
+               and line_counts_match and not missing_ids and not extra_ids)
+    return {
+        "status": "matched" if matched else "mismatch",
+        "basis": "same_posted_journal",
+        "osv_line_count": len(osv_movements),
+        "document_line_count": len(document_ids),
+        "missing_osv_lines": len(missing_ids),
+        "extra_document_lines": len(extra_ids),
+        "missing_postings": [{"entry_id": osv_movements[line_id]["entry_id"], "line_id": line_id}
+                             for line_id in sorted(missing_ids)[:20]],
+        "accounts": comparisons,
+    }
+
+
 async def report(session, org_id, start, end):
+    from modules.accounting import reports as ledger_reports
     from modules.accounting.closing_commands import authenticated_entries
     from modules.accounting.fx_revaluation import valuation_currencies
 
@@ -134,14 +176,18 @@ async def report(session, org_id, start, end):
         output.append(item)
     output.sort(key=lambda item: (item["counterparty"] or "", item["contract"] or "",
                                   item["document"] or "", item["account"], item["key"]))
+    osv = await ledger_reports.report(session, org_id, start, end)
+    reconciliation = _reconcile_with_trial_balance(output, osv)
     return {
         "organization_id": org_id, "from": str(start), "to": str(end),
         "status": "preliminary", "scope": "posted_accounts_60_62",
         "statutory_certified": False, "due_dates_verified": False,
+        "osv_reconciliation": reconciliation,
         "review_items": [
             {"code": "incomplete_analytics", "count": sum(not item["analytics_complete"] for item in output)},
             {"code": "unclassified_balance", "count": sum(item["balance_kind"] == "unclassified" for item in output)},
             {"code": "mixed_currency_document", "count": sum(len(item["currencies"]) > 1 for item in output)},
+            {"code": "osv_document_mismatch", "count": int(reconciliation["status"] == "mismatch")},
         ],
         "totals_byn": {name: _money(totals[name]) for name in
                        ("receivable", "payable", "customer_advance", "supplier_advance", "unclassified")},

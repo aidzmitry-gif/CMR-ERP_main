@@ -14,9 +14,14 @@ type Row = { key: string; account: string; account_title: string; counterparty: 
   analytics_complete: boolean; opening_byn: string; debit_byn: string; credit_byn: string;
   closing_byn: string; bank_receipts_byn: string; bank_payments_byn: string;
   offset_debit_byn: string; offset_credit_byn: string; movements: Movement[] };
+type Reconciliation = { status: "matched" | "mismatch"; basis: "same_posted_journal";
+  osv_line_count: number; document_line_count: number; missing_osv_lines: number;
+  extra_document_lines: number; missing_postings: { entry_id: number; line_id: number }[];
+  accounts: { account: string; matched: boolean; osv_byn: Record<string, string>;
+    documents_byn: Record<string, string> }[] };
 type Report = { organization_id: number; from: string; to: string; status: "preliminary";
   scope: "posted_accounts_60_62"; due_dates_verified: false; statutory_certified: false;
-  review_items: { code: string; count: number }[];
+  review_items: { code: string; count: number }[]; osv_reconciliation: Reconciliation;
   totals_byn: Record<string, string>; rows: Row[] };
 
 const kinds: Record<string, string> = { receivable: "Дебиторская задолженность", payable: "Кредиторская задолженность",
@@ -70,10 +75,18 @@ export function AccountingTradeSettlements({ org, start, end, onEntry }: {
     {error && <div role="alert" className="rounded-lg border border-red-300 p-3 text-red-700">{error} <Button variant="secondary" onClick={() => setRefresh((value) => value + 1)}>Повторить</Button></div>}
     {report && <>
       <p className="text-sm text-muted">{report.from} — {report.to} · только проведённая книга юрлица № {report.organization_id}. Аванс отмечен лишь при явном документе аванса; иные встречные сальдо требуют проверки.</p>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">{[
+      {report.osv_reconciliation.status === "matched"
+        ? <p role="status" className="rounded-lg border border-green-300 p-3 text-sm">Внутренняя сверка с ОСВ: суммы в BYN и строки 60/62 совпали (количество: {report.osv_reconciliation.document_line_count}). Оба отчёта построены по одной книге; это не сверка с 1С.</p>
+        : <div role="alert" className="rounded-lg border border-red-300 p-3 text-sm text-red-700">
+          <p className="font-semibold">Расхождение с ОСВ: документная сводка неполна. Не используйте её итог без проверки.</p>
+          <p>Строк в ОСВ: {report.osv_reconciliation.osv_line_count}; в документной сводке: {report.osv_reconciliation.document_line_count}; пропущено: {report.osv_reconciliation.missing_osv_lines}; лишних: {report.osv_reconciliation.extra_document_lines}.</p>
+          {report.osv_reconciliation.accounts.filter((account) => !account.matched).map((account) => <p key={account.account}>Счёт {account.account}, ОСВ / документы (BYN): начало {account.osv_byn.opening} / {account.documents_byn.opening}; Дт {account.osv_byn.debit} / {account.documents_byn.debit}; Кт {account.osv_byn.credit} / {account.documents_byn.credit}; конец {account.osv_byn.closing} / {account.documents_byn.closing}.</p>)}
+          {report.osv_reconciliation.missing_postings.map((posting) => <button key={posting.line_id} className="mr-3 text-accent underline" onClick={() => onEntry(posting.entry_id)}>Проводка № {posting.entry_id}, строка {posting.line_id}</button>)}
+        </div>}
+      {report.osv_reconciliation.status === "matched" && <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">{[
         ["Дебиторка", "receivable"], ["Кредиторка", "payable"], ["Авансы покупателей", "customer_advance"],
         ["Авансы поставщикам", "supplier_advance"], ["Не классифицировано", "unclassified"],
-      ].map(([label, key]) => <div key={key} className="rounded-lg border border-line bg-surface p-3"><p className="text-sm text-muted">{label}</p><p className="font-semibold tabular-nums">{report.totals_byn[key]} BYN</p></div>)}</div>
+      ].map(([label, key]) => <div key={key} className="rounded-lg border border-line bg-surface p-3"><p className="text-sm text-muted">{label}</p><p className="font-semibold tabular-nums">{report.totals_byn[key]} BYN</p></div>)}</div>}
       {report.review_items.some((item) => item.count > 0) && <p role="status" className="rounded-lg border border-amber-300 p-3 text-sm">Требуют проверки: неполная аналитика — {report.review_items.find((item) => item.code === "incomplete_analytics")?.count ?? 0}; не классифицированное сальдо — {report.review_items.find((item) => item.code === "unclassified_balance")?.count ?? 0}; документы с разной валютной атрибуцией — {report.review_items.find((item) => item.code === "mixed_currency_document")?.count ?? 0}.</p>}
       <label className="block max-w-xs text-sm">Показать<Select aria-label="Вид расчётов" value={filter} onChange={(event) => setSavedFilter({ scope, value: event.target.value as Filter })}>
         <option value="all">Все документы</option><option value="receivable">Дебиторка</option><option value="payable">Кредиторка</option>

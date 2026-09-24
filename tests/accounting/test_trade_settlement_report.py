@@ -1,6 +1,7 @@
 from datetime import date
 
 from modules.accounting import service
+from modules.accounting.models import Account
 from modules.accounting.schemas import PostingInput
 from modules.sales.models import Deal, DealDocument
 from tests.accounting.test_bank_documents import document as bank_document
@@ -58,6 +59,8 @@ async def test_document_report_uses_posted_partial_payments_not_current_invoice_
     assert (row["opening_byn"], row["debit_byn"], row["credit_byn"], row["closing_byn"]) == (
         "0.00", "120.00", "50.00", "70.00")
     assert row["bank_receipts_byn"] == "50.00"
+    assert early["osv_reconciliation"]["status"] == "matched"
+    assert early["osv_reconciliation"]["osv_line_count"] == 2
     assert [movement["entry_id"] for movement in row["movements"]] == [sale_entry.id, first_bank]
 
     await bank(client, book, document, source="receipt-2", day="2026-09-12", amount="20.00")
@@ -68,8 +71,13 @@ async def test_document_report_uses_posted_partial_payments_not_current_invoice_
     assert (row["bank_receipts_byn"], row["bank_payments_byn"], row["closing_byn"]) == (
         "70.00", "10.00", "60.00")
     assert later["totals_byn"]["receivable"] == "60.00"
+    assert later["osv_reconciliation"]["status"] == "matched"
     assert [movement["kind"] for movement in row["movements"]] == [
         "posting", "bank_receipt", "bank_receipt", "bank_payment"]
+    shifted = await get_report(client, book[0], start="2026-09-10")
+    assert shifted["osv_reconciliation"]["status"] == "matched"
+    assert shifted["osv_reconciliation"]["accounts"][0]["osv_byn"] == {
+        "opening": "70.00", "debit": "10.00", "credit": "20.00", "closing": "60.00"}
 
     invoice = await db.get(DealDocument, document_id)
     deal = await db.get(Deal, invoice.deal_id)
@@ -144,3 +152,32 @@ async def test_byn_payment_reduces_the_same_foreign_document_balance(client, db,
     assert row["currencies"] == ["BYN", "USD"]
     assert result["totals_byn"]["receivable"] == "180.00"
     assert result["review_items"][2] == {"code": "mixed_currency_document", "count": 1}
+    assert result["osv_reconciliation"]["status"] == "matched"
+
+
+async def test_report_flags_a_60_62_ledger_line_excluded_from_document_view(client, db, book):
+    db.add(Account(organization_id=book[0], code="62.9", title="Misconfigured settlement account",
+                   category="asset", valid_from=date(2026, 1, 1), required_dimensions=[],
+                   currency_tracking=False, quantity_tracking=False, cash=True,
+                   normative_ref="Synthetic misconfiguration"))
+    await db.commit()
+    entry = await service.post(db, book[0], PostingInput.model_validate({
+        "source": "misconfigured-trade", "source_version": 1, "operation": "manual",
+        "document_date": "2026-09-05", "operation_date": "2026-09-05",
+        "posting_date": "2026-09-05", "policy_id": book[1],
+        "rule_version": "test-only", "explanation": "Synthetic chart error",
+        "lines": [
+            {"account": "62.9", "side": "debit", "amount": "30.00",
+             "cash_activity": "operating", "dimensions": {"counterparty": "Buyer",
+             "contract": "Contract", "settlement_document": "sales:document:bad"}},
+            {"account": "90.1", "side": "credit", "amount": "30.00"},
+        ],
+    }), "tester")
+    result = await get_report(client, book[0])
+    check = result["osv_reconciliation"]
+    assert check["status"] == "mismatch"
+    assert (check["osv_line_count"], check["document_line_count"], check["missing_osv_lines"]) == (1, 0, 1)
+    assert check["missing_postings"][0]["entry_id"] == entry.id
+    assert check["accounts"][0]["osv_byn"]["closing"] == "30.00"
+    assert check["accounts"][0]["documents_byn"]["closing"] == "0.00"
+    assert result["review_items"][-1] == {"code": "osv_document_mismatch", "count": 1}
