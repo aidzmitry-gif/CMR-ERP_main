@@ -8,6 +8,8 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { ProcurementMachineEditor } from "./procurement-machine-editor";
 import { commandHash, emptyLine, type EditCommand } from "@/lib/procurement-machine";
+const navigation = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => navigation }));
 const storage = vi.hoisted(() => ({ rows: new Map<string, unknown>(), tail: Promise.resolve(), fail: false }));
 vi.mock("@/lib/procurement-editor-journal", async importOriginal => {
   const actual = await importOriginal<typeof import("@/lib/procurement-editor-journal")>();
@@ -29,12 +31,14 @@ const ok = (body: unknown) => ({ ok: true, status: (body as { action?: string })
 const plan = (org: number) => ({ organization_id: org, order_id: 7, principal, transport_method_code: "truck", target_arrival_date: date, start_date: null, total_days: 83, ...(date ? milestones(date) : { milestones: [], start_date: null }), customer_requirements_status: "unverified", at_risk: null, required_by: null, required_arrival: null, slack_days: null, at_risk_deals: [], schedule_start_in_past: null });
 const writes = () => f.mock.calls.filter(([, init]) => init?.method);
 beforeEach(() => {
+  navigation.push.mockClear();
   storage.rows.clear(); storage.tail = Promise.resolve(); storage.fail = false; serverReceipts.clear(); sessionStorage.clear(); principal = "alice"; manage = true; status = "draft"; freight = "100.00"; mode = "ok"; date = null;
   lines = [{ id: 11, ...emptyLine(), sku_code: "AKB-190", qty: "2.00", goods_value_byn: "900.00", weight: "50.000", volume: "3.0000" }];
   f = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.endsWith("receipt-organizations")) return ok([{ id: 1, name: "A", unp: "1" }, { id: 2, name: "B", unp: "2" }]);
     const org = Number(url.match(/organizations\/(\d+)/)?.[1] ?? (init?.headers as Record<string, string>)?.["X-Expected-Organization"] ?? 1);
     if (url.endsWith("request-plan-context")) return ok({ organization_id: org, principal, can_manage: manage });
+    if (url.includes("/sku-options?q=")) return ok({ organization_id: org, items: [{ id: 71, code: "AKB-190", title: "Аккумулятор", unit: "шт" }, { id: 99, code: "NEW", title: "Новый товар", unit: "шт" }], truncated: false });
     if (url.includes("/edit-history?after_id=")) return ok({ organization_id: org, order_id: 7, number: org === 1 ? "ZAK-7" : "B-7", items: [], next_after_id: null });
     if (init?.method) {
       const c = JSON.parse(String(init.body)) as EditCommand;
@@ -45,7 +49,7 @@ beforeEach(() => {
       if (!result) {
         if (mode === "lost") throw new Error("lost response");
         const body = c.payload; let effect: unknown;
-        if (c.action === "add_line") { const row = { id: 12, ...body } as typeof lines[number]; lines.push(row); effect = { line: row }; }
+        if (c.action === "add_line") { const row = { id: 12, sku_code: body.sku_code, qty: body.qty, goods_value_byn: body.goods_value_byn, weight: body.weight, volume: body.volume } as typeof lines[number]; lines.push(row); effect = { line: row }; }
         else if (c.action === "delete_line") { effect = { line: lines.find(x => x.id === body.line_id) }; lines = lines.filter(x => x.id !== body.line_id); }
         else if (c.action === "header") { effect = { before: { freight_byn: freight }, after: body }; freight = String(body.freight_byn); }
         else if (c.action === "plan") { date = String(body.target_arrival_date); effect = plan(org); }
@@ -63,6 +67,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 async function ready() { render(<ProcurementMachineEditor orderId={7} suggestedOrg="1" />); await screen.findByText("Состав заказа ZAK-7"); await waitFor(() => expect(screen.getByRole("button", { name: "Проверить состав" })).toBeEnabled()); }
+async function selectNewSku() { await screen.findByRole("option", { name: "NEW · Новый товар · шт" }); fireEvent.change(screen.getByLabelText("Номенклатура из справочника"), { target: { value: "99" } }); }
 it("renders header, status and backend preview through scoped reads", async () => { await ready(); expect(screen.getByText(/Shenzhen Co/)).toHaveTextContent("Черновик"); expect(screen.getByText(/Shenzhen Co/)).toHaveTextContent("ETA 2026-08-01"); expect(screen.getByText("475")).toBeInTheDocument(); expect(screen.getByText("Итого landed: 950.00 BYN")).toBeInTheDocument(); });
 it("shows saved order changes with actor and server time", async () => {
   const original = f.getMockImplementation()!;
@@ -91,15 +96,47 @@ it("separates expected, client-bound and free quantities without calling them ph
 it("does not fetch an order without explicit organization", async () => { render(<ProcurementMachineEditor orderId={7} />); await screen.findByRole("option", { name: "A · 1" }); expect(f.mock.calls.map(([url]) => url)).toEqual(["/api/procurement/receipt-organizations"]); });
 it("empty lines show the original add hint", async () => { lines = []; await ready(); expect(screen.getByText(/Позиций нет/)).toBeInTheDocument(); });
 it("missing preview shows a dash and an error, never zero cost", async () => { mode = "no-preview"; await ready(); expect(screen.getByText("—")).toBeInTheDocument(); expect(screen.getByRole("alert")).toHaveTextContent("503"); expect(screen.queryByText(/Итого landed/)).not.toBeInTheDocument(); });
-it("validates empty SKU before posting", async () => { await ready(); fireEvent.click(screen.getByRole("button", { name: "Добавить позицию" })); expect(screen.getByRole("alert")).toHaveTextContent("Укажите код"); expect(writes()).toHaveLength(0); });
+it("validates empty SKU before posting", async () => { await ready(); fireEvent.click(screen.getByRole("button", { name: "Добавить позицию" })); expect(screen.getByRole("alert")).toHaveTextContent("Выберите номенклатуру"); expect(writes()).toHaveLength(0); });
 it("adds a line with exact decimals and displays the refreshed row", async () => {
-  await ready(); fireEvent.change(screen.getByLabelText("Код номенклатуры"), { target: { value: "NEW" } }); fireEvent.change(screen.getByLabelText("Стоимость товара"), { target: { value: "1234567.89" } }); fireEvent.click(screen.getByRole("button", { name: "Добавить позицию" }));
-  await screen.findByText("NEW"); expect(JSON.parse(String(writes()[0][1].body)).payload).toMatchObject({ sku_code: "NEW", goods_value_byn: "1234567.89", qty: "1.00" });
+  await ready(); await selectNewSku(); fireEvent.change(screen.getByLabelText("Стоимость товара"), { target: { value: "1234567.89" } }); fireEvent.click(screen.getByRole("button", { name: "Добавить позицию" }));
+  await screen.findByText("NEW"); expect(JSON.parse(String(writes()[0][1].body)).payload).toMatchObject({ sku_id: 99, sku_code: "NEW", sku_title: "Новый товар", sku_unit: "шт", goods_value_byn: "1234567.89", qty: "1.00" });
 });
-it("generic409 shows the reason but cannot close the pending journal", async () => { await ready(); mode = "reject"; fireEvent.change(screen.getByLabelText("Код номенклатуры"), { target: { value: "NEW" } }); fireEvent.click(screen.getByRole("button", { name: "Добавить позицию" })); await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("409")); expect(pending()).toHaveLength(1); });
+it("generic409 shows the reason but cannot close the pending journal", async () => { await ready(); mode = "reject"; await selectNewSku(); fireEvent.click(screen.getByRole("button", { name: "Добавить позицию" })); await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("409")); expect(pending()).toHaveLength(1); });
 it("deletes the selected line and refreshes the composition", async () => { await ready(); fireEvent.click(screen.getByRole("button", { name: "Удалить позицию" })); await screen.findByText(/Позиций нет/); expect(JSON.parse(String(writes()[0][1].body))).toMatchObject({ action: "delete_line", payload: { line_id: 11 } }); });
-it("rejects negative freight and restores previous text", async () => { await ready(); const input = screen.getByLabelText("Фрахт партии, BYN"); fireEvent.change(input, { target: { value: "-5" } }); fireEvent.blur(input); expect(screen.getByRole("alert")).toHaveTextContent("неотрицательным"); expect(input).toHaveValue("100.00"); expect(writes()).toHaveLength(0); });
-it("saves valid freight but does not post unchanged freight", async () => { await ready(); const input = screen.getByLabelText("Фрахт партии, BYN"); fireEvent.blur(input); expect(writes()).toHaveLength(0); fireEvent.change(input, { target: { value: "200.13" } }); fireEvent.blur(input); await screen.findByText("Изменение сохранено. Серверная квитанция подтверждена."); expect(JSON.parse(String(writes()[0][1].body)).payload).toEqual({ freight_byn: "200.13" }); });
+it("rejects negative freight and restores previous text", async () => { await ready(); const input = screen.getByLabelText("Фрахт партии, BYN"); fireEvent.change(input, { target: { value: "-5" } }); fireEvent.click(screen.getByRole("button", { name: "Сохранить фрахт" })); expect(screen.getByRole("alert")).toHaveTextContent("неотрицательным"); expect(input).toHaveValue("100.00"); expect(writes()).toHaveLength(0); });
+it("saves valid freight only on an explicit action", async () => { await ready(); const input = screen.getByLabelText("Фрахт партии, BYN"); fireEvent.blur(input); expect(writes()).toHaveLength(0); fireEvent.change(input, { target: { value: "200.13" } }); fireEvent.click(screen.getByRole("button", { name: "Сохранить фрахт" })); await screen.findByText("Изменение сохранено. Серверная квитанция подтверждена."); expect(JSON.parse(String(writes()[0][1].body)).payload).toEqual({ freight_byn: "200.13" }); });
+it("saves and closes only after the server confirms a changed order", async () => {
+  await ready(); fireEvent.change(screen.getByLabelText("Фрахт партии, BYN"), { target: { value: "200.13" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
+  await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/erp/procurement/orders?org=1"));
+  expect(JSON.parse(String(writes()[0][1].body)).payload).toEqual({ freight_byn: "200.13" });
+});
+it("retains unsaved fields and stays open when a later change fails", async () => {
+  const original = f.getMockImplementation()!;
+  f.mockImplementation((url: string, init?: RequestInit) => init?.method && JSON.parse(String(init.body)).action === "header"
+    ? Promise.resolve({ ok: false, status: 409, json: async () => ({ detail: "conflict" }) })
+    : original(url, init));
+  await ready(); await selectNewSku();
+  fireEvent.change(screen.getByLabelText("Фрахт партии, BYN"), { target: { value: "200.13" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("409"));
+  expect(screen.getByLabelText("Фрахт партии, BYN")).toHaveValue("200.13");
+  expect(screen.getByText("NEW")).toBeInTheDocument();
+  expect(writes()).toHaveLength(2);
+  expect(navigation.push).not.toHaveBeenCalled();
+});
+it("keeps the editor open when the save result is unknown", async () => {
+  await ready(); mode = "lost-after"; fireEvent.change(screen.getByLabelText("Фрахт партии, BYN"), { target: { value: "200.13" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
+  await screen.findByText(/Исход команды не подтверждён сервером/);
+  expect(navigation.push).not.toHaveBeenCalled(); expect(screen.getByLabelText("Фрахт партии, BYN")).toHaveValue("200.13");
+});
+it("does not close with an incomplete new position", async () => {
+  await ready(); fireEvent.change(screen.getByLabelText("Количество"), { target: { value: "3.00" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("Выберите номенклатуру");
+  expect(navigation.push).not.toHaveBeenCalled(); expect(writes()).toHaveLength(0);
+});
 it.each(["received", "cancelled"])("terminal %s composition stays uneditable", async terminal => { status = terminal; await ready(); expect(screen.getByRole("button", { name: "Добавить позицию" })).toBeDisabled(); expect(screen.getByLabelText("Фрахт партии, BYN")).toBeDisabled(); expect(screen.getByRole("button", { name: "Удалить позицию" })).toBeDisabled(); });
 it("reader sees own order and cannot write", async () => { manage = false; await ready(); expect(screen.getByRole("button", { name: "Добавить позицию" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Пересчитать план" })).toBeDisabled(); expect(writes()).toHaveLength(0); });
 it("chief can change lifecycle status and plan with an explicit date", async () => {
@@ -155,7 +192,7 @@ it("double submit is blocked while the command is pending", async () => {
 });
 
 it("lost applied command recovers the exact UUID without duplicating a line", async () => {
-  await ready(); mode = "lost-after"; fireEvent.change(screen.getByLabelText("Код номенклатуры"), { target: { value: "NEW" } }); fireEvent.click(screen.getByRole("button", { name: "Добавить позицию" }));
+  await ready(); mode = "lost-after"; await selectNewSku(); fireEvent.click(screen.getByRole("button", { name: "Добавить позицию" }));
   await waitFor(() => expect(screen.getByRole("button", { name: "Повторить сохранённую команду" })).toBeEnabled()); const first = writes()[0][1].body; mode = "ok";
   fireEvent.click(screen.getByRole("button", { name: "Повторить сохранённую команду" })); await screen.findByText("NEW"); expect(writes()[1][1].body).toBe(first); expect(lines.filter(x => x.sku_code === "NEW")).toHaveLength(1); expect(pending()).toHaveLength(0);
 });

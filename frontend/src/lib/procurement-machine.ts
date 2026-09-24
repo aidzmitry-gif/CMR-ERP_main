@@ -2,6 +2,8 @@
 
 export type Identity = { organization_id: number; principal: string; can_manage: boolean };
 export type Organization = { id: number; name: string; unp: string };
+export type ProcurementSkuOption = { id: number; code: string; title: string; unit: string };
+export type ProcurementSkuOptions = { organization_id: number; items: ProcurementSkuOption[]; truncated: boolean };
 export type MachineLine = { id: number; sku_code: string; qty: string; goods_value_byn: string; weight: string; volume: string };
 export type NewLine = Omit<MachineLine, "id">;
 export type MachineOrder = { organization_id: number; id: number; number: string; supplier: string; status: string; eta_date: string | null; freight_byn: string; lines: MachineLine[]; next_after_line_id: number | null };
@@ -51,6 +53,15 @@ async function read<T>(path: string): Promise<T> {
 export async function organizations(): Promise<Organization[]> {
   const v = await read<Organization[]>("/api/procurement/receipt-organizations");
   if (!Array.isArray(v) || v.some(x => !id(x.id) || typeof x.name !== "string")) throw new Error("Некорректный список организаций"); return v;
+}
+export async function fetchProcurementSkus(org: number, search = ""): Promise<ProcurementSkuOptions> {
+  const value = await read<ProcurementSkuOptions>(`${prefix(org)}/sku-options?q=${encodeURIComponent(search)}`);
+  if (value.organization_id !== org || typeof value.truncated !== "boolean" || !Array.isArray(value.items)
+      || value.items.length > 50 || value.items.some((row) => !id(row.id) || !row.code || !row.title || !row.unit
+        || typeof row.code !== "string" || typeof row.title !== "string" || typeof row.unit !== "string")) {
+    throw new Error("Некорректный справочник номенклатуры закупок");
+  }
+  return value;
 }
 export async function identity(org: number): Promise<Identity> {
   const v = await read<Identity>(`${prefix(org)}/request-plan-context`);
@@ -160,7 +171,14 @@ const exactDecimal = (v: unknown, scale: number, positive = false) => typeof v =
 export function validCommand(v: unknown): v is EditCommand {
   if (!keys(v, ["version", "request_key", "order_id", "action", "payload"]) || v.version !== 1 || !uuid(v.request_key) || !id(v.order_id)) return false;
   const p = v.payload;
-  if (v.action === "add_line") return keys(p, ["sku_code", "qty", "goods_value_byn", "weight", "volume"]) && typeof p.sku_code === "string" && p.sku_code.trim() === p.sku_code && p.sku_code.length > 0 && [...p.sku_code].length <= 64 && !p.sku_code.includes("\0") && exactDecimal(p.qty, 2, true) && exactDecimal(p.goods_value_byn, 2) && exactDecimal(p.weight, 3) && exactDecimal(p.volume, 4);
+  if (v.action === "add_line") {
+    const base = ["sku_code", "qty", "goods_value_byn", "weight", "volume"];
+    const selected = ["sku_id", "sku_title", "sku_unit"];
+    return (keys(p, base) || keys(p, [...base, ...selected]))
+      && typeof p.sku_code === "string" && p.sku_code.trim() === p.sku_code && p.sku_code.length > 0 && [...p.sku_code].length <= 64 && !p.sku_code.includes("\0")
+      && (!("sku_id" in p) || id(p.sku_id) && typeof p.sku_title === "string" && p.sku_title.length > 0 && p.sku_title.length <= 255 && !p.sku_title.includes("\0") && typeof p.sku_unit === "string" && p.sku_unit.length > 0 && p.sku_unit.length <= 16 && !p.sku_unit.includes("\0"))
+      && exactDecimal(p.qty, 2, true) && exactDecimal(p.goods_value_byn, 2) && exactDecimal(p.weight, 3) && exactDecimal(p.volume, 4);
+  }
   if (v.action === "delete_line") return keys(p, ["line_id"]) && id(p.line_id);
   if (v.action === "status") return keys(p, ["status"]) && typeof p.status === "string" && statuses.includes(p.status);
   if (v.action === "plan") return keys(p, ["transport_method_code", "target_arrival_date"]) && typeof p.transport_method_code === "string" && p.transport_method_code.length > 0 && calendar(p.target_arrival_date);
@@ -192,7 +210,7 @@ function validEffect(c: EditCommand, e: Record<string, unknown>, scope: Identity
     if (!keys(e, ["line"]) || !keys(e.line, ["id", "sku_code", "qty", "goods_value_byn", "weight", "volume"])) return false;
     const l = e.line;
     if (!id(l.id) || typeof l.sku_code !== "string" || ![l.qty, l.goods_value_byn, l.weight, l.volume].every(money)) return false;
-    return c.action === "delete_line" ? l.id === c.payload.line_id : canonical(Object.fromEntries(Object.entries(l).filter(([k]) => k !== "id"))) === canonical(c.payload);
+    return c.action === "delete_line" ? l.id === c.payload.line_id : canonical(Object.fromEntries(Object.entries(l).filter(([k]) => k !== "id"))) === canonical(Object.fromEntries(Object.entries(c.payload).filter(([k]) => !["sku_id", "sku_title", "sku_unit"].includes(k))));
   }
   if (c.action === "header") return keys(e, ["before", "after"]) && keys(e.before, Object.keys(c.payload)) && canonical(e.after) === canonical(c.payload) && Object.entries(e.before).every(([k, x]) => k === "freight_byn" ? money(x) : k === "supplier" ? typeof x === "string" : k === "supplier_id" ? x === null || Number.isInteger(x) : x === null || calendar(x));
   if (c.action === "status") return keys(e, ["from", "to", "received_at", "event_ids"]) && typeof e.from === "string" && statuses.includes(e.from) && e.to === c.payload.status && (e.received_at === null || (typeof e.received_at === "string" && /^\d{4}-\d{2}-\d{2}T/.test(e.received_at))) && Array.isArray(e.event_ids) && e.event_ids.every(id) && new Set(e.event_ids).size === e.event_ids.length && (e.event_ids.length > 0) === (e.from !== e.to);
@@ -204,7 +222,7 @@ export async function validOutcome(v: unknown, scope: Identity, c: EditCommand):
   if (!v || typeof v !== "object") return false;
   const r = v as EditOutcome;
   if (r.version !== 1 || r.organization_id !== scope.organization_id || r.principal !== scope.principal || r.request_key !== c.request_key || r.order_id !== c.order_id || r.action !== c.action || r.command_hash !== await commandHash(c)) return false;
-  if (r.outcome === "rejected") return keys(r, [...common, "code", "no_business_write"]) && r.no_business_write === true && ["command_abandoned", "source_unavailable", "order_not_editable", "line_unavailable", "transition_not_allowed", "transport_method_unavailable"].includes(r.code);
+  if (r.outcome === "rejected") return keys(r, [...common, "code", "no_business_write"]) && r.no_business_write === true && ["command_abandoned", "source_unavailable", "order_not_editable", "line_unavailable", "transition_not_allowed", "transport_method_unavailable", "sku_catalog_changed"].includes(r.code);
   return r.outcome === "applied" && keys(r, [...common, "ownership_id", "effect"]) && id(r.ownership_id) && !!r.effect && typeof r.effect === "object" && validEffect(c, r.effect, scope);
 }
 export async function sendEdit(scope: Identity, command: EditCommand, mode: "execute" | "reconcile"): Promise<EditOutcome> {

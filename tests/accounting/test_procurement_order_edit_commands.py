@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import func, select, update
 
-from core.domain.models import OutboxEvent
+from core.domain.models import OutboxEvent, Sku
 from modules.accounting.models import AccessGrant
 from modules.procurement import order_edit_commands as commands
 from modules.procurement.models import PurchaseOrderLine
@@ -120,6 +120,33 @@ async def test_order_history_shows_actor_time_and_exact_header_change(client, bo
     foreign = await client.get(f"/procurement/organizations/{book[0] + 1}/orders/{source[0]}/edit-history")
     assert foreign.status_code in {403, 404, 409}
     assert "tester" not in foreign.text
+
+
+async def test_selected_sku_is_checked_and_snapshotted_in_edit_receipt(client, db, book, source):
+    sku = Sku(code="SKU-CATALOG-1", title="Аккумулятор из справочника", unit="шт", is_active=True)
+    db.add(sku)
+    await db.commit()
+    options = await client.get(f"/procurement/organizations/{book[0]}/sku-options", params={"q": "CATALOG"})
+    assert options.status_code == 200, options.text
+    assert options.json()["items"] == [{"id": sku.id, "code": sku.code,
+                                        "title": sku.title, "unit": sku.unit}]
+    payload = {"sku_code": sku.code, "sku_id": sku.id, "sku_title": sku.title,
+               "sku_unit": sku.unit, "qty": "1.00", "goods_value_byn": "2.00",
+               "weight": "0.000", "volume": "0.0000"}
+    selected = command(source[0], "add_line", payload)
+    saved = await client.post(url(book, source), json=selected)
+    assert saved.status_code == 200, saved.text
+    history = (await client.get(
+        f"/procurement/organizations/{book[0]}/orders/{source[0]}/edit-history")).json()
+    assert history["items"][0]["changes"][0]["after"]["catalog_snapshot"] == {
+        "sku_id": sku.id, "title": "Аккумулятор из справочника", "unit": "шт"}
+    sku.title = "Новое название"
+    await db.commit()
+    assert (await client.post(url(book, source), json=selected)).json() == saved.json()
+    stale = await client.post(url(book, source), json=command(source[0], "add_line", payload))
+    assert stale.status_code == 409
+    assert stale.json()["code"] == "sku_catalog_changed"
+    assert stale.json()["no_business_write"] is True
 
 
 @pytest.mark.parametrize("action", ["header", "status", "plan"])
