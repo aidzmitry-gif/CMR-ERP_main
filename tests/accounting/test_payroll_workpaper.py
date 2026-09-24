@@ -713,11 +713,13 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
         "review_id": None,
         "review_digest": None,
         "reviewed_fact_codes": [],
+        "fszn_minimum_condition": None,
         "unrecorded_fact_codes": [
             "income_kind_and_tax_agent_treatment", "year_to_date_taxable_income",
             "main_workplace_and_deduction_basis",
             "dependants_special_status_and_deduction_documents",
             "other_deduction_claims_and_documents", "insurance_applicability_and_base",
+            "fszn_minimum_condition",
         ],
     }]
     assert applicability["reference_scope"] == "selected_mns_topics_only"
@@ -976,6 +978,7 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
         "listed_eligible_base_byn": "700.00", "capped_listed_base_byn": "500.00",
     }]
     assert "fszn_components_need_monthly_recalculation" in capped_candidate["blockers"]
+    assert "fszn_minimum_wage_missing" in capped_candidate["blockers"]
     assert capped_candidate["totals"]["listed_employer_contributions_byn"] == "140.00"
     assert capped_candidate["posting_available"] is False
     assert capped_candidate["statutory_payroll_certified"] is False
@@ -985,10 +988,114 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert (await client.get(candidate_url)).status_code == 409
     wage_path.write_bytes(wage_original)
     assert (await client.get(candidate_url)).status_code == 200
+
+    minimum_source_command = {
+        **wage_source_command, "request_key": str(uuid4()),
+        "reference": "synthetic-october-minimum-wage", "filename": "minimum.pdf",
+        "data_url": "data:application/pdf;base64," + base64.b64encode(
+            b"%PDF-1.7\nsynthetic minimum wage, not official\n").decode(),
+        "evidence": "Synthetic separate source for Article 9 comparison",
+    }
+    minimum_source = await client.post(url, json=minimum_source_command)
+    assert minimum_source.status_code == 200, minimum_source.text
+    minimum_fact = {**wage_review_command["facts"][0],
+                    "minimum_wage_month": "2026-10", "minimum_wage_byn": "2000.00",
+                    "minimum_wage_published_on": "2026-09-30",
+                    "minimum_wage_url": "https://nalog.gov.by/news/36005/",
+                    "minimum_wage_source_file_id": minimum_source.json()["file_id"],
+                    "minimum_wage_source_file_sha256": minimum_source.json()["sha256"],
+                    "minimum_wage_source_locator": "page 1, synthetic amount"}
+    minimum_review_command = {**wage_review_command, "request_key": str(uuid4()),
+                              "supersedes_id": wage_review.json()["review_id"],
+                              "facts": [minimum_fact]}
+    assert (await client.post(wage_review_url, json={
+        **minimum_review_command, "facts": [{**minimum_fact,
+            "minimum_wage_month": "2026-09"}],
+    })).status_code == 422
+    assert (await client.post(wage_review_url, json={
+        **minimum_review_command, "facts": [{**minimum_fact,
+            "minimum_wage_source_file_sha256": "0" * 64}],
+    })).status_code == 422
+    assert (await client.post(wage_review_url, json={
+        **minimum_review_command, "facts": [{**minimum_fact,
+            "minimum_wage_source_locator": "page 1\x00tampered"}],
+    })).status_code == 422
+    minimum_review = await client.post(wage_review_url, json=minimum_review_command)
+    assert minimum_review.status_code == 200, minimum_review.text
+    assert (await client.post(wage_review_url, json=minimum_review_command)).json() == minimum_review.json()
+    assert (await client.get(f"/accounting/organizations/{book[0]}/payroll-organization-reviews/"
+                             f"by-request/{wage_review_command['request_key']}")).json() == wage_review.json()
+    before_employee_review = (await client.get(candidate_url)).json()
+    assert before_employee_review["fszn_minimum_preview"]["employees"][0]["status"] == "unreviewed"
+    assert "fszn_minimum_condition_unreviewed" in before_employee_review["blockers"]
+
+    employee_source = await client.post(url, json={
+        "request_key": str(uuid4()), "kind": "payroll_applicability",
+        "employment_binding_id": binding["binding_id"], "month": "2026-10",
+        "reference": "synthetic-article-9-employee-fact", "filename": "employee.pdf",
+        "data_url": "data:application/pdf;base64," + base64.b64encode(
+            b"%PDF-1.7\nsynthetic employee category, not official\n").decode(),
+        "evidence": "Synthetic chief checked the employee exception category",
+    })
+    assert employee_source.status_code == 200, employee_source.text
+    employee_review_url = (f"/accounting/organizations/{book[0]}/periods/2026-10/"
+                           "payroll-applicability-reviews")
+    employee_review_command = {
+        "request_key": str(uuid4()), "employment_binding_id": binding["binding_id"],
+        "source_file_id": employee_source.json()["file_id"],
+        "source_document": employee_source.json()["reference"],
+        "facts": [{"code": "fszn_minimum_condition",
+                   "finding": "Synthetic chief identified ordinary employee treatment",
+                   "source_locator": "page 1, employee status",
+                   "fszn_minimum_condition": "applies",
+                   "fszn_minimum_full_month_norm_hours": "160.00",
+                   "fszn_minimum_full_norm_locator": "page 1, full month hours"}],
+        "evidence": "Synthetic chief identified Article 9 treatment for this employee",
+    }
+    assert (await client.post(employee_review_url, json={
+        **employee_review_command,
+        "facts": [{key: value for key, value in employee_review_command["facts"][0].items()
+                   if key != "fszn_minimum_condition"}],
+    })).status_code == 422
+    assert (await client.post(employee_review_url, json={
+        **employee_review_command,
+        "facts": [{key: value for key, value in employee_review_command["facts"][0].items()
+                   if key != "fszn_minimum_full_month_norm_hours"}],
+    })).status_code == 422
+    employee_review = await client.post(employee_review_url, json=employee_review_command)
+    assert employee_review.status_code == 200, employee_review.text
+    minimum_candidate = (await client.get(candidate_url)).json()
+    assert minimum_candidate["fszn_minimum_preview"]["employees"] == [{
+        "employee_id": binding["employee_id"], "review_ids": [attested["review_id"]],
+        "chief_condition": "applies", "status": "comparison",
+        "worked_hours": "80.00", "full_month_norm_hours": "160.00",
+        "time_adjusted_minimum_base_byn": "1000.00",
+        "listed_fszn_components_byn": "140.00",
+        "minimum_of_listed_components_byn": "200.00",
+        "indicative_shortfall_byn": "60.00",
+    }]
+    assert "fszn_minimum_recalculation_required" in minimum_candidate["blockers"]
+    assert minimum_candidate["totals"] == capped_candidate["totals"]
+    assert minimum_candidate["posting_available"] is False
+    minimum_path = root / str(book[0]) / (minimum_source_command["request_key"].replace("-", "") + ".pdf")
+    minimum_original = minimum_path.read_bytes()
+    minimum_path.write_bytes(b"%PDF-1.7\ntampered minimum source\n")
+    assert (await client.get(candidate_url)).status_code == 409
+    assert (await client.get(wage_review_url + "/current")).status_code == 409
+    minimum_path.write_bytes(minimum_original)
+    assert (await client.get(candidate_url)).status_code == 200
     period = await db.scalar(select(Period).where(
         Period.organization_id == book[0], Period.month == "2026-10"))
     period.closed = True
     await db.commit()
+    assert (await client.post(wage_review_url, json={
+        **minimum_review_command, "request_key": str(uuid4()),
+        "supersedes_id": minimum_review.json()["review_id"],
+    })).status_code == 422
+    assert (await client.post(employee_review_url, json={
+        **employee_review_command, "request_key": str(uuid4()),
+        "supersedes_id": employee_review.json()["review_id"],
+    })).status_code == 422
     assert (await client.post(review_url, json={
         **review_command, "request_key": str(uuid4()),
         "supersedes_review_id": corrected.json()["review_id"],

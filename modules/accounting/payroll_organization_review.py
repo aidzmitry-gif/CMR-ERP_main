@@ -39,8 +39,22 @@ class ReviewedRule(Input):
         default=None, max_length=500,
         pattern=r"^https://(?:www\.)?belstat\.gov\.by/[^\s#]+$",
     )
+    minimum_wage_month: str | None = Field(
+        default=None, pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$",
+    )
+    minimum_wage_byn: Money | None = Field(default=None, gt=0)
+    minimum_wage_published_on: date | None = None
+    minimum_wage_url: str | None = Field(
+        default=None, max_length=500,
+        pattern=r"^https://(?:www\.)?(?:nalog|mintrud)\.gov\.by/[^\s#]+$",
+    )
+    minimum_wage_source_file_id: int | None = Field(default=None, gt=0, strict=True)
+    minimum_wage_source_file_sha256: str | None = Field(
+        default=None, pattern=r"^[a-f0-9]{64}$",
+    )
+    minimum_wage_source_locator: str | None = Field(default=None, min_length=3, max_length=200)
 
-    @field_validator("reference_wage_byn", mode="before")
+    @field_validator("reference_wage_byn", "minimum_wage_byn", mode="before")
     @classmethod
     def exact_reference_wage(cls, value):
         if value is not None and (not isinstance(value, str)
@@ -57,6 +71,16 @@ class ReviewedRule(Input):
                     or self.code != "period_fszn_rules_and_limits"
                     or self.decision != "applicable"):
                 raise ValueError("Reference wage needs one applicable FSZN fact and complete source")
+        minimum = (self.minimum_wage_month, self.minimum_wage_byn,
+                   self.minimum_wage_published_on, self.minimum_wage_url,
+                   self.minimum_wage_source_file_id,
+                   self.minimum_wage_source_file_sha256,
+                   self.minimum_wage_source_locator)
+        if any(value is not None for value in minimum):
+            if (not all(value is not None for value in minimum)
+                    or self.code != "period_fszn_rules_and_limits"
+                    or self.decision != "applicable"):
+                raise ValueError("Minimum wage needs one applicable FSZN fact and complete source")
         return self
 
     @field_validator("code")
@@ -72,6 +96,11 @@ class ReviewedRule(Input):
         if not value.strip() or "\x00" in value:
             raise ValueError("Employer payroll rule evidence must be nonempty")
         return value.strip()
+
+    @field_validator("minimum_wage_source_locator")
+    @classmethod
+    def meaningful_minimum_locator(cls, value: str | None) -> str | None:
+        return cls.meaningful_text(value) if value is not None else None
 
 
 class PayrollOrganizationInput(Input):
@@ -126,6 +155,9 @@ def result(row: PayrollOrganizationReview) -> dict:
     if any(fact.reference_wage_month is not None
            and fact.reference_wage_month != previous_month for fact in parsed_facts):
         raise HTTPException(409, "FSZN reference wage month requires reconciliation")
+    if any(fact.minimum_wage_month is not None
+           and fact.minimum_wage_month != row.month for fact in parsed_facts):
+        raise HTTPException(409, "FSZN minimum wage month requires reconciliation")
     return {
         "review_id": row.id, **snapshot, "digest": row.digest, "actor": row.actor,
         "source_file_bytes_verified_now": False,
@@ -194,6 +226,26 @@ async def current_for(session, org_id: int, month: str) -> dict | None:
             "source_file_id": row.source_file_id,
             "source_file_sha256": row.source_file_sha256,
         }
+    minimum_wage = next((fact for fact in row.facts if
+                         fact["code"] == "period_fszn_rules_and_limits"
+                         and fact.get("minimum_wage_byn") is not None), None)
+    if minimum_wage:
+        minimum_file = await file_for(
+            session, org_id, minimum_wage["minimum_wage_source_file_id"],
+            kind="payroll_organization_rule", month=month,
+        )
+        if (minimum_file.employment_binding_id is not None
+                or minimum_file.sha256 != minimum_wage["minimum_wage_source_file_sha256"]):
+            raise HTTPException(409, "FSZN minimum wage source file changed")
+        current["fszn_minimum_wage"] = {
+            "wage_month": minimum_wage["minimum_wage_month"],
+            "wage_byn": minimum_wage["minimum_wage_byn"],
+            "published_on": minimum_wage["minimum_wage_published_on"],
+            "url": minimum_wage["minimum_wage_url"],
+            "source_file_id": minimum_file.id,
+            "source_file_sha256": minimum_file.sha256,
+            "source_locator": minimum_wage["minimum_wage_source_locator"],
+        }
     return current
 
 
@@ -203,7 +255,11 @@ async def create(session, org_id: int, month: str, data: PayrollOrganizationInpu
     command = data.model_dump(mode="json")
     for fact in command["facts"]:
         for field in ("reference_wage_month", "reference_wage_byn",
-                      "reference_wage_published_on", "reference_wage_url"):
+                      "reference_wage_published_on", "reference_wage_url",
+                      "minimum_wage_month", "minimum_wage_byn",
+                      "minimum_wage_published_on", "minimum_wage_url",
+                      "minimum_wage_source_file_id", "minimum_wage_source_file_sha256",
+                      "minimum_wage_source_locator"):
             if fact[field] is None:
                 fact.pop(field)  # Preserve old command digests and receipts.
         if "reference_wage_month" in fact:
@@ -211,6 +267,16 @@ async def create(session, org_id: int, month: str, data: PayrollOrganizationInpu
                               - timedelta(days=1)).strftime("%Y-%m")
             if fact["reference_wage_month"] != previous_month:
                 raise AccountingError("FSZN reference wage must be from the preceding month")
+        if "minimum_wage_month" in fact:
+            if fact["minimum_wage_month"] != month:
+                raise AccountingError("FSZN minimum wage must be for the payroll month")
+            minimum_file = await file_for(
+                session, org_id, fact["minimum_wage_source_file_id"],
+                kind="payroll_organization_rule", month=month,
+            )
+            if (minimum_file.employment_binding_id is not None
+                    or minimum_file.sha256 != fact["minimum_wage_source_file_sha256"]):
+                raise AccountingError("FSZN minimum wage source differs from stored file")
     request_digest = _digest(command)
     existing = await session.scalar(select(PayrollOrganizationReview).where(
         PayrollOrganizationReview.organization_id == org_id,

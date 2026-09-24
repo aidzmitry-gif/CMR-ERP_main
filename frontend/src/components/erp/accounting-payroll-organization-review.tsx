@@ -21,8 +21,11 @@ const decisions: { value: Decision; label: string }[] = [
 ];
 
 type WageSource = { reference_wage_month: string; reference_wage_byn: string; reference_wage_published_on: string; reference_wage_url: string };
-type Fact = { code: RuleCode; decision: Decision; finding: string; source_locator: string } & Partial<WageSource>;
-type DraftFact = { decision: Decision | ""; finding: string; source_locator: string } & WageSource;
+type MinimumWageSource = { minimum_wage_month: string; minimum_wage_byn: string; minimum_wage_published_on: string;
+  minimum_wage_url: string; minimum_wage_source_file_id: number; minimum_wage_source_file_sha256: string; minimum_wage_source_locator: string };
+type Fact = { code: RuleCode; decision: Decision; finding: string; source_locator: string } & Partial<WageSource & MinimumWageSource>;
+type DraftFact = { decision: Decision | ""; finding: string; source_locator: string;
+  minimum_wage_source_file_id: string } & WageSource & Omit<MinimumWageSource, "minimum_wage_source_file_id" | "minimum_wage_source_file_sha256">;
 type FileReceipt = Pick<PayrollEvidenceReceipt, "file_id" | "organization_id" | "employment_binding_id" | "kind" | "month" | "reference" | "sha256">;
 type ReviewReceipt = {
   review_id: number;
@@ -72,7 +75,10 @@ async function api<T>(path: string, body?: unknown, signal?: AbortSignal): Promi
 }
 
 function blankFacts(): Record<RuleCode, DraftFact> {
-  return Object.fromEntries(ruleCodes.map((code) => [code, { decision: "", finding: "", source_locator: "", reference_wage_month: "", reference_wage_byn: "", reference_wage_published_on: "", reference_wage_url: "" }])) as Record<RuleCode, DraftFact>;
+  return Object.fromEntries(ruleCodes.map((code) => [code, { decision: "", finding: "", source_locator: "",
+    reference_wage_month: "", reference_wage_byn: "", reference_wage_published_on: "", reference_wage_url: "",
+    minimum_wage_month: "", minimum_wage_byn: "", minimum_wage_published_on: "", minimum_wage_url: "",
+    minimum_wage_source_file_id: "", minimum_wage_source_locator: "" }])) as Record<RuleCode, DraftFact>;
 }
 
 function precedingMonth(month: string) {
@@ -94,7 +100,7 @@ function validFile(row: FileReceipt, org: string, month: string) {
     && /^[a-f0-9]{64}$/.test(row.sha256);
 }
 
-function validFacts(facts: Fact[], month: string) {
+function validFacts(facts: Fact[], month: string, files: FileReceipt[]) {
   return Array.isArray(facts) && facts.length >= 1 && facts.length <= ruleCodes.length
     && facts.every((fact, index) => ruleCodes.includes(fact.code)
       && (index === 0 || facts[index - 1].code < fact.code)
@@ -106,7 +112,18 @@ function validFacts(facts: Fact[], month: string) {
         && fixedMoney(fact.reference_wage_byn) === fact.reference_wage_byn
         && /^\d{4}-\d{2}-\d{2}$/.test(fact.reference_wage_published_on ?? "")
         && /^https:\/\/(?:www\.)?belstat\.gov\.by\/[^\s#]+$/.test(fact.reference_wage_url ?? "")))
-      && (fact.reference_wage_byn !== undefined || [fact.reference_wage_month, fact.reference_wage_published_on, fact.reference_wage_url].every((field) => field === undefined)));
+      && (fact.reference_wage_byn !== undefined || [fact.reference_wage_month, fact.reference_wage_published_on, fact.reference_wage_url].every((field) => field === undefined))
+      && (fact.minimum_wage_byn === undefined || (fact.code === "period_fszn_rules_and_limits"
+        && fact.decision === "applicable" && fact.minimum_wage_month === month
+        && fixedMoney(fact.minimum_wage_byn) === fact.minimum_wage_byn
+        && /^\d{4}-\d{2}-\d{2}$/.test(fact.minimum_wage_published_on ?? "")
+        && /^https:\/\/(?:www\.)?(?:nalog|mintrud)\.gov\.by\/[^\s#]+$/.test(fact.minimum_wage_url ?? "")
+        && typeof fact.minimum_wage_source_locator === "string" && fact.minimum_wage_source_locator.trim().length >= 3
+        && files.some((file) => file.file_id === fact.minimum_wage_source_file_id
+          && file.sha256 === fact.minimum_wage_source_file_sha256)))
+      && (fact.minimum_wage_byn !== undefined || [fact.minimum_wage_month, fact.minimum_wage_published_on,
+        fact.minimum_wage_url, fact.minimum_wage_source_file_id, fact.minimum_wage_source_file_sha256,
+        fact.minimum_wage_source_locator].every((field) => field === undefined)));
 }
 
 function validReview(receipt: ReviewReceipt, org: string, month: string, files: FileReceipt[], sourceVerifiedNow: boolean) {
@@ -121,14 +138,18 @@ function validReview(receipt: ReviewReceipt, org: string, month: string, files: 
     && /^[a-f0-9]{64}$/.test(receipt.digest)
     && receipt.source_file_bytes_verified_now === sourceVerifiedNow
     && receipt.statutory_payroll_certified === false && receipt.posting_available === false
-    && validFacts(receipt.facts, month);
+    && validFacts(receipt.facts, month, files);
 }
 
 function factDraft(facts: Fact[]): Record<RuleCode, DraftFact> {
   const draft = blankFacts();
   for (const fact of facts) draft[fact.code] = { decision: fact.decision, finding: fact.finding, source_locator: fact.source_locator,
     reference_wage_month: fact.reference_wage_month ?? "", reference_wage_byn: fact.reference_wage_byn ?? "",
-    reference_wage_published_on: fact.reference_wage_published_on ?? "", reference_wage_url: fact.reference_wage_url ?? "" };
+    reference_wage_published_on: fact.reference_wage_published_on ?? "", reference_wage_url: fact.reference_wage_url ?? "",
+    minimum_wage_month: fact.minimum_wage_month ?? "", minimum_wage_byn: fact.minimum_wage_byn ?? "",
+    minimum_wage_published_on: fact.minimum_wage_published_on ?? "", minimum_wage_url: fact.minimum_wage_url ?? "",
+    minimum_wage_source_file_id: String(fact.minimum_wage_source_file_id ?? ""),
+    minimum_wage_source_locator: fact.minimum_wage_source_locator ?? "" };
   return draft;
 }
 
@@ -197,7 +218,10 @@ export function AccountingPayrollOrganizationReview({ org, month, onReviewed }: 
       const fact = facts[code];
       const anyField = [fact.decision, fact.finding, fact.source_locator,
         fact.reference_wage_month, fact.reference_wage_byn,
-        fact.reference_wage_published_on, fact.reference_wage_url].some((value) => value.trim().length > 0);
+        fact.reference_wage_published_on, fact.reference_wage_url,
+        fact.minimum_wage_month, fact.minimum_wage_byn, fact.minimum_wage_published_on,
+        fact.minimum_wage_url, fact.minimum_wage_source_file_id,
+        fact.minimum_wage_source_locator].some((value) => value.trim().length > 0);
       if (!anyField) continue;
       if (!fact.decision || fact.finding.trim().length < 10 || fact.source_locator.trim().length < 3) {
         throw new Error("Для каждого выбранного правила укажите решение, вывод и точное место в документе.");
@@ -216,6 +240,25 @@ export function AccountingPayrollOrganizationReview({ org, month, onReviewed }: 
           Object.assign(row, { reference_wage_month: fact.reference_wage_month,
             reference_wage_byn: amount, reference_wage_published_on: fact.reference_wage_published_on,
             reference_wage_url: fact.reference_wage_url.trim() });
+        }
+        const minimumFields = [fact.minimum_wage_month, fact.minimum_wage_byn,
+          fact.minimum_wage_published_on, fact.minimum_wage_url,
+          fact.minimum_wage_source_file_id, fact.minimum_wage_source_locator];
+        if (minimumFields.some(Boolean)) {
+          const amount = fixedMoney(fact.minimum_wage_byn.trim());
+          const minimumFile = files.find((file) => String(file.file_id) === fact.minimum_wage_source_file_id);
+          if (fact.decision !== "applicable" || fact.minimum_wage_month !== month
+              || !amount || !minimumFile || !validFile(minimumFile, org, month)
+              || fact.minimum_wage_source_locator.trim().length < 3
+              || !/^\d{4}-\d{2}-\d{2}$/.test(fact.minimum_wage_published_on)
+              || !/^https:\/\/(?:www\.)?(?:nalog|mintrud)\.gov\.by\/[^\s#]+$/.test(fact.minimum_wage_url.trim())) {
+            throw new Error("Для предварительной проверки минимума ФСЗН укажите МЗП этого месяца, отдельный сохранённый источник и точное место в нём.");
+          }
+          Object.assign(row, { minimum_wage_month: fact.minimum_wage_month,
+            minimum_wage_byn: amount, minimum_wage_published_on: fact.minimum_wage_published_on,
+            minimum_wage_url: fact.minimum_wage_url.trim(), minimum_wage_source_file_id: minimumFile.file_id,
+            minimum_wage_source_file_sha256: minimumFile.sha256,
+            minimum_wage_source_locator: fact.minimum_wage_source_locator.trim() });
         }
       }
       selectedFacts.push(row);
@@ -308,6 +351,15 @@ export function AccountingPayrollOrganizationReview({ org, month, onReviewed }: 
           <label>Средняя зарплата, BYN<Input aria-label="Средняя зарплата Белстата BYN" inputMode="decimal" value={facts[code].reference_wage_byn} disabled={locked} onChange={(event) => changeFact(code, { reference_wage_byn: event.target.value })} /></label>
           <label>Дата публикации<Input aria-label="Дата публикации Белстата" type="date" value={facts[code].reference_wage_published_on} disabled={locked} onChange={(event) => changeFact(code, { reference_wage_published_on: event.target.value })} /></label>
           <label>Официальная ссылка<Input aria-label="Ссылка на источник Белстата" value={facts[code].reference_wage_url} disabled={locked} onChange={(event) => changeFact(code, { reference_wage_url: event.target.value })} /></label>
+          <p className="text-xs text-muted md:col-span-2">Для отдельной проверки минимума по статье 9 сохраните официальный документ о МЗП за расчётный месяц. Укажите отдельный файл, даже если справка Белстата находится в другом документе.</p>
+          <label>Месяц МЗП<Input aria-label="Месяц МЗП ФСЗН" type="month" value={facts[code].minimum_wage_month} disabled={locked} onChange={(event) => changeFact(code, { minimum_wage_month: event.target.value })} /></label>
+          <label>МЗП, BYN<Input aria-label="МЗП ФСЗН BYN" inputMode="decimal" value={facts[code].minimum_wage_byn} disabled={locked} onChange={(event) => changeFact(code, { minimum_wage_byn: event.target.value })} /></label>
+          <label>Дата публикации МЗП<Input aria-label="Дата публикации МЗП ФСЗН" type="date" value={facts[code].minimum_wage_published_on} disabled={locked} onChange={(event) => changeFact(code, { minimum_wage_published_on: event.target.value })} /></label>
+          <label>Официальная ссылка МЗП<Input aria-label="Ссылка на источник МЗП ФСЗН" value={facts[code].minimum_wage_url} disabled={locked} onChange={(event) => changeFact(code, { minimum_wage_url: event.target.value })} /></label>
+          <label>Файл источника МЗП<Select aria-label="Файл источника МЗП ФСЗН" value={facts[code].minimum_wage_source_file_id} disabled={locked} onChange={(event) => changeFact(code, { minimum_wage_source_file_id: event.target.value })}>
+            <option value="">Выберите сохранённый файл</option>{files.map((file) => <option key={file.file_id} value={file.file_id}>{file.reference} · № {file.file_id}</option>)}
+          </Select></label>
+          <label>Место МЗП в файле<Input aria-label="Место МЗП ФСЗН" value={facts[code].minimum_wage_source_locator} disabled={locked} onChange={(event) => changeFact(code, { minimum_wage_source_locator: event.target.value })} /></label>
         </div>}
       </div>)}</div>
       <label className="block">Пояснение проверки главбуха<Textarea aria-label="Пояснение проверки правил организации" value={evidence} disabled={locked} onChange={(event) => setEvidence(event.target.value)} /></label>
