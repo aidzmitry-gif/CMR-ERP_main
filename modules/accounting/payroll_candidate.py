@@ -35,6 +35,7 @@ from modules.accounting.payroll_rule_set import (
 )
 from modules.accounting.payroll_workpaper_review import (
     AMOUNT_FIELDS,
+    _amount,
     _review_amounts,
     monthly_arithmetic_summary,
 )
@@ -48,6 +49,31 @@ def _digest(value: dict) -> str:
     return hashlib.sha256(json.dumps(
         value, sort_keys=True, ensure_ascii=False, separators=(",", ":"),
     ).encode()).hexdigest()
+
+
+def _monthly_fszn_cap_rows(segments: list[tuple[int, int, Decimal]],
+                           cap: Decimal) -> tuple[list[dict], bool]:
+    """Compare listed monthly bases per employee; never calculate contributions."""
+    by_employee: dict[int, dict] = {}
+    for employee_id, review_id, base in segments:
+        item = by_employee.setdefault(employee_id, {
+            "employee_id": employee_id, "review_ids": [],
+            "listed_eligible_base_byn": Decimal("0"),
+        })
+        item["review_ids"].append(review_id)
+        item["listed_eligible_base_byn"] += base
+    exceeded = False
+    rows = []
+    for employee in sorted(by_employee.values(), key=lambda item: item["employee_id"]):
+        listed_base = employee["listed_eligible_base_byn"]
+        exceeded |= listed_base > cap
+        rows.append({
+            "employee_id": employee["employee_id"],
+            "review_ids": employee["review_ids"],
+            "listed_eligible_base_byn": format(listed_base, ".2f"),
+            "capped_listed_base_byn": format(min(listed_base, cap), ".2f"),
+        })
+    return rows, exceeded
 
 
 async def preview(session, org_id: int, month: str) -> dict:
@@ -98,8 +124,12 @@ async def preview(session, org_id: int, month: str) -> dict:
 
     totals = {field: Decimal("0") for field in AMOUNT_FIELDS}
     binding_rows: dict[int, dict] = {}
+    fszn_segments: list[tuple[int, int, Decimal]] = []
     included = []
     stale_rule = False
+    fszn_base_conflict = False
+    fszn_rate_codes = {rate["code"] for rate in (rule["rate_rules"] if rule else [])
+                       if rate.get("obligation_code") == "period_fszn_rules_and_limits"}
     for binding in summary["bindings"]:
         for segment in binding["segments"]:
             row = by_id[segment["review_id"]]
@@ -128,6 +158,18 @@ async def preview(session, org_id: int, month: str) -> dict:
                 if current_rate["digest"] != component["requirement_digest"]:
                     stale_rule = True
             amounts = _review_amounts(row)
+            if fszn_rate_codes:
+                components = [component for component in basis["components"]
+                              if component["rate_code"] in fszn_rate_codes]
+                component_bases = {_amount(component.get("base_byn"))
+                                   for component in components}
+                if len(components) != len(fszn_rate_codes) or len(component_bases) != 1:
+                    fszn_base_conflict = True
+                else:
+                    employee_id = basis.get("employee_id")
+                    if type(employee_id) is not int or employee_id <= 0:
+                        raise HTTPException(409, "Payroll candidate employee identity requires reconciliation")
+                    fszn_segments.append((employee_id, row.id, component_bases.pop()))
             item = binding_rows.setdefault(binding["employment_binding_id"], {
                 "employment_binding_id": binding["employment_binding_id"],
                 "review_ids": [],
@@ -163,6 +205,30 @@ async def preview(session, org_id: int, month: str) -> dict:
         blockers.append("payroll_rate_obligation_unreviewed")
     if any(row["chief_decision"] == "not_applicable" for row in rate_obligations):
         blockers.append("payroll_rate_conflicts_with_organization_review")
+    fszn_cap_preview = None
+    reference_wage = (organization_review or {}).get("fszn_reference_wage")
+    if fszn_base_conflict:
+        blockers.append("fszn_segment_bases_disagree")
+    if (fszn_rate_codes and not stale_rule
+            and decisions.get("period_fszn_rules_and_limits") == "applicable"):
+        if reference_wage is None:
+            blockers.append("fszn_reference_wage_missing")
+        elif not fszn_base_conflict:
+            cap = _amount(reference_wage["wage_byn"]) * 5
+            rows, cap_exceeded = _monthly_fszn_cap_rows(fszn_segments, cap)
+            if cap_exceeded:
+                blockers.append("fszn_components_need_monthly_recalculation")
+            fszn_cap_preview = {
+                "scope": "attested_erp_segments_only",
+                "month": month,
+                "multiplier": 5,
+                "reference_wage": reference_wage,
+                "ceiling_byn": format(cap, ".2f"),
+                "employees": rows,
+                "all_selected_segments_attested": not summary["source_fact_unattested_review_ids"],
+                "statutory_base_certified": False,
+                "contributions_recalculated": False,
+            }
     # A configured percentage list is not proof that every legally applicable
     # deduction, exemption, cap, benefit or employee-specific fact was covered.
     blockers.append("statutory_rule_completeness_unverified")
@@ -180,6 +246,7 @@ async def preview(session, org_id: int, month: str) -> dict:
         "rule_set_digest": rule["digest"] if rule else None,
         "included_reviews": included,
         "applicability": applicability,
+        "fszn_monthly_cap_preview": fszn_cap_preview,
         "blockers": blockers,
         "totals": formatted,
     }
@@ -192,6 +259,7 @@ async def preview(session, org_id: int, month: str) -> dict:
         "unattested_review_ids": summary["source_fact_unattested_review_ids"],
         "bindings": bindings, "totals": formatted, "blockers": blockers,
         "applicability": applicability,
+        "fszn_monthly_cap_preview": fszn_cap_preview,
         "arithmetic_scope_complete": not any(code not in {
             "statutory_rule_completeness_unverified",
             "payroll_rate_obligation_unmapped",

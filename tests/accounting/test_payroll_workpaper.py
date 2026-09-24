@@ -385,11 +385,14 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
         },
     )
     assert bad_rule.status_code == 422
+    mapped_rules = [{**row, "obligation_code": (
+        "period_fszn_rules_and_limits" if row["role"] == "employer_contribution"
+        else "period_income_tax_withholding_rule")} for row in ruleset["rate_rules"]]
     new_rule = await client.post(
         f"/accounting/organizations/{book[0]}/payroll-rule-sets", json={
             "request_key": str(uuid4()), "policy_id": book[1],
             "effective_from": "2026-01-01", "gross_method": "monthly_salary_by_hours",
-            "rounding": "half_up_cent", "rate_rules": ruleset["rate_rules"],
+            "rounding": "half_up_cent", "rate_rules": mapped_rules,
             "source_reference": policy_file["reference"],
             "source_digest": policy_file["sha256"],
             "source_file_id": policy_file["file_id"],
@@ -697,7 +700,7 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
         "review_id": attested["review_id"], "snapshot_digest": attested["snapshot_digest"],
     }]
     assert candidate["blockers"] == [
-        "population_review_missing_or_stale", "payroll_rate_obligation_unmapped",
+        "population_review_missing_or_stale", "payroll_rate_obligation_unreviewed",
         "statutory_rule_completeness_unverified",
     ]
     assert candidate["posting_available"] is False
@@ -805,7 +808,7 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     roster_candidate = (await client.get(candidate_url)).json()
     assert roster_candidate["arithmetic_scope_complete"] is True
     assert roster_candidate["blockers"] == [
-        "payroll_rate_obligation_unmapped", "statutory_rule_completeness_unverified",
+        "payroll_rate_obligation_unreviewed", "statutory_rule_completeness_unverified",
     ]
     assert roster_candidate["candidate_digest"] != candidate["candidate_digest"]
     assert roster_candidate["source_basis"]["population_review_id"] == roster_review.json()["review_id"]
@@ -938,6 +941,50 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert stale_summary["coverage_digest"] != attested_summary["coverage_digest"]
     assert stale_summary["summary_digest"] != attested_summary["summary_digest"]
 
+    wage_source_command = {
+        "request_key": str(uuid4()), "kind": "payroll_organization_rule",
+        "employment_binding_id": None, "month": "2026-10",
+        "reference": "synthetic-september-wage-dossier", "filename": "wage.pdf",
+        "data_url": "data:application/pdf;base64," + base64.b64encode(
+            b"%PDF-1.7\nsynthetic reference wage, not official\n").decode(),
+        "evidence": "Synthetic reference wage for monthly cap arithmetic only",
+    }
+    wage_source = await client.post(url, json=wage_source_command)
+    assert wage_source.status_code == 200, wage_source.text
+    wage_review_command = {
+        "request_key": str(uuid4()), "source_file_id": wage_source.json()["file_id"],
+        "source_document": wage_source.json()["reference"],
+        "facts": [{"code": "period_fszn_rules_and_limits", "decision": "applicable",
+                   "finding": "Synthetic chief selected one monthly wage reference",
+                   "source_locator": "page 1, synthetic national wage",
+                   "reference_wage_month": "2026-09", "reference_wage_byn": "100.00",
+                   "reference_wage_published_on": "2026-10-24",
+                   "reference_wage_url": "https://www.belstat.gov.by/example/wage.pdf"}],
+        "evidence": "Synthetic chief checked one reference wage source file",
+        "supersedes_id": None,
+    }
+    wage_review_url = (f"/accounting/organizations/{book[0]}/periods/2026-10/"
+                       "payroll-organization-reviews")
+    wage_review = await client.post(wage_review_url, json=wage_review_command)
+    assert wage_review.status_code == 200, wage_review.text
+    assert (await client.post(wage_review_url, json=wage_review_command)).json() == wage_review.json()
+    capped_candidate = (await client.get(candidate_url)).json()
+    cap_preview = capped_candidate["fszn_monthly_cap_preview"]
+    assert cap_preview["ceiling_byn"] == "500.00"
+    assert cap_preview["employees"] == [{
+        "employee_id": binding["employee_id"], "review_ids": [attested["review_id"]],
+        "listed_eligible_base_byn": "700.00", "capped_listed_base_byn": "500.00",
+    }]
+    assert "fszn_components_need_monthly_recalculation" in capped_candidate["blockers"]
+    assert capped_candidate["totals"]["listed_employer_contributions_byn"] == "140.00"
+    assert capped_candidate["posting_available"] is False
+    assert capped_candidate["statutory_payroll_certified"] is False
+    wage_path = root / str(book[0]) / (wage_source_command["request_key"].replace("-", "") + ".pdf")
+    wage_original = wage_path.read_bytes()
+    wage_path.write_bytes(b"%PDF-1.7\ntampered wage source\n")
+    assert (await client.get(candidate_url)).status_code == 409
+    wage_path.write_bytes(wage_original)
+    assert (await client.get(candidate_url)).status_code == 200
     period = await db.scalar(select(Period).where(
         Period.organization_id == book[0], Period.month == "2026-10"))
     period.closed = True

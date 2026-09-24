@@ -42,6 +42,39 @@ function fillFacts() {
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe("AccountingPayrollOrganizationReview", () => {
+  it("can review only the FSZN wage source without claiming the other two rules", async () => {
+    let saved: Record<string, unknown> | null = null;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url.endsWith("/payroll-workpaper-access")) return Promise.resolve(response({ organization_id: 7, can_review: true }));
+      if (url.includes("/payroll-evidence-files?")) return Promise.resolve(response([source]));
+      if (url.endsWith("/payroll-organization-reviews/current")) return Promise.resolve(saved ? response({ ...saved, source_file_bytes_verified_now: true }) : response({}, 404));
+      if (url.endsWith("/payroll-organization-reviews") && init?.method === "POST") {
+        const command = JSON.parse(String(init.body));
+        saved = savedReceipt({ ...command, facts: command.facts.map((fact: Record<string, unknown>) =>
+          fact.reference_wage_byn === undefined ? fact : { ...fact, reference_wage_byn: "3135.90" }) });
+        return Promise.resolve(response(saved));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("crypto", { randomUUID: () => key });
+    render(<AccountingPayrollOrganizationReview org="7" month="2026-10" onReviewed={vi.fn()} />);
+    await screen.findByRole("option", { name: "rules-2026-10 · № 87" });
+    fireEvent.change(screen.getByLabelText("Файл правил организации для обзора"), { target: { value: "87" } });
+    fireEvent.change(screen.getByLabelText(`Решение ${ruleCodes[0]}`), { target: { value: "applicable" } });
+    fireEvent.change(screen.getByLabelText(`Вывод ${ruleCodes[0]}`), { target: { value: "Synthetic wage finding for this employer" } });
+    fireEvent.change(screen.getByLabelText(`Место ${ruleCodes[0]}`), { target: { value: "page 1, country value" } });
+    fireEvent.change(screen.getByLabelText("Месяц средней зарплаты Белстата"), { target: { value: "2026-09" } });
+    fireEvent.change(screen.getByLabelText("Средняя зарплата Белстата BYN"), { target: { value: "003135.90" } });
+    fireEvent.change(screen.getByLabelText("Дата публикации Белстата"), { target: { value: "2026-10-24" } });
+    fireEvent.change(screen.getByLabelText("Ссылка на источник Белстата"), { target: { value: "https://www.belstat.gov.by/example/wage.pdf" } });
+    fireEvent.change(screen.getByLabelText("Пояснение проверки правил организации"), { target: { value: "Проверен отдельный источник месячной средней зарплаты" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить фактический обзор" }));
+    expect(await screen.findByText(/Текущая редакция № 1, квитанция № 21/)).toBeInTheDocument();
+    const post = fetchMock.mock.calls.find(([url, init]) => String(url).endsWith("/payroll-organization-reviews") && init?.method === "POST");
+    expect(JSON.parse(String(post?.[1]?.body)).facts).toMatchObject([{ reference_wage_byn: "3135.90" }]);
+  });
+
   it("saves sorted factual rule decisions as an organization and month scoped revision", async () => {
     let saved: Record<string, unknown> | null = {
       review_id: 20, organization_id: 7, month: "2026-10", revision: 3, supersedes_id: 19,
@@ -71,6 +104,11 @@ describe("AccountingPayrollOrganizationReview", () => {
     await screen.findByRole("option", { name: "rules-2026-10 · № 87" });
     fireEvent.change(screen.getByLabelText("Файл правил организации для обзора"), { target: { value: "87" } });
     fillFacts();
+    fireEvent.change(screen.getByLabelText(`Решение ${ruleCodes[0]}`), { target: { value: "applicable" } });
+    fireEvent.change(screen.getByLabelText("Месяц средней зарплаты Белстата"), { target: { value: "2026-09" } });
+    fireEvent.change(screen.getByLabelText("Средняя зарплата Белстата BYN"), { target: { value: "3135.9" } });
+    fireEvent.change(screen.getByLabelText("Дата публикации Белстата"), { target: { value: "2026-10-24" } });
+    fireEvent.change(screen.getByLabelText("Ссылка на источник Белстата"), { target: { value: "https://www.belstat.gov.by/example/wage.pdf" } });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить исправление обзора" }));
 
     expect(await screen.findByText(/Текущая редакция № 4, квитанция № 21/)).toBeInTheDocument();
@@ -82,7 +120,10 @@ describe("AccountingPayrollOrganizationReview", () => {
       request_key: key, source_file_id: 87, source_document: "rules-2026-10",
       supersedes_id: 20, evidence: "Главбух проверил указанные пункты документа",
       facts: [
-        { code: ruleCodes[0], decision: "not_applicable", source_locator: `page 2, ${ruleCodes[0]}` },
+        { code: ruleCodes[0], decision: "applicable", source_locator: `page 2, ${ruleCodes[0]}`,
+          reference_wage_month: "2026-09", reference_wage_byn: "3135.90",
+          reference_wage_published_on: "2026-10-24",
+          reference_wage_url: "https://www.belstat.gov.by/example/wage.pdf" },
         { code: ruleCodes[1], decision: "applicable", source_locator: `page 2, ${ruleCodes[1]}` },
         { code: ruleCodes[2], decision: "applicable", source_locator: `page 2, ${ruleCodes[2]}` },
       ],

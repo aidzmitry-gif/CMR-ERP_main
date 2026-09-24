@@ -3,17 +3,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+from datetime import date, timedelta
 from typing import Literal
 from uuid import UUID
 
 from fastapi import HTTPException
-from pydantic import Field, field_validator
+from pydantic import Field, ValidationError, field_validator, model_validator
 from sqlalchemy import select
 
 from modules.accounting.models import PayrollOrganizationReview, Period
 from modules.accounting.payroll_applicability import ORGANIZATION_RULE_CODES
 from modules.accounting.payroll_evidence_files import file_for
-from modules.accounting.schemas import Input
+from modules.accounting.schemas import Input, Money
 from modules.accounting.service import AccountingError, audit, lock_organization
 
 
@@ -28,6 +30,34 @@ class ReviewedRule(Input):
     decision: Literal["applicable", "not_applicable", "unresolved"]
     finding: str = Field(min_length=10, max_length=500)
     source_locator: str = Field(min_length=3, max_length=200)
+    reference_wage_month: str | None = Field(
+        default=None, pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$",
+    )
+    reference_wage_byn: Money | None = Field(default=None, gt=0)
+    reference_wage_published_on: date | None = None
+    reference_wage_url: str | None = Field(
+        default=None, max_length=500,
+        pattern=r"^https://(?:www\.)?belstat\.gov\.by/[^\s#]+$",
+    )
+
+    @field_validator("reference_wage_byn", mode="before")
+    @classmethod
+    def exact_reference_wage(cls, value):
+        if value is not None and (not isinstance(value, str)
+                                  or re.fullmatch(r"\d{1,17}\.\d{2}", value) is None):
+            raise ValueError("Reference wage must be a two-decimal BYN string")
+        return value
+
+    @model_validator(mode="after")
+    def reference_wage_is_one_fszn_fact(self):
+        values = (self.reference_wage_month, self.reference_wage_byn,
+                  self.reference_wage_published_on, self.reference_wage_url)
+        if any(value is not None for value in values):
+            if (not all(value is not None for value in values)
+                    or self.code != "period_fszn_rules_and_limits"
+                    or self.decision != "applicable"):
+                raise ValueError("Reference wage needs one applicable FSZN fact and complete source")
+        return self
 
     @field_validator("code")
     @classmethod
@@ -87,6 +117,15 @@ def result(row: PayrollOrganizationReview) -> dict:
     if (row.snapshot != snapshot or row.digest != _digest(snapshot)
             or row.request_digest != _digest(command)):
         raise HTTPException(409, "Employer payroll rule review integrity requires reconciliation")
+    previous_month = (date.fromisoformat(row.month + "-01")
+                      - timedelta(days=1)).strftime("%Y-%m")
+    try:
+        parsed_facts = [ReviewedRule.model_validate(fact) for fact in row.facts]
+    except (ValidationError, TypeError) as exc:
+        raise HTTPException(409, "Employer payroll rule facts require reconciliation") from exc
+    if any(fact.reference_wage_month is not None
+           and fact.reference_wage_month != previous_month for fact in parsed_facts):
+        raise HTTPException(409, "FSZN reference wage month requires reconciliation")
     return {
         "review_id": row.id, **snapshot, "digest": row.digest, "actor": row.actor,
         "source_file_bytes_verified_now": False,
@@ -137,18 +176,41 @@ async def current_for(session, org_id: int, month: str) -> dict | None:
         raise HTTPException(409, "Employer payroll rule source file changed")
     reviewed = [fact["code"] for fact in row.facts if fact["decision"] != "unresolved"]
     unresolved = [code for code in ORGANIZATION_RULE_CODES if code not in reviewed]
-    return {
+    reference_wage = next((fact for fact in row.facts if
+                           fact["code"] == "period_fszn_rules_and_limits"
+                           and fact.get("reference_wage_byn") is not None), None)
+    current = {
         "review_id": row.id, "review_digest": row.digest,
         "reviewed_rule_codes": reviewed,
         "unresolved_rule_codes": unresolved,
         "rule_decisions": {fact["code"]: fact["decision"] for fact in row.facts},
     }
+    if reference_wage:
+        current["fszn_reference_wage"] = {
+            "wage_month": reference_wage["reference_wage_month"],
+            "wage_byn": reference_wage["reference_wage_byn"],
+            "published_on": reference_wage["reference_wage_published_on"],
+            "url": reference_wage["reference_wage_url"],
+            "source_file_id": row.source_file_id,
+            "source_file_sha256": row.source_file_sha256,
+        }
+    return current
 
 
 async def create(session, org_id: int, month: str, data: PayrollOrganizationInput,
                  actor: str) -> dict:
     await lock_organization(session, org_id)
     command = data.model_dump(mode="json")
+    for fact in command["facts"]:
+        for field in ("reference_wage_month", "reference_wage_byn",
+                      "reference_wage_published_on", "reference_wage_url"):
+            if fact[field] is None:
+                fact.pop(field)  # Preserve old command digests and receipts.
+        if "reference_wage_month" in fact:
+            previous_month = (date.fromisoformat(month + "-01")
+                              - timedelta(days=1)).strftime("%Y-%m")
+            if fact["reference_wage_month"] != previous_month:
+                raise AccountingError("FSZN reference wage must be from the preceding month")
     request_digest = _digest(command)
     existing = await session.scalar(select(PayrollOrganizationReview).where(
         PayrollOrganizationReview.organization_id == org_id,

@@ -137,6 +137,29 @@ describe("AccountingPayrollControl", () => {
     expect(screen.queryByText("Связь ставок с обязательствами")).not.toBeInTheDocument();
   });
 
+  it("shows the provisional monthly FSZN ceiling without claiming recalculated contributions", async () => {
+    const data = reports(7);
+    const wage = { wage_month: "2026-09", wage_byn: "3135.90", published_on: "2026-10-24",
+      url: "https://www.belstat.gov.by/example/wage.pdf", source_file_id: 87,
+      source_file_sha256: "d".repeat(64) };
+    Object.assign(data.candidate.applicability.organization, { fszn_reference_wage: wage });
+    Object.assign(data.candidate, { fszn_monthly_cap_preview: {
+      scope: "attested_erp_segments_only", month: "2026-10", multiplier: 5,
+      reference_wage: wage, ceiling_byn: "15679.50",
+      employees: [{ employee_id: 41, review_ids: [101, 102],
+        listed_eligible_base_byn: "16000.00", capped_listed_base_byn: "15679.50" }],
+      all_selected_segments_attested: true, statutory_base_certified: false,
+      contributions_recalculated: false,
+    } });
+    vi.stubGlobal("fetch", vi.fn((input: string) => Promise.resolve(response(
+      input.includes("payroll-own-candidate") ? data.candidate : input.includes("payroll-arithmetic-summary") ? data.summary : data.comparison,
+    ))));
+    render(<AccountingPayrollControl org="7" month="2026-10" onEntry={vi.fn()} />);
+    expect(await screen.findByText("Предварительное сравнение с месячным пределом ФСЗН")).toBeInTheDocument();
+    expect(screen.getByText(/Работник № 41: показанные базы 16000.00 BYN, после ограничения 15679.50 BYN/)).toBeInTheDocument();
+    expect(screen.getByText(/Показанные выше суммы взносов не пересчитаны; проведение и выплата недоступны/)).toBeInTheDocument();
+  });
+
   it("does not call an empty month an uncovered employment interval", async () => {
     const data = reports(7);
     data.summary.known_binding_coverage.active_binding_count = 0;

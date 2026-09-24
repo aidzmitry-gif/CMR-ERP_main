@@ -20,8 +20,9 @@ const decisions: { value: Decision; label: string }[] = [
   { value: "unresolved", label: "Не удалось определить" },
 ];
 
-type Fact = { code: RuleCode; decision: Decision; finding: string; source_locator: string };
-type DraftFact = { decision: Decision | ""; finding: string; source_locator: string };
+type WageSource = { reference_wage_month: string; reference_wage_byn: string; reference_wage_published_on: string; reference_wage_url: string };
+type Fact = { code: RuleCode; decision: Decision; finding: string; source_locator: string } & Partial<WageSource>;
+type DraftFact = { decision: Decision | ""; finding: string; source_locator: string } & WageSource;
 type FileReceipt = Pick<PayrollEvidenceReceipt, "file_id" | "organization_id" | "employment_binding_id" | "kind" | "month" | "reference" | "sha256">;
 type ReviewReceipt = {
   review_id: number;
@@ -71,7 +72,18 @@ async function api<T>(path: string, body?: unknown, signal?: AbortSignal): Promi
 }
 
 function blankFacts(): Record<RuleCode, DraftFact> {
-  return Object.fromEntries(ruleCodes.map((code) => [code, { decision: "", finding: "", source_locator: "" }])) as Record<RuleCode, DraftFact>;
+  return Object.fromEntries(ruleCodes.map((code) => [code, { decision: "", finding: "", source_locator: "", reference_wage_month: "", reference_wage_byn: "", reference_wage_published_on: "", reference_wage_url: "" }])) as Record<RuleCode, DraftFact>;
+}
+
+function precedingMonth(month: string) {
+  const [year, number] = month.split("-").map(Number);
+  return new Date(Date.UTC(year, number - 2, 1)).toISOString().slice(0, 7);
+}
+
+function fixedMoney(value: string) {
+  if (!/^\d{1,17}(?:\.\d{1,2})?$/.test(value) || /^0+(?:\.0+)?$/.test(value)) return null;
+  const [whole, cents = ""] = value.split(".");
+  return `${BigInt(whole)}.${cents.padEnd(2, "0")}`;
 }
 
 function validFile(row: FileReceipt, org: string, month: string) {
@@ -82,13 +94,19 @@ function validFile(row: FileReceipt, org: string, month: string) {
     && /^[a-f0-9]{64}$/.test(row.sha256);
 }
 
-function validFacts(facts: Fact[]) {
+function validFacts(facts: Fact[], month: string) {
   return Array.isArray(facts) && facts.length >= 1 && facts.length <= ruleCodes.length
     && facts.every((fact, index) => ruleCodes.includes(fact.code)
       && (index === 0 || facts[index - 1].code < fact.code)
       && decisions.some((decision) => decision.value === fact.decision)
       && typeof fact.finding === "string" && fact.finding.trim().length >= 10
-      && typeof fact.source_locator === "string" && fact.source_locator.trim().length >= 3);
+      && typeof fact.source_locator === "string" && fact.source_locator.trim().length >= 3
+      && (fact.reference_wage_byn === undefined || (fact.code === "period_fszn_rules_and_limits"
+        && fact.decision === "applicable" && fact.reference_wage_month === precedingMonth(month)
+        && fixedMoney(fact.reference_wage_byn) === fact.reference_wage_byn
+        && /^\d{4}-\d{2}-\d{2}$/.test(fact.reference_wage_published_on ?? "")
+        && /^https:\/\/(?:www\.)?belstat\.gov\.by\/[^\s#]+$/.test(fact.reference_wage_url ?? "")))
+      && (fact.reference_wage_byn !== undefined || [fact.reference_wage_month, fact.reference_wage_published_on, fact.reference_wage_url].every((field) => field === undefined)));
 }
 
 function validReview(receipt: ReviewReceipt, org: string, month: string, files: FileReceipt[], sourceVerifiedNow: boolean) {
@@ -103,12 +121,14 @@ function validReview(receipt: ReviewReceipt, org: string, month: string, files: 
     && /^[a-f0-9]{64}$/.test(receipt.digest)
     && receipt.source_file_bytes_verified_now === sourceVerifiedNow
     && receipt.statutory_payroll_certified === false && receipt.posting_available === false
-    && validFacts(receipt.facts);
+    && validFacts(receipt.facts, month);
 }
 
 function factDraft(facts: Fact[]): Record<RuleCode, DraftFact> {
   const draft = blankFacts();
-  for (const fact of facts) draft[fact.code] = { decision: fact.decision, finding: fact.finding, source_locator: fact.source_locator };
+  for (const fact of facts) draft[fact.code] = { decision: fact.decision, finding: fact.finding, source_locator: fact.source_locator,
+    reference_wage_month: fact.reference_wage_month ?? "", reference_wage_byn: fact.reference_wage_byn ?? "",
+    reference_wage_published_on: fact.reference_wage_published_on ?? "", reference_wage_url: fact.reference_wage_url ?? "" };
   return draft;
 }
 
@@ -172,13 +192,35 @@ export function AccountingPayrollOrganizationReview({ org, month, onReviewed }: 
 
   function buildCommand(): ReviewCommand {
     if (!selectedFile || !validFile(selectedFile, org, month)) throw new Error("Выберите сохранённый файл правил для этого юрлица и месяца.");
-    const selectedFacts = ruleCodes.map((code) => {
+    const selectedFacts: Fact[] = [];
+    for (const code of ruleCodes) {
       const fact = facts[code];
+      const anyField = [fact.decision, fact.finding, fact.source_locator,
+        fact.reference_wage_month, fact.reference_wage_byn,
+        fact.reference_wage_published_on, fact.reference_wage_url].some((value) => value.trim().length > 0);
+      if (!anyField) continue;
       if (!fact.decision || fact.finding.trim().length < 10 || fact.source_locator.trim().length < 3) {
-        throw new Error("Для каждого правила укажите решение, вывод и точное место в документе.");
+        throw new Error("Для каждого выбранного правила укажите решение, вывод и точное место в документе.");
       }
-      return { code, decision: fact.decision, finding: fact.finding.trim(), source_locator: fact.source_locator.trim() };
-    });
+      const row: Fact = { code, decision: fact.decision, finding: fact.finding.trim(), source_locator: fact.source_locator.trim() };
+      if (code === "period_fszn_rules_and_limits") {
+        const wageFields = [fact.reference_wage_month, fact.reference_wage_byn,
+          fact.reference_wage_published_on, fact.reference_wage_url];
+        if (wageFields.some(Boolean)) {
+          const amount = fixedMoney(fact.reference_wage_byn.trim());
+          if (fact.decision !== "applicable" || fact.reference_wage_month !== precedingMonth(month)
+              || !amount || !/^\d{4}-\d{2}-\d{2}$/.test(fact.reference_wage_published_on)
+              || !/^https:\/\/(?:www\.)?belstat\.gov\.by\/[^\s#]+$/.test(fact.reference_wage_url.trim())) {
+            throw new Error("Для предварительного предела ФСЗН укажите среднюю зарплату именно предыдущего месяца, дату и официальный источник Белстата.");
+          }
+          Object.assign(row, { reference_wage_month: fact.reference_wage_month,
+            reference_wage_byn: amount, reference_wage_published_on: fact.reference_wage_published_on,
+            reference_wage_url: fact.reference_wage_url.trim() });
+        }
+      }
+      selectedFacts.push(row);
+    }
+    if (selectedFacts.length === 0) throw new Error("Выберите хотя бы одно правило для обзора.");
     if (evidence.trim().length < 10) throw new Error("Укажите пояснение проверки главбуха не короче 10 символов.");
     return {
       request_key: crypto.randomUUID(), source_file_id: selectedFile.file_id,
@@ -260,6 +302,13 @@ export function AccountingPayrollOrganizationReview({ org, month, onReviewed }: 
         </Select></label>
         <label className="block">Фактический вывод по документу<Textarea aria-label={`Вывод ${code}`} value={facts[code].finding} disabled={locked} onChange={(event) => changeFact(code, { finding: event.target.value })} /></label>
         <label className="block">Точный источник: страница, пункт или строка<Input aria-label={`Место ${code}`} value={facts[code].source_locator} disabled={locked} onChange={(event) => changeFact(code, { source_locator: event.target.value })} /></label>
+        {code === "period_fszn_rules_and_limits" && <div className="grid gap-2 md:grid-cols-2">
+          <p className="text-xs text-muted md:col-span-2">Необязательная справка о месячном пределе: загрузите в выбранный файл официальный источник Белстата. Значение и применимость подтверждает главбух; ERP сверяет байты файла, но не извлекает из него показатель.</p>
+          <label>Месяц средней зарплаты<Input aria-label="Месяц средней зарплаты Белстата" type="month" value={facts[code].reference_wage_month} disabled={locked} onChange={(event) => changeFact(code, { reference_wage_month: event.target.value })} /></label>
+          <label>Средняя зарплата, BYN<Input aria-label="Средняя зарплата Белстата BYN" inputMode="decimal" value={facts[code].reference_wage_byn} disabled={locked} onChange={(event) => changeFact(code, { reference_wage_byn: event.target.value })} /></label>
+          <label>Дата публикации<Input aria-label="Дата публикации Белстата" type="date" value={facts[code].reference_wage_published_on} disabled={locked} onChange={(event) => changeFact(code, { reference_wage_published_on: event.target.value })} /></label>
+          <label>Официальная ссылка<Input aria-label="Ссылка на источник Белстата" value={facts[code].reference_wage_url} disabled={locked} onChange={(event) => changeFact(code, { reference_wage_url: event.target.value })} /></label>
+        </div>}
       </div>)}</div>
       <label className="block">Пояснение проверки главбуха<Textarea aria-label="Пояснение проверки правил организации" value={evidence} disabled={locked} onChange={(event) => setEvidence(event.target.value)} /></label>
       <Button disabled={busy || loading || uploading || (!pending && !selectedFile)} onClick={() => void submit()}>{pending ? "Проверить или повторить сохранение" : latest ? "Сохранить исправление обзора" : "Сохранить фактический обзор"}</Button>

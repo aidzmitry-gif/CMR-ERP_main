@@ -64,11 +64,15 @@ type Candidate = {
     reference_scope: "selected_mns_topics_only" | "no_period_source_checked";
     references: { topic: string; url: string }[];
     organization_gap_codes: string[];
-    organization: { review_id: number | null; review_digest: string | null; reviewed_rule_codes: string[]; unresolved_rule_codes: string[]; rule_decisions?: Record<string, string> };
+    organization: { review_id: number | null; review_digest: string | null; reviewed_rule_codes: string[]; unresolved_rule_codes: string[]; rule_decisions?: Record<string, string>; fszn_reference_wage?: { wage_month: string; wage_byn: string; published_on: string; url: string; source_file_id: number; source_file_sha256: string } };
     rate_obligations?: { rate_code: string; obligation_code: string | null; chief_decision: "applicable" | "not_applicable" | "unresolved" | null }[];
     bindings: { employment_binding_id: number; review_id: number | null; review_digest: string | null; reviewed_fact_codes: string[]; unrecorded_fact_codes: string[] }[];
     statutory_completeness_verified: false;
   };
+  fszn_monthly_cap_preview: { scope: "attested_erp_segments_only"; month: string; multiplier: 5;
+    reference_wage: { wage_month: string; wage_byn: string; published_on: string; url: string; source_file_id: number; source_file_sha256: string };
+    ceiling_byn: string; employees: { employee_id: number; review_ids: number[]; listed_eligible_base_byn: string; capped_listed_base_byn: string }[];
+    all_selected_segments_attested: boolean; statutory_base_certified: false; contributions_recalculated: false } | null;
   arithmetic_scope_complete: boolean;
   posting_available: false;
   statutory_payroll_certified: false;
@@ -103,6 +107,9 @@ const candidateBlockers: Record<string, string> = {
   payroll_rate_obligation_unmapped: "Для одной или нескольких ставок не указано обязательство (подоходный налог, ФСЗН или страхование от несчастных случаев).",
   payroll_rate_obligation_unreviewed: "Применимость указанного обязательства главбухом не рассмотрена или не определена.",
   payroll_rate_conflicts_with_organization_review: "Ставка включена в расчёт, хотя обзор организации помечает её обязательство неприменимым.",
+  fszn_reference_wage_missing: "Для сравнения с месячным пределом ФСЗН нет проверенной по файлу справки о средней зарплате за предыдущий месяц.",
+  fszn_segment_bases_disagree: "Базы ставок ФСЗН в одном расчётном отрезке различаются; общий месячный предел нельзя рассчитать автоматически.",
+  fszn_components_need_monthly_recalculation: "Сумма показанных баз ФСЗН превысила месячный предел; перечисленные взносы рассчитаны без ограничения и требуют отдельного перерасчёта.",
   statutory_rule_completeness_unverified: "Полнота применимых удержаний, взносов, вычетов и льгот не подтверждена.",
 };
 const applicabilityLabels: Record<string, string> = {
@@ -164,6 +171,26 @@ function validOrganizationApplicability(candidate: Candidate) {
     && organizationRuleCodes.every((code) => candidate.applicability.organization_gap_codes.includes(code));
 }
 
+function validFsznPreview(candidate: Candidate) {
+  const preview = candidate.fszn_monthly_cap_preview;
+  if (preview == null) return true;
+  const wage = candidate.applicability.organization.fszn_reference_wage;
+  const money = (value: string) => typeof value === "string" && /^\d+\.\d{2}$/.test(value);
+  return !!preview && preview.scope === "attested_erp_segments_only"
+    && preview.month === candidate.month && preview.multiplier === 5
+    && preview.statutory_base_certified === false && preview.contributions_recalculated === false
+    && !!wage && JSON.stringify(preview.reference_wage) === JSON.stringify(wage)
+    && /^\d{4}-(0[1-9]|1[0-2])$/.test(wage.wage_month)
+    && /^https:\/\/(?:www\.)?belstat\.gov\.by\//.test(wage.url)
+    && /^[a-f0-9]{64}$/.test(wage.source_file_sha256)
+    && Number.isInteger(wage.source_file_id) && wage.source_file_id > 0
+    && money(wage.wage_byn) && money(preview.ceiling_byn)
+    && Array.isArray(preview.employees) && preview.employees.every((row) =>
+      Number.isInteger(row.employee_id) && row.employee_id > 0
+      && Array.isArray(row.review_ids) && row.review_ids.every((id) => Number.isInteger(id) && id > 0)
+      && money(row.listed_eligible_base_byn) && money(row.capped_listed_base_byn));
+}
+
 async function readScoped<T extends { organization_id: number; month: string }>(
   path: string, org: string, month: string, signal: AbortSignal,
 ): Promise<T> {
@@ -213,7 +240,7 @@ export function AccountingPayrollControl({ org, month, onEntry }: {
         && candidateValue.statutory_payroll_certified === false
         && candidateValue.applicability?.status === "facts_and_rules_unverified"
         && candidateValue.applicability.statutory_completeness_verified === false
-        && validOrganizationApplicability(candidateValue);
+        && validOrganizationApplicability(candidateValue) && validFsznPreview(candidateValue);
       setLoaded({
         summary: summary.status === "fulfilled" ? summary.value : null,
         comparison: comparison.status === "fulfilled" ? comparison.value : null,
@@ -263,6 +290,12 @@ export function AccountingPayrollControl({ org, month, onEntry }: {
       <p className="text-sm">{loaded.candidate.arithmetic_scope_complete ? "Исходные расчётные отрезки собраны; нормативная полнота ещё не подтверждена." : "Черновик неполон: проверьте причины ниже."}</p>
       <ul className="list-disc space-y-1 pl-5 text-sm">{loaded.candidate.blockers.map((code) => <li key={code}>{candidateBlockers[code] ?? code}</li>)}</ul>
       {!!loaded.candidate.applicability.rate_obligations?.length && <div className="rounded-lg border border-line p-3 text-sm"><h4 className="font-semibold">Связь ставок с обязательствами</h4><ul className="mt-1 list-disc space-y-1 pl-5">{loaded.candidate.applicability.rate_obligations.map((row) => <li key={row.rate_code}>{row.rate_code}: {row.obligation_code ? obligationTitles[row.obligation_code] ?? row.obligation_code : "обязательство не указано"}; {row.chief_decision === "applicable" ? "главбух отметил применимость" : row.chief_decision === "not_applicable" ? "главбух отметил неприменимость — конфликт" : "применимость не определена"}.</li>)}</ul><p className="mt-1 text-xs text-muted">Сопоставление не подтверждает ставку, базу или нормативную полноту.</p></div>}
+      {loaded.candidate.fszn_monthly_cap_preview && <div className="space-y-2 rounded-lg border border-line p-3 text-sm">
+        <h4 className="font-semibold">Предварительное сравнение с месячным пределом ФСЗН</h4>
+        <p>Средняя зарплата за {loaded.candidate.fszn_monthly_cap_preview.reference_wage.wage_month}: {loaded.candidate.fszn_monthly_cap_preview.reference_wage.wage_byn} BYN; × 5 = {loaded.candidate.fszn_monthly_cap_preview.ceiling_byn} BYN. Источник: <a className="underline" href={loaded.candidate.fszn_monthly_cap_preview.reference_wage.url} target="_blank" rel="noreferrer">Белстат</a>, файл № {loaded.candidate.fszn_monthly_cap_preview.reference_wage.source_file_id}.</p>
+        {loaded.candidate.fszn_monthly_cap_preview.employees.length ? <ul className="list-disc pl-5">{loaded.candidate.fszn_monthly_cap_preview.employees.map((row) => <li key={row.employee_id}>Работник № {row.employee_id}: показанные базы {row.listed_eligible_base_byn} BYN, после ограничения {row.capped_listed_base_byn} BYN; листы № {row.review_ids.join(", ")}.</li>)}</ul> : <p>Подтверждённых расчётных отрезков для сравнения нет.</p>}
+        <p className="text-xs text-muted">Суммируются только подтверждённые отрезки ERP. Полнота выплат, исключения, особые категории и применимость лимита не удостоверены. Показанные выше суммы взносов не пересчитаны; проведение и выплата недоступны.</p>
+      </div>}
       <div className="space-y-2 rounded-lg border border-line p-3 text-sm">
         <h4 className="font-semibold">Что нужно для проверки налоговых условий</h4>
         <p className="text-muted">ERP пока не хранит перечисленные ниже факты по работникам. Список охватывает только известные ERP договоры; отсутствие заявления о вычете нельзя считать нулевым вычетом.</p>
