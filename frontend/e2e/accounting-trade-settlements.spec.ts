@@ -94,11 +94,32 @@ test("60/62: бухгалтер видит документ и скачивае�
   });
   await expect(page.getByRole("alert").filter({ hasText: "Расхождения: 1" })).toBeVisible();
   await expect(page.getByText("credit_byn: ERP 40.00 / 1С 50.00 BYN")).toBeVisible();
+  const [draft] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "Скачать черновой протокол сравнения" }).click(),
+  ]);
+  const workpaper = JSON.parse(await readFile(await draft.path(), "utf8"));
+  expect(workpaper).toMatchObject({
+    protocol_version: "trade-settlement-comparison-draft-v1", status: "differences",
+    organization_id: orgA.id, period_start: "2026-09-01", period_end: "2026-09-30",
+    erp_csv_sha256: createHash("sha256").update(csv).digest("hex"),
+    external_csv_sha256: createHash("sha256").update(different).digest("hex"),
+    erp_rows: 1, external_rows: 1, matched_rows: 0,
+    provenance_verified: false, accountant_accepted: false, cutover_ready: false,
+  });
+  expect(workpaper.issues).toEqual([{ kind: "amount_difference",
+    identity: { account: "62", category: "asset", counterparty: "Синтетический клиент", contract: "Договор 1", document: "Счёт 1" },
+    differing_fields: ["credit_byn", "closing_byn"],
+    erp_amounts_byn: { opening_byn: "100.00", debit_byn: "0.00", credit_byn: "40.00", closing_byn: "60.00" },
+    external_amounts_byn: { opening_byn: "100.00", debit_byn: "0.00", credit_byn: "50.00", closing_byn: "50.00" },
+    erp_entry_line_ids: ["11:21", "12:22"],
+  }]);
   await page.screenshot({ path: testInfo.outputPath("trade-comparison.png"), fullPage: true });
 
   await page.getByLabel("Организация", { exact: true }).selectOption(String(orgB.id));
   await expect(page.getByRole("alert").filter({ hasText: "Расхождение с ОСВ" })).toBeVisible();
   await expect(page.getByText("synthetic-difference.csv", { exact: false })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Скачать черновой протокол сравнения" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Скачать CSV для внутренней сверки" })).toHaveCount(0);
   wrongScope = true;
   await page.getByLabel("Конец периода").fill("2026-09-29");

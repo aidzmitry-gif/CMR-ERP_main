@@ -72,8 +72,8 @@ export function buildTradeSettlementsCsv(report: Report): string {
   return `\uFEFF${[header.join(","), ...lines].join("\r\n")}\r\n`;
 }
 
-function downloadLocalCsv(contents: string, filename: string) {
-  const url = URL.createObjectURL(new Blob([contents], { type: "text/csv;charset=utf-8" }));
+function downloadLocalFile(contents: string, filename: string, mime: string) {
+  const url = URL.createObjectURL(new Blob([contents], { type: mime }));
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = filename;
@@ -83,13 +83,18 @@ function downloadLocalCsv(contents: string, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
+async function sha256Hex(bytes: BufferSource): Promise<string> {
+  return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)))
+    .map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export function AccountingTradeSettlements({ org, start, end, onEntry }: {
   org: string; start: string; end: string; onEntry: (id: number) => void;
 }) {
   const [savedReport, setSavedReport] = useState<{ scope: string; data: Report } | null>(null);
   const [savedError, setSavedError] = useState<{ scope: string; message: string } | null>(null);
   const [savedFilter, setSavedFilter] = useState<{ scope: string; value: Filter } | null>(null);
-  const [comparison, setComparison] = useState<{ scope: string; filename: string; sha256: string;
+  const [comparison, setComparison] = useState<{ scope: string; filename: string; sha256: string; erpSha256: string;
     result: TradeComparison } | null>(null);
   const [comparisonError, setComparisonError] = useState<{ scope: string; message: string } | null>(null);
   const [refresh, setRefresh] = useState(0);
@@ -104,11 +109,38 @@ export function AccountingTradeSettlements({ org, start, end, onEntry }: {
   function downloadCsv() {
     if (!report || report.organization_id !== Number(org) || report.from !== start || report.to !== end) return;
     try {
-      downloadLocalCsv(buildTradeSettlementsCsv(report),
-        `trade-settlements-org-${report.organization_id}-${report.from}-${report.to}.csv`);
+      downloadLocalFile(buildTradeSettlementsCsv(report),
+        `trade-settlements-org-${report.organization_id}-${report.from}-${report.to}.csv`, "text/csv;charset=utf-8");
     } catch (reason) {
       setSavedError({ scope, message: reason instanceof Error ? reason.message : "Не удалось подготовить CSV." });
     }
+  }
+
+  function downloadComparisonWorkpaper() {
+    if (!report || !comparison || comparison.scope !== scope || report.organization_id !== Number(org)
+        || report.from !== start || report.to !== end) return;
+    const amounts = (row: { opening_byn: string; debit_byn: string; credit_byn: string; closing_byn: string } | null) =>
+      row ? { opening_byn: row.opening_byn, debit_byn: row.debit_byn,
+        credit_byn: row.credit_byn, closing_byn: row.closing_byn } : null;
+    const workpaper = {
+      protocol_version: "trade-settlement-comparison-draft-v1",
+      status: comparison.result.status === "matched" ? "preliminary_amount_match" : "differences",
+      organization_id: report.organization_id, period_start: report.from, period_end: report.to,
+      erp_csv_sha256: comparison.erpSha256, external_csv_sha256: comparison.sha256,
+      external_filename_label: comparison.filename, external_source_declared_as: "1C",
+      erp_rows: comparison.result.erp_rows, external_rows: comparison.result.external_rows,
+      matched_rows: comparison.result.matched_rows,
+      issues: comparison.result.issues.map((issue) => ({
+        kind: issue.kind, identity: issue.identity, differing_fields: issue.differing_fields,
+        erp_amounts_byn: amounts(issue.erp), external_amounts_byn: amounts(issue.external),
+        erp_entry_line_ids: issue.erp?.movements.map((movement) =>
+          `${movement.entry_id}:${movement.line_id}`) ?? [],
+      })),
+      provenance_verified: false, accountant_accepted: false, cutover_ready: false,
+    };
+    downloadLocalFile(`${JSON.stringify(workpaper, null, 2)}\n`,
+      `trade-comparison-draft-org-${report.organization_id}-${report.from}-${report.to}.json`,
+      "application/json;charset=utf-8");
   }
 
   async function compareFile(file: File) {
@@ -117,17 +149,18 @@ export function AccountingTradeSettlements({ org, start, end, onEntry }: {
     setComparisonError(null);
     try {
       if (!report || report.organization_id !== Number(org) || report.from !== start || report.to !== end) return;
-      buildTradeSettlementsCsv(report); // Requires the exact internally matched ERP population.
+      const erpCsv = buildTradeSettlementsCsv(report); // Requires the exact internally matched ERP population.
       if (!file.size || file.size > 10 * 1024 * 1024) throw new Error("CSV 1С должен быть непустым и не больше 10 МБ.");
       const bytes = await file.arrayBuffer();
-      const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)))
-        .map((byte) => byte.toString(16).padStart(2, "0")).join("");
+      const [sha256, erpSha256] = await Promise.all([
+        sha256Hex(bytes), sha256Hex(new TextEncoder().encode(erpCsv)),
+      ]);
       let source: string;
       try { source = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
       catch { throw new Error("CSV 1С должен быть в кодировке UTF-8."); }
       if (currentScope.current !== selectedScope) return;
       const result = compareTradeDocumentCsv(source, report);
-      if (currentScope.current === selectedScope) setComparison({ scope, filename: file.name, sha256, result });
+      if (currentScope.current === selectedScope) setComparison({ scope, filename: file.name, sha256, erpSha256, result });
     } catch (reason) {
       if (currentScope.current === selectedScope) setComparisonError({ scope,
         message: reason instanceof Error ? reason.message : "Не удалось сравнить CSV 1С." });
@@ -175,7 +208,7 @@ export function AccountingTradeSettlements({ org, start, end, onEntry }: {
       {report.osv_reconciliation.status === "matched" && <section aria-label="Сравнение документов с 1С" className="space-y-3 rounded-lg border border-line bg-surface p-4">
         <h3 className="font-semibold">Сравнение документов с выгрузкой 1С</h3>
         <p className="text-sm text-muted">Нормализуйте выгрузку 1С по пустому шаблону: источник 1C, ID этой книги, выбранный период, один документ на строку и суммы в BYN. Сравнение использует точные текстовые аналитики; одноимённые объекты требуют отдельной проверки ID. Файл читается только в браузере, в ERP не отправляется. Название и совпадение сумм не доказывают происхождение файла или бухгалтерскую приёмку.</p>
-        <Button variant="secondary" onClick={() => downloadLocalCsv(`\uFEFF${EXTERNAL_TRADE_HEADER.join(",")}\r\n`, "trade-settlements-1c-template.csv")}>Скачать пустой шаблон 1С</Button>
+        <Button variant="secondary" onClick={() => downloadLocalFile(`\uFEFF${EXTERNAL_TRADE_HEADER.join(",")}\r\n`, "trade-settlements-1c-template.csv", "text/csv;charset=utf-8")}>Скачать пустой шаблон 1С</Button>
         <label className="block text-sm">Нормализованный CSV 1С
           <input aria-label="Нормализованный CSV 1С" type="file" accept=".csv,text/csv" className="mt-1 block w-full text-sm"
             onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void compareFile(file); }} />
@@ -187,6 +220,9 @@ export function AccountingTradeSettlements({ org, start, end, onEntry }: {
             {" "}ERP: {comparison.result.erp_rows}; 1С: {comparison.result.external_rows}; совпали: {comparison.result.matched_rows}. Это предварительная сверка, не акт приёмки.
           </p>
           <p className="break-all text-xs text-muted">Выбранный файл: {comparison.filename}; SHA-256 его байтов: {comparison.sha256}. Сверьте этот отпечаток с независимым пакетом исходных документов.</p>
+          <p className="break-all text-xs text-muted">SHA-256 CSV текущей ERP-книги: {comparison.erpSha256}.</p>
+          <Button variant="secondary" onClick={downloadComparisonWorkpaper}>Скачать черновой протокол сравнения</Button>
+          <p className="text-xs text-muted">JSON сохраняется только на компьютере. Он не подписан и не подтверждает происхождение выгрузки 1С или приёмку бухгалтером.</p>
           {comparison.result.issues.map((issue, index) => <div key={`${issue.kind}:${index}`} className="rounded border border-red-200 p-2">
             <p className="font-medium">{issue.kind === "missing_in_1c" ? "Есть в ERP, отсутствует в файле 1С" : issue.kind === "only_in_1c" ? "Есть в файле 1С, отсутствует в ERP" : "Суммы различаются"}: {issue.identity.account} · {issue.identity.counterparty} · {issue.identity.contract} · {issue.identity.document}</p>
             {issue.differing_fields.map((field) => <p key={field}>{field}: ERP {issue.erp?.[field]} / 1С {issue.external?.[field]} BYN</p>)}
