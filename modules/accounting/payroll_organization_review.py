@@ -141,6 +141,7 @@ async def current_for(session, org_id: int, month: str) -> dict | None:
         "review_id": row.id, "review_digest": row.digest,
         "reviewed_rule_codes": reviewed,
         "unresolved_rule_codes": unresolved,
+        "rule_decisions": {fact["code"]: fact["decision"] for fact in row.facts},
     }
 
 

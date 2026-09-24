@@ -182,6 +182,18 @@ the software has not verified the legal text, employer tariff or policy.
 Closed periods reject new files and reviews; no rate is inferred, and posting,
 payment and forms stay disabled.
 
+Each newly configured percentage rate may now carry an explicit obligation
+code for income-tax withholding, FSZN or work-injury insurance. The accountant
+UI requires this selection for a new rule-set revision. Historical rules without
+it remain replayable but the monthly candidate reports
+`payroll_rate_obligation_unmapped`. The candidate compares the mapped code
+with the current chief's organization/month rule review: absent or unresolved
+decisions report `payroll_rate_obligation_unreviewed`; `not_applicable` with a
+configured rate reports `payroll_rate_conflicts_with_organization_review`.
+This is source-trace and conflict detection, not verification of a rate, base,
+cap, exemption or the completeness of mandatory payroll obligations. The
+statutory blocker, posting/payment prohibition and external-import path remain.
+
 The current rule-set API exposes `rate_versions` (the immutable configured
 requirement IDs and digests) together with the rate roles and base modes. The
 accountant workspace's **Расчётный лист** tab uses those IDs, an explicitly

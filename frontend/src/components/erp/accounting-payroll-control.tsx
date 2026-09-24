@@ -64,7 +64,8 @@ type Candidate = {
     reference_scope: "selected_mns_topics_only" | "no_period_source_checked";
     references: { topic: string; url: string }[];
     organization_gap_codes: string[];
-    organization: { review_id: number | null; review_digest: string | null; reviewed_rule_codes: string[]; unresolved_rule_codes: string[] };
+    organization: { review_id: number | null; review_digest: string | null; reviewed_rule_codes: string[]; unresolved_rule_codes: string[]; rule_decisions?: Record<string, string> };
+    rate_obligations?: { rate_code: string; obligation_code: string | null; chief_decision: "applicable" | "not_applicable" | "unresolved" | null }[];
     bindings: { employment_binding_id: number; review_id: number | null; review_digest: string | null; reviewed_fact_codes: string[]; unrecorded_fact_codes: string[] }[];
     statutory_completeness_verified: false;
   };
@@ -99,6 +100,9 @@ const candidateBlockers: Record<string, string> = {
   accounting_policy_changed_or_unverified: "Учётная политика для месяца изменилась или не подтверждена.",
   rule_source_file_missing: "К набору правил не приложен сохранённый файл политики.",
   rule_version_changed: "Версия правила или ставки изменилась после проверки расчётного листа.",
+  payroll_rate_obligation_unmapped: "Для одной или нескольких ставок не указано обязательство (подоходный налог, ФСЗН или страхование от несчастных случаев).",
+  payroll_rate_obligation_unreviewed: "Применимость указанного обязательства главбухом не рассмотрена или не определена.",
+  payroll_rate_conflicts_with_organization_review: "Ставка включена в расчёт, хотя обзор организации помечает её обязательство неприменимым.",
   statutory_rule_completeness_unverified: "Полнота применимых удержаний, взносов, вычетов и льгот не подтверждена.",
 };
 const applicabilityLabels: Record<string, string> = {
@@ -123,6 +127,11 @@ const organizationRuleCodes = [
   "period_fszn_rules_and_limits",
   "period_work_injury_insurance_tariff",
 ];
+const obligationTitles: Record<string, string> = {
+  period_income_tax_withholding_rule: "Подоходный налог",
+  period_fszn_rules_and_limits: "Взносы ФСЗН",
+  period_work_injury_insurance_tariff: "Страхование от несчастных случаев",
+};
 
 function validOrganizationApplicability(candidate: Candidate) {
   const review = candidate.applicability.organization;
@@ -137,9 +146,20 @@ function validOrganizationApplicability(candidate: Candidate) {
       && unresolved.length === organizationRuleCodes.length
     : Number.isInteger(review.review_id) && review.review_id > 0
       && typeof review.review_digest === "string" && /^[a-f0-9]{64}$/.test(review.review_digest);
+  const rates = candidate.applicability.rate_obligations;
+  const decisions = review.rule_decisions ?? {};
+  const decisionsShape = rates === undefined || (review.rule_decisions !== null
+    && typeof review.rule_decisions === "object" && !Array.isArray(review.rule_decisions)
+    && Object.entries(decisions).every(([code, decision]) =>
+      organizationRuleCodes.includes(code) && ["applicable", "not_applicable", "unresolved"].includes(decision)));
+  const ratesShape = rates === undefined || (Array.isArray(rates) && rates.every((row) =>
+    typeof row.rate_code === "string" && row.rate_code.length > 0
+    && (row.obligation_code === null || organizationRuleCodes.includes(row.obligation_code))
+    && row.chief_decision === (row.obligation_code === null ? null : decisions[row.obligation_code] ?? null))
+    && new Set(rates.map((row) => row.rate_code)).size === rates.length);
   return Array.isArray(reviewed) && Array.isArray(unresolved)
     && known(reviewed) && known(unresolved)
-    && reviewShape
+    && reviewShape && decisionsShape && ratesShape
     && organizationRuleCodes.every((code) => reviewed.includes(code) !== unresolved.includes(code))
     && organizationRuleCodes.every((code) => candidate.applicability.organization_gap_codes.includes(code));
 }
@@ -242,6 +262,7 @@ export function AccountingPayrollControl({ org, month, onEntry }: {
       <dl className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{amountLabels.map(([key, label]) => <div key={key} className="rounded-lg bg-canvas p-3"><dt className="text-xs text-muted">{label}</dt><dd className="font-semibold tabular-nums">{loaded.candidate!.totals[key]} BYN</dd></div>)}</dl>
       <p className="text-sm">{loaded.candidate.arithmetic_scope_complete ? "Исходные расчётные отрезки собраны; нормативная полнота ещё не подтверждена." : "Черновик неполон: проверьте причины ниже."}</p>
       <ul className="list-disc space-y-1 pl-5 text-sm">{loaded.candidate.blockers.map((code) => <li key={code}>{candidateBlockers[code] ?? code}</li>)}</ul>
+      {!!loaded.candidate.applicability.rate_obligations?.length && <div className="rounded-lg border border-line p-3 text-sm"><h4 className="font-semibold">Связь ставок с обязательствами</h4><ul className="mt-1 list-disc space-y-1 pl-5">{loaded.candidate.applicability.rate_obligations.map((row) => <li key={row.rate_code}>{row.rate_code}: {row.obligation_code ? obligationTitles[row.obligation_code] ?? row.obligation_code : "обязательство не указано"}; {row.chief_decision === "applicable" ? "главбух отметил применимость" : row.chief_decision === "not_applicable" ? "главбух отметил неприменимость — конфликт" : "применимость не определена"}.</li>)}</ul><p className="mt-1 text-xs text-muted">Сопоставление не подтверждает ставку, базу или нормативную полноту.</p></div>}
       <div className="space-y-2 rounded-lg border border-line p-3 text-sm">
         <h4 className="font-semibold">Что нужно для проверки налоговых условий</h4>
         <p className="text-muted">ERP пока не хранит перечисленные ниже факты по работникам. Список охватывает только известные ERP договоры; отсутствие заявления о вычете нельзя считать нулевым вычетом.</p>

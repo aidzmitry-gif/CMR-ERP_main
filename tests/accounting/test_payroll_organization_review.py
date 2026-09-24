@@ -4,12 +4,15 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
+from modules.accounting import statutory_requirements
 from modules.accounting.models import (
     AccessGrant,
     Organization,
     PayrollOrganizationReview,
     Period,
 )
+from tests.accounting.test_payroll_calculation import rate_input
+from tests.accounting.test_payroll_rule_set import command as rule_set_command
 
 
 def file_command(month="2026-10", reference="synthetic-employer-rule-dossier"):
@@ -102,6 +105,68 @@ async def test_organization_review_changes_candidate_without_certifying_payroll(
     assert (await client.get(review_url + "/current")).status_code == 409
     stored.write_bytes(original)
     assert (await client.get(candidate_url)).status_code == 200
+
+
+async def test_rate_obligation_mapping_detects_unreviewed_and_conflicting_chief_decision(
+        client, db, book, tmp_path, monkeypatch):
+    root = tmp_path / "payroll"
+    root.mkdir()
+    monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
+    org_id = book[0]
+    prefix = f"/accounting/organizations/{org_id}"
+    rate = await statutory_requirements.create(db, org_id, rate_input(
+        request_key=str(uuid4()), code="SYNTHETIC-WORK-INJURY",
+    ), "tester")
+    await db.commit()
+    rate_rule = {
+        "code": "SYNTHETIC-WORK-INJURY", "role": "employer_contribution",
+        "base_mode": "gross", "obligation_code": "period_work_injury_insurance_tariff",
+        "classification_evidence": "Synthetic employer insurance classification",
+    }
+    rules = rule_set_command(book[1], rate_rules=[rate_rule],
+        expected_rate_versions=[{
+            "code": rate_rule["code"], "requirement_id": rate["requirement_id"],
+            "requirement_digest": rate["digest"],
+        }])
+    created = await client.post(prefix + "/payroll-rule-sets", json=rules)
+    assert created.status_code == 200, created.text
+    assert created.json()["rate_rules"] == [rate_rule]
+    assert (await client.post(prefix + "/payroll-rule-sets", json=rules)).json() == created.json()
+    candidate_url = prefix + "/periods/2026-10/payroll-own-candidate"
+    before = (await client.get(candidate_url)).json()
+    assert before["applicability"]["rate_obligations"] == [{
+        "rate_code": rate_rule["code"],
+        "obligation_code": rate_rule["obligation_code"],
+        "chief_decision": None,
+    }]
+    assert "payroll_rate_obligation_unreviewed" in before["blockers"]
+    assert "payroll_rate_obligation_unmapped" not in before["blockers"]
+
+    source = file_command()
+    uploaded = await client.post(prefix + "/payroll-evidence-files", json=source)
+    assert uploaded.status_code == 200, uploaded.text
+    review_url = prefix + "/periods/2026-10/payroll-organization-reviews"
+    excluded = review_command(uploaded.json()["file_id"], source["reference"],
+                              decision="not_applicable")
+    first = await client.post(review_url, json=excluded)
+    assert first.status_code == 200, first.text
+    conflict = (await client.get(candidate_url)).json()
+    assert conflict["candidate_digest"] != before["candidate_digest"]
+    assert conflict["applicability"]["rate_obligations"][0]["chief_decision"] == "not_applicable"
+    assert "payroll_rate_conflicts_with_organization_review" in conflict["blockers"]
+
+    included = {**review_command(uploaded.json()["file_id"], source["reference"],
+                                  decision="applicable"),
+                "supersedes_id": first.json()["review_id"]}
+    second = await client.post(review_url, json=included)
+    assert second.status_code == 200, second.text
+    reconciled = (await client.get(candidate_url)).json()
+    assert reconciled["candidate_digest"] != conflict["candidate_digest"]
+    assert reconciled["applicability"]["rate_obligations"][0]["chief_decision"] == "applicable"
+    assert "payroll_rate_obligation_unreviewed" not in reconciled["blockers"]
+    assert "payroll_rate_conflicts_with_organization_review" not in reconciled["blockers"]
+    assert "statutory_rule_completeness_unverified" in reconciled["blockers"]
+    assert reconciled["posting_available"] is False
 
 
 async def test_organization_review_scopes_permissions_period_and_replay(

@@ -8,10 +8,11 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import HTTPException
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from sqlalchemy import func, select
 
 from modules.accounting.models import PayrollRuleSet, StatutoryRequirement
+from modules.accounting.payroll_applicability import ORGANIZATION_RULE_CODES
 from modules.accounting.payroll_calculation import (
     effective_percentage_rate,
     month_bounds,
@@ -26,7 +27,15 @@ class PayrollRateRuleInput(Input):
     code: str = Field(min_length=1, max_length=120)
     role: Literal["employee_deduction", "employer_contribution"]
     base_mode: Literal["gross", "gross_less_adjustment"]
+    obligation_code: str | None = Field(default=None, min_length=1, max_length=80)
     classification_evidence: str = Field(min_length=10, max_length=2000)
+
+    @field_validator("obligation_code")
+    @classmethod
+    def known_obligation(cls, value: str | None) -> str | None:
+        if value is not None and value not in ORGANIZATION_RULE_CODES:
+            raise ValueError("Unknown employer payroll obligation")
+        return value
 
 
 class PayrollRateVersionInput(Input):
@@ -102,6 +111,9 @@ async def current(session, org_id: int, on: date) -> PayrollRuleSet | None:
 async def create(session, org_id: int, data: PayrollRuleSetInput, actor: str) -> dict:
     await lock_organization(session, org_id)
     command = data.model_dump(mode="json")
+    for rule in command["rate_rules"]:
+        if rule.get("obligation_code") is None:
+            rule.pop("obligation_code", None)  # Preserve earlier command digests.
     if command["expected_rate_versions"] is None:
         del command["expected_rate_versions"]  # Preserve request digests for earlier clients.
     request_digest = _digest(command)
@@ -159,7 +171,7 @@ async def create(session, org_id: int, data: PayrollRuleSetInput, actor: str) ->
         revision=revision + 1,
         gross_method=data.gross_method,
         rounding=data.rounding,
-        rate_rules=[rule.model_dump(mode="json") for rule in data.rate_rules],
+        rate_rules=command["rate_rules"],
         source_reference=data.source_reference,
         source_digest=data.source_digest,
         evidence=data.evidence,

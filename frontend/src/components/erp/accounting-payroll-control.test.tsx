@@ -52,7 +52,7 @@ function reports(organizationId: number) {
       status: "provisional_payroll_candidate_only", candidate_digest: "a".repeat(64),
       included_segment_count: 0, selected_segment_count: 1,
       unattested_review_ids: [5], totals: { ...amounts, gross_byn: "0.00" },
-      blockers: ["source_facts_not_attested", "statutory_rule_completeness_unverified"],
+      blockers: ["source_facts_not_attested", "payroll_rate_obligation_unreviewed", "statutory_rule_completeness_unverified"],
       arithmetic_scope_complete: false, posting_available: false,
       statutory_payroll_certified: false,
       applicability: {
@@ -62,7 +62,11 @@ function reports(organizationId: number) {
         organization_gap_codes: ["period_income_tax_withholding_rule", "period_fszn_rules_and_limits", "period_work_injury_insurance_tariff"],
         organization: { review_id: 18, review_digest: "c".repeat(64),
           reviewed_rule_codes: ["period_fszn_rules_and_limits", "period_income_tax_withholding_rule"],
-          unresolved_rule_codes: ["period_work_injury_insurance_tariff"] },
+          unresolved_rule_codes: ["period_work_injury_insurance_tariff"],
+          rule_decisions: { period_fszn_rules_and_limits: "applicable", period_income_tax_withholding_rule: "applicable",
+            period_work_injury_insurance_tariff: "unresolved" } },
+        rate_obligations: [{ rate_code: "SYNTHETIC-RATE", obligation_code: "period_work_injury_insurance_tariff",
+          chief_decision: "unresolved" }],
         bindings: [{ employment_binding_id: 9, review_id: null, review_digest: null,
           reviewed_fact_codes: [], unrecorded_fact_codes: ["main_workplace_and_deduction_basis", "year_to_date_taxable_income"] }],
         statutory_completeness_verified: false,
@@ -94,6 +98,8 @@ describe("AccountingPayrollControl", () => {
     expect(screen.getByText(/Без отдельного подтверждения исходных данных: квитанции № 5/)).toBeInTheDocument();
     expect(screen.getByText(/Включено подтверждённых отрезков: 0 из 1/)).toBeInTheDocument();
     expect(screen.getByText(/Полнота применимых удержаний, взносов, вычетов и льгот не подтверждена/)).toBeInTheDocument();
+    expect(screen.getByText(/Применимость указанного обязательства главбухом не рассмотрена/)).toBeInTheDocument();
+    expect(screen.getByText(/SYNTHETIC-RATE:.*применимость не определена/)).toBeInTheDocument();
     expect(screen.getByText(/Утвердить правило удержания подоходного налога/)).toBeInTheDocument();
     expect(screen.getByTestId("payroll-organization-review-summary")).toHaveTextContent("квитанция № 18; рассмотрено правил 2; нерешённых 1");
     expect(screen.getByText(/Обзор фактов о применимости не закрывает правовые пробелы ниже/)).toBeInTheDocument();
@@ -118,6 +124,17 @@ describe("AccountingPayrollControl", () => {
     expect(alerts).toHaveLength(3);
     expect(alerts[0]).toHaveTextContent("другому юридическому лицу");
     expect(screen.queryByText("100.00 BYN")).not.toBeInTheDocument();
+  });
+
+  it("hides an inconsistent chief decision in the payroll candidate", async () => {
+    const data = reports(7);
+    data.candidate.applicability.rate_obligations[0].chief_decision = "applicable";
+    vi.stubGlobal("fetch", vi.fn((input: string) => Promise.resolve(response(
+      input.includes("payroll-own-candidate") ? data.candidate : input.includes("payroll-arithmetic-summary") ? data.summary : data.comparison,
+    ))));
+    render(<AccountingPayrollControl org="7" month="2026-10" onEntry={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ответ черновика имеет неожиданный статус");
+    expect(screen.queryByText("Связь ставок с обязательствами")).not.toBeInTheDocument();
   });
 
   it("does not call an empty month an uncovered employment interval", async () => {

@@ -54,6 +54,15 @@ async def test_rule_set_requires_effective_rate_and_is_idempotent(client, db, bo
         "requirement_digest": rate["digest"],
     }]
     assert created.json()["source_document_verified"] is False
+    assert "obligation_code" not in created.json()["rate_rules"][0]
+    legacy_candidate = (await client.get(
+        f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-own-candidate"
+    )).json()
+    assert legacy_candidate["applicability"]["rate_obligations"] == [{
+        "rate_code": "SYNTHETIC-EMPLOYEE-DEDUCTION",
+        "obligation_code": None, "chief_decision": None,
+    }]
+    assert "payroll_rate_obligation_unmapped" in legacy_candidate["blockers"]
     repeated = await client.post(url, json=payload)
     assert repeated.json() == created.json()
     assert await db.scalar(select(func.count(PayrollRuleSet.id))) == 1
@@ -100,6 +109,11 @@ async def test_rule_set_rejects_duplicate_codes_and_accountant_write(client, db,
         **payload, "rate_rules": payload["rate_rules"] * 2,
     })
     assert duplicate.status_code == 422
+    unknown_obligation = await client.post(url, json={
+        **payload, "rate_rules": [{**payload["rate_rules"][0],
+                                   "obligation_code": "unknown-obligation"}],
+    })
+    assert unknown_obligation.status_code == 422
     mid_month = await client.post(url, json={**payload, "effective_from": "2026-01-15"})
     assert mid_month.status_code == 422
 
