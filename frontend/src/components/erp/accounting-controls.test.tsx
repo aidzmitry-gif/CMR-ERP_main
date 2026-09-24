@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createHash, webcrypto } from "node:crypto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { AccountingControls } from "./accounting-controls";
@@ -26,12 +27,20 @@ async function filled(treatment="include") {
   fireEvent.change(screen.getByRole("textbox",{name:"Основание настроек переноса",exact:true}),{target:{value:"Explicit policy"}});
 }
 const respond = (data: unknown, ok = true) => Promise.resolve({ ok, json: async () => data });
+const sourceBytes = new TextEncoder().encode("Synthetic 1C opening export for UI tests");
+const sourceDigest = createHash("sha256").update(sourceBytes).digest("hex");
+const sourceFile = (bytes = sourceBytes) => ({
+  name: "source-export.dat", size: bytes.byteLength, arrayBuffer: async () => bytes.buffer,
+}) as unknown as File;
+const selectSource = (file = sourceFile()) => fireEvent.change(
+  screen.getByLabelText("Исходная выгрузка остатков"), { target: { files: [file] } },
+);
 const openingCommand = () => ({
   batch: "opening-2026-09",
   request_key: "00000000-0000-4000-8000-000000000001",
   protocol_version: "opening-balance-v1",
   source_system: "1c-export",
-  source_digest: "a".repeat(64),
+  source_digest: sourceDigest,
   cutover_date: "2026-09-01",
   evidence: "Approved opening reconciliation protocol",
   expected_entry_count: 1,
@@ -107,6 +116,7 @@ it("late-cost choices do not transfer to a different policy date", () => {
 });
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("crypto", webcrypto);
   fetchMock.mockImplementation((url: string, options?: RequestInit) => {
     if (options?.method === "POST" || options?.method === "PUT") return respond({ id: 1 });
     if (url.endsWith("catalog")) return respond({ version: "review-required", accounts: [{ code: "51", title: "Расчётные счета" }] });
@@ -246,13 +256,59 @@ it("requires an explicit source digest instead of deriving one from the uploaded
   const command = openingCommand();
   const withoutDigest = { ...command };
   delete withoutDigest.source_digest;
+  selectSource();
   fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(withoutDigest)] } });
   expect(await screen.findByRole("alert")).toHaveTextContent("ERP не подставляет эти данные");
   expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/imports/preview"))).toBe(false);
 });
 
+it("waits for the original source export before previewing opening balances", async () => {
+  const command = openingCommand();
+  fetchMock.mockImplementation((url: string) => respond(
+    url.endsWith("/imports/preview") ? openingPreview(command) : url.endsWith("catalog") ? { version: "test", accounts: [] } : [],
+  ));
+  render(<AccountingControls org="1" initialSection="import" onChanged={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
+  expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/imports/preview"))).toBe(false);
+  selectSource();
+  await screen.findByRole("button", { name: "Подтвердить перенос остатков" });
+  expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/imports/preview"))).toHaveLength(1);
+});
+
+it.each([
+  ["other bytes", sourceFile(new TextEncoder().encode("different 1C source")), "не совпадает"],
+  ["empty file", sourceFile(new Uint8Array()), "пуста"],
+  ["unreadable file", { name: "broken.dat", size: 4, arrayBuffer: async () => { throw new Error("unreadable"); } } as unknown as File, "Не удалось прочитать"],
+])("blocks %s before sending opening preview", async (_name, file, message) => {
+  render(<AccountingControls org="1" initialSection="import" onChanged={vi.fn()} />);
+  selectSource(file);
+  fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(openingCommand())] } });
+  expect(await screen.findByRole("alert")).toHaveTextContent(message);
+  expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/imports/preview"))).toBe(false);
+});
+
+it("rehashes the source immediately before confirmation and blocks changed bytes", async () => {
+  const command = openingCommand();
+  const altered = new TextEncoder().encode("changed 1C opening export");
+  let reads = 0;
+  const changingFile = { name: "source-export.dat", size: sourceBytes.byteLength,
+    arrayBuffer: async () => (++reads === 1 ? sourceBytes.buffer : altered.buffer) } as unknown as File;
+  fetchMock.mockImplementation((url: string) => respond(
+    url.endsWith("/imports/preview") ? openingPreview(command) : url.endsWith("catalog") ? { version: "test", accounts: [] } : [],
+  ));
+  render(<AccountingControls org="1" initialSection="import" onChanged={vi.fn()} />);
+  selectSource(changingFile);
+  fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
+  fireEvent.click(await screen.findByRole("button", { name: "Подтвердить перенос остатков" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Исходная выгрузка изменилась");
+  expect(reads).toBe(2);
+  expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/imports/confirm"))).toBe(false);
+  expect(screen.queryByRole("button", { name: "Подтвердить перенос остатков" })).not.toBeInTheDocument();
+});
+
 it("rejects an organization embedded in an opening package instead of silently routing it", async () => {
   render(<AccountingControls org="1" initialSection="import" onChanged={vi.fn()} />);
+  selectSource();
   fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile({ ...openingCommand(), organization_id: 2 })] } });
   expect(await screen.findByRole("alert")).toHaveTextContent("Юрлицо не берётся из файла");
   expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/imports/preview"))).toBe(false);
@@ -268,6 +324,7 @@ it("previews and confirms only the exact package for the selected organization",
     return respond([]);
   });
   render(<AccountingControls org="1" initialSection="import" onChanged={changed} />);
+  selectSource();
   fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
   await screen.findByText(/Пакет: opening-2026-09/);
   const previewCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/imports/preview"));
@@ -287,11 +344,13 @@ it("discards the reviewed opening package when the legal entity changes", async 
     return respond(url.endsWith("catalog") ? { version: "test", accounts: [] } : []);
   });
   const view = render(<AccountingControls org="1" initialSection="import" onChanged={vi.fn()} />);
+  selectSource();
   fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
   await screen.findByRole("button", { name: "Подтвердить перенос остатков" });
   view.rerender(<AccountingControls org="2" initialSection="import" onChanged={vi.fn()} />);
   expect(screen.queryByRole("button", { name: "Подтвердить перенос остатков" })).not.toBeInTheDocument();
   expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/organizations/2/imports/confirm"))).toBe(false);
+  selectSource();
   fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
   await screen.findByRole("button", { name: "Подтвердить перенос остатков" });
   fireEvent.click(screen.getByRole("button", { name: "Подтвердить перенос остатков" }));
@@ -307,6 +366,7 @@ it("ignores a preview response that arrives after switching the legal entity", a
     return respond(url.endsWith("catalog") ? { version: "test", accounts: [] } : []);
   });
   const view = render(<AccountingControls org="1" initialSection="import" onChanged={vi.fn()} />);
+  selectSource();
   fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
   await waitFor(() => expect(resolveOld).toBeDefined());
   view.rerender(<AccountingControls org="2" initialSection="import" onChanged={vi.fn()} />);
@@ -325,6 +385,7 @@ it("does not show an old book confirmation after switching the legal entity", as
     return respond(url.endsWith("catalog") ? { version: "test", accounts: [] } : []);
   });
   const view = render(<AccountingControls org="1" initialSection="import" onChanged={changed} />);
+  selectSource();
   fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
   fireEvent.click(await screen.findByRole("button", { name: "Подтвердить перенос остатков" }));
   await waitFor(() => expect(resolveOld).toBeDefined());
@@ -343,6 +404,7 @@ it("rejects a preview returned for another organization before it can be confirm
     return respond([]);
   });
   render(<AccountingControls org="1" initialSection="import" onChanged={vi.fn()} />);
+  selectSource();
   fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
   expect(await screen.findByRole("alert")).toHaveTextContent("не подтверждающий выбранное юрлицо");
   expect(screen.queryByRole("button", { name: "Подтвердить перенос остатков" })).not.toBeInTheDocument();
@@ -361,6 +423,7 @@ it("retries an unknown confirmation with the frozen exact opening package", asyn
     return respond([]);
   });
   render(<AccountingControls org="1" initialSection="import" onChanged={vi.fn()} />);
+  selectSource();
   fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
   await screen.findByText(/Пакет: opening-2026-09/);
   fireEvent.click(screen.getByRole("button", { name: "Подтвердить перенос остатков" }));
