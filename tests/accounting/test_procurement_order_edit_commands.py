@@ -96,6 +96,32 @@ async def test_replay_add_survives_later_delete_without_resurrection(client, db,
     assert await db.get(PurchaseOrderLine, line_id) is None
 
 
+async def test_order_history_shows_actor_time_and_exact_header_change(client, book, source):
+    cmd = command(source[0], "header", {"freight_byn": "7.13"})
+    saved = await client.post(url(book, source), json=cmd)
+    assert saved.status_code == 200, saved.text
+    history_url = f"/procurement/organizations/{book[0]}/orders/{source[0]}/edit-history"
+    history = await client.get(history_url)
+    assert history.status_code == 200, history.text
+    body = history.json()
+    assert body["organization_id"] == book[0]
+    assert body["order_id"] == source[0]
+    assert body["number"]
+    assert body["next_after_id"] is None
+    assert len(body["items"]) == 1
+    item = body["items"][0]
+    assert item["changed_by"] == "tester"
+    assert item["changed_at"]
+    assert item["action"] == "header"
+    assert item["changes"] == [{"field": "freight_byn", "before": "2.00", "after": "7.13"}]
+    assert (await client.get(history_url, params={"after_id": item["id"]})).json()["items"] == []
+    await client.post(url(book, source), json=cmd)
+    assert len((await client.get(history_url)).json()["items"]) == 1
+    foreign = await client.get(f"/procurement/organizations/{book[0] + 1}/orders/{source[0]}/edit-history")
+    assert foreign.status_code in {403, 404, 409}
+    assert "tester" not in foreign.text
+
+
 @pytest.mark.parametrize("action", ["header", "status", "plan"])
 async def test_historical_result_not_recomputed_from_later_state(client, db, book, source, action):
     first = command(source[0], action, payload(action, source[1]))

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { formatNumber } from "@/lib/format";
-import { sendEdit, fetchOrder, fetchLandedPreview, fetchExpectedReservations, fetchDealDemandOrder, fetchPlan, identity, organizations, emptyLine, decimalInput, ReadFailure, MutationUnknown, type EditCommand, type Identity, type Organization, type MachineOrder, type LandedPreview, type ExpectedOrder, type DealDemandOrder, type Plan, type NewLine } from "@/lib/procurement-machine";
+import { sendEdit, fetchOrder, fetchEditHistory, fetchLandedPreview, fetchExpectedReservations, fetchDealDemandOrder, fetchPlan, identity, organizations, emptyLine, decimalInput, ReadFailure, MutationUnknown, type EditCommand, type Identity, type Organization, type MachineOrder, type OrderEditHistory, type LandedPreview, type ExpectedOrder, type DealDemandOrder, type Plan, type NewLine } from "@/lib/procurement-machine";
 import { allocateDealDemand, clearDealDemandAllocation, loadDealDemandAllocation, type DealDemandAllocationScope, type PendingDealDemandAllocation, DealDemandError } from "@/lib/procurement-deal-demand";
 import { ProcurementCustomerDeadlines } from "./procurement-customer-deadlines";
 import { ProcurementPurchaseChain } from "./procurement-purchase-chain";
@@ -10,6 +10,8 @@ import { ProcurementPurchaseChain } from "./procurement-purchase-chain";
 import { editorJournal, type Attempt, type Scope } from "@/lib/procurement-editor-journal";
 
 const STATUS: Record<string, string> = { draft: "Черновик", ordered: "Заказан", shipped: "Отгружен", customs: "Таможня", received: "Принят", cancelled: "Отменён" };
+const CHANGE_LABELS: Record<string, string> = { freight_byn: "Фрахт, BYN", supplier: "Поставщик", supplier_id: "Поставщик из справочника", eta_date: "Дата прибытия", status: "Статус", plan: "План поставки" };
+const changeValue = (value: unknown) => value === null ? "—" : typeof value === "object" ? JSON.stringify(value) : String(value);
 const message = (e: unknown) => e instanceof Error ? e.message : "Не удалось выполнить действие";
 const validId = (s?: string) => s && /^[1-9]\d*$/.test(s) && Number(s) <= 2147483647 ? s : "";
 const reserveUnits = (value: string) => { const [whole, fraction] = value.split("."); return BigInt(whole) * 100n + BigInt(fraction); };
@@ -24,12 +26,13 @@ export function ProcurementMachineEditor({ orderId, suggestedOrg }: { orderId: n
 }
 function Editor({ org, orderId }: { org: number; orderId: number }) {
   const [scope, setScope] = useState<Identity | null>(null); const [order, setOrder] = useState<MachineOrder | null>(null); const [preview, setPreview] = useState<LandedPreview | null>(null); const [expected, setExpected] = useState<ExpectedOrder | null>(null); const [demandOrder, setDemandOrder] = useState<DealDemandOrder | null>(null); const [plan, setPlan] = useState<Plan | null>(null);
+  const [history, setHistory] = useState<OrderEditHistory | null>(null); const [historyError, setHistoryError] = useState(""); const [historyBusy, setHistoryBusy] = useState(false);
   const [draft, setDraft] = useState<NewLine>(emptyLine()); const [freight, setFreight] = useState(""); const [status, setStatus] = useState("ordered"); const [method, setMethod] = useState("truck"); const [target, setTarget] = useState("");
   const [busy, setBusy] = useState(true); const [error, setError] = useState(""); const [notice, setNotice] = useState(""); const [attempt, setAttempt] = useState<Attempt | null>(null); const [legacy, setLegacy] = useState(false); const [prepared, setPrepared] = useState(false); const [unknownNotice, setUnknownNotice] = useState(false); const [allocationRecovery, setAllocationRecovery] = useState<PendingDealDemandAllocation | null>(null);
   const generation = useRef(0); const locked = useRef(false); const principal = useRef<string | null>(null); const stored = useRef<Attempt | null>(null);
   const journalKey = `procurement-editor/${org}/${orderId}`;
   const active = (n: number) => generation.current === n;
-  function clearView() { setOrder(null); setPreview(null); setExpected(null); setDemandOrder(null); setPlan(null); setScope(null); }
+  function clearView() { setOrder(null); setPreview(null); setExpected(null); setDemandOrder(null); setPlan(null); setHistory(null); setScope(null); }
   async function who(n: number, expected?: string) {
     let current: Identity;
     try { current = await identity(org); } catch (e) { if (active(n)) clearView(); throw e; }
@@ -52,6 +55,8 @@ function Editor({ org, orderId }: { org: number; orderId: number }) {
     catch { if (active(n)) setDemandOrder(null); }
     try { const v = await fetchPlan(org, orderId); await who(n, current.principal); if (active(n)) { setPlan(v); setMethod(v.transport_method_code ?? "truck"); setTarget(v.target_arrival_date ?? ""); } }
     catch (e) { complete = false; if (active(n)) { setPlan(null); setError(message(e)); if (e instanceof ReadFailure && [401, 403].includes(e.status)) { clearView(); throw e; } } }
+    try { const v = await fetchEditHistory(org, orderId); await who(n, current.principal); if (active(n)) { setHistory(v); setHistoryError(""); } }
+    catch (e) { complete = false; if (active(n)) { setHistory(null); setHistoryError(message(e)); if (e instanceof ReadFailure && [401, 403].includes(e.status)) { clearView(); throw e; } } }
     return complete;
   }
   useEffect(() => {
@@ -127,6 +132,19 @@ function Editor({ org, orderId }: { org: number; orderId: number }) {
     catch (e) { if (active(n)) { clearView(); setError(message(e)); } }
     finally { if (active(n)) { locked.current = false; setBusy(false); } }
   }
+  async function moreHistory() {
+    if (historyBusy || !history?.next_after_id || !scope) return;
+    const n = generation.current; const after = history.next_after_id;
+    setHistoryBusy(true); setHistoryError("");
+    try {
+      const current = await who(n, principal.current ?? undefined);
+      const next = await fetchEditHistory(org, orderId, after);
+      await who(n, current.principal);
+      if (active(n)) setHistory((previous) => previous?.next_after_id === after
+        ? { ...next, items: [...previous.items, ...next.items] } : previous);
+    } catch (e) { if (active(n)) setHistoryError(message(e)); }
+    finally { if (active(n)) setHistoryBusy(false); }
+  }
   const uncertain = legacy || attempt?.state === "pending";
   const needsPreparation = attempt?.state === "settled" && attempt.result?.outcome === "rejected" && !prepared;
   const readonly = busy || uncertain || needsPreparation || !scope?.can_manage || !order || ["received", "cancelled"].includes(order.status);
@@ -195,6 +213,18 @@ function Editor({ org, orderId }: { org: number; orderId: number }) {
       <fieldset disabled={noCommand}><legend>План машины</legend><label>Способ перевозки<select value={method} onChange={e => setMethod(e.target.value)}><option value="truck">Машина</option><option value="container">Контейнер</option></select></label><label>В Минске до<input type="date" value={target} onChange={e => setTarget(e.target.value)} /></label><button onClick={() => { if (!target) { setError("Укажите дату «В Минске до»"); return; } void perform("plan", { transport_method_code: method, target_arrival_date: target }); }}>Пересчитать план</button></fieldset>
       <p>Клиентские сроки и штрафы не проверены.</p><ProcurementCustomerDeadlines key={`${org}:${orderId}:${JSON.stringify(plan)}:${JSON.stringify(expected)}`} org={org} orderId={orderId} disabled={noCommand} onUseDate={setTarget} />{plan && <><p>Всего дней: {plan.total_days}. Начало: {plan.start_date ?? "не задано"}</p>{plan.schedule_start_in_past && <p>Дата начала собственного графика уже прошла.</p>}{plan.milestones.map(x => <p key={x.stage}>{x.title}: план {x.planned_date ?? "—"}, факт {x.actual_date ?? "—"}</p>)}</>}
       <ProcurementPurchaseChain org={org} orderId={orderId} />
+      <section aria-label="История изменений заказа" className="space-y-2 rounded border border-line p-3">
+        <h2 className="font-semibold">История изменений · {order.number}</h2>
+        {historyError && <p role="alert">История недоступна: {historyError}</p>}
+        {history && history.items.length === 0 && <p>Изменений пока нет.</p>}
+        {history?.items.map((item) => <article key={item.id} className="border-t border-line pt-2 text-sm">
+          <p>№ {item.id} · {item.changed_at} · {item.changed_by}</p>
+          {item.changes.map((change, index) => <p key={`${change.field}/${index}`}>
+            {CHANGE_LABELS[change.field] ?? change.field}: {change.before_unknown ? "прежнее значение не сохранено" : changeValue(change.before)} → {changeValue(change.after)}
+          </p>)}
+        </article>)}
+        {history?.next_after_id !== null && history && <button disabled={historyBusy} onClick={() => void moreHistory()}>Ещё изменения</button>}
+      </section>
     </>}
   </section>;
 }
