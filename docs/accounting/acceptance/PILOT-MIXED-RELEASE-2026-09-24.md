@@ -12,7 +12,7 @@
 | Компонент | Точная версия | Что проверено |
 | --- | --- | --- |
 | Backend-кандидат | Git `b5508a3d0f887d54d3a4998bf27bd62370208961`, image `sha256:013ee1c3601bd4d9e3bfe44c6f0824aab485d053b96a42c7b17a8d3fae7580e0` | 2617 Git blobs; явная миграция пустой синтетической БД до `0176`, затем запуск с ролью без прав записи и тремя opt-in gates: GET 200, POST 503, прямой INSERT отклонён. Изолированная наполненная копия `0116 → 0176`: 113/113 исходных таблиц и 49 959 строк совпали |
-| Frontend | Git `1fd4e0811eceee41681a5cac3da99cdfcf36a245`, image `sha256:cf25ac8862b04c56865729418f6ed20ee8b10cbc786d8cb11c8fe8919d09a15e` | Linux/amd64 standalone, `BUILD_ID=NugLquCeWhonBTHKU0uZf`, локальный запуск без сети, анонимный redirect и JS 200 |
+| Frontend | Git `1fd4e0811eceee41681a5cac3da99cdfcf36a245`, image `sha256:cf25ac8862b04c56865729418f6ed20ee8b10cbc786d8cb11c8fe8919d09a15e` | Linux/amd64 standalone, `BUILD_ID=NugLquCeWhonBTHKU0uZf`; локальный WSL systemd на точном Node 22.22.3: анонимный redirect 307, JS 200, transient unit/порт удалены после stop |
 | Frontend-архив | `.harness/artifacts/CRM-ACC-001/frontend-runtime-1fd4e081.tar` | 99 745 792 байта, SHA-256 `02d6dadd86fbe4453ee0b570ada98ffd62cd18994ac79253aef8f6d2f94b63d1`, `docker load` дал тот же image ID |
 | Исходник для обзора | `agent/crm-acc-prod009` @ `b5508a3d0f887d54d3a4998bf27bd62370208961` локально; публичная agent-ветка остаётся на `23a0ca63` | Новый backend меняет контролируемый startup и HTTP write gate, runtime-зависимость PDF и безопасный лог БД; миграции и gitlink остались прежними. Квитанции: `CONTROLLED-BACKEND-START-2026-09-24.md`, `PILOT-BACKEND-READONLY-GATES-2026-09-24.md` |
 
@@ -47,8 +47,10 @@ Read-only инвентаризация 24.09.2026 уточнила текущу�
 drop-in, порт Caddy 3100 и локальный доступ к PostgreSQL на 127.0.0.1:5432.
 Контракт кандидата и возврата записан в
 `PILOT-FRONTEND-SYSTEMD-CONTRACT-2026-09-24.md`. Его порядок и точные
-артефакты проверены локально, но реальное переключение и откат systemd ещё
-не репетировались; все возможные источники записи в БД не доказаны
+артефакты и отдельный transient systemd unit проверены локально
+(`FRONTEND-SYSTEMD-WSL-2026-09-24.md`), но переключение и откат
+**рабочего** systemd-сервиса ещё не репетировались; все возможные
+источники записи в БД не доказаны
 остановленными. Поэтому `NO-GO` сохраняется.
 
 ## Ворота до начала окна
@@ -150,6 +152,8 @@ PostgreSQL без неявной миграции и фоновых процес
 INSERT, а HTTP write gate отклонил POST при работающем GET. Серверная
 репетиция наполненной **live-read
 копии** выполнена и для нового backend image: 113/113 прежних таблиц и
-49 959 строк совпали. Но final write-frozen backup, испытанный systemd/frontend-switch, текущий
-server preflight, authenticated UI и сверка с 1С отсутствуют. Поэтому
+49 959 строк совпали. Standalone frontend стартовал и остановился под
+локальным WSL systemd на точной версии Node. Но final write-frozen backup,
+испытанный switch/rollback рабочего systemd-сервиса, текущий server
+preflight, authenticated UI и сверка с 1С отсутствуют. Поэтому
 решение остаётся `NO-GO`, а цель — активной.

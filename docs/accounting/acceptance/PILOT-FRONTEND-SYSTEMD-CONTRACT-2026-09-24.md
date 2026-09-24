@@ -86,5 +86,7 @@ resolved properties without printing environment or secrets.
 
 No server file, service, database, Caddy route or container was changed while
 preparing this contract. The template's order and artifact identity were
-checked locally; systemd parsing and switch/rollback still require an
-isolated end-to-end rehearsal before production activation.
+checked locally. A separate transient WSL systemd unit using the exact server
+Node binary passed start/stop, anonymous redirect and static-JS checks; see
+`FRONTEND-SYSTEMD-WSL-2026-09-24.md`. The real unit's drop-in precedence,
+switch and rollback still require a separate rehearsal before activation.
