@@ -63,6 +63,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0174_reconciliation_erp_snapshot_blocker.py",
     "0175_payroll_applicability_review.py",
     "0176_payroll_organization_review.py",
+    "0177_procurement_catalog_receipt_guards.py",
 )
 
 
@@ -399,6 +400,7 @@ async def pg_factory():
                     PurchaseOrder,
                     PurchaseOrderLine,
                     PurchaseRequest,
+                    Supplier,
                 )
                 from modules.production.models import ProductionOrder
                 from modules.sales.models import (
@@ -473,6 +475,7 @@ async def pg_factory():
                 PurchaseRequest.__table__.create(connection)
                 PurchaseOrder.__table__.create(connection)
                 PurchaseOrderLine.__table__.create(connection)
+                Supplier.__table__.create(connection)
                 # Existing production order is the target of additive ownership.
                 connection.execute(text("CREATE SCHEMA production"))
                 ProductionOrder.__table__.create(connection)

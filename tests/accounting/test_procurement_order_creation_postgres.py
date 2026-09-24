@@ -2,13 +2,14 @@
 import json
 from copy import deepcopy
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 
-from core.domain.models import IdentityInvitationRequest, User
-from modules.procurement.models import PurchaseOrder, PurchaseOrderLine, PurchaseRequest
+from core.domain.models import IdentityInvitationRequest, Sku, User
+from modules.procurement.models import PurchaseOrder, PurchaseOrderLine, PurchaseRequest, Supplier
 from modules.procurement.order_creation import (
     OrderCommand,
     PurchaseOrderCreation,
@@ -18,11 +19,80 @@ from modules.procurement.order_creation import (
 from modules.procurement.ownership import OrderRequestLink
 from tests.accounting.test_postgres import pg_factory  # noqa: F401
 from tests.accounting.test_procurement_order_creation import command
+from tests.accounting.test_procurement_order_edit_commands import command as edit_command
 from tests.accounting.test_procurement_request_creation import command as request_command
 from tests.accounting.test_procurement_request_creation_postgres import schedule
 from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 HEADERS = {"X-Expected-Principal": "issuer"}
+
+
+async def test_pg_catalog_supplier_and_sku_receipts_survive_replay_and_reject_drift(issuance_pg):  # noqa: F811
+    api, factory = issuance_pg
+    organization = await api.post("/accounting/organizations", json={
+        "name": "Catalog-bound order", "unp": "999999913"})
+    assert organization.status_code == 201, organization.text
+    org = organization.json()["id"]
+    prefix = f"/procurement/organizations/{org}"
+    async with factory() as session:
+        supplier = Supplier(name="Supplier catalog", unp="999999901", status="active")
+        sku = Sku(code="CAT-ORDER-1", title="Catalog order item", unit="pcs", is_active=True)
+        session.add_all([supplier, sku])
+        await session.commit()
+        supplier_id, sku_id = supplier.id, sku.id
+    body = command()
+    body["document"].update(supplier="Supplier catalog", supplier_id=supplier_id,
+                            supplier_unp="999999901")
+    body["document"]["lines"][0].update(sku_code="CAT-ORDER-1", sku_id=sku_id,
+                                         sku_title="Catalog order item", sku_unit="pcs")
+    created = await api.post(prefix + "/orders", json=body, headers=HEADERS)
+    assert created.status_code == 201, created.text
+    saved = created.json()
+    async with factory() as session:
+        assert (await session.get(PurchaseOrder, saved["order_id"])).supplier_id == supplier_id
+        assert (await session.scalar(select(PurchaseOrderCreation).where(
+            PurchaseOrderCreation.order_id == saved["order_id"]))).command["document"]["lines"][0]["sku_id"] == sku_id
+        supplier = await session.get(Supplier, supplier_id)
+        sku = await session.get(Sku, sku_id)
+        supplier.name = "Supplier renamed"
+        sku.title = "Item renamed"
+        await session.commit()
+    replay = await api.post(prefix + "/orders", json=body, headers=HEADERS)
+    assert replay.status_code == 201 and replay.json() == saved, replay.text
+    stale_supplier = deepcopy(body)
+    stale_supplier["request_key"] = str(uuid4())
+    rejected = await api.post(prefix + "/orders", json=stale_supplier, headers=HEADERS)
+    assert rejected.status_code == 409 and rejected.json()["code"] == "supplier_catalog_changed", rejected.text
+    stale_sku = deepcopy(body)
+    stale_sku["request_key"] = str(uuid4())
+    stale_sku["document"]["supplier"] = "Supplier renamed"
+    rejected = await api.post(prefix + "/orders", json=stale_sku, headers=HEADERS)
+    assert rejected.status_code == 409 and rejected.json()["code"] == "sku_catalog_changed", rejected.text
+    async with factory() as session:
+        fresh = Sku(code="CAT-EDIT-1", title="Catalog edit item", unit="pcs", is_active=True)
+        session.add(fresh)
+        await session.commit()
+        fresh_id = fresh.id
+    edit = edit_command(saved["order_id"], "add_line", {
+        "sku_code": "CAT-EDIT-1", "sku_id": fresh_id, "sku_title": "Catalog edit item", "sku_unit": "pcs",
+        "qty": "1.00", "goods_value_byn": "2.00", "weight": "0.000", "volume": "0.0000",
+    })
+    endpoint = prefix + f"/orders/{saved['order_id']}/edit-commands"
+    headers = {**HEADERS, "X-Expected-Organization": str(org)}
+    applied = await api.post(endpoint, json=edit, headers=headers)
+    assert applied.status_code == 200 and applied.json()["outcome"] == "applied", applied.text
+    async with factory() as session:
+        fresh = await session.get(Sku, fresh_id)
+        fresh.title = "Edited item renamed"
+        await session.commit()
+    assert (await api.post(endpoint, json=edit, headers=headers)).json() == applied.json()
+    changed = deepcopy(edit)
+    changed["request_key"] = str(uuid4())
+    rejected = await api.post(endpoint, json=changed, headers=headers)
+    assert rejected.status_code == 409 and rejected.json()["code"] == "sku_catalog_changed", rejected.text
+    async with factory() as session:
+        assert await session.scalar(select(func.count()).select_from(PurchaseOrder)) == 1
+        assert await session.scalar(select(func.count()).select_from(PurchaseOrderLine)) == 3
 
 
 @pytest.mark.parametrize("linked", [False, True])
