@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@/lib/procurement-machine", () => ({ organizations: vi.fn() }));
+
 // Частичный мок: сетевые функции — моки, чистые хелперы (filterSuppliers/statusLabel/
 // emptySupplier) остаются НАСТОЯЩИМИ, чтобы фильтр и подписи считались по-честному.
 vi.mock("@/lib/procurement-suppliers", async (importActual) => {
@@ -11,11 +13,13 @@ vi.mock("@/lib/procurement-suppliers", async (importActual) => {
     createSupplier: vi.fn(),
     updateSupplier: vi.fn(),
     searchSupplierCounterparties: vi.fn(),
+    fetchSupplierScorecard: vi.fn(),
   };
 });
 
 import { ProcurementSuppliersTable } from "@/components/erp/procurement-suppliers-table";
 import * as api from "@/lib/procurement-suppliers";
+import { organizations } from "@/lib/procurement-machine";
 import type { Supplier } from "@/lib/procurement-suppliers";
 
 function supplier(over: Partial<Supplier> = {}): Supplier {
@@ -67,6 +71,8 @@ const fetchSuppliers = api.fetchSuppliers as ReturnType<typeof vi.fn>;
 const createSupplier = api.createSupplier as ReturnType<typeof vi.fn>;
 const updateSupplier = api.updateSupplier as ReturnType<typeof vi.fn>;
 const searchSupplierCounterparties = api.searchSupplierCounterparties as ReturnType<typeof vi.fn>;
+const fetchSupplierScorecard = api.fetchSupplierScorecard as ReturnType<typeof vi.fn>;
+const fetchOrganizations = organizations as ReturnType<typeof vi.fn>;
 
 // Открыть drawer создания и вернуть input названия (Field без htmlFor — берём по метке).
 function nameInput(): HTMLInputElement {
@@ -87,9 +93,53 @@ beforeEach(() => {
   createSupplier.mockResolvedValue(supplier({ id: 99 }));
   updateSupplier.mockResolvedValue(supplier());
   searchSupplierCounterparties.mockImplementation(async (name: string) => [{ id: 12, name, unp: "190000012" }]);
+  fetchOrganizations.mockResolvedValue([{ id: 7, name: "Компания А", unp: "123" }, { id: 8, name: "Компания Б", unp: "456" }]);
+  fetchSupplierScorecard.mockResolvedValue({ organization_id: 7, supplier_id: 1,
+    supplier_name: "Shenzhen Power Co", orders_count: 2, on_time_observed_count: 1,
+    on_time_count: 1, on_time_rate: 1, won_rfq_count: 1, avg_won_price_byn: "100.00",
+    claims_total: null, claims_open: null, claims_closed: null, score: null,
+    status: "provisional_claims_unattributed", reason: "Claims unattributed" });
 });
 
 describe("ProcurementSuppliersTable", () => {
+  it("не читает показатели до выбора юрлица и показывает неполноту данных", async () => {
+    render(<ProcurementSuppliersTable initial={rows} />);
+    expect(fetchSupplierScorecard).not.toHaveBeenCalled();
+    await screen.findByRole("option", { name: "Компания А · 123" });
+    fireEvent.change(screen.getByLabelText("Юрлицо для показателей поставщика"), { target: { value: "7" } });
+    fireEvent.click(within(screen.getByText("Shenzhen Power Co").closest("tr")!).getByRole("button", { name: "Открыть показатели" }));
+    await waitFor(() => expect(fetchSupplierScorecard).toHaveBeenCalledWith(7, 1));
+    const panel = await screen.findByRole("region", { name: "Показатели поставщика" });
+    expect(within(panel).getByText(/Претензии и общий балл: нет надёжной привязки/)).toBeInTheDocument();
+    expect(within(panel).getByText(/Доля своевременных: 100%/)).toBeInTheDocument();
+  });
+
+  it("при смене юрлица скрывает прежние показатели до ответа нового юрлица", async () => {
+    let resolveOther!: (value: unknown) => void;
+    fetchSupplierScorecard.mockImplementation((org: number) => org === 7
+      ? Promise.resolve({ organization_id: 7, supplier_id: 1, supplier_name: "A", orders_count: 2,
+        on_time_observed_count: 1, on_time_count: 1, on_time_rate: 1, won_rfq_count: 0,
+        avg_won_price_byn: null, claims_total: null, claims_open: null, claims_closed: null,
+        score: null, status: "provisional_claims_unattributed", reason: "Claims unattributed" })
+      : new Promise(resolve => { resolveOther = resolve; }));
+    render(<ProcurementSuppliersTable initial={rows} />);
+    await screen.findByRole("option", { name: "Компания А · 123" });
+    const select = screen.getByLabelText("Юрлицо для показателей поставщика");
+    fireEvent.change(select, { target: { value: "7" } });
+    fireEvent.click(within(screen.getByText("Shenzhen Power Co").closest("tr")!).getByRole("button", { name: "Открыть показатели" }));
+    await screen.findByText(/Заказов: 2/);
+    fireEvent.change(select, { target: { value: "8" } });
+    expect(screen.queryByText(/Заказов: 2/)).toBeNull();
+    expect(fetchSupplierScorecard).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(screen.getByText("Shenzhen Power Co").closest("tr")!).getByRole("button", { name: "Открыть показатели" }));
+    await waitFor(() => expect(fetchSupplierScorecard).toHaveBeenCalledWith(8, 1));
+    expect(screen.queryByText(/Заказов: 2/)).toBeNull();
+    resolveOther({ organization_id: 8, supplier_id: 1, supplier_name: "B", orders_count: 1,
+      on_time_observed_count: 0, on_time_count: 0, on_time_rate: null, won_rfq_count: 0,
+      avg_won_price_byn: null, claims_total: null, claims_open: null, claims_closed: null,
+      score: null, status: "provisional_claims_unattributed", reason: "Claims unattributed" });
+    await screen.findByText(/Заказов: 1/);
+  });
   it("считает KPI: всего / активных / заблокировано по статусам", () => {
     render(<ProcurementSuppliersTable initial={rows} />);
     // 3 всего, 2 active, 1 blocked — проверяем внутри плитки (label+value в одном контейнере)

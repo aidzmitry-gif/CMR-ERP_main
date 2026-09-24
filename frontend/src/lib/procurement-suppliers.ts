@@ -25,6 +25,43 @@ export type SupplierInput = Omit<Supplier, "id">;
 
 export interface SupplierCounterparty { id: number; name: string; unp: string }
 
+export interface SupplierScorecard {
+  organization_id: number;
+  supplier_id: number;
+  supplier_name: string;
+  orders_count: number;
+  on_time_observed_count: number;
+  on_time_count: number;
+  on_time_rate: number | null;
+  won_rfq_count: number;
+  avg_won_price_byn: string | null;
+  claims_total: null;
+  claims_open: null;
+  claims_closed: null;
+  score: null;
+  status: "provisional_claims_unattributed";
+  reason: string;
+}
+
+export async function fetchSupplierScorecard(orgId: number, supplierId: number): Promise<SupplierScorecard> {
+  if (!Number.isSafeInteger(orgId) || orgId <= 0 || !Number.isSafeInteger(supplierId) || supplierId <= 0)
+    throw new Error("Выберите юрлицо и поставщика");
+  const response = await fetch(`/api/procurement/organizations/${orgId}/suppliers/${supplierId}/scorecard`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Не удалось получить показатели поставщика (${response.status})`);
+  const value: unknown = await response.json();
+  if (!value || typeof value !== "object") throw new Error("Некорректные показатели поставщика");
+  const row = value as SupplierScorecard;
+  if (row.organization_id !== orgId || row.supplier_id !== supplierId || typeof row.supplier_name !== "string"
+      || !Number.isSafeInteger(row.orders_count) || !Number.isSafeInteger(row.on_time_observed_count)
+      || !Number.isSafeInteger(row.on_time_count) || !Number.isSafeInteger(row.won_rfq_count)
+      || (row.on_time_rate !== null && (typeof row.on_time_rate !== "number" || row.on_time_rate < 0 || row.on_time_rate > 1))
+      || (row.avg_won_price_byn !== null && !/^\d+(?:\.\d{1,2})?$/.test(row.avg_won_price_byn))
+      || row.claims_total !== null || row.claims_open !== null || row.claims_closed !== null
+      || row.score !== null || row.status !== "provisional_claims_unattributed" || typeof row.reason !== "string")
+    throw new Error("Некорректные показатели поставщика");
+  return row;
+}
+
 export async function searchSupplierCounterparties(term: string): Promise<SupplierCounterparty[]> {
   if (term.trim().length < 2) return [];
   const response = await fetch(`/api/procurement/supplier-counterparties?q=${encodeURIComponent(term.trim())}`, { cache: "no-store" });

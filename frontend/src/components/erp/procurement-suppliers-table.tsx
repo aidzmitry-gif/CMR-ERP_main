@@ -5,15 +5,18 @@ import { Plus, RefreshCw, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { formatNumber } from "@/lib/format";
+import { organizations, type Organization } from "@/lib/procurement-machine";
 import {
   createSupplier,
   emptySupplier,
   fetchSuppliers,
+  fetchSupplierScorecard,
   filterSuppliers,
   searchSupplierCounterparties,
   type Supplier,
   type SupplierCounterparty,
   type SupplierInput,
+  type SupplierScorecard,
   statusLabel,
   updateSupplier,
 } from "@/lib/procurement-suppliers";
@@ -71,6 +74,12 @@ export function ProcurementSuppliersTable({ initial }: { initial: Supplier[] }) 
   const [mdmSearch, setMdmSearch] = useState("");
   const [mdmOptions, setMdmOptions] = useState<SupplierCounterparty[]>([]);
   const [mdmError, setMdmError] = useState("");
+  const [companies, setCompanies] = useState<Organization[]>([]);
+  const [companyError, setCompanyError] = useState("");
+  const [orgId, setOrgId] = useState("");
+  const [scoreSupplierId, setScoreSupplierId] = useState<number | null>(null);
+  const [scorecard, setScorecard] = useState<SupplierScorecard | null>(null);
+  const [scoreError, setScoreError] = useState("");
   const drawerOpen = draft !== null;
 
   useEffect(() => {
@@ -90,6 +99,22 @@ export function ProcurementSuppliersTable({ initial }: { initial: Supplier[] }) 
       if (d) setRows(d); // null = ошибка fetch → не затираем SSR-данные
     });
   }, []);
+
+  useEffect(() => {
+    let live = true;
+    void organizations().then(items => { if (live) setCompanies(items); })
+      .catch(() => { if (live) setCompanyError("Не удалось загрузить доступные юрлица"); });
+    return () => { live = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!orgId || scoreSupplierId === null) return;
+    let live = true;
+    void fetchSupplierScorecard(Number(orgId), scoreSupplierId)
+      .then(value => { if (live) setScorecard(value); })
+      .catch(() => { if (live) setScoreError("Не удалось получить показатели выбранного юрлица"); });
+    return () => { live = false; };
+  }, [orgId, scoreSupplierId]);
 
   async function refresh() {
     setBusy(true);
@@ -166,6 +191,14 @@ export function ProcurementSuppliersTable({ initial }: { initial: Supplier[] }) 
       </div>
 
       <div className="mt-5 flex items-center">
+        <label className="text-sm text-muted">Юрлицо для показателей поставщика
+          <select aria-label="Юрлицо для показателей поставщика" value={orgId}
+            onChange={event => { setOrgId(event.target.value); setScoreSupplierId(null); setScorecard(null); setScoreError(""); }}
+            className="ml-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink">
+            <option value="">Выберите юрлицо</option>
+            {companies.map(company => <option key={company.id} value={company.id}>{company.name} · {company.unp}</option>)}
+          </select>
+        </label>
         <div className="relative ml-auto">
           <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
           <input
@@ -176,6 +209,7 @@ export function ProcurementSuppliersTable({ initial }: { initial: Supplier[] }) 
           />
         </div>
       </div>
+      {companyError && <p role="alert" className="mt-2 text-sm text-red-700">{companyError}</p>}
 
       <div className="mt-3 overflow-hidden rounded-xl border border-line bg-surface">
         <table className="w-full text-sm">
@@ -187,12 +221,13 @@ export function ProcurementSuppliersTable({ initial }: { initial: Supplier[] }) 
               <th className="px-4 py-2 text-right font-medium">Срок, дн</th>
               <th className="px-4 py-2 font-medium">Incoterms</th>
               <th className="px-4 py-2 font-medium">Статус</th>
+              <th className="px-4 py-2 font-medium">Показатели</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-muted">
+                <td colSpan={7} className="px-4 py-6 text-center text-muted">
                   {rows.length === 0 ? "Поставщиков пока нет — добавьте первого" : "Ничего не найдено"}
                 </td>
               </tr>
@@ -225,11 +260,30 @@ export function ProcurementSuppliersTable({ initial }: { initial: Supplier[] }) 
                     {statusLabel(s.status)}
                   </span>
                 </td>
+                <td className="px-4 py-2.5"><button type="button" disabled={!orgId}
+                  onClick={event => { event.stopPropagation(); setScoreSupplierId(s.id); setScorecard(null); setScoreError(""); }}
+                  className="text-accent underline disabled:text-muted disabled:no-underline">
+                  Открыть показатели
+                </button></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {scoreSupplierId !== null && orgId && <section aria-label="Показатели поставщика" className="mt-4 rounded-xl border border-line bg-surface p-4 text-sm">
+        <div className="flex items-center justify-between"><h2 className="font-semibold text-ink">
+          Показатели: {rows.find(row => row.id === scoreSupplierId)?.name ?? `ID ${scoreSupplierId}`}
+        </h2><button type="button" onClick={() => setScoreSupplierId(null)} aria-label="Закрыть показатели"><X size={18} /></button></div>
+        {scoreError && <p role="alert" className="mt-2 text-red-700">{scoreError}</p>}
+        {!scoreError && (!scorecard || scorecard.organization_id !== Number(orgId) || scorecard.supplier_id !== scoreSupplierId) && <p className="mt-2 text-muted">Загрузка…</p>}
+        {scorecard?.organization_id === Number(orgId) && scorecard.supplier_id === scoreSupplierId && <div className="mt-2 space-y-1">
+          <p>Заказов: {scorecard.orders_count}. Поставок с проверяемой датой: {scorecard.on_time_observed_count}; вовремя: {scorecard.on_time_count}.</p>
+          <p>Доля своевременных: {scorecard.on_time_rate === null ? "недостаточно данных" : `${Math.round(scorecard.on_time_rate * 100)}%`}.</p>
+          <p>Выигранных запросов цен: {scorecard.won_rfq_count}; средняя цена предложения: {scorecard.avg_won_price_byn === null ? "нет данных" : `${scorecard.avg_won_price_byn} BYN`}.</p>
+          <p className="text-amber-700">Претензии и общий балл: нет надёжной привязки претензий к юрлицу; показатели предварительные.</p>
+        </div>}
+      </section>}
 
       {draft && (
         <div className="fixed inset-0 z-40 flex justify-end bg-black/30" onClick={() => setDraft(null)}>
