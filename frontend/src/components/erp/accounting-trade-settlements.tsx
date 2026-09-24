@@ -6,9 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 
 type Movement = { entry_id: number; line_id: number; date: string; source: string; operation: string;
-  side: "debit" | "credit"; amount_byn: string; period_bucket: "opening" | "movement";
+  source_version: number; side: "debit" | "credit"; amount_byn: string; period_bucket: "opening" | "movement";
   kind: "posting" | "bank_receipt" | "bank_payment" | "advance_offset" };
-type Row = { key: string; account: string; account_title: string; counterparty: string | null;
+type Row = { key: string; account: string; account_title: string; category: string; counterparty: string | null;
   contract: string | null; document: string | null; currencies: string[];
   classification: string; balance_kind: string;
   analytics_complete: boolean; opening_byn: string; debit_byn: string; credit_byn: string;
@@ -33,6 +33,44 @@ const movements: Record<Movement["kind"], string> = {
 };
 type Filter = "all" | "receivable" | "payable" | "advances" | "unclassified";
 
+const csvText = (value: string | null) => {
+  const raw = value ?? "";
+  const safe = /^[\s\uFEFF]*[=+\-@]/u.test(raw) ? `'${raw}` : raw;
+  return `"${safe.replaceAll('"', '""')}"`;
+};
+const csvAmount = (value: string) => {
+  if (!/^-?\d+\.\d{2}$/.test(value)) throw new Error("Некорректная сумма в отчёте.");
+  return value;
+};
+const csvId = (value: number) => {
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error("Некорректная ссылка на проводку.");
+  return String(value);
+};
+
+export function buildTradeSettlementsCsv(report: Report): string {
+  const check = report.osv_reconciliation;
+  const count = report.rows.reduce((sum, row) => sum + row.movements.length, 0);
+  if (check.status !== "matched" || check.osv_line_count !== count || check.document_line_count !== count
+      || check.missing_osv_lines || check.extra_document_lines || check.accounts.some((account) => !account.matched)) {
+    throw new Error("Выгрузка недоступна: документная сводка не совпадает с ОСВ.");
+  }
+  const header = ["organization_id", "period_start", "period_end", "status", "account", "category",
+    "counterparty", "contract", "settlement_document", "currencies", "opening_byn", "debit_byn",
+    "credit_byn", "closing_byn", "movement_count", "entry_line_ids", "source_references_json"];
+  const lines = report.rows.map((row) => [
+    csvId(report.organization_id), csvText(report.from), csvText(report.to), csvText("preliminary_internal"),
+    csvText(row.account), csvText(row.category), csvText(row.counterparty), csvText(row.contract),
+    csvText(row.document), csvText(row.currencies.join("|")), csvAmount(row.opening_byn),
+    csvAmount(row.debit_byn), csvAmount(row.credit_byn), csvAmount(row.closing_byn),
+    String(row.movements.length),
+    csvText(row.movements.map((movement) => `${csvId(movement.entry_id)}:${csvId(movement.line_id)}`).join("|")),
+    csvText(JSON.stringify(row.movements.map((movement) => ({
+      source: movement.source, source_version: csvId(movement.source_version),
+    })))),
+  ].join(","));
+  return `\uFEFF${[header.join(","), ...lines].join("\r\n")}\r\n`;
+}
+
 export function AccountingTradeSettlements({ org, start, end, onEntry }: {
   org: string; start: string; end: string; onEntry: (id: number) => void;
 }) {
@@ -45,6 +83,23 @@ export function AccountingTradeSettlements({ org, start, end, onEntry }: {
   const error = savedError?.scope === scope ? savedError.message : "";
   const filter = savedFilter?.scope === scope ? savedFilter.value : "all";
   const loading = !!org && !report && !error;
+
+  function downloadCsv() {
+    if (!report || report.organization_id !== Number(org) || report.from !== start || report.to !== end) return;
+    try {
+      const blob = new Blob([buildTradeSettlementsCsv(report)], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `trade-settlements-org-${report.organization_id}-${report.from}-${report.to}.csv`;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (reason) {
+      setSavedError({ scope, message: reason instanceof Error ? reason.message : "Не удалось подготовить CSV." });
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -83,6 +138,7 @@ export function AccountingTradeSettlements({ org, start, end, onEntry }: {
           {report.osv_reconciliation.accounts.filter((account) => !account.matched).map((account) => <p key={account.account}>Счёт {account.account}, ОСВ / документы (BYN): начало {account.osv_byn.opening} / {account.documents_byn.opening}; Дт {account.osv_byn.debit} / {account.documents_byn.debit}; Кт {account.osv_byn.credit} / {account.documents_byn.credit}; конец {account.osv_byn.closing} / {account.documents_byn.closing}.</p>)}
           {report.osv_reconciliation.missing_postings.map((posting) => <button key={posting.line_id} className="mr-3 text-accent underline" onClick={() => onEntry(posting.entry_id)}>Проводка № {posting.entry_id}, строка {posting.line_id}</button>)}
         </div>}
+      {report.osv_reconciliation.status === "matched" && <div><Button variant="secondary" onClick={downloadCsv}>Скачать CSV для внутренней сверки</Button><p className="text-xs text-muted">Файл содержит данные выбранной книги и периода. Это не акт сверки и не подтверждение данных 1С.</p></div>}
       {report.osv_reconciliation.status === "matched" && <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">{[
         ["Дебиторка", "receivable"], ["Кредиторка", "payable"], ["Авансы покупателей", "customer_advance"],
         ["Авансы поставщикам", "supplier_advance"], ["Не классифицировано", "unclassified"],
