@@ -176,6 +176,49 @@ describe("AccountingPayrollOrganizationReview", () => {
     expect(postsSent[1][1]?.body).toBe(firstBody);
   });
 
+  it("keeps an uncertain command in its original organization when the accountant switches books", async () => {
+    const otherFile = { ...source, file_id: 89, organization_id: 8, reference: "rules-org-8" };
+    let posts = 0;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const organization = url.includes("/organizations/8/") ? 8 : 7;
+      if (url.endsWith("/payroll-workpaper-access")) return Promise.resolve(response({ organization_id: organization, can_review: true }));
+      if (url.includes("/payroll-evidence-files?")) return Promise.resolve(response([organization === 8 ? otherFile : source]));
+      if (url.endsWith("/payroll-organization-reviews/current")) return Promise.resolve(response({}, 404));
+      if (url.endsWith(`/payroll-organization-reviews/by-request/${key}`)) return Promise.resolve(response({}, 404));
+      if (url.endsWith("/payroll-organization-reviews") && init?.method === "POST") {
+        expect(organization).toBe(7);
+        posts += 1;
+        if (posts === 1) return Promise.reject(new Error("connection lost"));
+        return Promise.resolve(response(savedReceipt(JSON.parse(String(init.body)))));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("crypto", { randomUUID: () => key });
+    const onReviewed = vi.fn();
+    const view = render(<AccountingPayrollOrganizationReview org="7" month="2026-10" onReviewed={onReviewed} />);
+    await screen.findByLabelText("Файл правил организации для обзора");
+    fireEvent.change(screen.getByLabelText("Файл правил организации для обзора"), { target: { value: "87" } });
+    fillFacts();
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить фактический обзор" }));
+    expect(await screen.findByText(/Повторите тот же сохранённый запрос/)).toBeInTheDocument();
+    const firstPost = fetchMock.mock.calls.find(([url, init]) => url.includes("/organizations/7/")
+      && url.endsWith("/payroll-organization-reviews") && init?.method === "POST");
+
+    view.rerender(<AccountingPayrollOrganizationReview org="8" month="2026-10" onReviewed={onReviewed} />);
+    await screen.findByLabelText("Файл правил организации для обзора");
+    expect(screen.getByRole("button", { name: "Сохранить фактический обзор" })).toBeInTheDocument();
+    expect(screen.queryByText(/Ключ запроса:/)).toBeNull();
+
+    view.rerender(<AccountingPayrollOrganizationReview org="7" month="2026-10" onReviewed={onReviewed} />);
+    await screen.findByRole("button", { name: "Проверить или повторить сохранение" });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить или повторить сохранение" }));
+    await waitFor(() => expect(onReviewed).toHaveBeenCalledOnce());
+    const allPosts = fetchMock.mock.calls.filter(([url, init]) => url.endsWith("/payroll-organization-reviews") && init?.method === "POST");
+    expect(allPosts).toHaveLength(2);
+    expect(allPosts[1][1]?.body).toBe(firstPost?.[1]?.body);
+  });
+
   it("loads a valid partial review without hiding the accountant workspace", async () => {
     const partial = {
       review_id: 21, organization_id: 7, month: "2026-10", revision: 1,

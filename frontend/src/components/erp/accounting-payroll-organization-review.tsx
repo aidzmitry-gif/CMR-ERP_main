@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input, Select, Textarea } from "@/components/ui/input";
@@ -165,11 +165,15 @@ export function AccountingPayrollOrganizationReview({ org, month, onReviewed }: 
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<{ scope: string; text: string } | null>(null);
   const [reload, setReload] = useState(0);
-  const [pending, setPending] = useState<ReviewCommand | null>(null);
+  const [pendingByScope, setPendingByScope] = useState<Record<string, ReviewCommand>>({});
   const submitting = useRef(false);
   const scope = `/organizations/${encodeURIComponent(org)}`;
+  const scopeKey = `${org}:${month}`;
+  const currentScope = useRef(scopeKey);
+  useLayoutEffect(() => { currentScope.current = scopeKey; }, [scopeKey]);
+  const pending = pendingByScope[scopeKey] ?? null;
   const validScope = /^\d+$/.test(org) && Number(org) > 0 && /^\d{4}-(0[1-9]|1[0-2])$/.test(month);
   const loading = requestLoading || loadedScope !== `${org}:${month}`;
   const selectedFile = files.find((row) => String(row.file_id) === fileId);
@@ -283,17 +287,26 @@ export function AccountingPayrollOrganizationReview({ org, month, onReviewed }: 
         || receipt.revision !== (latest?.revision ?? 0) + 1) {
       throw new ReviewError("Квитанция обзора не совпадает с сохранённым запросом.");
     }
-    setPending(null); setNotice(`Квитанция № ${receipt.review_id}, редакция ${receipt.revision} сохранена; расчёт и проводки не созданы.`);
-    setRequestLoading(true); setReload((value) => value + 1); onReviewed();
+    setPendingByScope((previous) => {
+      const next = { ...previous }; delete next[scopeKey]; return next;
+    });
+    setNotice({ scope: scopeKey, text: `Квитанция № ${receipt.review_id}, редакция ${receipt.revision} сохранена; расчёт и проводки не созданы.` });
+    if (currentScope.current === scopeKey) {
+      setRequestLoading(true); setReload((value) => value + 1); onReviewed();
+    }
   }
 
   async function submit() {
     if (submitting.current || busy || loading || !access?.can_review) return;
-    submitting.current = true; setBusy(true); setError(""); setNotice("");
+    submitting.current = true; setBusy(true); setError(""); setNotice(null);
     let sent = pending;
     let rejectedPost = false;
     try {
-      if (!sent) { sent = buildCommand(); setPending(sent); }
+      if (!sent) {
+        const command = buildCommand();
+        sent = command;
+        setPendingByScope((previous) => ({ ...previous, [scopeKey]: command }));
+      }
       const endpoint = `${scope}/periods/${encodeURIComponent(month)}/payroll-organization-reviews`;
       try {
         accept(await api<ReviewReceipt>(endpoint, sent), sent);
@@ -311,8 +324,10 @@ export function AccountingPayrollOrganizationReview({ org, month, onReviewed }: 
         }
       }
     } catch (cause) {
-      if (rejectedPost) setPending(null);
-      setError(cause instanceof Error ? cause.message : "Обзор не сохранён.");
+      if (rejectedPost) setPendingByScope((previous) => {
+        const next = { ...previous }; delete next[scopeKey]; return next;
+      });
+      if (currentScope.current === scopeKey) setError(cause instanceof Error ? cause.message : "Обзор не сохранён.");
     } finally { submitting.current = false; setBusy(false); }
   }
 
@@ -366,6 +381,6 @@ export function AccountingPayrollOrganizationReview({ org, month, onReviewed }: 
       <Button disabled={busy || loading || uploading || (!pending && !selectedFile)} onClick={() => void submit()}>{pending ? "Проверить или повторить сохранение" : latest ? "Сохранить исправление обзора" : "Сохранить фактический обзор"}</Button>
       {pending && <p className="break-all text-xs text-muted">Ключ запроса: {pending.request_key}. Ввод заблокирован до подтверждения результата.</p>}
     </>}
-    {notice && <p role="status">{notice}</p>}
+    {notice?.scope === scopeKey && <p role="status">{notice.text}</p>}
   </section>;
 }
