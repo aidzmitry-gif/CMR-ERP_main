@@ -5,6 +5,8 @@ export type Organization = { id: number; name: string; unp: string };
 export type MachineLine = { id: number; sku_code: string; qty: string; goods_value_byn: string; weight: string; volume: string };
 export type NewLine = Omit<MachineLine, "id">;
 export type MachineOrder = { organization_id: number; id: number; number: string; supplier: string; status: string; eta_date: string | null; freight_byn: string; lines: MachineLine[]; next_after_line_id: number | null };
+export type OrderEditHistoryItem = { id: number; changed_at: string; changed_by: string; action: Action; changes: { field: string; before: unknown; after: unknown; before_unknown?: boolean }[] };
+export type OrderEditHistory = { organization_id: number; order_id: number; number: string; items: OrderEditHistoryItem[]; next_after_id: number | null };
 export type ExpectedLine = { pending_conversion_count: number; order_line_id: number; sku_code: string; ordered: string; accepted: string; warehouse_accepted: string; physical_convertible: string; expected: string; converted: string; convertible: string; expected_reserved: string; free_expected: string; uncovered: string; reservations: { id: number; deal_id: number; demand_id: number | null; document_id: number | null; qty: string; released: string; converted: string; convertible: string }[] };
 export type ExpectedOrder = { organization_id: number; order_id: number; lines: ExpectedLine[] };
 export type DealDemandCandidate = { demand_id: number; deal_id: number; deal_item_id: number; sku_code: string; qty: string; free_qty: string; document_id: number | null };
@@ -69,6 +71,20 @@ export async function fetchOrder(org: number, orderId: number): Promise<MachineO
     after = next ?? 0;
   } while (after);
   return result!;
+}
+export async function fetchEditHistory(org: number, orderId: number, afterId = 0): Promise<OrderEditHistory> {
+  const value = await read<OrderEditHistory>(`${prefix(org)}/orders/${orderId}/edit-history?after_id=${afterId}`);
+  if (value.organization_id !== org || value.order_id !== orderId || typeof value.number !== "string"
+      || !Array.isArray(value.items) || value.items.length > 50 || value.items.some((item, index) =>
+        !id(item.id) || item.id <= afterId || (index > 0 && item.id <= value.items[index - 1].id)
+        || typeof item.changed_at !== "string" || !item.changed_at || typeof item.changed_by !== "string" || !item.changed_by
+        || !["add_line", "delete_line", "header", "status", "plan"].includes(item.action)
+        || !Array.isArray(item.changes) || item.changes.length === 0 || item.changes.some((change) =>
+          typeof change.field !== "string" || !change.field || !("before" in change) || !("after" in change)))
+      || (value.next_after_id !== null && (!id(value.next_after_id) || value.items.length !== 50 || value.next_after_id !== value.items.at(-1)?.id))) {
+    throw new Error("Некорректная история изменений заказа");
+  }
+  return value;
 }
 export async function fetchLandedPreview(org: number, orderId: number): Promise<LandedPreview> {
   const v = await read<LandedPreview>(`${prefix(org)}/orders/${orderId}/landed-preview`);

@@ -35,6 +35,7 @@ beforeEach(() => {
     if (url.endsWith("receipt-organizations")) return ok([{ id: 1, name: "A", unp: "1" }, { id: 2, name: "B", unp: "2" }]);
     const org = Number(url.match(/organizations\/(\d+)/)?.[1] ?? (init?.headers as Record<string, string>)?.["X-Expected-Organization"] ?? 1);
     if (url.endsWith("request-plan-context")) return ok({ organization_id: org, principal, can_manage: manage });
+    if (url.includes("/edit-history?after_id=")) return ok({ organization_id: org, order_id: 7, number: org === 1 ? "ZAK-7" : "B-7", items: [], next_after_id: null });
     if (init?.method) {
       const c = JSON.parse(String(init.body)) as EditCommand;
       const common = { version: 1, organization_id: org, principal, request_key: c.request_key, command_hash: await commandHash(c), order_id: 7, action: c.action };
@@ -63,6 +64,15 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 async function ready() { render(<ProcurementMachineEditor orderId={7} suggestedOrg="1" />); await screen.findByText("Состав заказа ZAK-7"); await waitFor(() => expect(screen.getByRole("button", { name: "Проверить состав" })).toBeEnabled()); }
 it("renders header, status and backend preview through scoped reads", async () => { await ready(); expect(screen.getByText(/Shenzhen Co/)).toHaveTextContent("Черновик"); expect(screen.getByText(/Shenzhen Co/)).toHaveTextContent("ETA 2026-08-01"); expect(screen.getByText("475")).toBeInTheDocument(); expect(screen.getByText("Итого landed: 950.00 BYN")).toBeInTheDocument(); });
+it("shows saved order changes with actor and server time", async () => {
+  const original = f.getMockImplementation()!;
+  f.mockImplementation((url: string, init?: RequestInit) => url.includes("/edit-history?after_id=")
+    ? Promise.resolve(ok({ organization_id: 1, order_id: 7, number: "ZAK-7", items: [{ id: 31, changed_at: "2026-09-24T12:00:00Z", changed_by: "tester", action: "header", changes: [{ field: "freight_byn", before: "100.00", after: "120.00" }] }], next_after_id: null }))
+    : original(url, init));
+  await ready();
+  expect(screen.getByRole("region", { name: "История изменений заказа" })).toHaveTextContent("2026-09-24T12:00:00Z · tester");
+  expect(screen.getByText("Фрахт, BYN: 100.00 → 120.00")).toBeInTheDocument();
+});
 it("separates expected, client-bound and free quantities without calling them physical stock", async () => {
   const original = f.getMockImplementation()!;
   f.mockImplementation((url: string, init?: RequestInit) => {
