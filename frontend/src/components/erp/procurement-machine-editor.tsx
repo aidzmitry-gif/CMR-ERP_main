@@ -9,6 +9,7 @@ import { ProcurementCustomerDeadlines } from "./procurement-customer-deadlines";
 import { ProcurementPurchaseChain } from "./procurement-purchase-chain";
 
 import { editorJournal, type Attempt, type Scope } from "@/lib/procurement-editor-journal";
+import { confirmDiscardUnsaved, useUnsavedDocumentGuard } from "@/lib/use-unsaved-document-guard";
 
 const STATUS: Record<string, string> = { draft: "Черновик", ordered: "Заказан", shipped: "Отгружен", customs: "Таможня", received: "Принят", cancelled: "Отменён" };
 const CHANGE_LABELS: Record<string, string> = { freight_byn: "Фрахт, BYN", supplier: "Поставщик", supplier_id: "Поставщик из справочника", eta_date: "Дата прибытия", status: "Статус", plan: "План поставки" };
@@ -21,11 +22,11 @@ const maxReserve = (left: string, right: string) => {
   return `${units / 100n}.${String(units % 100n).padStart(2, "0")}`;
 };
 export function ProcurementMachineEditor({ orderId, suggestedOrg }: { orderId: number; suggestedOrg?: string }) {
-  const [companies, setCompanies] = useState<Organization[]>([]); const [org, setOrg] = useState(validId(suggestedOrg)); const [error, setError] = useState("");
+  const [companies, setCompanies] = useState<Organization[]>([]); const [org, setOrg] = useState(validId(suggestedOrg)); const [error, setError] = useState(""); const [pending, setPending] = useState(false);
   useEffect(() => { let live = true; organizations().then(v => { if (live) setCompanies(v); }).catch(e => { if (live) setError(message(e)); }); return () => { live = false; }; }, []);
-  return <main className="w-full space-y-4 overflow-auto p-6"><label>Юрлицо заказа<select className="ml-2 rounded border p-2" value={org} onChange={e => setOrg(e.target.value)}><option value="">Выберите юрлицо</option>{companies.map(x => <option key={x.id} value={x.id}>{x.name} · {x.unp}</option>)}</select></label>{error && <p role="alert">{error}</p>}{org && <Editor key={`${org}/${orderId}`} org={Number(org)} orderId={orderId} />}</main>;
+  return <main className="w-full space-y-4 overflow-auto p-6"><label>Юрлицо заказа<select className="ml-2 rounded border p-2" value={org} onChange={e => { if (confirmDiscardUnsaved(pending)) setOrg(e.target.value); }}><option value="">Выберите юрлицо</option>{companies.map(x => <option key={x.id} value={x.id}>{x.name} · {x.unp}</option>)}</select></label>{error && <p role="alert">{error}</p>}{org && <Editor key={`${org}/${orderId}`} org={Number(org)} orderId={orderId} onPendingChange={setPending} />}</main>;
 }
-function Editor({ org, orderId }: { org: number; orderId: number }) {
+function Editor({ org, orderId, onPendingChange }: { org: number; orderId: number; onPendingChange: (pending: boolean) => void }) {
   const router = useRouter();
   const [scope, setScope] = useState<Identity | null>(null); const [order, setOrder] = useState<MachineOrder | null>(null); const [preview, setPreview] = useState<LandedPreview | null>(null); const [expected, setExpected] = useState<ExpectedOrder | null>(null); const [demandOrder, setDemandOrder] = useState<DealDemandOrder | null>(null); const [plan, setPlan] = useState<Plan | null>(null);
   const [history, setHistory] = useState<OrderEditHistory | null>(null); const [historyError, setHistoryError] = useState(""); const [historyBusy, setHistoryBusy] = useState(false);
@@ -167,12 +168,7 @@ function Editor({ org, orderId }: { org: number; orderId: number }) {
   const freightDirty = !!order && freight !== order.freight_byn;
   const planDirty = plan ? method !== (plan.transport_method_code ?? "truck") || target !== (plan.target_arrival_date ?? "") : method !== "truck" || target !== "";
   const unsaved = draftDirty || freightDirty || planDirty || statusTouched;
-  useEffect(() => {
-    if (!unsaved && !uncertain) return;
-    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [unsaved, uncertain]);
+  useUnsavedDocumentGuard(unsaved || uncertain, onPendingChange);
   const unit = new Map(preview?.lines.map(x => [x.sku_code, x.unit_landed_cost_byn]));
   function add() {
     try { if (!selectedSku || draft.sku_code !== selectedSku.code) throw new Error("Выберите номенклатуру из справочника"); const line = { sku_code: selectedSku.code, sku_id: selectedSku.id, sku_title: selectedSku.title, sku_unit: selectedSku.unit, qty: decimalInput(draft.qty, 2, true), goods_value_byn: decimalInput(draft.goods_value_byn, 2), weight: decimalInput(draft.weight, 3), volume: decimalInput(draft.volume, 4) }; void perform("add_line", line); } catch (e) { setError(message(e)); }

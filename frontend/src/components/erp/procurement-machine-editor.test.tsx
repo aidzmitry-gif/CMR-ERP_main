@@ -148,6 +148,19 @@ it("keeps the editor open when the save result is unknown", async () => {
   await screen.findByText(/Исход команды не подтверждён сервером/);
   expect(navigation.push).not.toHaveBeenCalled(); expect(screen.getByLabelText("Фрахт партии, BYN")).toHaveValue("200.13");
 });
+it("warns before changing legal entity with unsaved order fields", async () => {
+  await ready();
+  const confirm = vi.fn(() => false);
+  vi.stubGlobal("confirm", confirm);
+  fireEvent.change(screen.getByLabelText("Фрахт партии, BYN"), { target: { value: "200.13" } });
+  fireEvent.change(screen.getByLabelText("Юрлицо заказа"), { target: { value: "2" } });
+  expect(confirm).toHaveBeenCalledTimes(1);
+  expect(screen.getByLabelText("Юрлицо заказа")).toHaveValue("1");
+  expect(screen.getByLabelText("Фрахт партии, BYN")).toHaveValue("200.13");
+  confirm.mockReturnValue(true);
+  fireEvent.change(screen.getByLabelText("Юрлицо заказа"), { target: { value: "2" } });
+  expect(await screen.findByText("Состав заказа B-7")).toBeInTheDocument();
+});
 it("does not close with an incomplete new position", async () => {
   await ready(); fireEvent.change(screen.getByLabelText("Количество"), { target: { value: "3.00" } });
   fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));

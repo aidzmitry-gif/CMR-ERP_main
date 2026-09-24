@@ -79,3 +79,37 @@ it("requires a selected supplier and saves its directory snapshot in a new recei
   expect(submitted!.document).toMatchObject({ supplier: "Поставщик из каталога", supplier_id: 19,
     supplier_unp: "190000001" });
 });
+
+it("warns before replacing an unsaved new receipt", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => [] })));
+  const confirm = vi.fn(() => false);
+  vi.stubGlobal("confirm", confirm);
+  render(<ProcurementReceiptDrafts org="7" />);
+  await screen.findByText("Показано 0 из 0 накладных выбранного юрлица за все даты.");
+  fireEvent.change(screen.getByLabelText("Номер первичной накладной"), { target: { value: "INV-UNSAVED" } });
+  fireEvent.click(screen.getByRole("button", { name: "Новая первичная накладная" }));
+  expect(confirm).toHaveBeenCalledTimes(1);
+  expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("INV-UNSAVED");
+  confirm.mockReturnValue(true);
+  fireEvent.click(screen.getByRole("button", { name: "Новая первичная накладная" }));
+  expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("");
+});
+
+it("keeps the legal entity when an unsaved receipt switch is cancelled", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, json: async () =>
+    url.includes("unlinked-primary") ? { rows: [], next_after_id: null } : url.endsWith("receipt-organizations") ? [
+      { id: 7, name: "Белакб", unp: "123456789" }, { id: 8, name: "Второе ООО", unp: "987654321" },
+    ] : [] })));
+  const confirm = vi.fn(() => false);
+  vi.stubGlobal("confirm", confirm);
+  render(<ProcurementReceipts initialOrganization="7" />);
+  await screen.findByText("Показано 0 из 0 накладных выбранного юрлица за все даты.");
+  fireEvent.change(screen.getByLabelText("Номер первичной накладной"), { target: { value: "INV-UNSAVED" } });
+  fireEvent.change(screen.getByLabelText("Юрлицо поступления"), { target: { value: "8" } });
+  expect(confirm).toHaveBeenCalledTimes(1);
+  expect(screen.getByLabelText("Юрлицо поступления")).toHaveValue("7");
+  expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("INV-UNSAVED");
+  confirm.mockReturnValue(true);
+  fireEvent.change(screen.getByLabelText("Юрлицо поступления"), { target: { value: "8" } });
+  expect(screen.getByLabelText("Юрлицо поступления")).toHaveValue("8");
+});

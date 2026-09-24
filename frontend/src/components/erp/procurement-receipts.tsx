@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { Input, Select } from "@/components/ui/input";
+import { confirmDiscardUnsaved } from "@/lib/use-unsaved-document-guard";
 
 import { ProcurementReceiptDrafts } from "./procurement-receipt-drafts";
 import { ProcurementUnlinkedPurchases } from "./procurement-unlinked-purchases";
@@ -20,6 +21,7 @@ async function get<T>(path: string): Promise<T> {
 }
 export function ProcurementReceipts({ initialOrganization, initialReceipt }: { initialOrganization?: string; initialReceipt?: string } = {}) {
   const [organizations, setOrganizations] = useState<Organization[]>([]), [org, setOrg] = useState("");
+  const [pendingDocument, setPendingDocument] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [generation, setGeneration] = useState(0), [error, setError] = useState("");
   const [loaded, setLoaded] = useState<{ key: string; accounts: Account[]; policies: Policy[]; entries: Entry[] } | null>(null);
@@ -53,12 +55,12 @@ export function ProcurementReceipts({ initialOrganization, initialReceipt }: { i
   return <main className="min-w-0 w-0 flex-1 space-y-4 overflow-auto p-6 lg:pr-24">
     <h1 className="text-2xl font-semibold">Накладные на поступление</h1>
     <div className="grid gap-3 rounded-xl border border-line bg-surface p-4 md:grid-cols-2">
-      <label>Юрлицо поступления<Select aria-label="Юрлицо поступления" value={org} onChange={(e) => setOrg(e.target.value)}><option value="">Выберите организацию</option>{organizations.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.unp}</option>)}</Select></label>
+      <label>Юрлицо поступления<Select aria-label="Юрлицо поступления" value={org} onChange={(e) => { if (confirmDiscardUnsaved(pendingDocument)) setOrg(e.target.value); }}><option value="">Выберите организацию</option>{organizations.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.unp}</option>)}</Select></label>
       <label>Дата отражения<Input aria-label="Дата отражения" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
     </div>
     {error && <p role="alert" className="text-red-700">{error}</p>}
     {!org && !error && <p>Выберите юрлицо перед просмотром или созданием накладной.</p>}
-    {org && <ProcurementReceiptDrafts key={`draft:${org}`} org={org} initialReceipt={org === initialOrganization ? initialReceipt : undefined} accounts={current?.accounts ?? []} policyId={policy?.id} date={date} onPosted={() => setGeneration((v) => v + 1)} />}
+    {org && <ProcurementReceiptDrafts key={`draft:${org}`} org={org} initialReceipt={org === initialOrganization ? initialReceipt : undefined} accounts={current?.accounts ?? []} policyId={policy?.id} date={date} onPosted={() => setGeneration((v) => v + 1)} onPendingChange={setPendingDocument} />}
     {org && <ProcurementUnlinkedPurchases key={`unlinked:${org}:${generation}`} org={org} />}
     {org && !current && !error && <p role="status">Загрузка поступлений…</p>}
     {current && <section className="rounded-xl border border-line bg-surface p-4"><h2 className="font-semibold">Проведённые поступления с начала месяца по {date}</h2>
