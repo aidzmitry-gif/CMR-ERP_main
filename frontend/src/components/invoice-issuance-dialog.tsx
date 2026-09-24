@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { InvoiceDealPreparation } from "./invoice-deal-preparation";
 import { fetchRegisterOrganizations, type RegisterOrganization } from "@/lib/document-register-api";
+import { useUnsavedDocumentGuard } from "@/lib/use-unsaved-document-guard";
 import { allocationError, clearPending, exact, invoiceItems, InvoiceError, issueInvoice, loadPending, prepareCommand, previewInvoice, savePending, units,
   type Allocation, type InvoiceInput, type InvoiceItem, type InvoicePreview, type InvoiceResult, type PendingInvoice } from "@/lib/invoice-issuance-api";
 
@@ -53,6 +54,14 @@ function InvoiceDialogForScope({ dealId, documentId, initialMode = "stock", onCl
   const submitting = useRef(false);
   const capturedInput = useRef<InvoiceInput | null>(null);
   const root = useRef<HTMLDivElement>(null);
+  const hasUnsavedInput = loaded && !pending && !completed && (org !== "" || mode !== initialMode || currency !== ""
+    || documentDate !== "" || validUntil !== "" || pricingEvidence !== "" || evidence !== ""
+    || Object.values(pricing).some(value => value.price !== "" || value.rate !== ""));
+  const confirmClose = useUnsavedDocumentGuard(hasUnsavedInput);
+
+  function close() {
+    if (confirmClose()) onClose(completed);
+  }
 
   useEffect(() => {
     let active = true;
@@ -121,7 +130,7 @@ function InvoiceDialogForScope({ dealId, documentId, initialMode = "stock", onCl
   }
   function trap(event: React.KeyboardEvent<HTMLDivElement>) {
     event.stopPropagation();
-    if (event.key === "Escape") { event.preventDefault(); if (!busy) onClose(completed); }
+    if (event.key === "Escape") { event.preventDefault(); if (!busy) close(); }
     if (event.key !== "Tab") return;
     const controls = [...(root.current?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href]') ?? [])];
     const first = controls[0], last = controls.at(-1);
@@ -132,7 +141,7 @@ function InvoiceDialogForScope({ dealId, documentId, initialMode = "stock", onCl
   const allocationProblem = preview ? allocationError(preview, allocations) : null;
   return <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/50 p-3" onPointerDown={e => e.stopPropagation()} onKeyDown={trap}>
     <div ref={root} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="invoice-issuance-title" className="max-h-[94vh] w-full max-w-5xl min-w-0 overflow-y-auto rounded-xl bg-surface p-5 text-ink shadow-xl">
-      <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="invoice-issuance-title" className="text-lg font-semibold">Выпуск счёта · сделка #{dealId}{documentId ? ` · черновик #${documentId}` : ""}</h2><button disabled={busy} onClick={() => onClose(completed)} className="rounded border border-line p-2">Закрыть</button></div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="invoice-issuance-title" className="text-lg font-semibold">Выпуск счёта · сделка #{dealId}{documentId ? ` · черновик #${documentId}` : ""}</h2><button disabled={busy} onClick={close} className="rounded border border-line p-2">Закрыть</button></div>
       <p className="my-3 text-sm text-muted">Товарный счёт: согласованные цены и ставки, реквизиты из подтверждённых источников и выбранный режим поставки. Счета только на услуги и замена выпущенного счёта пока недоступны.</p>
       {error && <p role="alert" className="my-3 text-sm text-red-600">{error}</p>}
       {!loaded && <button disabled={busy} onClick={() => setAttempt(n => n + 1)} className="rounded border border-line p-2">Повторить загрузку</button>}

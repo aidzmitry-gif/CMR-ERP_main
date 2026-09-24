@@ -52,6 +52,21 @@ beforeEach(() => sessionStorage.clear());
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("invoice dialog", () => {
+  it("warns before closing unsaved invoice input by button or Escape", async () => {
+    const fetch = mockApi(), close = vi.fn(), confirm = vi.fn().mockReturnValue(false);
+    vi.stubGlobal("confirm", confirm);
+    render(<InvoiceIssuanceDialog dealId="1" onClose={close} />);
+    fireEvent.change(await screen.findByLabelText("Валюта"), { target: { value: "BYN" } });
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть" }));
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(close).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Валюта")).toHaveValue("BYN");
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть" }));
+    expect(close).toHaveBeenCalledWith(null);
+    expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
   it("requires explicit org, dates, price and VAT with no 20% default", async () => {
     mockApi(); render(<InvoiceIssuanceDialog dealId="1" onClose={vi.fn()} />);
     expect(await screen.findByLabelText("Юрлицо")).toHaveValue("");
@@ -114,6 +129,19 @@ describe("invoice dialog", () => {
     expect(sends).toHaveLength(2); expect(sends[0]).toEqual(sends[1]);
     expect(fetch.mock.calls.filter(([url]) => url.endsWith("/invoice-preview"))).toHaveLength(1);
     expect(loadPending("1")).toBeNull();
+  });
+  it("keeps an uncertain issued command when the dialog closes", async () => {
+    mockApi({ failIssue: true });
+    const close = vi.fn(), confirm = vi.fn().mockReturnValue(false);
+    vi.stubGlobal("confirm", confirm);
+    render(<InvoiceIssuanceDialog dealId="1" onClose={close} />);
+    await fill(); allocate();
+    fireEvent.click(screen.getByText("Выпустить счёт и зарезервировать"));
+    await screen.findByText(/Результат неизвестен/);
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть" }));
+    expect(close).toHaveBeenCalledWith(null);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(loadPending("1")).not.toBeNull();
   });
   it("reopens saved command despite a different requested draft, preserving original endpoint", async () => {
     const pending = command(); savePending(pending);
