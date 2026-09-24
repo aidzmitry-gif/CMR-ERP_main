@@ -15,6 +15,28 @@ type Receipt = { id: number; version: number; status?: string; posting?: { entry
 type OwnedOrder = { kind: string; source_id: number; snapshot: { number: string; supplier: string } };
 const fields = [["invoice_reference", "Номер первичной накладной"], ["document_date", "Дата первичной накладной"], ["operation_date", "Дата поступления"], ["contract", "Договор накладной"], ["warehouse", "Склад накладной"], ["explanation", "Содержание накладной"]] as const;
 const itemFields = [["sku", "Номенклатура"], ["unit", "Единица измерения"], ["lot", "Партия"], ["quantity", "Количество"], ["net_amount", "Стоимость без НДС"], ["vat_rate", "Ставка НДС %"], ["vat_amount", "Сумма НДС"], ["vat_basis", "Основание НДС"]] as const;
+const itemHistoryFields = [["order_id", "Заказ поставщику"], ["order_line_id", "Строка заказа"], ...itemFields] as const;
+const shown = (value: unknown) => value === null || value === undefined || value === "" ? "—" : String(value);
+const supplierSnapshot = (document: Document) => `${shown(document.supplier)} · УНП ${shown(document.supplier_unp)} · ${document.supplier_id ? `ID ${document.supplier_id}` : "без связи со справочником"}`;
+function revisionChanges(previous: Document, current: Document) {
+  const changes: { label: string; before: string; after: string }[] = [];
+  const add = (label: string, before: unknown, after: unknown) => {
+    if (JSON.stringify(before) !== JSON.stringify(after)) changes.push({ label, before: shown(before), after: shown(after) });
+  };
+  add("Валюта", previous.currency, current.currency);
+  for (const [field, label] of fields) add(label, previous[field], current[field]);
+  add("Поставщик", supplierSnapshot(previous), supplierSnapshot(current));
+  for (let index = 0; index < Math.max(previous.items.length, current.items.length); index++) {
+    const before = previous.items[index], after = current.items[index];
+    if (!before || !after) add(`Строка ${index + 1}`, before ? "есть" : null, after ? "есть" : null);
+    for (const [field, label] of itemHistoryFields) {
+      add(`Строка ${index + 1} · ${label}`,
+        (before as unknown as Record<string, unknown> | undefined)?.[field],
+        (after as unknown as Record<string, unknown> | undefined)?.[field]);
+    }
+  }
+  return changes;
+}
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`/api/procurement${path}`, { cache: "no-store", ...options });
   const data = await response.json();
@@ -160,6 +182,18 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       setReload((value) => value + 1); onPosted?.();
     }} />)}
     {selected && !dirty && document.supplier_id && <Link className="text-accent underline" href={`/erp/wms/receipts/from-primary?org=${org}&receipt=${selected.id}&version=${selected.version}`}>Подготовить складскую приёмку</Link>}
-    {selected && <details><summary>История накладной № {selected.id}</summary>{selected.revisions.map((row) => <article key={row.version} className="border-b border-line py-3"><h3>Версия {row.version} · {row.actor} · {row.created_at}</h3><dl>{fields.map(([field, label]) => <div key={field}><dt>{label}</dt><dd>{row.document[field]}</dd></div>)}<div><dt>Поставщик накладной</dt><dd>{row.document.supplier} · {row.document.supplier_unp || "УНП не указан"} · {row.document.supplier_id ? `ID ${row.document.supplier_id}` : "связь со справочником неизвестна"}</dd></div></dl>{row.document.items.map((r, i) => <p key={i}>{r.sku}{r.order_id ? ` · заказ № ${r.order_id}` : ""} · партия {r.lot} · {r.quantity} {r.unit ?? "(единица не указана)"} · без НДС {r.net_amount} BYN · НДС {r.vat_rate}% / {r.vat_amount} BYN · {r.vat_basis}</p>)}</article>)}</details>}
+    {selected && <details><summary>История накладной № {selected.id}</summary>{selected.revisions.map((row, index) => {
+      const changes = index ? revisionChanges(selected.revisions[index - 1].document, row.document) : [];
+      return <article key={row.version} className="border-b border-line py-3">
+        <h3>Версия {row.version} · {row.actor} · {row.created_at}</h3>
+        {index ? <div><h4>Изменения редакции</h4>{changes.length
+          ? <ul>{changes.map((change, i) => <li key={`${change.label}:${i}`}>{change.label}: было «{change.before}», стало «{change.after}».</li>)}</ul>
+          : <p>Реквизиты не изменились.</p>}</div> : <p>Исходная редакция.</p>}
+        <details><summary>Полный снимок версии {row.version}</summary>
+          <dl>{fields.map(([field, label]) => <div key={field}><dt>{label}</dt><dd>{row.document[field]}</dd></div>)}<div><dt>Поставщик накладной</dt><dd>{row.document.supplier} · {row.document.supplier_unp || "УНП не указан"} · {row.document.supplier_id ? `ID ${row.document.supplier_id}` : "связь со справочником неизвестна"}</dd></div></dl>
+          {row.document.items.map((r, i) => <p key={i}>{r.sku}{r.order_id ? ` · заказ № ${r.order_id}` : ""} · партия {r.lot} · {r.quantity} {r.unit ?? "(единица не указана)"} · без НДС {r.net_amount} BYN · НДС {r.vat_rate}% / {r.vat_amount} BYN · {r.vat_basis}</p>)}
+        </details>
+      </article>;
+    })}</details>}
   </section>;
 }

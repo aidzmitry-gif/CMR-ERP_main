@@ -195,3 +195,32 @@ it.each([
   expect(await screen.findByRole("alert")).toHaveTextContent("Сервер не подтвердил сохранённую версию этой накладной");
   expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("INV-EDIT");
 });
+
+it("shows who changed receipt fields and their prior and new saved values", async () => {
+  const first = {
+    currency: "BYN", invoice_reference: "INV-41", document_date: "2026-09-23",
+    operation_date: "2026-09-24", supplier: "Первый поставщик", supplier_id: 11,
+    supplier_unp: "190000011", contract: "Договор А", warehouse: "Склад",
+    explanation: "Товар", items: [{ order_id: null, sku: "AKB", unit: "шт",
+      lot: "L1", quantity: "1.000000", net_amount: "100.00", vat_rate: "20.00",
+      vat_amount: "20.00", vat_basis: "ОСН" }],
+  };
+  const second = { ...first, contract: "Договор Б", supplier: "Новый поставщик",
+    supplier_id: 19, supplier_unp: "190000019",
+    items: [{ ...first.items[0], quantity: "2.000000" }, { ...first.items[0], sku: "CHG",
+      lot: "L2", vat_amount: "8.00" }] };
+  const row = { id: 41, version: 2, status: "draft", posting: null, revisions: [
+    { version: 1, actor: "Закупщик", created_at: "2026-09-23 10:00", document: first },
+    { version: 2, actor: "Бухгалтер", created_at: "2026-09-24 11:00", document: second },
+  ] };
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, json: async () =>
+    url.includes("purchase-ownership") ? [] : [row] })));
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /INV-41/ }));
+  fireEvent.click(screen.getByText("История накладной № 41"));
+  expect(screen.getByText("Версия 2 · Бухгалтер · 2026-09-24 11:00")).toBeInTheDocument();
+  expect(screen.getByText("Договор накладной: было «Договор А», стало «Договор Б».")).toBeInTheDocument();
+  expect(screen.getByText("Строка 1 · Количество: было «1.000000», стало «2.000000».")).toBeInTheDocument();
+  expect(screen.getByText("Строка 2 · Сумма НДС: было «—», стало «8.00».")).toBeInTheDocument();
+  expect(screen.getByText(/Поставщик: было «Первый поставщик · УНП 190000011 · ID 11»/)).toBeInTheDocument();
+});
