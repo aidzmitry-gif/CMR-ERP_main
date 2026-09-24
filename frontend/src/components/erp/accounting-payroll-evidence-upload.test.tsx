@@ -108,4 +108,28 @@ describe("AccountingPayrollEvidenceUpload", () => {
       reference: "facts-2026-10", filename: "facts.pdf",
     });
   });
+
+  it("stores organization rules for the selected month without an employee binding", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => key });
+    const onUploaded = vi.fn();
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => Promise.resolve(response(receipt(JSON.parse(init.body as string)))));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AccountingPayrollEvidenceUpload org="7" month="2026-10" organizationRuleOnly disabled={false} onUploaded={onUploaded} />);
+    fireEvent.change(screen.getByLabelText("Номер документа"), { target: { value: "rules-2026-10" } });
+    fireEvent.change(screen.getByLabelText("Файл правил организации"), {
+      target: { files: [new File(["%PDF-1.7\nfictional"], "rules.pdf", { type: "application/pdf" })] },
+    });
+    fireEvent.change(screen.getByLabelText("Пояснение документа"), {
+      target: { value: "Основания правил для выбранного юридического лица и месяца" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить документ" }));
+    expect(await screen.findByText(/Файл № 87 сохранён/)).toBeInTheDocument();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toMatchObject({
+      request_key: key, kind: "payroll_organization_rule", employment_binding_id: null,
+      month: "2026-10", reference: "rules-2026-10", filename: "rules.pdf",
+    });
+    expect(onUploaded).toHaveBeenCalledWith(expect.objectContaining({
+      organization_id: 7, employment_binding_id: null, kind: "payroll_organization_rule", month: "2026-10",
+    }));
+  });
 });

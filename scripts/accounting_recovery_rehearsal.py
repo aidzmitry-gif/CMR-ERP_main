@@ -35,6 +35,7 @@ RESOURCE_PREFIX = "crm_acc_recovery_"
 DATABASE_PREFIX = "crm_acc_recovery_"
 HEAD_RE = re.compile(r"^([A-Za-z0-9_]+) \(head\)$", re.MULTILINE)
 SYNTHETIC_POLICY = b"%PDF-1.7\nSynthetic payroll policy source for local recovery rehearsal.\n"
+SYNTHETIC_ORG_RULE = b"%PDF-1.7\nSynthetic employer rule source for local recovery rehearsal.\n"
 
 
 class RehearsalError(RuntimeError):
@@ -223,6 +224,79 @@ async def _check_restored_policy(url: str, root: Path, organization_id: int, fil
         await engine.dispose()
 
 
+async def _store_synthetic_org_rule(url: str, root: Path, organization_id: int) -> tuple[int, str, str, int, str]:
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from modules.accounting.models import PayrollEvidenceFile
+    from modules.accounting.payroll_evidence_files import PayrollEvidenceFileInput, verify_bytes
+    from modules.accounting.payroll_evidence_files import create as save_file
+    from modules.accounting.payroll_organization_review import PayrollOrganizationInput
+    from modules.accounting.payroll_organization_review import create as review_rules
+
+    engine = create_async_engine(url)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            with _payroll_root(root):
+                receipt = await save_file(session, organization_id, PayrollEvidenceFileInput(
+                    request_key=uuid.uuid4(), kind="payroll_organization_rule",
+                    month="2026-10", reference="synthetic-recovery-org-rule",
+                    filename="org-rule.pdf",
+                    data_url="data:application/pdf;base64," + base64.b64encode(SYNTHETIC_ORG_RULE).decode(),
+                    evidence="Synthetic local organization rule recovery evidence",
+                ), "rehearsal")
+                review = await review_rules(session, organization_id, "2026-10",
+                    PayrollOrganizationInput.model_validate({
+                        "request_key": str(uuid.uuid4()),
+                        "source_file_id": receipt["file_id"],
+                        "source_document": receipt["reference"],
+                        "facts": [{"code": "period_work_injury_insurance_tariff",
+                                   "decision": "unresolved",
+                                   "finding": "Synthetic source is not a tariff decision",
+                                   "source_locator": "page 1, line 2"}],
+                        "evidence": "Synthetic chief read the cited employer source",
+                    }), "rehearsal")
+                await session.commit()
+                row = await session.scalar(select(PayrollEvidenceFile).where(
+                    PayrollEvidenceFile.id == receipt["file_id"],
+                ))
+                if row is None or verify_bytes(row) != SYNTHETIC_ORG_RULE:
+                    raise RehearsalError("source employer rule file differs from its receipt")
+                return row.id, row.sha256, row.storage_filename, review["review_id"], review["digest"]
+    finally:
+        await engine.dispose()
+
+
+async def _check_restored_org_rule(url: str, root: Path, organization_id: int,
+                                   review_id: int, expected_digest: str, *, available: bool) -> None:
+    from fastapi import HTTPException
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from modules.accounting.models import PayrollOrganizationReview
+    from modules.accounting.payroll_organization_review import current_for, result
+
+    engine = create_async_engine(url)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            row = await session.get(PayrollOrganizationReview, review_id)
+            if (row is None or row.organization_id != organization_id
+                    or result(row)["digest"] != expected_digest):
+                raise RehearsalError("restored employer rule review is missing or changed")
+            with _payroll_root(root):
+                try:
+                    current = await current_for(session, organization_id, "2026-10")
+                except HTTPException as exc:
+                    if not available and exc.status_code == 409:
+                        return
+                    raise RehearsalError(f"restored employer rule source failed: HTTP {exc.status_code}") from exc
+            if not available:
+                raise RehearsalError("restored employer rule review accepted unavailable source bytes")
+            if current is None or current["review_digest"] != expected_digest:
+                raise RehearsalError("restored employer rule review differs from its source")
+    finally:
+        await engine.dispose()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run a local-only accounting PostgreSQL recovery rehearsal")
     parser.add_argument("--image", required=True, help="already-present local PostgreSQL Docker image")
@@ -349,12 +423,20 @@ FROM organization;
         organization_id, file_id, file_sha256, storage_filename = asyncio.run(
             _store_synthetic_policy(source_url, source_files, str(uuid.uuid4())),
         )
+        _org_file_id, org_file_sha256, org_storage_filename, org_review_id, org_review_digest = (
+            asyncio.run(_store_synthetic_org_rule(source_url, source_files, organization_id))
+        )
         source_path = source_files / str(organization_id) / storage_filename
         shutil.copytree(source_files, backup_files)
         backup_path = backup_files / str(organization_id) / storage_filename
+        org_backup_path = backup_files / str(organization_id) / org_storage_filename
         if (not backup_path.is_file() or hashlib.sha256(backup_path.read_bytes()).hexdigest() != file_sha256
                 or source_path.read_bytes() != backup_path.read_bytes()):
             raise RehearsalError("private payroll-file backup is incomplete")
+        if (not org_backup_path.is_file()
+                or hashlib.sha256(org_backup_path.read_bytes()).hexdigest() != org_file_sha256
+                or org_backup_path.read_bytes() != SYNTHETIC_ORG_RULE):
+            raise RehearsalError("private employer-rule backup is incomplete")
         _run("dump generated source database", ["docker", "exec", container, "pg_dump", "-Fc", "-U", user, "-d", source_db, "-f", dump_path], timeout=120, secret=password)
         _run("create generated restored database", ["docker", "exec", container, "createdb", "-U", user, restored_db], secret=password)
         restored_created = True
@@ -362,9 +444,13 @@ FROM organization;
 
         asyncio.run(_check_restored_policy(restored_url, restored_files, organization_id,
                                             file_id, file_sha256, available=False))
+        asyncio.run(_check_restored_org_rule(restored_url, restored_files, organization_id,
+                                             org_review_id, org_review_digest, available=False))
         shutil.copytree(backup_files, restored_files, dirs_exist_ok=True)
         asyncio.run(_check_restored_policy(restored_url, restored_files, organization_id,
                                             file_id, file_sha256, available=True))
+        asyncio.run(_check_restored_org_rule(restored_url, restored_files, organization_id,
+                                             org_review_id, org_review_digest, available=True))
         restored_path = restored_files / str(organization_id) / storage_filename
         restored_path.write_bytes(b"%PDF-1.7\ntampered synthetic file\n")
         asyncio.run(_check_restored_policy(restored_url, restored_files, organization_id,
@@ -372,6 +458,13 @@ FROM organization;
         shutil.copy2(backup_path, restored_path)
         asyncio.run(_check_restored_policy(restored_url, restored_files, organization_id,
                                             file_id, file_sha256, available=True))
+        org_restored_path = restored_files / str(organization_id) / org_storage_filename
+        org_restored_path.write_bytes(b"%PDF-1.7\ntampered employer rule file\n")
+        asyncio.run(_check_restored_org_rule(restored_url, restored_files, organization_id,
+                                             org_review_id, org_review_digest, available=False))
+        shutil.copy2(org_backup_path, org_restored_path)
+        asyncio.run(_check_restored_org_rule(restored_url, restored_files, organization_id,
+                                             org_review_id, org_review_digest, available=True))
 
         restored_head = _psql(container, user, restored_db, "SELECT version_num FROM alembic_version", secret=password)
         if expected_head not in restored_head.stdout:
@@ -390,7 +483,8 @@ FROM organization;
         if "Reconciliation receipts are immutable" not in (immutable_rejection.stdout + immutable_rejection.stderr):
             raise RehearsalError("receipt update was rejected without the immutable reconciliation guard signal")
         print(f"recovery rehearsal passed: alembic_head={expected_head}; reconciliation_receipts=1; "
-              "payroll_files=1; database_only_rejected=true; tamper_rejected=true; paired_restore_verified=true; "
+              "payroll_files=2; organization_rule_reviews=1; database_only_rejected=true; "
+              "tamper_rejected=true; paired_restore_verified=true; "
               f"work_schedule_migration_checked={str(args.check_work_schedule_migration).lower()}; "
               f"reconciliation_migration_checked={str(args.check_reconciliation_migration).lower()}")
         return 0

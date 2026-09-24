@@ -6,6 +6,9 @@ import { AccountingPayrollControl } from "@/components/erp/accounting-payroll-co
 vi.mock("@/components/erp/accounting-payroll-applicability-review", () => ({
   AccountingPayrollApplicabilityReview: () => null,
 }));
+vi.mock("@/components/erp/accounting-payroll-organization-review", () => ({
+  AccountingPayrollOrganizationReview: () => null,
+}));
 
 const amounts = {
   gross_byn: "100.00",
@@ -56,7 +59,10 @@ function reports(organizationId: number) {
         status: "facts_and_rules_unverified", population_scope: "known_erp_bindings_only",
         reference_year: 2026, reference_scope: "selected_mns_topics_only",
         references: [{ topic: "standard_deductions_and_main_workplace", url: "https://nalog.gov.by/individuals/income_taxation/tax_deductions/9332/" }],
-        organization_gap_codes: ["period_income_tax_withholding_rule", "period_fszn_rules_and_limits"],
+        organization_gap_codes: ["period_income_tax_withholding_rule", "period_fszn_rules_and_limits", "period_work_injury_insurance_tariff"],
+        organization: { review_id: 18, review_digest: "c".repeat(64),
+          reviewed_rule_codes: ["period_fszn_rules_and_limits", "period_income_tax_withholding_rule"],
+          unresolved_rule_codes: ["period_work_injury_insurance_tariff"] },
         bindings: [{ employment_binding_id: 9, review_id: null, review_digest: null,
           reviewed_fact_codes: [], unrecorded_fact_codes: ["main_workplace_and_deduction_basis", "year_to_date_taxable_income"] }],
         statutory_completeness_verified: false,
@@ -89,6 +95,9 @@ describe("AccountingPayrollControl", () => {
     expect(screen.getByText(/Включено подтверждённых отрезков: 0 из 1/)).toBeInTheDocument();
     expect(screen.getByText(/Полнота применимых удержаний, взносов, вычетов и льгот не подтверждена/)).toBeInTheDocument();
     expect(screen.getByText(/Утвердить правило удержания подоходного налога/)).toBeInTheDocument();
+    expect(screen.getByTestId("payroll-organization-review-summary")).toHaveTextContent("квитанция № 18; рассмотрено правил 2; нерешённых 1");
+    expect(screen.getByText(/Обзор фактов о применимости не закрывает правовые пробелы ниже/)).toBeInTheDocument();
+    expect(screen.getByText(/Подтвердить тариф страхования от несчастных случаев этого юрлица/)).toBeInTheDocument();
     fireEvent.click(screen.getByText("Данные по договорам: 1"));
     expect(screen.getByText("Накопленный облагаемый доход за год")).toBeInTheDocument();
     expect(screen.getByText(/Удержания: расчёт 10.00, импорт 11.00, разница 1.00 BYN/)).toBeInTheDocument();

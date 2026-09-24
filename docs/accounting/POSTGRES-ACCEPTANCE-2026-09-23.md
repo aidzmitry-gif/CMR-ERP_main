@@ -97,3 +97,18 @@ The local API test separately stores a synthetic schedule receipt scoped to
 one employer binding and month, rejects a missing binding, wrong month, wrong
 file kind and changed bytes. The local run does not cover the target schema,
 real schedules or accountant approval of the stated norm.
+
+## Employer rule-review migration and paired recovery — 2026-09-24
+
+Source head `0176` was exercised on a disposable PostgreSQL `18.4-alpine`
+container. `python -m pytest tests/accounting/test_postgres.py::test_payroll_organization_review_postgres_guards -q`
+passed (1/1): a valid organization/month review inserted, while an incorrect
+source, missing decision and attempted mutation were rejected by database
+guards. `python scripts/accounting_recovery_rehearsal.py --image
+postgres:18.4-alpine` passed after full Alembic upgrade to `0176`: one
+synthetic organization-rule review and its private file were restored together
+with the database. Database-only restore and changed restored bytes were
+rejected; paired intact bytes were accepted. The runner removed generated
+databases, container and scratch files. This is local synthetic evidence, not
+a target-database upgrade, recovery of real records, legal-rule verification,
+or accountant acceptance.

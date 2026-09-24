@@ -26,6 +26,7 @@ PayrollEvidenceKind = Literal[
     "employment_contract", "timesheet", "work_schedule", "payroll_policy", "base_adjustment",
     "payroll_zero_activity", "payroll_population", "payroll_zero_individual",
     "payroll_statutory_zero", "payroll_stat_zero_person", "payroll_applicability",
+    "payroll_organization_rule",
 ]
 
 
@@ -44,7 +45,8 @@ class PayrollEvidenceFileInput(Input):
         if self.kind == "payroll_policy":
             if self.employment_binding_id is not None or self.month is not None:
                 raise ValueError("Policy file is organization-scoped, not employee-scoped")
-        elif self.kind in {"payroll_zero_activity", "payroll_population", "payroll_statutory_zero"}:
+        elif self.kind in {"payroll_zero_activity", "payroll_population", "payroll_statutory_zero",
+                           "payroll_organization_rule"}:
             if self.employment_binding_id is not None or self.month is None:
                 raise ValueError("Monthly payroll source file needs a month and no employee binding")
         elif self.kind == "employment_contract":
@@ -219,7 +221,8 @@ async def create(session, org_id: int, data: PayrollEvidenceFileInput, actor: st
         return result(existing)
 
     if data.kind in {"payroll_zero_activity", "payroll_population", "payroll_zero_individual",
-                     "payroll_statutory_zero", "payroll_stat_zero_person", "payroll_applicability"}:
+                     "payroll_statutory_zero", "payroll_stat_zero_person", "payroll_applicability",
+                     "payroll_organization_rule"}:
         from modules.accounting.models import Period
 
         closed = await session.scalar(select(Period.id).where(

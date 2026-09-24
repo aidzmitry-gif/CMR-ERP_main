@@ -167,6 +167,21 @@ applicable employee-specific deductions, caps, benefits and exemptions. The
 candidate always reports this normative blocker and cannot post, pay or create
 compulsory forms. No candidate receipt is persisted by this read-only API.
 
+The chief may upload a private `payroll_organization_rule` file for one
+organization and month, then POST a sourced organization-rule review at
+`/accounting/organizations/{org_id}/periods/{YYYY-MM}/payroll-organization-reviews`.
+Each of the existing tax, FSZN and work-injury rule-gap codes has an explicit
+`applicable`, `not_applicable` or `unresolved` decision, a written finding and
+a locator inside the selected file. The command has a request key and may
+supersede only the current revision. `GET .../current` rechecks current file
+bytes; `GET /accounting/organizations/{org_id}/payroll-organization-reviews/by-request/{key}`
+recovers a lost write response. The candidate includes the current review
+digest and the still-unresolved codes, so a correction changes its digest.
+All statutory rule gaps remain visible even when a chief records a decision:
+the software has not verified the legal text, employer tariff or policy.
+Closed periods reject new files and reviews; no rate is inferred, and posting,
+payment and forms stay disabled.
+
 The current rule-set API exposes `rate_versions` (the immutable configured
 requirement IDs and digests) together with the rate roles and base modes. The
 accountant workspace's **Расчётный лист** tab uses those IDs, an explicitly

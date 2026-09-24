@@ -18,6 +18,9 @@ from modules.accounting.payroll_calculation import (
     verified_policy,
 )
 from modules.accounting.payroll_evidence_files import file_for
+from modules.accounting.payroll_organization_review import (
+    current_for as current_organization_review,
+)
 from modules.accounting.payroll_population import (
     state as population_state,
 )
@@ -140,8 +143,10 @@ async def preview(session, org_id: int, month: str) -> dict:
     applicability_reviews = await current_applicability(
         session, org_id, month, population["known_binding_ids"],
     )
+    organization_review = await current_organization_review(session, org_id, month)
     applicability = assess_applicability(
         month, population["known_binding_ids"], applicability_reviews,
+        organization_review,
     )
     # A configured percentage list is not proof that every legally applicable
     # deduction, exemption, cap, benefit or employee-specific fact was covered.

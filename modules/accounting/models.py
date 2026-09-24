@@ -377,7 +377,7 @@ class PayrollEvidenceFile(Base):
     __tablename__ = "payroll_evidence_file"
     __table_args__ = (
         UniqueConstraint("organization_id", "request_key", name="uq_payroll_evidence_request"),
-        CheckConstraint("kind IN ('employment_contract', 'timesheet', 'work_schedule', 'payroll_policy', 'base_adjustment', 'payroll_zero_activity', 'payroll_population', 'payroll_zero_individual', 'payroll_statutory_zero', 'payroll_stat_zero_person', 'payroll_applicability')",
+        CheckConstraint("kind IN ('employment_contract', 'timesheet', 'work_schedule', 'payroll_policy', 'base_adjustment', 'payroll_zero_activity', 'payroll_population', 'payroll_zero_individual', 'payroll_statutory_zero', 'payroll_stat_zero_person', 'payroll_applicability', 'payroll_organization_rule')",
                         name="payroll_evidence_kind"),
         CheckConstraint("size_bytes > 0 AND size_bytes <= 10485760", name="payroll_evidence_size"),
         {"schema": "accounting"},
@@ -387,7 +387,7 @@ class PayrollEvidenceFile(Base):
     employment_binding_id: Mapped[int | None] = mapped_column(
         ForeignKey("accounting.payroll_employment_binding.id"), nullable=True,
     )
-    kind: Mapped[str] = mapped_column(String(24))
+    kind: Mapped[str] = mapped_column(String(32))
     month: Mapped[str | None] = mapped_column(String(7), nullable=True)
     reference: Mapped[str] = mapped_column(String(160))
     filename: Mapped[str] = mapped_column(String(160))
@@ -458,6 +458,37 @@ class PayrollApplicabilityReview(Base):
     revision: Mapped[int] = mapped_column(Integer)
     supersedes_id: Mapped[int | None] = mapped_column(
         ForeignKey("accounting.payroll_applicability_review.id"), nullable=True,
+    )
+    source_file_id: Mapped[int] = mapped_column(ForeignKey("accounting.payroll_evidence_file.id"))
+    source_file_sha256: Mapped[str] = mapped_column(String(64))
+    source_document: Mapped[str] = mapped_column(String(160))
+    facts: Mapped[list] = mapped_column(JSON)
+    evidence: Mapped[str] = mapped_column(String(2000))
+    request_key: Mapped[str] = mapped_column(String(36))
+    request_digest: Mapped[str] = mapped_column(String(64))
+    digest: Mapped[str] = mapped_column(String(64))
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    actor: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PayrollOrganizationReview(Base):
+    """Immutable chief review of employer rule facts, never a legal rate decision."""
+
+    __tablename__ = "payroll_organization_review"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "request_key", name="uq_payroll_org_review_request"),
+        UniqueConstraint("organization_id", "month", "revision",
+                         name="uq_payroll_org_review_revision"),
+        CheckConstraint("revision > 0", name="payroll_org_review_positive_revision"),
+        {"schema": "accounting"},
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("accounting.organization.id"), index=True)
+    month: Mapped[str] = mapped_column(String(7), index=True)
+    revision: Mapped[int] = mapped_column(Integer)
+    supersedes_id: Mapped[int | None] = mapped_column(
+        ForeignKey("accounting.payroll_organization_review.id"), nullable=True,
     )
     source_file_id: Mapped[int] = mapped_column(ForeignKey("accounting.payroll_evidence_file.id"))
     source_file_sha256: Mapped[str] = mapped_column(String(64))

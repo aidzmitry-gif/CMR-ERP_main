@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { AccountingPayrollApplicabilityReview } from "./accounting-payroll-applicability-review";
+import { AccountingPayrollOrganizationReview } from "./accounting-payroll-organization-review";
 
 type Amounts = {
   gross_byn: string;
@@ -63,6 +64,7 @@ type Candidate = {
     reference_scope: "selected_mns_topics_only" | "no_period_source_checked";
     references: { topic: string; url: string }[];
     organization_gap_codes: string[];
+    organization: { review_id: number | null; review_digest: string | null; reviewed_rule_codes: string[]; unresolved_rule_codes: string[] };
     bindings: { employment_binding_id: number; review_id: number | null; review_digest: string | null; reviewed_fact_codes: string[]; unrecorded_fact_codes: string[] }[];
     statutory_completeness_verified: false;
   };
@@ -116,6 +118,31 @@ const referenceLabels: Record<string, string> = {
   standard_deductions_and_main_workplace: "стандартные вычеты и основное место работы",
   deduction_categories: "виды налоговых вычетов",
 };
+const organizationRuleCodes = [
+  "period_income_tax_withholding_rule",
+  "period_fszn_rules_and_limits",
+  "period_work_injury_insurance_tariff",
+];
+
+function validOrganizationApplicability(candidate: Candidate) {
+  const review = candidate.applicability.organization;
+  if (!review || typeof review !== "object" || !Array.isArray(review.reviewed_rule_codes)
+      || !Array.isArray(review.unresolved_rule_codes) || !Array.isArray(candidate.applicability.organization_gap_codes)) return false;
+  const reviewed = review.reviewed_rule_codes;
+  const unresolved = review.unresolved_rule_codes;
+  const known = (codes: string[]) => codes.every((code) => organizationRuleCodes.includes(code))
+    && new Set(codes).size === codes.length;
+  const reviewShape = review.review_id === null
+    ? review.review_digest === null && reviewed.length === 0
+      && unresolved.length === organizationRuleCodes.length
+    : Number.isInteger(review.review_id) && review.review_id > 0
+      && typeof review.review_digest === "string" && /^[a-f0-9]{64}$/.test(review.review_digest);
+  return Array.isArray(reviewed) && Array.isArray(unresolved)
+    && known(reviewed) && known(unresolved)
+    && reviewShape
+    && organizationRuleCodes.every((code) => reviewed.includes(code) !== unresolved.includes(code))
+    && organizationRuleCodes.every((code) => candidate.applicability.organization_gap_codes.includes(code));
+}
 
 async function readScoped<T extends { organization_id: number; month: string }>(
   path: string, org: string, month: string, signal: AbortSignal,
@@ -165,7 +192,8 @@ export function AccountingPayrollControl({ org, month, onEntry }: {
         && candidateValue.posting_available === false
         && candidateValue.statutory_payroll_certified === false
         && candidateValue.applicability?.status === "facts_and_rules_unverified"
-        && candidateValue.applicability.statutory_completeness_verified === false;
+        && candidateValue.applicability.statutory_completeness_verified === false
+        && validOrganizationApplicability(candidateValue);
       setLoaded({
         summary: summary.status === "fulfilled" ? summary.value : null,
         comparison: comparison.status === "fulfilled" ? comparison.value : null,
@@ -217,7 +245,11 @@ export function AccountingPayrollControl({ org, month, onEntry }: {
       <div className="space-y-2 rounded-lg border border-line p-3 text-sm">
         <h4 className="font-semibold">Что нужно для проверки налоговых условий</h4>
         <p className="text-muted">ERP пока не хранит перечисленные ниже факты по работникам. Список охватывает только известные ERP договоры; отсутствие заявления о вычете нельзя считать нулевым вычетом.</p>
+        <p className="text-xs text-muted">Обзор фактов о применимости не закрывает правовые пробелы ниже и не подтверждает полноту расчёта.</p>
         <ul className="list-disc space-y-1 pl-5">{loaded.candidate.applicability.organization_gap_codes.map((code) => <li key={code}>{applicabilityLabels[code] ?? code}</li>)}</ul>
+        {loaded.candidate.applicability.organization?.review_id !== null
+          && loaded.candidate.applicability.organization?.review_id !== undefined
+          && <p data-testid="payroll-organization-review-summary">Фактический обзор организации: квитанция № {loaded.candidate.applicability.organization.review_id}; рассмотрено правил {loaded.candidate.applicability.organization.reviewed_rule_codes.length}; нерешённых {loaded.candidate.applicability.organization.unresolved_rule_codes.length}. Правовые пробелы сохраняются.</p>}
         {loaded.candidate.applicability.bindings.length === 0
           ? <p>Известных договоров нет: сначала подтвердите реестр работников.</p>
           : <details><summary className="cursor-pointer">Данные по договорам: {loaded.candidate.applicability.bindings.length}</summary>
@@ -231,6 +263,7 @@ export function AccountingPayrollControl({ org, month, onEntry }: {
           ? <p className="text-xs text-muted">Проверенные страницы МНС за {loaded.candidate.applicability.reference_year} год описывают только отдельные налоговые условия: {loaded.candidate.applicability.references.map((source, index) => <span key={source.topic}>{index > 0 ? ", " : ""}<a className="underline" href={source.url} target="_blank" rel="noreferrer">{referenceLabels[source.topic] ?? source.topic}</a></span>)}. Они не подтверждают полноту расчёта.</p>
           : <p className="text-xs text-muted">Для {loaded.candidate.applicability.reference_year} года официальные налоговые источники в этом контроле ещё не проверены.</p>}
       </div>
+      <AccountingPayrollOrganizationReview org={org} month={month} onReviewed={() => setReload((value) => value + 1)} />
       <AccountingPayrollApplicabilityReview org={org} month={month} bindingIds={loaded.candidate.applicability.bindings.map((row) => row.employment_binding_id)} onReviewed={() => setReload((value) => value + 1)} />
       <p className="break-all text-xs text-muted">Отпечаток исходной версии: {loaded.candidate.candidate_digest}. Проведение, выплата и обязательная отчётность недоступны.</p>
     </div>}

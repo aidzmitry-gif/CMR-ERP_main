@@ -29,7 +29,7 @@ EMPLOYEE_FACT_CODES = [
     "insurance_applicability_and_base",
 ]
 
-_ORGANIZATION_RULE_CODES = [
+ORGANIZATION_RULE_CODES = [
     "period_income_tax_withholding_rule",
     "period_fszn_rules_and_limits",
     "period_work_injury_insurance_tariff",
@@ -37,13 +37,20 @@ _ORGANIZATION_RULE_CODES = [
 
 
 def assess(month: str, binding_ids: list[int],
-           reviews: dict[int, dict] | None = None) -> dict:
+           reviews: dict[int, dict] | None = None,
+           organization_review: dict | None = None) -> dict:
     """List facts ERP does not record; never infer that a deduction is zero."""
     year = int(month[:4])
-    organization_gaps = list(_ORGANIZATION_RULE_CODES)
+    organization_gaps = list(ORGANIZATION_RULE_CODES)
     if year != 2026:
         organization_gaps.insert(0, "period_income_tax_sources_unverified")
     reviews = reviews or {}
+    organization = organization_review or {
+        "review_id": None,
+        "review_digest": None,
+        "reviewed_rule_codes": [],
+        "unresolved_rule_codes": list(ORGANIZATION_RULE_CODES),
+    }
     return {
         "status": "facts_and_rules_unverified",
         "population_scope": "known_erp_bindings_only",
@@ -51,6 +58,7 @@ def assess(month: str, binding_ids: list[int],
         "reference_scope": "selected_mns_topics_only" if year == 2026 else "no_period_source_checked",
         "references": list(_MNS_2026_SOURCES) if year == 2026 else [],
         "organization_gap_codes": organization_gaps,
+        "organization": organization,
         "bindings": [
             {"employment_binding_id": binding_id,
              "review_id": reviews[binding_id]["review_id"] if binding_id in reviews else None,

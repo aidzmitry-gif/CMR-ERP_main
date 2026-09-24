@@ -59,6 +59,11 @@ restore and targeted payroll guards, not the target database.
   binds the current review/roster/rule selection to a digest and lists missing
   coverage and rule-completeness gates. It is read-only and excludes un-attested
   amounts; no salary accrual, payment or compulsory form is created.
+- The chief may separately record an organization/month review of tax, FSZN and
+  work-injury rule applicability against a private file and exact source locator.
+  Corrections append a new receipt; the candidate identifies the current review
+  and remaining unresolved codes. These findings do not prove the current law,
+  select a tariff or remove the statutory-completeness blocker.
 - External payroll import lines may carry a stable employer-binding ID; the
   preview rejects cross-entity, unknown, future and name-mismatched mappings.
   Legacy free-text lines remain accepted and are marked as incompletely mapped.

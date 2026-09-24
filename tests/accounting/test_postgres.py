@@ -62,6 +62,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0173_payroll_work_schedule_source.py",
     "0174_reconciliation_erp_snapshot_blocker.py",
     "0175_payroll_applicability_review.py",
+    "0176_payroll_organization_review.py",
 )
 
 
@@ -610,6 +611,83 @@ async def test_payroll_applicability_review_postgres_guards(pg_factory, pg_book,
             snapshot=forged, actor="tester",
         ))
         with pytest.raises(DBAPIError, match="source file mismatch"):
+            await session.flush()
+        await session.rollback()
+
+
+async def test_payroll_organization_review_postgres_guards(pg_factory, pg_book, tmp_path, monkeypatch):
+    """The actual migration enforces employer source scope and immutable revisions."""
+    import base64
+
+    from sqlalchemy.exc import DBAPIError
+
+    from modules.accounting.models import PayrollOrganizationReview
+    from modules.accounting.payroll_evidence_files import PayrollEvidenceFileInput
+    from modules.accounting.payroll_evidence_files import create as save_file
+    from modules.accounting.payroll_organization_review import PayrollOrganizationInput
+    from modules.accounting.payroll_organization_review import create as review_rules
+
+    root = tmp_path / "private-payroll"
+    root.mkdir()
+    monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
+    org_id = pg_book[0]
+    async with pg_factory() as session:
+        source = await save_file(session, org_id, PayrollEvidenceFileInput.model_validate({
+            "request_key": str(uuid4()), "kind": "payroll_organization_rule",
+            "employment_binding_id": None, "month": "2026-10",
+            "reference": "synthetic-employer-rule-dossier", "filename": "employer-rules.pdf",
+            "data_url": "data:application/pdf;base64," + base64.b64encode(
+                b"%PDF-1.7\nsynthetic employer rule source\n").decode(),
+            "evidence": "Synthetic private employer rule source for PostgreSQL",
+        }), "tester")
+        accepted = await review_rules(session, org_id, "2026-10",
+            PayrollOrganizationInput.model_validate({
+                "request_key": str(uuid4()), "source_file_id": source["file_id"],
+                "source_document": source["reference"],
+                "facts": [{"code": "period_work_injury_insurance_tariff",
+                           "decision": "unresolved",
+                           "finding": "Synthetic tariff notice is not sufficient yet",
+                           "source_locator": "page 1, line 2"}],
+                "evidence": "Synthetic chief inspected the cited page",
+            }), "tester")
+        await session.commit()
+    assert accepted["revision"] == 1
+
+    for sql in (
+        "UPDATE accounting.payroll_organization_review SET evidence='forged'",
+        "DELETE FROM accounting.payroll_organization_review",
+        "TRUNCATE accounting.payroll_organization_review",
+    ):
+        async with pg_factory() as session:
+            with pytest.raises(DBAPIError, match="immutable"):
+                await session.execute(text(sql))
+            await session.rollback()
+
+    async with pg_factory() as session:
+        first = await session.get(PayrollOrganizationReview, accepted["review_id"])
+        forged = dict(first.snapshot)
+        forged.update(revision=2, supersedes_id=first.id,
+                      source_file_sha256="0" * 64, request_key=str(uuid4()))
+        session.add(PayrollOrganizationReview(
+            **forged, request_digest="a" * 64, digest="b" * 64,
+            snapshot=forged, actor="tester",
+        ))
+        with pytest.raises(DBAPIError, match="source file mismatch"):
+            await session.flush()
+        await session.rollback()
+
+    async with pg_factory() as session:
+        first = await session.get(PayrollOrganizationReview, accepted["review_id"])
+        malformed = dict(first.snapshot)
+        malformed.update(revision=2, supersedes_id=first.id, request_key=str(uuid4()),
+                         facts=[{"code": "period_work_injury_insurance_tariff",
+                                 "finding": "Direct database writer omitted the decision",
+                                 "source_locator": "page 1, line 2"}])
+        session.add(PayrollOrganizationReview(
+            **malformed, request_digest="a" * 64, digest="b" * 64,
+            snapshot=malformed, actor="tester",
+        ))
+        with pytest.raises(DBAPIError, match="distinct sourced decisions"):
             await session.flush()
         await session.rollback()
 
