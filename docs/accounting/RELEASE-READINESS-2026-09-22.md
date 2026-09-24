@@ -1,5 +1,30 @@
 # Accounting release readiness — source snapshot 2026-09-22
 
+## Current local check — 2026-09-24
+
+The checked isolated source is `agent/crm-acc-prod009` at `40057631` with one
+Alembic head, `0175`. The separately committed CRM-PAY-NET-001 HR draft is
+already integrated in this source by `864f19d2` with later safety fixes; do
+not replay the older parallel commit `d3e8c3f`. The accountant screen links
+to the existing HR payroll register, including the two-per-A4 draft handouts,
+while explicitly stating that its rows are not automatically tied to the
+selected legal entity and create no accounting postings.
+
+Focused checks on this exact source passed: 105 HR backend tests, 20 HR screen
+tests and 25 accountant navigation tests. A local production frontend build
+with the public example OIDC settings completed and generated 137 pages.
+Next.js emitted existing ESLint warnings, so a warning-free lint gate is not
+claimed. This build is neither a clean remote checkout nor a deployed image.
+
+The ten gitlinks did not change since the exact remote audit below: six pinned
+submodule commits still require publication or a reviewed replacement before
+the source can be packaged from a clean checkout. The current target database,
+real payroll policy, source documents and accountant acceptance remain
+unverified. No push, target migration or deployment occurred in this check.
+
+The dated sections below retain their historical source heads and results;
+they are not statements about the current source commit.
+
 Current isolated source head is `0174`. A local synthetic PostgreSQL 18.4
 rehearsal checked both `0173 → 0172 → 0174` for the work-schedule file
 constraints and `0174 → 0173 → 0174` for the reconciliation issue blocker.
