@@ -34,6 +34,7 @@ import { AccountingFxRevaluation } from "./accounting-fx-revaluation";
 import { ExpenseControl } from "./expense-control";
 import { AccountingHome, type AccountingDestination } from "./accounting-home";
 import { AccountingReportCatalog, type ReportFavoriteState } from "./accounting-report-catalog";
+import { AccountingTradeSettlements } from "./accounting-trade-settlements";
 import { AccountingAccountActivity, type AccountMovement } from "./accounting-account-activity";
 
 type Organization = { id: number; name: string; unp: string };
@@ -73,7 +74,8 @@ const accountingSections: AccountingSection[] = [
     { id: "foreign-trade", label: "ВЭД" }, { id: "statutory-requirements", label: "Формы и ставки" },
   ] },
   { id: "reports", label: "Отчёты", pages: [
-    { id: "reports", label: "ОСВ и отчёты" }, { id: "reconciliation", label: "Сверка ОСВ" },
+    { id: "reports", label: "ОСВ и отчёты" }, { id: "trade-settlements", label: "Расчёты 60/62" },
+    { id: "reconciliation", label: "Сверка ОСВ" },
     { id: "expenses", label: "Контроль расходов" },
   ] },
   { id: "closing", label: "Закрытие месяца", pages: [
@@ -281,6 +283,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     {tab === "shipment-preview" && <AccountingShipmentPreview key={`${org}/${shipmentSource}`} org={org} source={shipmentSource} accounts={accounts} date={operationDate} policyId={policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id} disabled={locked} onDate={(value) => changeDate("operation", value)} onPosted={async () => { setNotice("Отгрузка проведена."); await refresh(); }} />}
     {tab === "controls" && <AccountingControls onEntry={id => void openEntry(id)} onShipment={(source) => { setShipmentSource(source); setTab("shipment-preview"); }} key={`${org}/${controlSection}`} org={org} initialSection={controlSection} onBusyChange={setControlsBusy} onChanged={() => { setOrganizationRefresh((v) => v + 1); void refresh(); }} />}
     {busy && <p role="status">Загрузка…</p>}
+    {tab === "trade-settlements" && <AccountingTradeSettlements org={org} start={start} end={end} onEntry={(id) => void openEntry(id)} />}
     {tab === "reports" && <AccountingReportCatalog onOpen={setTab} reportReady={!!org && !!report} favoriteState={reportFavoriteState} setFavoriteState={setReportFavoriteState} />}
     {report && tab === "reports" && <>
       <nav aria-label="Отчёты бухгалтерской книги" className="flex flex-wrap gap-3 rounded-xl border border-line bg-surface p-4 text-sm">

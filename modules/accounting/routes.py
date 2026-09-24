@@ -57,6 +57,7 @@ from modules.accounting import (
     shipment_drafts,
     specific_zero_value_issue,
     statutory_requirements,
+    trade_settlement_report,
 )
 from modules.accounting.documents import BankDocument, preview_bank
 from modules.accounting.fixed_assets import (
@@ -785,6 +786,11 @@ async def shipment_package(org_id: int, entry_id: int, response: Response, ctx=D
 @router.get("/organizations/{org_id}/reports")
 async def get_report(org_id: int, start: date, end: date, ctx=Depends(member)):
     return await reports.report(ctx[0], org_id, start, end)
+
+
+@router.get("/organizations/{org_id}/reports/trade-settlements")
+async def get_trade_settlements(org_id: int, start: date, end: date, ctx=Depends(member)):
+    return await trade_settlement_report.report(ctx[0], org_id, start, end)
 
 
 @router.get("/organizations/{org_id}/reconciliation/erp-osv.csv")
