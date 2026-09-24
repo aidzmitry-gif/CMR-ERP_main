@@ -3,6 +3,8 @@
 Status: **prepared, not activated**. This is a candidate and rollback contract
 for the existing `cmr-frontend.service`, not a production deployment. The
 mixed release remains `NO-GO` under `PILOT-MIXED-RELEASE-2026-09-24.md`.
+After source `943bc2e8`, this archive is a verified older rehearsal artifact:
+the accountant payroll UI has changed and must be rebuilt before any release.
 
 ## Read-only server observation, 24 September 2026
 
