@@ -30,6 +30,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   const [supplierOptions, setSupplierOptions] = useState<ProcurementSupplierOption[]>([]);
   const [supplierError, setSupplierError] = useState("");
   const [selected, setSelected] = useState<Receipt | null>(null), [busy, setBusy] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(true);
   const [error, setError] = useState(""), [notice, setNotice] = useState(""), [reload, setReload] = useState(0);
   const [loadedKey, setLoadedKey] = useState("");
   const key = useRef<string | null>(null), active = useRef(true);
@@ -77,6 +78,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
         const row = data.find(row => String(row.id) === initialReceipt);
         if (row) {
           setSelected(row); setDocument(structuredClone(row.revisions.at(-1)!.document));
+          setEditorOpen(true);
           key.current = null; setError(""); setNotice("");
         }
         else setError("Накладная из ссылки не найдена в выбранном юрлице.");
@@ -87,9 +89,10 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   function open(row: Receipt | null) {
     if (!confirmDiscard()) return;
     setSelected(row); setDocument(row ? structuredClone(row.revisions.at(-1)!.document) : blank());
+    setEditorOpen(true);
     key.current = null; setError(""); setNotice("");
   }
-  async function save() {
+  async function save(closeAfterSave = false) {
     if (selected?.posting) return;
     if (!document.supplier_id || document.supplier_unp == null) {
       setError("Выберите поставщика накладной из справочника."); return;
@@ -101,10 +104,19 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
         method: selected ? "PUT" : "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(selected ? { expected_version: selected.version, document } : { key: key.current, document }),
       });
+      const revision = row?.revisions?.at(-1);
+      if (!Number.isSafeInteger(row?.id) || row.id < 1 || !Number.isSafeInteger(row.version)
+        || row.version < 1 || revision?.version !== row.version || !revision.document
+        || (selected && row.id !== selected.id)) {
+        throw new Error("Сервер не подтвердил сохранённую версию этой накладной. Форма оставлена открытой.");
+      }
       if (!active.current) return;
-      setSelected(row); setDocument(structuredClone(row.revisions.at(-1)!.document));
+      key.current = null;
+      setSelected(closeAfterSave ? null : row);
+      setDocument(closeAfterSave ? blank() : structuredClone(revision.document));
+      setEditorOpen(!closeAfterSave);
       setRows((current) => [row, ...current.filter((item) => item.id !== row.id)]);
-      setReload((value) => value + 1); setNotice(`Накладная № ${row.id}: сохранена версия ${row.version}.`);
+      setNotice(`Накладная № ${row.id}: сохранена версия ${row.version}${closeAfterSave ? ", форма закрыта" : ""}.`);
     } catch (e) { if (active.current) setError((e as Error).message); }
     finally { if (active.current) setBusy(false); }
   }
@@ -129,7 +141,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       })}</ul>}
       {listLoaded && !visible.length && <p className="text-sm text-muted">Накладных по выбранному фильтру нет.</p>}
       {selected?.posting && <p role="status">Проведена · проводка № {selected.posting.entry_id}. Первичные данные доступны для просмотра.</p>}
-      <fieldset disabled={Boolean(selected?.posting)} className="space-y-3">
+      {editorOpen && <fieldset disabled={Boolean(selected?.posting)} className="space-y-3">
       <div className="grid gap-3 md:grid-cols-3">{fields.map(([field, label]) => <label key={field}>{label}<Input type={field.endsWith("date") ? "date" : "text"} value={document[field]} onChange={(e) => setDocument({ ...document, [field]: e.target.value })} /></label>)}</div>
       <div className="grid gap-3 md:grid-cols-2"><label>Поиск поставщика<Input aria-label="Поиск поставщика накладной" maxLength={100} value={supplierSearch} onChange={(e) => { setSupplierSearch(e.target.value); setSupplierOptions([]); setSupplierError(""); setDocument((current) => ({ ...current, supplier: "", supplier_id: null, supplier_unp: null })); }} /></label><label>Поставщик накладной из справочника<Select aria-label="Поставщик накладной из справочника" value={document.supplier_id ?? ""} onChange={(e) => {
         const supplier = supplierOptions.find((option) => String(option.id) === e.target.value);
@@ -137,8 +149,8 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       }}><option value="">Выберите поставщика</option>{document.supplier_id && !supplierOptions.some((option) => option.id === document.supplier_id) && <option value={document.supplier_id}>{document.supplier} · {document.supplier_unp || "без УНП"} (сохранённый)</option>}{supplierOptions.map((option) => <option key={option.id} value={option.id}>{option.name} · {option.unp || "без УНП"}</option>)}</Select></label></div>
       {supplierError && <p role="alert">Справочник поставщиков недоступен: {supplierError}</p>}{selected && !document.supplier_id && <p>У этой версии нет связи со справочником. Выберите поставщика перед исправлением или проведением.</p>}
       {document.items.map((row, index) => <fieldset key={index} className="rounded-lg border border-line p-3"><legend>Строка накладной {index + 1}</legend><label>Заказ поставщику<Select aria-label={`Заказ строки ${index + 1}`} value={row.order_id ?? ""} onChange={(e) => setDocument({ ...document, items: document.items.map((r, i) => i === index ? { ...r, order_id: e.target.value ? Number(e.target.value) : null } : r) })}><option value="">Без связи с заказом</option>{row.order_id && !orders.some((order) => order.source_id === row.order_id) && <option value={row.order_id}>Сохранённый заказ № {row.order_id}</option>}{orders.map((order) => <option key={order.source_id} value={order.source_id}>{order.snapshot.number || `№ ${order.source_id}`} · {order.snapshot.supplier}</option>)}</Select></label><div className="grid gap-3 md:grid-cols-4">{itemFields.map(([field, label]) => <label key={field}>{label}<Input aria-label={`${label} черновика ${index + 1}`} value={row[field] ?? ""} onChange={(e) => setDocument({ ...document, items: document.items.map((r, i) => i === index ? { ...r, [field]: field === "unit" ? e.target.value || null : e.target.value } : r) })} /></label>)}</div><Button variant="secondary" disabled={document.items.length === 1} onClick={() => setDocument({ ...document, items: document.items.filter((_, i) => i !== index) })}>Удалить строку {index + 1}</Button></fieldset>)}
-      <div className="flex gap-2"><Button variant="secondary" disabled={document.items.length >= 300} onClick={() => setDocument({ ...document, items: [...document.items, item()] })}>Добавить строку накладной</Button><Button onClick={() => void save()}>{selected ? `Сохранить исправление версии ${selected.version}` : "Сохранить первичную накладную"}</Button></div>
-      </fieldset>
+      <div className="flex gap-2"><Button variant="secondary" disabled={document.items.length >= 300} onClick={() => setDocument({ ...document, items: [...document.items, item()] })}>Добавить строку накладной</Button><Button onClick={() => void save()}>{selected ? `Сохранить исправление версии ${selected.version}` : "Сохранить первичную накладную"}</Button><Button variant="secondary" onClick={() => void save(true)}>Сохранить и закрыть</Button></div>
+      </fieldset>}
     </fieldset>
     {selected && !selected.posting && (dirty ? <p>Сохраните изменения накладной перед расчётом проводок.</p> : !document.supplier_id ? <p>Сопоставьте поставщика со справочником перед проведением.</p> : <ProcurementReceiptPosting key={`${selected.id}/${selected.version}/${date}/${policyId}`} blocked={busy} org={org} receiptId={selected.id} version={selected.version} items={document.items} accounts={accounts} policyId={policyId} date={date} onBusy={(value) => { if (active.current) setBusy(value); }} onPosted={(entryId) => {
       if (!active.current) return;
