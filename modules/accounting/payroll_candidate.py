@@ -68,6 +68,13 @@ def _rate(value: object) -> Decimal:
     return rate
 
 
+def _fszn_general_rate_scope(rate_rules: list[dict]) -> tuple[set[str], bool]:
+    rates = [row for row in rate_rules
+             if row.get("obligation_code") == "period_fszn_rules_and_limits"]
+    return ({row["code"] for row in rates},
+            bool(rates) and all(row.get("fszn_scheme") == "general" for row in rates))
+
+
 def _monthly_fszn_cap_rows(segments: list[tuple[int, int, Decimal]],
                            cap: Decimal) -> tuple[list[dict], bool]:
     """Compare listed monthly bases per employee; never calculate contributions."""
@@ -221,11 +228,12 @@ async def preview(session, org_id: int, month: str) -> dict:
     binding_rows: dict[int, dict] = {}
     fszn_segments: list[tuple[int, int, Decimal]] = []
     fszn_minimum_segments: list[dict] = []
+    fszn_unclassified_review_ids: list[int] = []
     included = []
     stale_rule = False
     fszn_base_conflict = False
-    fszn_rate_codes = {rate["code"] for rate in (rule["rate_rules"] if rule else [])
-                       if rate.get("obligation_code") == "period_fszn_rules_and_limits"}
+    fszn_rate_codes, fszn_general_scheme = _fszn_general_rate_scope(
+        rule["rate_rules"] if rule else [])
     for binding in summary["bindings"]:
         for segment in binding["segments"]:
             row = by_id[segment["review_id"]]
@@ -255,13 +263,16 @@ async def preview(session, org_id: int, month: str) -> dict:
                     stale_rule = True
             amounts = _review_amounts(row)
             if fszn_rate_codes:
+                classified = receipt["fszn_base_classified_by_chief"]
+                if not classified:
+                    fszn_unclassified_review_ids.append(row.id)
                 components = [component for component in basis["components"]
                               if component["rate_code"] in fszn_rate_codes]
                 component_bases = {_amount(component.get("base_byn"))
                                    for component in components}
                 if len(components) != len(fszn_rate_codes) or len(component_bases) != 1:
                     fszn_base_conflict = True
-                else:
+                elif classified:
                     employee_id = basis.get("employee_id")
                     if type(employee_id) is not int or employee_id <= 0:
                         raise HTTPException(409, "Payroll candidate employee identity requires reconciliation")
@@ -320,11 +331,20 @@ async def preview(session, org_id: int, month: str) -> dict:
     reference_wage = (organization_review or {}).get("fszn_reference_wage")
     if fszn_base_conflict:
         blockers.append("fszn_segment_bases_disagree")
-    if (fszn_rate_codes and not stale_rule
+    if fszn_unclassified_review_ids:
+        blockers.append("fszn_base_classification_unreviewed")
+    if fszn_rate_codes and not fszn_general_scheme:
+        blockers.append("fszn_rate_scheme_unreviewed_or_special")
+    fszn_known_scope_complete = (
+        not summary["source_fact_unattested_review_ids"]
+        and summary["known_binding_coverage"]["known_binding_coverage_complete"]
+        and population_review is not None)
+    if (fszn_rate_codes and not stale_rule and fszn_known_scope_complete
+            and fszn_general_scheme
             and decisions.get("period_fszn_rules_and_limits") == "applicable"):
         if reference_wage is None:
             blockers.append("fszn_reference_wage_missing")
-        elif not fszn_base_conflict:
+        elif not fszn_base_conflict and not fszn_unclassified_review_ids:
             cap = _amount(reference_wage["wage_byn"]) * 5
             rows, cap_exceeded = _monthly_fszn_cap_rows(fszn_segments, cap)
             if cap_exceeded:
@@ -343,7 +363,7 @@ async def preview(session, org_id: int, month: str) -> dict:
         minimum_wage = (organization_review or {}).get("fszn_minimum_wage")
         if minimum_wage is None:
             blockers.append("fszn_minimum_wage_missing")
-        elif not fszn_base_conflict:
+        elif not fszn_base_conflict and not fszn_unclassified_review_ids:
             minimum_rows, minimum_issues = _monthly_fszn_minimum_rows(
                 fszn_minimum_segments,
                 {binding_id: {"condition": review.get("fszn_minimum_condition"),
@@ -376,6 +396,7 @@ async def preview(session, org_id: int, month: str) -> dict:
         "rule_set_id": rule["rule_set_id"] if rule else None,
         "rule_set_digest": rule["digest"] if rule else None,
         "included_reviews": included,
+        "fszn_base_unclassified_review_ids": fszn_unclassified_review_ids,
         "applicability": applicability,
         "fszn_monthly_cap_preview": fszn_cap_preview,
         "fszn_minimum_preview": fszn_minimum_preview,
@@ -389,6 +410,7 @@ async def preview(session, org_id: int, month: str) -> dict:
         "included_segment_count": len(included),
         "selected_segment_count": summary["selected_segment_count"],
         "unattested_review_ids": summary["source_fact_unattested_review_ids"],
+        "fszn_base_unclassified_review_ids": fszn_unclassified_review_ids,
         "bindings": bindings, "totals": formatted, "blockers": blockers,
         "applicability": applicability,
         "fszn_monthly_cap_preview": fszn_cap_preview,
@@ -398,6 +420,8 @@ async def preview(session, org_id: int, month: str) -> dict:
             "payroll_rate_obligation_unmapped",
             "payroll_rate_obligation_unreviewed",
             "payroll_rate_conflicts_with_organization_review",
+            "fszn_base_classification_unreviewed",
+            "fszn_rate_scheme_unreviewed_or_special",
         } for code in blockers),
         "population_source_facts_verified_by_software": False,
         "statutory_payroll_certified": False,

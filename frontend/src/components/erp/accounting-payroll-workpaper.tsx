@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { AccountingPayrollEvidenceUpload, type PayrollEvidenceReceipt } from "./accounting-payroll-evidence-upload";
 
-type RateRule = { code: string; role: "employee_deduction" | "employer_contribution"; base_mode: "gross" | "gross_less_adjustment"; classification_evidence: string };
+type RateRule = { code: string; role: "employee_deduction" | "employer_contribution"; base_mode: "gross" | "gross_less_adjustment"; obligation_code?: string; classification_evidence: string };
 type RateVersion = { code: string; requirement_id: number; requirement_digest: string };
 type RuleSet = { rule_set_id: number; organization_id: number; policy_id: number; effective_from: string; revision: number; rate_rules: RateRule[]; rate_versions: RateVersion[]; source_reference: string; source_file_id: number | null };
 type Binding = { binding_id: number; organization_id: number; employee_id: number; employee_name: string; contract_ref: string; source_document: string; personnel_identifier: string | null; state: "active" | "ended"; effective_from: string };
@@ -17,10 +17,10 @@ type WorkpaperCommand = { policy_id: number; rule_set_id: number; employment_bin
 type Preview = { status: string; basis_digest: string; gross_byn: string; listed_employee_deductions_byn: string; after_listed_deductions_byn: string; listed_employer_contributions_byn: string; cost_including_listed_contributions_byn: string; contract_and_timesheet_hashes_verified: boolean; timesheet_numeric_hours_verified: boolean; timesheet_name_matches_binding: boolean; timesheet_identifier_matches_binding: boolean; schedule_file_bytes_verified: boolean; schedule_numeric_hours_verified: boolean; rule_source_file_bytes_verified: boolean; posting_available: boolean; statutory_payroll_certified: boolean; basis: { organization_id: number; month: string; employee_name: string; work_from: string; work_to: string; timesheet_row: number | null; timesheet_uninterpreted_code_days: number | null; work_schedule_cell: string | null; components: { rate_code: string; role: string; base_byn: string; rate_value: string; amount_byn: string }[] } };
 type Adjustment = { amount: string; fileId: string; evidence: string };
 type Access = { organization_id: number; can_preview: boolean; can_upload: boolean; can_review: boolean };
-type ReviewSegment = { review_id: number; revision: number; work_from: string; work_to: string; basis_digest: string; source_facts_attested_by_chief: boolean };
+type ReviewSegment = { review_id: number; revision: number; work_from: string; work_to: string; basis_digest: string; source_facts_attested_by_chief: boolean; fszn_base_classified_by_chief: boolean };
 type ReviewSummary = { status: string; organization_id: number; month: string; bindings: { employment_binding_id: number; segments: ReviewSegment[] }[] };
-type ReviewCommand = WorkpaperCommand & { request_key: string; basis_digest: string; reviewer_evidence: string; supersedes_review_id?: number; source_fact_attestation?: "contract_salary_time_norm_checked"; source_fact_evidence?: string };
-type ReviewReceipt = { review_id: number; organization_id: number; employment_binding_id: number; month: string; work_from: string; work_to: string; request_key: string; basis_digest: string; revision: number; supersedes_review_id: number | null; status: string; source_facts_attested_by_chief: boolean; posting_available: boolean; statutory_payroll_certified: boolean };
+type ReviewCommand = WorkpaperCommand & { request_key: string; basis_digest: string; reviewer_evidence: string; supersedes_review_id?: number; source_fact_attestation?: "contract_salary_time_norm_checked"; source_fact_evidence?: string; fszn_base_attestation?: "listed_salary_base_checked"; fszn_base_evidence?: string; fszn_base_contract_locator?: string };
+type ReviewReceipt = { review_id: number; organization_id: number; employment_binding_id: number; month: string; work_from: string; work_to: string; request_key: string; basis_digest: string; revision: number; supersedes_review_id: number | null; status: string; source_facts_attested_by_chief: boolean; fszn_base_classified_by_chief: boolean; posting_available: boolean; statutory_payroll_certified: boolean };
 
 const monthPattern = /^\d{4}-(0[1-9]|1[0-2])$/;
 const moneyPattern = /^(0|[1-9]\d*)\.\d{2}$/;
@@ -105,6 +105,9 @@ function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange, onOpenRule
   const [reviewEvidence, setReviewEvidence] = useState("");
   const [sourceFactsChecked, setSourceFactsChecked] = useState(false);
   const [sourceFactEvidence, setSourceFactEvidence] = useState("");
+  const [fsznBaseChecked, setFsznBaseChecked] = useState(false);
+  const [fsznBaseEvidence, setFsznBaseEvidence] = useState("");
+  const [fsznContractLocator, setFsznContractLocator] = useState("");
   const [pendingReview, setPendingReview] = useState<ReviewCommand | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
@@ -140,13 +143,17 @@ function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange, onOpenRule
   const timesheetCheck = timesheetCheckState?.key === timesheetCheckKey ? timesheetCheckState.report : null;
   const timesheetCheckError = timesheetCheckState?.key === timesheetCheckKey ? timesheetCheckState.error : "";
   const formLocked = disabled || busy || uploadBusy || pendingReview !== null || reviewBusy || personnelBusy;
+  const hasFsznRate = !!rules?.rate_rules.some((rule) => rule.obligation_code === "period_fszn_rules_and_limits");
+  const sameReviewedBasis = !!preview && latestReview?.basis_digest === preview.basis_digest;
+  const attestationUpgrade = sourceFactsChecked && !latestReview?.source_facts_attested_by_chief
+    || fsznBaseChecked && !latestReview?.fszn_base_classified_by_chief;
 
   useEffect(() => { onBusyChange?.(busy || uploadBusy || reviewBusy || personnelBusy); return () => onBusyChange?.(false); }, [busy, uploadBusy, reviewBusy, personnelBusy, onBusyChange]);
 
   function invalidate() {
     previewController.current?.abort();
     setPreview(null);
-    setPreviewCommand(null); setLatestReview(null); setReviewReceipt(null); setReviewError(""); setReviewEvidence(""); setSourceFactsChecked(false); setSourceFactEvidence("");
+    setPreviewCommand(null); setLatestReview(null); setReviewReceipt(null); setReviewError(""); setReviewEvidence(""); setSourceFactsChecked(false); setSourceFactEvidence(""); setFsznBaseChecked(false); setFsznBaseEvidence(""); setFsznContractLocator("");
     setError("");
   }
 
@@ -338,10 +345,11 @@ function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange, onOpenRule
         || receipt.request_key !== command.request_key || receipt.basis_digest !== command.basis_digest
          || receipt.supersedes_review_id !== (command.supersedes_review_id ?? null)
          || receipt.source_facts_attested_by_chief !== Boolean(command.source_fact_attestation)
+         || receipt.fszn_base_classified_by_chief !== Boolean(command.fszn_base_attestation)
         || receipt.status !== "arithmetic_review_only" || receipt.posting_available || receipt.statutory_payroll_certified) {
       throw new Error("Квитанция проверки относится к другому расчёту или имеет неожиданный статус.");
     }
-    setReviewReceipt(receipt); setLatestReview({ review_id: receipt.review_id, revision: receipt.revision, work_from: receipt.work_from, work_to: receipt.work_to, basis_digest: receipt.basis_digest, source_facts_attested_by_chief: receipt.source_facts_attested_by_chief });
+    setReviewReceipt(receipt); setLatestReview({ review_id: receipt.review_id, revision: receipt.revision, work_from: receipt.work_from, work_to: receipt.work_to, basis_digest: receipt.basis_digest, source_facts_attested_by_chief: receipt.source_facts_attested_by_chief, fszn_base_classified_by_chief: receipt.fszn_base_classified_by_chief });
     setPendingReview(null); setReviewError("");
   }
 
@@ -352,11 +360,13 @@ function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange, onOpenRule
         || !preview.schedule_file_bytes_verified
          || !preview.contract_and_timesheet_hashes_verified || reviewEvidence.trim().length < 10
          || (sourceFactsChecked && sourceFactEvidence.trim().length < 20)
-         || (latestReview?.basis_digest === preview.basis_digest && (!sourceFactsChecked || latestReview.source_facts_attested_by_chief)))) return;
+         || (fsznBaseChecked && (!sourceFactsChecked || fsznBaseEvidence.trim().length < 20 || fsznContractLocator.trim().length < 3))
+         || (sameReviewedBasis && !attestationUpgrade))) return;
     const command: ReviewCommand = stored ?? {
       ...previewCommand, request_key: crypto.randomUUID(), basis_digest: preview.basis_digest,
       reviewer_evidence: reviewEvidence.trim(),
       ...(sourceFactsChecked ? { source_fact_attestation: "contract_salary_time_norm_checked" as const, source_fact_evidence: sourceFactEvidence.trim() } : {}),
+      ...(fsznBaseChecked ? { fszn_base_attestation: "listed_salary_base_checked" as const, fszn_base_evidence: fsznBaseEvidence.trim(), fszn_base_contract_locator: fsznContractLocator.trim() } : {}),
       ...(latestReview ? { supersedes_review_id: latestReview.review_id } : {}),
     };
     reviewing.current = true; setReviewBusy(true); setReviewError(""); setPendingReview(command);
@@ -442,14 +452,16 @@ function ScopedPayrollWorkpaper({ org, month, disabled, onBusyChange, onOpenRule
       {reviewError && <p role="alert" className="text-red-700">{reviewError}</p>}
       {!preview.rule_source_file_bytes_verified && <p role="status">Для проверки привяжите сохранённый файл политики к действующему набору правил.</p>}
       {!preview.schedule_file_bytes_verified && <p role="status">Для проверки приложите график работы с месячной нормой и укажите место нормы в документе.</p>}
-      {latestReview?.basis_digest === preview.basis_digest && <p role="status">Эта арифметика уже рассмотрена: квитанция № {latestReview.review_id}, редакция {latestReview.revision}. {latestReview.source_facts_attested_by_chief ? "Исходные данные подтверждены главбухом." : "Исходные данные отдельно не подтверждены."}</p>}
+      {latestReview?.basis_digest === preview.basis_digest && <p role="status">Эта арифметика уже рассмотрена: квитанция № {latestReview.review_id}, редакция {latestReview.revision}. {latestReview.source_facts_attested_by_chief ? "Исходные данные подтверждены главбухом." : "Исходные данные отдельно не подтверждены."} {latestReview.fszn_base_classified_by_chief ? "Состав показанной базы ФСЗН отдельно проверен." : "Состав показанной базы ФСЗН не подтверждён."}</p>}
       {latestReview && latestReview.basis_digest !== preview.basis_digest && <p className="text-sm">Исправление квитанции № {latestReview.review_id}; прежняя редакция сохранится в истории.</p>}
-      {(!latestReview || latestReview.basis_digest !== preview.basis_digest || !latestReview.source_facts_attested_by_chief) && <>
+      {(!latestReview || latestReview.basis_digest !== preview.basis_digest || !latestReview.source_facts_attested_by_chief || (hasFsznRate && !latestReview.fszn_base_classified_by_chief)) && <>
         <label className="block text-sm">Что именно проверено в документах<Textarea aria-label="Основание проверки главбуха" value={reviewEvidence} disabled={formLocked} onChange={(event) => setReviewEvidence(event.target.value)} /></label>
         <label className="flex items-start gap-2 text-sm"><input type="checkbox" aria-label="Подтверждаю исходные данные" checked={sourceFactsChecked} disabled={formLocked} onChange={(event) => setSourceFactsChecked(event.target.checked)} />Я сверил оклад с договором, отработанные часы с табелем и месячную норму с графиком.</label>
         {sourceFactsChecked && <label className="block text-sm">Где проверены исходные данные<Textarea aria-label="Основание подтверждения исходных данных" value={sourceFactEvidence} disabled={formLocked} onChange={(event) => setSourceFactEvidence(event.target.value)} /></label>}
+        {hasFsznRate && <label className="flex items-start gap-2 text-sm"><input type="checkbox" aria-label="Подтверждаю состав базы ФСЗН" checked={fsznBaseChecked} disabled={formLocked || !sourceFactsChecked} onChange={(event) => setFsznBaseChecked(event.target.checked)} />Я отдельно сверил включённый оклад и документированные исключения из показанной базы ФСЗН.</label>}
+        {hasFsznRate && fsznBaseChecked && <div className="grid gap-2 md:grid-cols-2"><label className="text-sm">Место оклада в договоре<Input aria-label="Место оклада для базы ФСЗН" value={fsznContractLocator} disabled={formLocked} onChange={(event) => setFsznContractLocator(event.target.value)} /></label><label className="text-sm">Состав и основания исключений<Textarea aria-label="Основание состава базы ФСЗН" value={fsznBaseEvidence} disabled={formLocked} onChange={(event) => setFsznBaseEvidence(event.target.value)} /></label></div>}
         <p className="text-xs text-muted">Это подтверждение фактов главбухом; оно не заменяет проверку применимости ставок и обязательной отчётности. В новой редакции подтверждение не переносится автоматически.</p>
-        <Button disabled={disabled || reviewBusy || reviewLoading || (needsXlsxCheck && timesheetCheck?.status !== "structure_checked") || (!pendingReview && (!preview.rule_source_file_bytes_verified || !preview.schedule_file_bytes_verified || !preview.contract_and_timesheet_hashes_verified || !!reviewError || reviewEvidence.trim().length < 10 || (sourceFactsChecked && sourceFactEvidence.trim().length < 20) || (latestReview?.basis_digest === preview.basis_digest && !sourceFactsChecked)))} onClick={() => void confirmReview()}>{pendingReview ? "Проверить или повторить подтверждение" : latestReview ? "Подтвердить исправление" : "Подтвердить арифметику"}</Button>
+        <Button disabled={disabled || reviewBusy || reviewLoading || (needsXlsxCheck && timesheetCheck?.status !== "structure_checked") || (!pendingReview && (!preview.rule_source_file_bytes_verified || !preview.schedule_file_bytes_verified || !preview.contract_and_timesheet_hashes_verified || !!reviewError || reviewEvidence.trim().length < 10 || (sourceFactsChecked && sourceFactEvidence.trim().length < 20) || (fsznBaseChecked && (!sourceFactsChecked || fsznBaseEvidence.trim().length < 20 || fsznContractLocator.trim().length < 3)) || (sameReviewedBasis && !attestationUpgrade)))} onClick={() => void confirmReview()}>{pendingReview ? "Проверить или повторить подтверждение" : latestReview ? "Подтвердить исправление" : "Подтвердить арифметику"}</Button>
       </>}
       {pendingReview && <p className="break-all text-xs text-muted">Ключ подтверждения: {pendingReview.request_key}. Ввод заблокирован до получения квитанции.</p>}
       {reviewReceipt && <p role="status">Квитанция № {reviewReceipt.review_id}, редакция {reviewReceipt.revision}, сохранена без проводок.</p>}

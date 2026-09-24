@@ -387,7 +387,9 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert bad_rule.status_code == 422
     mapped_rules = [{**row, "obligation_code": (
         "period_fszn_rules_and_limits" if row["role"] == "employer_contribution"
-        else "period_income_tax_withholding_rule")} for row in ruleset["rate_rules"]]
+        else "period_income_tax_withholding_rule"),
+        **({"fszn_scheme": "general"} if row["role"] == "employer_contribution" else {})}
+        for row in ruleset["rate_rules"]]
     new_rule = await client.post(
         f"/accounting/organizations/{book[0]}/payroll-rule-sets", json={
             "request_key": str(uuid4()), "policy_id": book[1],
@@ -701,8 +703,11 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     }]
     assert candidate["blockers"] == [
         "population_review_missing_or_stale", "payroll_rate_obligation_unreviewed",
+        "fszn_base_classification_unreviewed",
         "statutory_rule_completeness_unverified",
     ]
+    assert candidate["fszn_base_unclassified_review_ids"] == [attested["review_id"]]
+    assert candidate["fszn_monthly_cap_preview"] is None
     assert candidate["posting_available"] is False
     assert candidate["statutory_payroll_certified"] is False
     applicability = candidate["applicability"]
@@ -727,6 +732,29 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
                for source in applicability["references"])
     assert candidate["source_basis"]["applicability"] == applicability
     assert (await client.get(candidate_url)).json()["candidate_digest"] == candidate["candidate_digest"]
+    base_review_command = {
+        **attestation, "request_key": str(uuid4()),
+        "supersedes_review_id": attested["review_id"],
+        "fszn_base_attestation": "listed_salary_base_checked",
+        "fszn_base_evidence": "Synthetic chief checked salary and the documented base adjustment against policy",
+        "fszn_base_contract_locator": "page 1, salary clause",
+    }
+    assert (await client.post(review_url, json={
+        **base_review_command, "fszn_base_contract_locator": "bad\x00locator",
+    })).status_code == 422
+    assert (await client.post(review_url, json={
+        **base_review_command, "source_fact_attestation": None,
+        "source_fact_evidence": None,
+    })).status_code == 422
+    base_review = await client.post(review_url, json=base_review_command)
+    assert base_review.status_code == 200, base_review.text
+    attested = base_review.json()
+    assert attested["fszn_base_classified_by_chief"] is True
+    assert (await client.post(review_url, json=base_review_command)).json() == attested
+    attested_summary = (await client.get(summary_url)).json()
+    candidate = (await client.get(candidate_url)).json()
+    assert candidate["fszn_base_unclassified_review_ids"] == []
+    assert "fszn_base_classification_unreviewed" not in candidate["blockers"]
     reconcile_url = (f"/accounting/organizations/{book[0]}/periods/2026-10/"
                      "payroll-source-reconciliation")
     empty_reconcile = await client.get(reconcile_url)
@@ -922,27 +950,6 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert (await client.get(summary_url)).status_code == 409
     for path, original in stored_pdf_bytes.items():
         path.write_bytes(original)
-    ended_after_review = await client.post(
-        f"/accounting/organizations/{book[0]}/payroll-employments", json={
-            "request_key": str(uuid4()),
-            "employee_id": binding["employee_id"],
-            "contract_ref": binding["contract_ref"],
-            "effective_from": "2026-10-15",
-            "state": "ended",
-            "source_document": "synthetic-retrospective-contract-end",
-            "evidence": "Synthetic later correction to employment period",
-        },
-    )
-    assert ended_after_review.status_code == 200, ended_after_review.text
-    stale_summary = (await client.get(summary_url)).json()
-    stale_coverage = stale_summary["known_binding_coverage"]
-    assert stale_coverage["known_binding_coverage_complete"] is False
-    assert stale_coverage["expected_intervals"][0]["work_to"] == "2026-10-14"
-    assert stale_coverage["issues"][0]["kind"] == "outside_current_binding"
-    assert stale_summary["selection_digest"] == attested_summary["selection_digest"]
-    assert stale_summary["coverage_digest"] != attested_summary["coverage_digest"]
-    assert stale_summary["summary_digest"] != attested_summary["summary_digest"]
-
     wage_source_command = {
         "request_key": str(uuid4()), "kind": "payroll_organization_rule",
         "employment_binding_id": None, "month": "2026-10",
@@ -1084,6 +1091,29 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert (await client.get(wage_review_url + "/current")).status_code == 409
     minimum_path.write_bytes(minimum_original)
     assert (await client.get(candidate_url)).status_code == 200
+    ended_after_review = await client.post(
+        f"/accounting/organizations/{book[0]}/payroll-employments", json={
+            "request_key": str(uuid4()),
+            "employee_id": binding["employee_id"],
+            "contract_ref": binding["contract_ref"],
+            "effective_from": "2026-10-15",
+            "state": "ended",
+            "source_document": "synthetic-retrospective-contract-end",
+            "evidence": "Synthetic later correction to employment period",
+        },
+    )
+    assert ended_after_review.status_code == 200, ended_after_review.text
+    stale_summary = (await client.get(summary_url)).json()
+    stale_coverage = stale_summary["known_binding_coverage"]
+    assert stale_coverage["known_binding_coverage_complete"] is False
+    assert stale_coverage["expected_intervals"][0]["work_to"] == "2026-10-14"
+    assert stale_coverage["issues"][0]["kind"] == "outside_current_binding"
+    assert stale_summary["selection_digest"] == attested_summary["selection_digest"]
+    assert stale_summary["coverage_digest"] != attested_summary["coverage_digest"]
+    assert stale_summary["summary_digest"] != attested_summary["summary_digest"]
+    stale_candidate = (await client.get(candidate_url)).json()
+    assert stale_candidate["fszn_monthly_cap_preview"] is None
+    assert stale_candidate["fszn_minimum_preview"] is None
     period = await db.scalar(select(Period).where(
         Period.organization_id == book[0], Period.month == "2026-10"))
     period.closed = True

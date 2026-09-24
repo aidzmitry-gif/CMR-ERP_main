@@ -71,7 +71,10 @@ it("requires explicit policy, source, method, rate role and basis before creatin
   fireEvent.click(screen.getByRole("button", { name: "Сохранить новую редакцию" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("выберите уникальный код, вид, базу, обязательство");
   expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
-  fireEvent.change(screen.getByLabelText("Обязательство 1"), { target: { value: "period_income_tax_withholding_rule" } });
+  fireEvent.change(screen.getByLabelText("Обязательство 1"), { target: { value: "period_fszn_rules_and_limits" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить новую редакцию" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("выберите уникальный код, вид, базу, обязательство");
+  fireEvent.change(screen.getByLabelText("Схема ФСЗН 1"), { target: { value: "general" } });
   fireEvent.click(screen.getByRole("button", { name: "Сохранить новую редакцию" }));
   expect(await screen.findByText(/Редакция 1 сохранена/)).toBeInTheDocument();
   const post = fetchMock.mock.calls.find(([url, init]) => url.endsWith("/payroll-rule-sets") && init?.method === "POST");
@@ -80,7 +83,7 @@ it("requires explicit policy, source, method, rate role and basis before creatin
     source_reference: source.reference, source_digest: source.sha256, source_file_id: 61,
     gross_method: "monthly_salary_by_hours", rounding: "half_up_cent",
     rate_rules: [{ code: rate.code, role: "employee_deduction", base_mode: "gross",
-      obligation_code: "period_income_tax_withholding_rule" }],
+      obligation_code: "period_fszn_rules_and_limits", fszn_scheme: "general" }],
     expected_rate_versions: [{ code: rate.code, requirement_id: 31, requirement_digest: rate.digest }],
   });
   expect(screen.getByText(/Проверка содержания источника и нормативной полноты: не выполнена/)).toBeInTheDocument();

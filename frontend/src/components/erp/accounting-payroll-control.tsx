@@ -55,6 +55,7 @@ type Candidate = {
   included_segment_count: number;
   selected_segment_count: number;
   unattested_review_ids: number[];
+  fszn_base_unclassified_review_ids: number[];
   totals: Amounts;
   blockers: string[];
   applicability: {
@@ -116,6 +117,8 @@ const candidateBlockers: Record<string, string> = {
   payroll_rate_conflicts_with_organization_review: "Ставка включена в расчёт, хотя обзор организации помечает её обязательство неприменимым.",
   fszn_reference_wage_missing: "Для сравнения с месячным пределом ФСЗН нет проверенной по файлу справки о средней зарплате за предыдущий месяц.",
   fszn_segment_bases_disagree: "Базы ставок ФСЗН в одном расчётном отрезке различаются; общий месячный предел нельзя рассчитать автоматически.",
+  fszn_base_classification_unreviewed: "Состав показанной базы ФСЗН по одному или нескольким расчётным отрезкам не подтверждён главбухом.",
+  fszn_rate_scheme_unreviewed_or_special: "Не все ставки ФСЗН отнесены к общей схеме; сравнение с пределом 5× и минимумом для них недоступно.",
   fszn_components_need_monthly_recalculation: "Сумма показанных баз ФСЗН превысила месячный предел; перечисленные взносы рассчитаны без ограничения и требуют отдельного перерасчёта.",
   fszn_minimum_wage_missing: "Для проверки минимальной суммы ФСЗН нет подтверждённой МЗП этого месяца и её отдельного файла-основания.",
   fszn_minimum_condition_unreviewed: "По одному или нескольким работникам не подтверждена применимость минимума ФСЗН по статье 9.",
@@ -333,6 +336,7 @@ export function AccountingPayrollControl({ org, month, onEntry }: {
       <dl className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{amountLabels.map(([key, label]) => <div key={key} className="rounded-lg bg-canvas p-3"><dt className="text-xs text-muted">{label}</dt><dd className="font-semibold tabular-nums">{loaded.candidate!.totals[key]} BYN</dd></div>)}</dl>
       <p className="text-sm">{loaded.candidate.arithmetic_scope_complete ? "Исходные расчётные отрезки собраны; нормативная полнота ещё не подтверждена." : "Черновик неполон: проверьте причины ниже."}</p>
       <ul className="list-disc space-y-1 pl-5 text-sm">{loaded.candidate.blockers.map((code) => <li key={code}>{candidateBlockers[code] ?? code}</li>)}</ul>
+      {!!loaded.candidate.fszn_base_unclassified_review_ids?.length && <p className="text-sm">Нужна проверка состава базы ФСЗН по квитанциям № {loaded.candidate.fszn_base_unclassified_review_ids.join(", ")}.</p>}
       {!!loaded.candidate.applicability.rate_obligations?.length && <div className="rounded-lg border border-line p-3 text-sm"><h4 className="font-semibold">Связь ставок с обязательствами</h4><ul className="mt-1 list-disc space-y-1 pl-5">{loaded.candidate.applicability.rate_obligations.map((row) => <li key={row.rate_code}>{row.rate_code}: {row.obligation_code ? obligationTitles[row.obligation_code] ?? row.obligation_code : "обязательство не указано"}; {row.chief_decision === "applicable" ? "главбух отметил применимость" : row.chief_decision === "not_applicable" ? "главбух отметил неприменимость — конфликт" : "применимость не определена"}.</li>)}</ul><p className="mt-1 text-xs text-muted">Сопоставление не подтверждает ставку, базу или нормативную полноту.</p></div>}
       {loaded.candidate.fszn_monthly_cap_preview && <div className="space-y-2 rounded-lg border border-line p-3 text-sm">
         <h4 className="font-semibold">Предварительное сравнение с месячным пределом ФСЗН</h4>
