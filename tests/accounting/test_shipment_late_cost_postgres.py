@@ -8,6 +8,7 @@ from sqlalchemy import func, select, update
 
 from modules.accounting.late_cost_receipts import LateCostCommand
 from modules.accounting.models import AccessGrant, Entry, LateCostReceipt, Policy, SourceControl
+from modules.procurement.models import Supplier
 from modules.wms.models import StockMovement
 from tests.accounting.test_postgres import pg_factory  # noqa: F401
 from tests.accounting.test_shipment_receipt_postgres import prepare_accounting
@@ -30,8 +31,15 @@ async def test_physical_shipment_consumes_verified_late_cost(physical_pg, same_c
         policy_id = policy.id
         await session.commit()
     receipt_root = f"/procurement/organizations/{org}/receipt-documents"
+    async with factory() as session:
+        supplier = Supplier(name="supplier", unp="", status="active")
+        session.add(supplier)
+        await session.flush()
+        supplier_id = supplier.id
+        await session.commit()
     source = {"currency": "BYN", "invoice_reference": "receipt-cost", "document_date": today,
-        "operation_date": today, "supplier": "supplier", "contract": "contract", "warehouse": "W",
+        "operation_date": today, "supplier": "supplier", "supplier_id": supplier_id,
+        "supplier_unp": "", "contract": "contract", "warehouse": "W",
         "explanation": "Synthetic acquisition", "items": [{"sku": "A", "lot": "L", "quantity": "3",
             "net_amount": "10.00", "vat_rate": "0", "vat_amount": "0.00", "vat_basis": "Synthetic"}]}
     created = await api.post(receipt_root, json={"key": "late-source", "document": source})

@@ -8,7 +8,8 @@ from modules.procurement.receipt_documents import ReceiptRevision
 
 def document():
     return {"currency": "BYN", "invoice_reference": "INV1", "document_date": "2026-09-01",
-            "operation_date": "2026-09-02", "supplier": "supplier1", "contract": "contract1",
+            "operation_date": "2026-09-02", "supplier": "supplier1", "supplier_id": 1,
+            "supplier_unp": "190000001", "contract": "contract1",
             "warehouse": "warehouse1", "explanation": "Synthetic primary invoice",
             "items": [{"sku": "sku1", "lot": "lot1", "quantity": "2.000001",
                        "net_amount": "100.01", "vat_rate": "20", "vat_amount": "20.00",
@@ -41,6 +42,38 @@ async def test_catalog_supplier_snapshot_stays_in_revision_and_rejects_drift(cli
                               json={"expected_version": 1, "document": data})
     assert edited.status_code == 409
     assert len((await client.get(path)).json()) == 1
+
+
+async def test_new_text_only_receipt_is_rejected_but_legacy_replay_and_upgrade_work(client, db, book):
+    from modules.procurement.receipt_documents import ReceiptDocument
+
+    path = f"/procurement/organizations/{book[0]}/receipt-documents"
+    bound = document()
+    legacy = {key: value for key, value in bound.items() if key not in {"supplier_id", "supplier_unp"}}
+    rejected = await client.post(path, json={"key": "new-unbound", "document": legacy})
+    assert rejected.status_code == 422
+    assert await db.scalar(select(func.count()).select_from(ReceiptDocument)) == 0
+
+    row = ReceiptDocument(organization_id=book[0], source_key="old-unbound",
+                          current_version=1, status="draft", created_by="historical")
+    db.add(row)
+    await db.flush()
+    receipt_id = row.id
+    db.add(ReceiptRevision(receipt_id=receipt_id, version=1, document=legacy, actor="historical"))
+    await db.commit()
+    replay = await client.post(path, json={"key": "old-unbound", "document": legacy})
+    assert replay.status_code == 201 and replay.json()["id"] == receipt_id
+    assert "supplier_id" not in replay.json()["revisions"][0]["document"]
+    assert (await client.put(f"{path}/{receipt_id}", json={
+        "expected_version": 1, "document": legacy,
+    })).status_code == 422
+    upgraded = await client.put(f"{path}/{receipt_id}", json={
+        "expected_version": 1, "document": bound,
+    })
+    assert upgraded.status_code == 200, upgraded.text
+    assert upgraded.json()["version"] == 2
+    assert upgraded.json()["revisions"][0]["document"] == legacy
+    assert upgraded.json()["revisions"][1]["document"]["supplier_id"] == 1
 
 
 async def test_order_line_without_order_rejected_and_legacy_payload_unchanged(client, book):
