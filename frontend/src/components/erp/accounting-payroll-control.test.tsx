@@ -48,6 +48,14 @@ function reports(organizationId: number) {
       blockers: ["source_facts_not_attested", "statutory_rule_completeness_unverified"],
       arithmetic_scope_complete: false, posting_available: false,
       statutory_payroll_certified: false,
+      applicability: {
+        status: "facts_and_rules_unverified", population_scope: "known_erp_bindings_only",
+        reference_year: 2026, reference_scope: "selected_mns_topics_only",
+        references: [{ topic: "standard_deductions_and_main_workplace", url: "https://nalog.gov.by/individuals/income_taxation/tax_deductions/9332/" }],
+        organization_gap_codes: ["period_income_tax_withholding_rule", "period_fszn_rules_and_limits"],
+        bindings: [{ employment_binding_id: 9, unrecorded_fact_codes: ["main_workplace_and_deduction_basis", "year_to_date_taxable_income"] }],
+        statutory_completeness_verified: false,
+      },
     },
   };
 }
@@ -75,6 +83,9 @@ describe("AccountingPayrollControl", () => {
     expect(screen.getByText(/Без отдельного подтверждения исходных данных: квитанции № 5/)).toBeInTheDocument();
     expect(screen.getByText(/Включено подтверждённых отрезков: 0 из 1/)).toBeInTheDocument();
     expect(screen.getByText(/Полнота применимых удержаний, взносов, вычетов и льгот не подтверждена/)).toBeInTheDocument();
+    expect(screen.getByText(/Утвердить правило удержания подоходного налога/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Данные по договорам: 1"));
+    expect(screen.getByText("Накопленный облагаемый доход за год")).toBeInTheDocument();
     expect(screen.getByText(/Удержания: расчёт 10.00, импорт 11.00, разница 1.00 BYN/)).toBeInTheDocument();
     expect(screen.getByText(/Источники для сравнения: собраны; суммы всё ещё могут расходиться/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Начисление · проводка № 41" }));

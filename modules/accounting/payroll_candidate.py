@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from modules.accounting.models import PayrollWorkpaperReview
+from modules.accounting.payroll_applicability import assess as assess_applicability
 from modules.accounting.payroll_calculation import (
     effective_percentage_rate,
     month_bounds,
@@ -135,6 +136,7 @@ async def preview(session, org_id: int, month: str) -> dict:
                 totals[field] += amounts[field]
     if stale_rule:
         blockers.append("rule_version_changed")
+    applicability = assess_applicability(month, population["known_binding_ids"])
     # A configured percentage list is not proof that every legally applicable
     # deduction, exemption, cap, benefit or employee-specific fact was covered.
     blockers.append("statutory_rule_completeness_unverified")
@@ -151,6 +153,7 @@ async def preview(session, org_id: int, month: str) -> dict:
         "rule_set_id": rule["rule_set_id"] if rule else None,
         "rule_set_digest": rule["digest"] if rule else None,
         "included_reviews": included,
+        "applicability": applicability,
         "blockers": blockers,
         "totals": formatted,
     }
@@ -162,6 +165,7 @@ async def preview(session, org_id: int, month: str) -> dict:
         "selected_segment_count": summary["selected_segment_count"],
         "unattested_review_ids": summary["source_fact_unattested_review_ids"],
         "bindings": bindings, "totals": formatted, "blockers": blockers,
+        "applicability": applicability,
         "arithmetic_scope_complete": not any(code != "statutory_rule_completeness_unverified"
                                              for code in blockers),
         "population_source_facts_verified_by_software": False,

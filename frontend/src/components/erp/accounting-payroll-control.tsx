@@ -55,6 +55,16 @@ type Candidate = {
   unattested_review_ids: number[];
   totals: Amounts;
   blockers: string[];
+  applicability: {
+    status: "facts_and_rules_unverified";
+    population_scope: "known_erp_bindings_only";
+    reference_year: number;
+    reference_scope: "selected_mns_topics_only" | "no_period_source_checked";
+    references: { topic: string; url: string }[];
+    organization_gap_codes: string[];
+    bindings: { employment_binding_id: number; unrecorded_fact_codes: string[] }[];
+    statutory_completeness_verified: false;
+  };
   arithmetic_scope_complete: boolean;
   posting_available: false;
   statutory_payroll_certified: false;
@@ -87,6 +97,23 @@ const candidateBlockers: Record<string, string> = {
   rule_source_file_missing: "К набору правил не приложен сохранённый файл политики.",
   rule_version_changed: "Версия правила или ставки изменилась после проверки расчётного листа.",
   statutory_rule_completeness_unverified: "Полнота применимых удержаний, взносов, вычетов и льгот не подтверждена.",
+};
+const applicabilityLabels: Record<string, string> = {
+  period_income_tax_sources_unverified: "Проверить официальные налоговые правила именно для этого года.",
+  period_income_tax_withholding_rule: "Утвердить правило удержания подоходного налога для периода и вида дохода.",
+  period_fszn_rules_and_limits: "Подтвердить применимые правила и ограничения взносов ФСЗН.",
+  period_work_injury_insurance_tariff: "Подтвердить тариф страхования от несчастных случаев этого юрлица.",
+  income_kind_and_tax_agent_treatment: "Вид дохода и порядок действий налогового агента",
+  year_to_date_taxable_income: "Накопленный облагаемый доход за год",
+  main_workplace_and_deduction_basis: "Основное место работы и основание стандартного вычета",
+  dependants_special_status_and_deduction_documents: "Дети, иждивенцы, особый статус и подтверждающие документы",
+  other_deduction_claims_and_documents: "Другие заявленные вычеты и подтверждающие документы",
+  insurance_applicability_and_base: "Страховой статус и база для взносов",
+};
+const referenceLabels: Record<string, string> = {
+  income_tax_rate_categories: "виды доходов и категории ставок",
+  standard_deductions_and_main_workplace: "стандартные вычеты и основное место работы",
+  deduction_categories: "виды налоговых вычетов",
 };
 
 async function readScoped<T extends { organization_id: number; month: string }>(
@@ -135,7 +162,9 @@ export function AccountingPayrollControl({ org, month, onEntry }: {
       const candidateValue = candidate.status === "fulfilled" ? candidate.value : null;
       const candidateSafe = candidateValue?.status === "provisional_payroll_candidate_only"
         && candidateValue.posting_available === false
-        && candidateValue.statutory_payroll_certified === false;
+        && candidateValue.statutory_payroll_certified === false
+        && candidateValue.applicability?.status === "facts_and_rules_unverified"
+        && candidateValue.applicability.statutory_completeness_verified === false;
       setLoaded({
         summary: summary.status === "fulfilled" ? summary.value : null,
         comparison: comparison.status === "fulfilled" ? comparison.value : null,
@@ -184,6 +213,22 @@ export function AccountingPayrollControl({ org, month, onEntry }: {
       <dl className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{amountLabels.map(([key, label]) => <div key={key} className="rounded-lg bg-canvas p-3"><dt className="text-xs text-muted">{label}</dt><dd className="font-semibold tabular-nums">{loaded.candidate!.totals[key]} BYN</dd></div>)}</dl>
       <p className="text-sm">{loaded.candidate.arithmetic_scope_complete ? "Исходные расчётные отрезки собраны; нормативная полнота ещё не подтверждена." : "Черновик неполон: проверьте причины ниже."}</p>
       <ul className="list-disc space-y-1 pl-5 text-sm">{loaded.candidate.blockers.map((code) => <li key={code}>{candidateBlockers[code] ?? code}</li>)}</ul>
+      <div className="space-y-2 rounded-lg border border-line p-3 text-sm">
+        <h4 className="font-semibold">Что нужно для проверки налоговых условий</h4>
+        <p className="text-muted">ERP пока не хранит перечисленные ниже факты по работникам. Список охватывает только известные ERP договоры; отсутствие заявления о вычете нельзя считать нулевым вычетом.</p>
+        <ul className="list-disc space-y-1 pl-5">{loaded.candidate.applicability.organization_gap_codes.map((code) => <li key={code}>{applicabilityLabels[code] ?? code}</li>)}</ul>
+        {loaded.candidate.applicability.bindings.length === 0
+          ? <p>Известных договоров нет: сначала подтвердите реестр работников.</p>
+          : <details><summary className="cursor-pointer">Данные по договорам: {loaded.candidate.applicability.bindings.length}</summary>
+            <div className="mt-2 space-y-2">{loaded.candidate.applicability.bindings.map((binding) => <div key={binding.employment_binding_id} className="rounded border border-line p-2">
+              <strong>Договор № {binding.employment_binding_id}</strong>
+              <ul className="list-disc pl-5">{binding.unrecorded_fact_codes.map((code) => <li key={code}>{applicabilityLabels[code] ?? code}</li>)}</ul>
+            </div>)}</div>
+          </details>}
+        {loaded.candidate.applicability.references.length > 0
+          ? <p className="text-xs text-muted">Проверенные страницы МНС за {loaded.candidate.applicability.reference_year} год описывают только отдельные налоговые условия: {loaded.candidate.applicability.references.map((source, index) => <span key={source.topic}>{index > 0 ? ", " : ""}<a className="underline" href={source.url} target="_blank" rel="noreferrer">{referenceLabels[source.topic] ?? source.topic}</a></span>)}. Они не подтверждают полноту расчёта.</p>
+          : <p className="text-xs text-muted">Для {loaded.candidate.applicability.reference_year} года официальные налоговые источники в этом контроле ещё не проверены.</p>}
+      </div>
       <p className="break-all text-xs text-muted">Отпечаток исходной версии: {loaded.candidate.candidate_digest}. Проведение, выплата и обязательная отчётность недоступны.</p>
     </div>}
 

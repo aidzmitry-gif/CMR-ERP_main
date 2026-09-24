@@ -701,6 +701,22 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     ]
     assert candidate["posting_available"] is False
     assert candidate["statutory_payroll_certified"] is False
+    applicability = candidate["applicability"]
+    assert applicability["population_scope"] == "known_erp_bindings_only"
+    assert applicability["statutory_completeness_verified"] is False
+    assert applicability["bindings"] == [{
+        "employment_binding_id": binding["binding_id"],
+        "unrecorded_fact_codes": [
+            "income_kind_and_tax_agent_treatment", "year_to_date_taxable_income",
+            "main_workplace_and_deduction_basis",
+            "dependants_special_status_and_deduction_documents",
+            "other_deduction_claims_and_documents", "insurance_applicability_and_base",
+        ],
+    }]
+    assert applicability["reference_scope"] == "selected_mns_topics_only"
+    assert all(source["url"].startswith("https://nalog.gov.by/")
+               for source in applicability["references"])
+    assert candidate["source_basis"]["applicability"] == applicability
     assert (await client.get(candidate_url)).json()["candidate_digest"] == candidate["candidate_digest"]
     reconcile_url = (f"/accounting/organizations/{book[0]}/periods/2026-10/"
                      "payroll-source-reconciliation")
