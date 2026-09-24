@@ -590,6 +590,7 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert summary["coverage_verified"] is False
     assert summary["known_binding_coverage"]["known_binding_coverage_complete"] is True
     assert summary["known_binding_coverage"]["organization_payroll_population_verified"] is False
+    assert summary["current_file_bytes_verified"] is True
     assert summary["posting_available"] is False
     assert summary["statutory_payroll_certified"] is False
     reconcile_url = (f"/accounting/organizations/{book[0]}/periods/2026-10/"
@@ -675,9 +676,30 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     matched = (await client.get(reconcile_url)).json()
     assert matched["status"] == "matched_arithmetic_only"
     assert matched["comparison_ready"] is True
+    assert matched["current_file_bytes_verified"] is True
     assert matched["missing_statutory_binding_ids"] == []
     assert matched["statutory_payroll_certified"] is False
     assert matched["posting_available"] is False
+    for source in (policy_file, contract, timesheet, adjustment):
+        source_path = root / str(book[0]) / (source["request_key"].replace("-", "") + ".pdf")
+        original = source_path.read_bytes()
+        source_path.write_bytes(b"%PDF-1.7\ntampered after chief review\n")
+        assert (await client.get(summary_url)).status_code == 409
+        source_path.write_bytes(original)
+    schedule_path.write_bytes(b"%PDF-1.7\ntampered after chief review\n")
+    assert (await client.get(summary_url)).status_code == 409
+    assert (await client.get(reconcile_url)).status_code == 409
+    stale_controls = (await client.get(
+        f"/accounting/organizations/{book[0]}/periods/2026-10/closing-controls")).json()
+    assert stale_controls["payroll"]["arithmetic_reconciliation_status"] == "unavailable"
+    assert "payroll_arithmetic_reconciliation_unavailable" in {
+        item["code"] for item in stale_controls["review_items"]}
+    historical = await client.get(
+        f"/accounting/organizations/{book[0]}/payroll-workpaper-reviews/{review_command['request_key']}")
+    assert historical.status_code == 200
+    assert historical.json() == receipt
+    schedule_path.write_bytes(schedule_raw)
+    assert (await client.get(reconcile_url)).json()["comparison_ready"] is True
     first_gross_entry = matched["receipt_entry_ids"]["gross"][0]
     first_line = await db.scalar(select(Line).where(Line.entry_id == first_gross_entry)
                                  .order_by(Line.id))
@@ -744,10 +766,14 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
     assert partial.status_code == 422
 
     # Corrupt both possible files: whichever is selected must fail byte verification.
-    for path in (root / str(book[0])).glob("*.pdf"):
+    stored_pdf_bytes = {path: path.read_bytes() for path in (root / str(book[0])).glob("*.pdf")}
+    for path in stored_pdf_bytes:
         path.write_bytes(b"%PDF-1.7\ncorrupted")
     tampered = await client.post(preview_url, json=command(*args, **fields))
     assert tampered.status_code == 409
+    assert (await client.get(summary_url)).status_code == 409
+    for path, original in stored_pdf_bytes.items():
+        path.write_bytes(original)
     ended_after_review = await client.post(
         f"/accounting/organizations/{book[0]}/payroll-employments", json={
             "request_key": str(uuid4()),

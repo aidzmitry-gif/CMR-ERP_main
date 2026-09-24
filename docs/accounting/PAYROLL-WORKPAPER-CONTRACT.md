@@ -232,6 +232,12 @@ compares the latest reviewed workpaper arithmetic with posted external gross,
 deduction and contribution imports by `employment_binding_id`. It lists the
 entry IDs, differences for each binding, missing gross and statutory mappings,
 conflicting individual statutory-zero documents and unmapped source lines.
+Before returning a current monthly arithmetic summary or reconciliation, it
+rechecks the stored bytes and receipt claims for each latest segment's policy,
+contract, timesheet, work schedule and rate-base adjustment files. Missing or
+changed source bytes reject the current view; historical review receipts remain
+readable. `current_file_bytes_verified` describes that byte check only, not
+document authenticity, the truth of salary/hours or statutory applicability.
 An individual statutory-zero document is counted only after its stored bytes
 are checked against its receipt. Before using an import, it checks the receipt identity and hash,
 its stored posting and the actual ledger lines. `matched_arithmetic_only`

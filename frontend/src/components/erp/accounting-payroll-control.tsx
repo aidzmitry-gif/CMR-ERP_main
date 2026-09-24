@@ -20,6 +20,7 @@ type Summary = {
   totals: Amounts;
   bindings: { employment_binding_id: number; segments: { review_id: number; revision: number; work_from: string; work_to: string }[]; totals: Amounts }[];
   known_binding_coverage: { active_binding_count: number; known_binding_coverage_complete: boolean; issues: CoverageIssue[] };
+  current_file_bytes_verified: boolean;
   statutory_payroll_certified: false;
 };
 type ComparisonAmounts = Pick<Amounts, "gross_byn" | "listed_employee_deductions_byn" | "listed_employer_contributions_byn">;
@@ -132,6 +133,7 @@ export function AccountingPayrollControl({ org, month, onEntry }: {
     {loaded.summary && <div className="space-y-3 rounded-lg border border-line p-4">
       <h3 className="font-semibold">Рассмотренные расчётные отрезки</h3>
       <p className="text-sm text-muted">Квитанций: {loaded.summary.review_count}; действующих редакций отрезков: {loaded.summary.selected_segment_count}. Известных активных договоров: {loaded.summary.known_binding_coverage.active_binding_count}.</p>
+      {loaded.summary.current_file_bytes_verified && <p className="text-xs text-muted">Сохранённые файлы-основания действующих отрезков повторно сверены по байтам. Содержание документов подтверждает бухгалтер.</p>}
       <dl className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{amountLabels.map(([key, label]) => <div key={key} className="rounded-lg bg-canvas p-3"><dt className="text-xs text-muted">{label}</dt><dd className="font-semibold tabular-nums">{loaded.summary!.totals[key]} BYN</dd></div>)}</dl>
       <p className="text-sm">{loaded.summary.known_binding_coverage.active_binding_count === 0 ? "На этот месяц нет известных активных договоров. Проверьте реестр работников и основание нулевых начислений." : loaded.summary.known_binding_coverage.known_binding_coverage_complete ? "Все отрезки известных договоров рассмотрены; полнота реального штата не подтверждена." : "Есть нерассмотренные или устаревшие отрезки известных договоров."}</p>
       {!!loaded.summary.known_binding_coverage.issues.length && <ul className="list-disc space-y-1 pl-5 text-sm">{loaded.summary.known_binding_coverage.issues.map((issue, index) => <li key={`${issue.kind}-${issue.employment_binding_id}-${index}`}>{issueLabels[issue.kind] ?? issue.kind}: договор № {issue.employment_binding_id}, {issue.work_from}–{issue.work_to}</li>)}</ul>}

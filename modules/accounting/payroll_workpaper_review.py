@@ -89,6 +89,40 @@ def _review_amounts(row: PayrollWorkpaperReview) -> dict[str, Decimal]:
     return amounts
 
 
+async def _verify_current_review_files(session, row: PayrollWorkpaperReview) -> None:
+    """Recheck selected review sources without rewriting its historical receipt."""
+    basis = result(row)["snapshot"]["basis"]
+
+    async def check(file_id: object, kind: str, reference: object, digest: object,
+                    *, bound: bool = False, monthly: bool = False) -> None:
+        if type(file_id) is not int or file_id <= 0:
+            raise HTTPException(409, "Payroll arithmetic review source requires reconciliation")
+        source = await payroll_evidence_files.file_for(
+            session, row.organization_id, file_id, kind=kind,
+            employment_binding_id=row.employment_binding_id if bound else None,
+            month=row.month if monthly else None,
+        )
+        if source.reference != reference or source.sha256 != digest:
+            raise HTTPException(409, "Payroll arithmetic review source differs from receipt")
+
+    await check(basis.get("rule_set_source_file_id"), "payroll_policy",
+                basis.get("rule_set_source_reference"), basis.get("rule_set_source_digest"))
+    await check(basis.get("contract_file_id"), "employment_contract",
+                basis.get("contract_document"), basis.get("contract_digest"), bound=True)
+    await check(basis.get("timesheet_file_id"), "timesheet",
+                basis.get("timesheet_document"), basis.get("timesheet_digest"),
+                bound=True, monthly=True)
+    await check(basis.get("work_schedule_file_id"), "work_schedule",
+                basis.get("work_schedule_document"), basis.get("work_schedule_digest"),
+                bound=True, monthly=True)
+    for component in basis["components"]:
+        if component.get("base_mode") == "gross_less_adjustment" or component.get(
+                "adjustment_file_id") is not None:
+            await check(component.get("adjustment_file_id"), "base_adjustment",
+                        component.get("adjustment_document"),
+                        component.get("adjustment_file_digest"), bound=True, monthly=True)
+
+
 class PayrollWorkpaperReviewInput(PayrollWorkpaperInput):
     request_key: UUID
     basis_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -328,6 +362,7 @@ async def monthly_arithmetic_summary(session, org_id: int, month: str) -> dict:
                 raise HTTPException(409, "Payroll arithmetic review revision chain requires reconciliation")
             previous = row
         row, amounts = revisions[-1]
+        await _verify_current_review_files(session, row)
         binding = by_binding.setdefault(binding_id, {
             "employment_binding_id": binding_id,
             "segments": [],
@@ -370,6 +405,7 @@ async def monthly_arithmetic_summary(session, org_id: int, month: str) -> dict:
         "bindings": list(by_binding.values()),
         "totals": formatted_totals,
         "known_binding_coverage": coverage,
+        "current_file_bytes_verified": bool(selected_receipts),
         "coverage_verified": False,
         "source_facts_verified": False,
         "statutory_payroll_certified": False,
@@ -563,6 +599,7 @@ async def external_source_reconciliation(session, org_id: int, month: str) -> di
         "comparison_ready": ready,
         "differing_binding_count": differences,
         "bindings": rows,
+        "current_file_bytes_verified": summary["current_file_bytes_verified"],
         "source_facts_verified": False,
         "statutory_payroll_certified": False,
         "posting_available": False,
