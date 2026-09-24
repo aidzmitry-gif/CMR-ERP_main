@@ -7,6 +7,7 @@ vi.mock("@/lib/procurement-machine", () => ({
 vi.mock("@/lib/procurement-scoped-claims", () => ({
   listClaims: vi.fn(), createClaim: vi.fn(), resolveClaim: vi.fn(),
   searchClaimOrders: vi.fn(), claimHistory: vi.fn(),
+  previewUnassignedClaim: vi.fn(), bindUnassignedClaim: vi.fn(),
 }));
 
 import { ProcurementScopedClaims } from "@/components/erp/procurement-scoped-claims";
@@ -19,6 +20,8 @@ const suppliers = vi.mocked(machine.fetchProcurementSuppliers);
 const list = vi.mocked(claims.listClaims);
 const create = vi.mocked(claims.createClaim);
 const resolve = vi.mocked(claims.resolveClaim);
+const preview = vi.mocked(claims.previewUnassignedClaim);
+const bind = vi.mocked(claims.bindUnassignedClaim);
 
 const row = { organization_id: 7, order_id: null, claim: { id: 12, supplier: "Vendor A",
   supplier_id: 3, item: "Battery", reason: "Damage", order_code: "", claim_type: "брак",
@@ -36,6 +39,12 @@ beforeEach(() => {
   suppliers.mockResolvedValue({ organization_id: 7, items: [{ id: 3, name: "Vendor A", unp: "299999001" }], truncated: false });
   create.mockResolvedValue(row);
   resolve.mockResolvedValue({ ...row, claim: { ...row.claim, status: "resolved", resolution: "Replacement" } });
+  preview.mockResolvedValue({ organization_id: 7, claim_id: 23,
+    source_snapshot: { id: 23, source: "production", entity_ref: "production:qc:23",
+      item: "Battery", reason: "Damage", order_code: "QC-12", status: "open",
+      supplier_id: null, supplier: "", amount_byn: null }, source_digest: "a".repeat(64) });
+  bind.mockResolvedValue({ ...row, claim: { ...row.claim, id: 23,
+    source: "production", entity_ref: "production:qc:23", order_code: "QC-12" } });
 });
 
 it("loads claims only after selecting a company and creates with directory supplier ID", async () => {
@@ -88,4 +97,38 @@ it("keeps resolution command for exact retry after an uncertain result", async (
   fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
   await waitFor(() => expect(resolve).toHaveBeenCalledTimes(2));
   expect(resolve.mock.calls[1][3]).toEqual(first);
+});
+
+it("binds an exact QC source to a directory supplier and reuses the command on retry", async () => {
+  bind.mockRejectedValueOnce(new Error("network"));
+  render(<ProcurementScopedClaims />);
+  await screen.findByRole("option", { name: "Компания А · 123" });
+  fireEvent.change(screen.getByLabelText("Юрлицо претензий"), { target: { value: "7" } });
+  await screen.findByText("Battery");
+  fireEvent.click(screen.getByRole("button", { name: "Сопоставить претензию ОТК" }));
+  for (const [label, value] of [
+    ["Ссылка ОТК (production:qc:ID)", "production:qc:23"],
+    ["Изделие ОТК", "Battery"], ["Причина ОТК", "Damage"], ["Наряд ОТК", "QC-12"],
+  ]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  fireEvent.click(screen.getByRole("button", { name: "Проверить первичную запись" }));
+  await waitFor(() => expect(preview).toHaveBeenCalledWith(7, "tester", {
+    entity_ref: "production:qc:23", item: "Battery", reason: "Damage", order_code: "QC-12",
+  }));
+  await screen.findByText(/Найдена претензия №23/);
+  fireEvent.change(screen.getByLabelText("Поиск поставщика ОТК"), { target: { value: "Vendor" } });
+  fireEvent.click(screen.getByRole("button", { name: "Найти в справочнике" }));
+  await screen.findByRole("option", { name: "Vendor A · 299999001 · ID 3" });
+  fireEvent.change(screen.getByLabelText("Поставщик для сопоставления"), { target: { value: "3" } });
+  fireEvent.change(screen.getByLabelText("Первичное основание принадлежности юрлицу"),
+    { target: { value: "Act QC-12" } });
+  fireEvent.click(screen.getByRole("button", { name: "Подтвердить сопоставление и закрыть" }));
+  await screen.findByRole("alert");
+  const original = bind.mock.calls[0][3];
+  expect(bind.mock.calls[0].slice(0, 3)).toEqual([7, 23, "tester"]);
+  expect(original).toMatchObject({ entity_ref: "production:qc:23", expected_digest: "a".repeat(64),
+    supplier_id: 3, supplier: "Vendor A", supplier_unp: "299999001",
+    ownership_evidence: "Act QC-12" });
+  fireEvent.click(screen.getByRole("button", { name: "Подтвердить сопоставление и закрыть" }));
+  await waitFor(() => expect(bind).toHaveBeenCalledTimes(2));
+  expect(bind.mock.calls[1][3]).toEqual(original);
 });

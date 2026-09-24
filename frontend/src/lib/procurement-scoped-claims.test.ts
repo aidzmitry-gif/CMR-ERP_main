@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 
-import { createClaim, listClaims, type ClaimCommand } from "@/lib/procurement-scoped-claims";
+import { createClaim, listClaims, previewUnassignedClaim, type ClaimCommand } from "@/lib/procurement-scoped-claims";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -20,4 +20,16 @@ it("rejects a claim page or command receipt from another legal entity", async ()
   expect(fetcher.mock.calls[1][0]).toBe("/api/procurement/organizations/7/claims");
   expect(fetcher.mock.calls[1][1]).toMatchObject({ method: "POST",
     headers: { "X-Expected-Principal": "tester" } });
+});
+
+it("rejects a QC preview whose source identity does not match the supplied facts", async () => {
+  const facts = { entity_ref: "production:qc:23", item: "Battery", reason: "Damage", order_code: "QC-12" };
+  const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({
+    organization_id: 7, claim_id: 23, source_digest: "a".repeat(64),
+    source_snapshot: { id: 24, source: "production", status: "open", supplier_id: null,
+      supplier: "", amount_byn: null, ...facts },
+  }) });
+  vi.stubGlobal("fetch", fetcher);
+  await expect(previewUnassignedClaim(7, "tester", facts)).rejects.toThrow("Снимок ОТК");
+  expect(fetcher.mock.calls[0][0]).toBe("/api/procurement/organizations/7/unassigned-claim-preview");
 });

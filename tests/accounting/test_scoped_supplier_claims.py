@@ -137,3 +137,53 @@ async def test_resolution_has_one_company_event_and_immutable_before_after(clien
     assert history["edits"][0]["before"] == {"status": "open", "resolution": ""}
     assert history["edits"][0]["after"] == {"status": "resolved", "resolution": "Replacement received"}
     assert (await client.get(f"/procurement/organizations/{other}/claims/{claim_id}/history")).status_code == 404
+
+
+async def test_production_claim_requires_exact_qc_facts_and_explicit_binding(client, db, claims_case):
+    org, other, supplier_id = claims_case
+    source = SupplierClaim(item="QC battery", reason="Cell damaged", order_code="QC-901",
+                           source="production", status="open", entity_ref="production:qc:901")
+    db.add(source)
+    await db.commit()
+    path = f"/procurement/organizations/{org}/unassigned-claim-preview"
+    facts = {"entity_ref": "production:qc:901", "item": "QC battery",
+             "reason": "Cell damaged", "order_code": "QC-901"}
+    wrong = await client.post(path, json={**facts, "reason": "Guess"}, headers=HEADERS)
+    assert wrong.status_code == 409
+    assert await db.scalar(select(func.count()).select_from(ClaimOwnership)) == 0
+    preview = await client.post(path, json=facts, headers=HEADERS)
+    assert preview.status_code == 200, preview.text
+    reviewed = preview.json()
+    assert reviewed["claim_id"] == source.id
+    assert reviewed["source_snapshot"]["supplier_id"] is None
+    binding = {"claim_key": str(uuid4()), "entity_ref": facts["entity_ref"],
+               "expected_digest": reviewed["source_digest"], "supplier_id": supplier_id,
+               "supplier": "Vendor A", "supplier_unp": "299999001", "order_id": None,
+               "ownership_evidence": "Checked QC act and supplier contract"}
+    bind_path = f"/procurement/organizations/{org}/claims/{source.id}/bind"
+    assert (await client.post(bind_path, json={**binding, "expected_digest": "0" * 64},
+                              headers=HEADERS)).status_code == 409
+    first = await client.post(bind_path, json=binding, headers=HEADERS)
+    assert first.status_code == 200, first.text
+    result = first.json()
+    assert result["claim"]["supplier_id"] == supplier_id
+    assert result["claim"]["order_code"] == "QC-901"  # preserve QC source reference
+    assert result["source_snapshot"] == reviewed["source_snapshot"]
+    assert (await client.post(bind_path, json=binding, headers=HEADERS)).json() == result
+    assert (await client.post(path, json=facts, headers=HEADERS)).status_code == 409
+    assert (await client.get(f"/procurement/organizations/{org}/claims")).json()["items"][0]["claim"]["id"] == source.id
+    assert (await client.get(f"/procurement/organizations/{other}/claims")).json()["items"] == []
+    history = (await client.get(f"/procurement/organizations/{org}/claims/{source.id}/history")).json()
+    assert history["created"]["source_snapshot"] == reviewed["source_snapshot"]
+
+
+async def test_reader_cannot_preview_unassigned_production_claim(client, db, claims_case):
+    org, _, _ = claims_case
+    db.add(AccessGrant(organization_id=org, subject="reader", role="reader"))
+    await db.commit()
+    client.test_app.dependency_overrides[get_current_user] = lambda: CurrentUser("reader", ["director"])
+    response = await client.post(f"/procurement/organizations/{org}/unassigned-claim-preview",
+                                 json={"entity_ref": "production:qc:901", "item": "Battery",
+                                       "reason": "Defect", "order_code": "QC-901"},
+                                 headers={"X-Expected-Principal": "reader"})
+    assert response.status_code == 403
