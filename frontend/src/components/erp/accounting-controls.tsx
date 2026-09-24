@@ -51,7 +51,11 @@ type ImportRequestError = Error & { status?: number };
 const sha256 = /^[a-f0-9]{64}$/;
 const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const plainObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
-const money = (value: unknown) => (typeof value === "string" && value.trim().length > 0) || (typeof value === "number" && Number.isFinite(value));
+function monetaryCents(value: unknown): bigint | null {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(String(value).trim());
+  return match ? BigInt(match[1]) * 100n + BigInt((match[2] ?? "").padEnd(2, "0")) : null;
+}
 
 function importCommand(value: unknown): ImportCommand {
   if (!plainObject(value)) throw new Error("Файл должен содержать JSON-пакет начальных остатков.");
@@ -68,10 +72,13 @@ function importCommand(value: unknown): ImportCommand {
     || !/^\d{4}-\d{2}-\d{2}$/.test(command.cutover_date ?? "")
     || !Number.isInteger(entryCount) || entryCount < 1
     || !Number.isInteger(lineCount) || lineCount < 1
-    || !money(command.expected_debit_byn) || !money(command.expected_credit_byn)
+    || monetaryCents(command.expected_debit_byn) === null
+    || monetaryCents(command.expected_credit_byn) === null
     || !Array.isArray(command.entries) || command.entries.length !== entryCount) {
     throw new Error("Пакет обязан явно содержать batch, request_key, источник, SHA-256 источника, дату среза, контрольные количества, строки и основание. ERP не подставляет эти данные.");
   }
+  if (monetaryCents(command.expected_debit_byn) !== monetaryCents(command.expected_credit_byn))
+    throw new Error("Контрольные суммы Дт и Кт в пакете не совпадают.");
   return value as ImportCommand;
 }
 
@@ -83,8 +90,10 @@ function assertImportIdentity(value: unknown, org: string, command: ImportComman
     throw new Error("Сервер вернул пакет, не подтверждающий выбранное юрлицо или исходный файл.");
   }
   const totals = value.control_totals;
-  if (!plainObject(totals) || totals.entry_count !== command.expected_entry_count || totals.line_count !== command.expected_line_count) {
-    throw new Error("Сервер вернул контрольные количества, не совпадающие с загруженным пакетом.");
+  if (!plainObject(totals) || totals.entry_count !== command.expected_entry_count || totals.line_count !== command.expected_line_count
+    || monetaryCents(totals.debit_byn) !== monetaryCents(command.expected_debit_byn)
+    || monetaryCents(totals.credit_byn) !== monetaryCents(command.expected_credit_byn)) {
+    throw new Error("Сервер вернул контрольные количества или суммы, не совпадающие с загруженным пакетом.");
   }
 }
 
@@ -96,12 +105,17 @@ function assertImportPreview(value: unknown, org: string, command: ImportCommand
   }
 }
 
-function assertImportReceipt(value: unknown, org: string, command: ImportCommand): asserts value is ImportReceipt {
+function assertImportReceipt(value: unknown, org: string, command: ImportCommand,
+  preview: ImportPreview): asserts value is ImportReceipt {
   assertImportIdentity(value, org, command);
   const receiptId = plainObject(value) ? value.receipt_id : undefined;
-  if (!plainObject(value) || value.confirmed !== true || typeof receiptId !== "number" || !Number.isInteger(receiptId)
+  if (!plainObject(value) || value.confirmed !== true || value.command_digest !== preview.command_digest
+    || typeof receiptId !== "number" || !Number.isInteger(receiptId)
     || receiptId < 1 || !Array.isArray(value.entry_ids)
-    || value.entry_ids.length !== command.expected_entry_count || !sha256.test(String(value.digest ?? ""))) {
+    || value.entry_ids.length !== command.expected_entry_count
+    || value.entry_ids.some(id => !Number.isSafeInteger(id) || id < 1)
+    || new Set(value.entry_ids).size !== value.entry_ids.length
+    || !sha256.test(String(value.digest ?? ""))) {
     throw new Error("Сервер не подтвердил неизменяемую квитанцию переноса остатков.");
   }
 }
@@ -265,6 +279,7 @@ export function AccountingControls({ org, onChanged, initialSection = "setup", o
     const selectedOrg = org;
     const epoch = ++importEpoch.current;
     const command = importData;
+    const reviewed = importPreview;
     const sourceFile = importFiles.current.source;
     importPending.current = true;
     setBusy(true); setError(""); setNotice("");
@@ -276,7 +291,7 @@ export function AccountingControls({ org, onChanged, initialSection = "setup", o
       if (currentOrg.current !== selectedOrg || importEpoch.current !== epoch) return;
       requestStarted = true;
       const confirmed = await importApi<unknown>(`${prefix}/imports/confirm`, command);
-      assertImportReceipt(confirmed, selectedOrg, command);
+      assertImportReceipt(confirmed, selectedOrg, command, reviewed);
       if (!mounted.current || currentOrg.current !== selectedOrg || importEpoch.current !== epoch) return;
       setImportRetry(false); setImportData(null); setImportPreview(null); setRefresh((value) => value + 1);
       setNotice(`Остатки перенесены. Квитанция №${confirmed.receipt_id}; сверяйте ОСВ по протоколу.`);
@@ -291,7 +306,7 @@ export function AccountingControls({ org, onChanged, initialSection = "setup", o
       const status = (error as ImportRequestError).status;
       if (status === undefined || ![400, 401, 403, 404, 409, 413, 415, 422].includes(status)) {
         setImportRetry(true);
-        setError("Результат подтверждения неизвестен. ERP сохранит и повторит только тот же неизменённый пакет.");
+        setError(`${(error as Error).message} Результат подтверждения неизвестен. ERP сохранит и повторит только тот же неизменённый пакет.`);
       } else setError((error as Error).message);
     } finally { if (currentOrg.current === selectedOrg && importEpoch.current === epoch) { importPending.current = false; setBusy(false); } }
   }

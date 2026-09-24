@@ -262,6 +262,16 @@ it("requires an explicit source digest instead of deriving one from the uploaded
   expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/imports/preview"))).toBe(false);
 });
 
+it("blocks an unbalanced opening package before preview", async () => {
+  render(<AccountingControls org="1" initialSection="import" onChanged={vi.fn()} />);
+  selectSource();
+  fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile({
+    ...openingCommand(), expected_credit_byn: "99.99",
+  })] } });
+  expect(await screen.findByRole("alert")).toHaveTextContent("Контрольные суммы Дт и Кт");
+  expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/imports/preview"))).toBe(false);
+});
+
 it("waits for the original source export before previewing opening balances", async () => {
   const command = openingCommand();
   fetchMock.mockImplementation((url: string) => respond(
@@ -408,6 +418,49 @@ it("rejects a preview returned for another organization before it can be confirm
   fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
   expect(await screen.findByRole("alert")).toHaveTextContent("не подтверждающий выбранное юрлицо");
   expect(screen.queryByRole("button", { name: "Подтвердить перенос остатков" })).not.toBeInTheDocument();
+});
+
+it("rejects opening preview with different debit or credit totals", async () => {
+  const command = openingCommand();
+  fetchMock.mockImplementation((url: string) => respond(url.endsWith("/imports/preview")
+    ? { ...openingPreview(command), control_totals: { ...openingPreview(command).control_totals, debit_byn: "101.00" } }
+    : url.endsWith("catalog") ? { version: "test", accounts: [] } : []));
+  render(<AccountingControls org="1" initialSection="import" onChanged={vi.fn()} />);
+  selectSource();
+  fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
+  expect(await screen.findByRole("alert")).toHaveTextContent("контрольные количества или суммы");
+  expect(screen.queryByRole("button", { name: "Подтвердить перенос остатков" })).not.toBeInTheDocument();
+});
+
+it.each(["totals", "digest", "duplicate_entries"])("does not claim opening import success for a mismatched %s receipt", async mismatch => {
+  const command = openingCommand();
+  if (mismatch === "duplicate_entries") {
+    command.expected_entry_count = 2;
+    command.expected_line_count = 4;
+    command.entries.push({ source: "1c:opening:2", source_version: 1 });
+  }
+  const changed = vi.fn();
+  fetchMock.mockImplementation((url: string) => {
+    if (url.endsWith("/imports/preview")) return respond(openingPreview(command));
+    if (url.endsWith("/imports/confirm")) {
+      const receipt = { ...openingReceipt(command), control_totals: { ...openingReceipt(command).control_totals },
+        entry_ids: mismatch === "duplicate_entries" ? [18, 18] : [18],
+      };
+      if (mismatch === "totals") receipt.control_totals.debit_byn = "101.00";
+      if (mismatch === "digest") receipt.command_digest = "d".repeat(64);
+      return respond(receipt);
+    }
+    return respond(url.endsWith("catalog") ? { version: "test", accounts: [] } : []);
+  });
+  render(<AccountingControls org="1" initialSection="import" onChanged={changed} />);
+  selectSource();
+  fireEvent.change(screen.getByLabelText("Файл остатков"), { target: { files: [jsonFile(command)] } });
+  fireEvent.click(await screen.findByRole("button", { name: "Подтвердить перенос остатков" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(mismatch === "totals" ? "контрольные количества или суммы"
+    : "не подтвердил неизменяемую квитанцию");
+  expect(screen.queryByText(/Остатки перенесены/)).not.toBeInTheDocument();
+  expect(changed).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Повторить подтверждение того же пакета" })).toBeEnabled();
 });
 
 it("retries an unknown confirmation with the frozen exact opening package", async () => {
