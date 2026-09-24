@@ -6,11 +6,12 @@ const ok = (body: unknown, status = 200) => ({ ok: true, status, json: async () 
 
 afterEach(() => { vi.unstubAllGlobals(); sessionStorage.clear(); });
 
-it("requires a catalog selection and creates the order with an immutable SKU snapshot", async () => {
+it("requires supplier and SKU selections and creates the order with immutable snapshots", async () => {
   const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
     if (path.endsWith("receipt-organizations")) return ok([{ id: 1, name: "Компания", unp: "123" }]);
     if (path.endsWith("request-plan-context")) return ok({ organization_id: 1, principal: "tester", can_manage: true });
     if (path.includes("/sku-options?q=")) return ok({ organization_id: 1, items: [{ id: 42, code: "SKU-A", title: "Товар А", unit: "шт" }], truncated: false });
+    if (path.includes("/supplier-options?q=")) return ok({ organization_id: 1, items: [{ id: 17, name: "Поставщик", unp: "190000001" }], truncated: false });
     if (path.includes("/owned-sources?kind=")) return ok({ organization_id: 1, items: [], next_after_id: null });
     if (init?.method === "POST" && path.endsWith("/orders")) {
       const command = JSON.parse(String(init.body));
@@ -30,9 +31,12 @@ it("requires a catalog selection and creates the order with an immutable SKU sna
   await screen.findByRole("option", { name: "Компания · 123" });
   fireEvent.change(screen.getByLabelText("Юрлицо заказа"), { target: { value: "1" } });
   await screen.findByRole("option", { name: "SKU-A · Товар А · шт" });
+  await screen.findByRole("option", { name: "Поставщик · 190000001" });
   fireEvent.change(screen.getByLabelText("Основание заказа"), { target: { value: "standalone" } });
-  fireEvent.change(screen.getByLabelText("Поставщик заказа"), { target: { value: "Поставщик" } });
   fireEvent.change(screen.getByLabelText("Основание выбора юрлица заказа"), { target: { value: "Проверено" } });
+  fireEvent.click(screen.getByRole("button", { name: "Создать заказ" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Выберите поставщика");
+  fireEvent.change(screen.getByLabelText("Поставщик из справочника"), { target: { value: "17" } });
   fireEvent.click(screen.getByRole("button", { name: "Создать заказ" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Выберите номенклатуру");
   expect(fetcher.mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
@@ -40,5 +44,6 @@ it("requires a catalog selection and creates the order with an immutable SKU sna
   fireEvent.click(screen.getByRole("button", { name: "Создать заказ" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Создан заказ PO-2026-000007"));
   const command = JSON.parse(String(fetcher.mock.calls.find(([path, init]) => path.endsWith("/orders") && init?.method)?.[1]?.body));
+  expect(command.document).toMatchObject({ supplier: "Поставщик", supplier_id: 17, supplier_unp: "190000001" });
   expect(command.document.lines[0]).toMatchObject({ sku_id: 42, sku_code: "SKU-A", sku_title: "Товар А", sku_unit: "шт" });
 });
