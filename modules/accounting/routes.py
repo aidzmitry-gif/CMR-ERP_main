@@ -1128,10 +1128,12 @@ async def accounting_receipt_preview(org_id: int, receipt_id: int, data: Receipt
         raise HTTPException(503, "Procurement source service is unavailable")
     # Same organization-before-source lock order as the procurement command.
     await core.services.accounting.source_member(ctx[0], org_id, user)
-    document = await gateway.prepare_receipt(ctx[0], org_id, receipt_id, data)
-    result = await core.services.accounting.receipt_posting(ctx[0], org_id, user, document, confirm_digest=None)
-    return {**result, "organization_id": org_id, "source": document["source"],
-            "source_version": document["source_version"], "posted": False}
+    prepared = await gateway.prepare_receipt(ctx[0], org_id, receipt_id, data,
+                                             require_current_supplier=True)
+    result = await core.services.accounting.receipt_posting(ctx[0], org_id, user, prepared.document,
+        confirm_digest=None, verified_counterparty_id=prepared.verified_counterparty_id)
+    return {**result, "organization_id": org_id, "source": prepared.document["source"],
+            "source_version": prepared.document["source_version"], "posted": False}
 
 
 @router.post("/organizations/{org_id}/receipts/{receipt_id}/confirm", status_code=201)

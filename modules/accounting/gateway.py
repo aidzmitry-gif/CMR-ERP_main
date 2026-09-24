@@ -197,7 +197,7 @@ class AccountingService:
         await session.flush()
 
     async def receipt_posting(self, session, organization_id, user, document, *,
-                              confirm_digest, event_bus=None):
+                              confirm_digest, event_bus=None, verified_counterparty_id=None):
         from modules.accounting import service
         from modules.accounting.purchases import PurchaseDocument, preview_purchase
 
@@ -211,6 +211,7 @@ class AccountingService:
             raise HTTPException(403, "Accounting write access required")
         posting, accounts, policy = await preview_purchase(
             session, organization_id, PurchaseDocument.model_validate(document),
+            verified_counterparty_id=verified_counterparty_id,
         )
         control = await session.scalar(select(SourceControl).where(
             SourceControl.organization_id == organization_id, SourceControl.source == posting.source,

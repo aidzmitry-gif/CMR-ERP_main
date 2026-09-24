@@ -57,9 +57,17 @@ class PurchaseDocument(Input):
             raise ValueError("Zero VAT requires an explicit null VAT account")
         return self
 
-    def posting(self):
+    def posting(self, *, verified_counterparty_id: int | None = None):
+        """Only the procurement gateway supplies a server-verified MDM ID.
+
+        Direct and historical purchase commands keep their original v1 digest.
+        """
         dimensions = {"counterparty": self.counterparty, "contract": self.contract,
                       "settlement_document": self.invoice_reference}
+        if verified_counterparty_id is not None:
+            if type(verified_counterparty_id) is not int or verified_counterparty_id <= 0:
+                raise ValueError("Verified counterparty ID must be a positive integer")
+            dimensions["counterparty_id"] = str(verified_counterparty_id)
         lines = []
         gross = Decimal(0)
         for item in self.items:
@@ -79,12 +87,13 @@ class PurchaseDocument(Input):
         return PostingInput(source=self.source, source_version=self.source_version,
                             operation="inventory_purchase", document_date=self.document_date,
                             operation_date=self.operation_date, posting_date=self.posting_date,
-                            policy_id=self.policy_id, rule_version="purchase-byn-v1",
+                            policy_id=self.policy_id,
+                            rule_version="purchase-byn-v2" if verified_counterparty_id is not None else "purchase-byn-v1",
                             explanation=self.explanation, lines=lines)
 
 
-async def preview_purchase(session, org_id, document: PurchaseDocument):
-    posting = document.posting()
+async def preview_purchase(session, org_id, document: PurchaseDocument, *, verified_counterparty_id=None):
+    posting = document.posting(verified_counterparty_id=verified_counterparty_id)
     accounts, policy = await service.preview_posting(session, org_id, posting)
     # This bounded rule accepts only inventory/input VAT/supplier settlement roles.
     # Account names are versioned and configurable; synthetic roots define this rule.

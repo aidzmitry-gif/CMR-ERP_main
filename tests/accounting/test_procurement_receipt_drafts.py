@@ -246,6 +246,7 @@ async def source_options(client, db, book, *, unit=None):
 
 async def test_source_posting_uses_facts_and_freezes_document(client, db, book):
     from modules.procurement.receipt_documents import ReceiptPosting
+    from modules.procurement.source_gateway import ProcurementSourceService
     path, options = await source_options(client, db, book)
     revised = document()
     revised["invoice_reference"] = "INV1 revised"
@@ -255,6 +256,13 @@ async def test_source_posting_uses_facts_and_freezes_document(client, db, book):
     preview = await client.post(path + "/preview", json=options)
     assert preview.status_code == 200, preview.text
     assert preview.json()["lines"][0]["amount"] == "100.01"
+    assert preview.json()["lines"][0]["dimensions"]["counterparty_id"] == "1"
+    client.test_app.state.core.services.procurement_source = ProcurementSourceService()
+    accounting_preview = await client.post(
+        f"/accounting/organizations/{book[0]}/receipts/{path.rsplit('/', 1)[1]}/preview",
+        json=options)
+    assert accounting_preview.status_code == 200, accounting_preview.text
+    assert accounting_preview.json()["digest"] == preview.json()["digest"]
     confirmed = {**options, "digest": preview.json()["digest"]}
     first = await client.post(path + "/confirm", json=confirmed)
     party = await db.get(Counterparty, 1)
@@ -263,6 +271,12 @@ async def test_source_posting_uses_facts_and_freezes_document(client, db, book):
     again = await client.post(path + "/confirm", json=confirmed)
     assert first.status_code == again.status_code == 201, first.text
     assert first.json()["entry_id"] == again.json()["entry_id"]
+    assert (await db.get(Entry, first.json()["entry_id"])).rule_version == "purchase-byn-v2"
+    posting = await db.get(ReceiptPosting, int(path.rsplit("/", 1)[1]))
+    assert posting.options["supplier_counterparty_id"] == 1
+    basis = await ProcurementSourceService().posted_receipt_basis(
+        db, book[0], posting.receipt_id, 2)
+    assert basis["entry_id"] == first.json()["entry_id"]
     assert await db.scalar(select(func.count()).select_from(Entry)) == 1
     assert await db.scalar(select(func.count()).select_from(ReceiptPosting)) == 1
     assert (await client.put(path, json={"expected_version": 1, "document": document()})).status_code == 409

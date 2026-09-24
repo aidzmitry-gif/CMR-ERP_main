@@ -35,6 +35,7 @@ def purchase(book):
 async def test_receipt_has_inventory_and_input_vat_without_expense_or_deduction(client, db, purchase_book):
     prefix = f"/accounting/organizations/{purchase_book[0]}/purchases"
     data = purchase(purchase_book)
+    assert (await client.post(prefix + "/preview", json={**data, "counterparty_id": 1})).status_code == 422
     response = await client.post(prefix + "/preview", json=data)
     assert response.status_code == 200, response.text
     assert response.json()["vat_deducted"] is False
@@ -47,6 +48,7 @@ async def test_receipt_has_inventory_and_input_vat_without_expense_or_deduction(
     repeat = await client.post(prefix + "/confirm", json=data)
     assert first.status_code == repeat.status_code == 201
     assert first.json()["id"] == repeat.json()["id"]
+    assert (await db.get(models.Entry, first.json()["id"])).rule_version == "purchase-byn-v1"
     result = await reports.report(db, purchase_book[0], date(2026, 9, 1), date(2026, 9, 30))
     assert result["pnl"]["profit"] == "0.00"
     assert result["cashflow"]["closing"] == "0.00"
@@ -54,6 +56,7 @@ async def test_receipt_has_inventory_and_input_vat_without_expense_or_deduction(
     detail = await client.get(f"/accounting/organizations/{purchase_book[0]}/entries/{first.json()['id']}")
     stock = [r for r in detail.json()["lines"] if r["account_code"] == "41.1"]
     assert {r["dimensions"]["lot"] for r in stock} == {"lot1", "lot2"}
+    assert all("counterparty_id" not in row["dimensions"] for row in detail.json()["lines"])
     data["items"][0]["vat_basis"] = "changed basis"
     assert (await client.post(prefix + "/confirm", json=data)).status_code == 422
 
