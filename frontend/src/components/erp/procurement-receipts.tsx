@@ -33,7 +33,7 @@ export function ProcurementReceipts({ initialOrganization, initialReceipt }: { i
         const found = rows.find(row => String(row.id) === initialOrganization);
         setOrg(found ? String(found.id) : "");
         if (!found) setError("Юрлицо из ссылки недоступно. Выберите организацию с подтверждённым доступом.");
-      } else setOrg(rows[0] ? String(rows[0].id) : "");
+      } else setOrg("");
     } }).catch((e: Error) => { if (active) setError(e.message); });
     return () => { active = false; };
   }, [initialOrganization]);
@@ -56,6 +56,7 @@ export function ProcurementReceipts({ initialOrganization, initialReceipt }: { i
       <label>Дата отражения<Input aria-label="Дата отражения" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
     </div>
     {error && <p role="alert" className="text-red-700">{error}</p>}
+    {!org && !error && <p>Выберите юрлицо перед просмотром или созданием накладной.</p>}
     {org && <ProcurementReceiptDrafts key={`draft:${org}`} org={org} initialReceipt={org === initialOrganization ? initialReceipt : undefined} accounts={current?.accounts ?? []} policyId={policy?.id} date={date} onPosted={() => setGeneration((v) => v + 1)} />}
     {org && !current && !error && <p role="status">Загрузка поступлений…</p>}
     {current && <section className="rounded-xl border border-line bg-surface p-4"><h2 className="font-semibold">Проведённые поступления с начала месяца по {date}</h2>

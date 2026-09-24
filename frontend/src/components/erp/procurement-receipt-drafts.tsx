@@ -21,15 +21,27 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], policyId, date = "", onPosted }: { org: string; initialReceipt?: string; accounts?: ReceiptAccount[]; policyId?: number; date?: string; onPosted?: () => void }) {
   const [rows, setRows] = useState<Receipt[]>([]), [document, setDocument] = useState(blank);
+  const [query, setQuery] = useState(""), [statusFilter, setStatusFilter] = useState("all");
   const [orders, setOrders] = useState<OwnedOrder[]>([]);
   const [orderError, setOrderError] = useState("");
   const [selected, setSelected] = useState<Receipt | null>(null), [busy, setBusy] = useState(false);
   const [error, setError] = useState(""), [notice, setNotice] = useState(""), [reload, setReload] = useState(0);
+  const [loadedKey, setLoadedKey] = useState("");
   const key = useRef<string | null>(null), active = useRef(true);
   const initialOpened = useRef(false);
   const [initialLoading, setInitialLoading] = useState(initialReceipt !== undefined);
   const path = `/organizations/${org}/receipt-documents`;
+  const listKey = `${path}/${reload}`;
+  const listLoaded = loadedKey === listKey;
   const dirty = selected && JSON.stringify(document) !== JSON.stringify(selected.revisions.at(-1)!.document);
+  const search = query.trim().toLocaleLowerCase("ru");
+  const visible = rows.filter((row) => {
+    const source = row.revisions.at(-1)!.document;
+    const status = row.posting ? "posted" : "draft";
+    return (statusFilter === "all" || statusFilter === status)
+      && (!search || [source.invoice_reference, source.supplier, source.document_date]
+        .some((value) => value.toLocaleLowerCase("ru").includes(search)));
+  });
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   useEffect(() => {
     let current = true;
@@ -42,6 +54,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
     let current = true;
     void request<Receipt[]>(path).then((data) => { if (current) {
       setRows(data);
+      setLoadedKey(listKey);
       if (initialReceipt !== undefined && !initialOpened.current) {
         initialOpened.current = true;
         setInitialLoading(false);
@@ -51,7 +64,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       }
     } }).catch((e: Error) => { if (current) setError(e.message); });
     return () => { current = false; };
-  }, [path, reload, initialReceipt]);
+  }, [path, listKey, initialReceipt]);
   function open(row: Receipt | null) {
     setSelected(row); setDocument(row ? structuredClone(row.revisions.at(-1)!.document) : blank());
     key.current = null; setError(""); setNotice("");
@@ -74,13 +87,24 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   }
   if (initialLoading) return <section className="space-y-3 rounded-xl border border-line bg-surface p-4"><p role="status">Загрузка накладной из ссылки…</p>{error && <><p role="alert">{error}</p><Button onClick={() => setReload(value => value + 1)}>Повторить загрузку накладной</Button></>}</section>;
   return <section className="space-y-4 rounded-xl border border-line bg-surface p-4">
-    <h2 className="font-semibold">Первичные накладные · черновики</h2>
+    <h2 className="font-semibold">Реестр первичных накладных</h2>
     <p className="text-sm text-muted">Суммы в BYN по документу поставщика. Сохранение черновика не создаёт проводки и складские движения.</p>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {orderError && <p role="alert">{orderError}</p>}
     <fieldset disabled={busy} className="space-y-3">
-      <div className="flex gap-2"><Button variant="secondary" onClick={() => open(null)}>Новая первичная накладная</Button><Button variant="secondary" onClick={() => setReload((v) => v + 1)}>Обновить черновики</Button></div>
-      <ul>{rows.map((row) => <li key={row.id}><Button variant="secondary" onClick={() => open(row)}>{row.revisions.at(-1)!.document.invoice_reference} · версия {row.version}</Button></li>)}</ul>
+      <div className="flex gap-2"><Button variant="secondary" onClick={() => open(null)}>Новая первичная накладная</Button><Button variant="secondary" onClick={() => setReload((v) => v + 1)}>Обновить реестр</Button></div>
+      <div className="grid gap-3 md:grid-cols-2"><label>Поиск по номеру, поставщику или дате<Input aria-label="Поиск накладных" value={query} onChange={(e) => setQuery(e.target.value)} /></label><label>Статус накладной<Select aria-label="Статус накладной" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="all">Все</option><option value="draft">Черновики</option><option value="posted">Проведённые</option></Select></label></div>
+      {!listLoaded && !error && <p role="status">Загрузка реестра накладных…</p>}
+      {listLoaded && <p className="text-sm text-muted">Показано {visible.length} из {rows.length} накладных выбранного юрлица за все даты.</p>}
+      {listLoaded && <ul className="divide-y divide-line">{visible.map((row) => {
+        const source = row.revisions.at(-1)!.document;
+        return <li key={row.id} className="flex flex-wrap items-center gap-2 py-2">
+          <Button variant="secondary" onClick={() => open(row)}>{source.invoice_reference} · {source.document_date} · {source.supplier}</Button>
+          <span className="text-sm">{row.posting ? "Проведена" : "Черновик"} · версия {row.version}</span>
+          {row.posting && <Link className="text-sm text-accent underline" href={`/erp/procurement/receipts/posted/${row.posting.entry_id}?org=${org}`}>Открыть проведённую накладную</Link>}
+        </li>;
+      })}</ul>}
+      {listLoaded && !visible.length && <p className="text-sm text-muted">Накладных по выбранному фильтру нет.</p>}
       {selected?.posting && <p role="status">Проведена · проводка № {selected.posting.entry_id}. Первичные данные доступны для просмотра.</p>}
       <fieldset disabled={Boolean(selected?.posting)} className="space-y-3">
       <div className="grid gap-3 md:grid-cols-3">{fields.map(([field, label]) => <label key={field}>{label}<Input type={field.endsWith("date") ? "date" : "text"} value={document[field]} onChange={(e) => setDocument({ ...document, [field]: e.target.value })} /></label>)}</div>
