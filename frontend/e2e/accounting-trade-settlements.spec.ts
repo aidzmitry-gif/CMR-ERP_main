@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 import { expect, test } from "@playwright/test";
@@ -75,8 +76,29 @@ test("60/62: бухгалтер видит документ и скачивае�
   expect(csv).toContain('"Синтетический клиент","Договор 1","Счёт 1"');
   expect(csv).toContain(',100.00,0.00,40.00,60.00,2,"11:21|12:22"');
 
+  const [template] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "Скачать пустой шаблон 1С" }).click(),
+  ]);
+  expect(await readFile(await template.path(), "utf8")).toContain("source_system,organization_id,period_start,period_end,account");
+  const header = "source_system,organization_id,period_start,period_end,account,category,counterparty,contract,settlement_document,opening_byn,debit_byn,credit_byn,closing_byn\r\n";
+  const external = `${header}1C,${orgA.id},2026-09-01,2026-09-30,62,asset,Синтетический клиент,Договор 1,Счёт 1,100.00,0.00,40.00,60.00\r\n`;
+  await page.getByLabel("Нормализованный CSV 1С").setInputFiles({
+    name: "synthetic-1c.csv", mimeType: "text/csv", buffer: Buffer.from(external),
+  });
+  await expect(page.getByRole("status").filter({ hasText: "В выбранных файлах суммы документов совпали" })).toBeVisible();
+  await expect(page.getByText(`SHA-256 его байтов: ${createHash("sha256").update(external).digest("hex")}`, { exact: false })).toBeVisible();
+  const different = `${header}1C,${orgA.id},2026-09-01,2026-09-30,62,asset,Синтетический клиент,Договор 1,Счёт 1,100.00,0.00,50.00,50.00\r\n`;
+  await page.getByLabel("Нормализованный CSV 1С").setInputFiles({
+    name: "synthetic-difference.csv", mimeType: "text/csv", buffer: Buffer.from(different),
+  });
+  await expect(page.getByRole("alert").filter({ hasText: "Расхождения: 1" })).toBeVisible();
+  await expect(page.getByText("credit_byn: ERP 40.00 / 1С 50.00 BYN")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("trade-comparison.png"), fullPage: true });
+
   await page.getByLabel("Организация", { exact: true }).selectOption(String(orgB.id));
   await expect(page.getByRole("alert").filter({ hasText: "Расхождение с ОСВ" })).toBeVisible();
+  await expect(page.getByText("synthetic-difference.csv", { exact: false })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Скачать CSV для внутренней сверки" })).toHaveCount(0);
   wrongScope = true;
   await page.getByLabel("Конец периода").fill("2026-09-29");

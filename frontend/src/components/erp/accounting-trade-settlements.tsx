@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
+import { compareTradeDocumentCsv, EXTERNAL_TRADE_HEADER, type TradeComparison } from "./accounting-trade-settlement-compare";
 
 type Movement = { entry_id: number; line_id: number; date: string; source: string; operation: string;
   source_version: number; side: "debit" | "credit"; amount_byn: string; period_bucket: "opening" | "movement";
@@ -71,14 +72,30 @@ export function buildTradeSettlementsCsv(report: Report): string {
   return `\uFEFF${[header.join(","), ...lines].join("\r\n")}\r\n`;
 }
 
+function downloadLocalCsv(contents: string, filename: string) {
+  const url = URL.createObjectURL(new Blob([contents], { type: "text/csv;charset=utf-8" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
 export function AccountingTradeSettlements({ org, start, end, onEntry }: {
   org: string; start: string; end: string; onEntry: (id: number) => void;
 }) {
   const [savedReport, setSavedReport] = useState<{ scope: string; data: Report } | null>(null);
   const [savedError, setSavedError] = useState<{ scope: string; message: string } | null>(null);
   const [savedFilter, setSavedFilter] = useState<{ scope: string; value: Filter } | null>(null);
+  const [comparison, setComparison] = useState<{ scope: string; filename: string; sha256: string;
+    result: TradeComparison } | null>(null);
+  const [comparisonError, setComparisonError] = useState<{ scope: string; message: string } | null>(null);
   const [refresh, setRefresh] = useState(0);
   const scope = `${org}/${start}/${end}/${refresh}`;
+  const currentScope = useRef(scope);
+  useEffect(() => { currentScope.current = scope; }, [scope]);
   const report = savedReport?.scope === scope ? savedReport.data : null;
   const error = savedError?.scope === scope ? savedError.message : "";
   const filter = savedFilter?.scope === scope ? savedFilter.value : "all";
@@ -87,17 +104,33 @@ export function AccountingTradeSettlements({ org, start, end, onEntry }: {
   function downloadCsv() {
     if (!report || report.organization_id !== Number(org) || report.from !== start || report.to !== end) return;
     try {
-      const blob = new Blob([buildTradeSettlementsCsv(report)], { type: "text/csv;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `trade-settlements-org-${report.organization_id}-${report.from}-${report.to}.csv`;
-      document.body.append(anchor);
-      anchor.click();
-      anchor.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+      downloadLocalCsv(buildTradeSettlementsCsv(report),
+        `trade-settlements-org-${report.organization_id}-${report.from}-${report.to}.csv`);
     } catch (reason) {
       setSavedError({ scope, message: reason instanceof Error ? reason.message : "Не удалось подготовить CSV." });
+    }
+  }
+
+  async function compareFile(file: File) {
+    const selectedScope = scope;
+    setComparison(null);
+    setComparisonError(null);
+    try {
+      if (!report || report.organization_id !== Number(org) || report.from !== start || report.to !== end) return;
+      buildTradeSettlementsCsv(report); // Requires the exact internally matched ERP population.
+      if (!file.size || file.size > 10 * 1024 * 1024) throw new Error("CSV 1С должен быть непустым и не больше 10 МБ.");
+      const bytes = await file.arrayBuffer();
+      const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)))
+        .map((byte) => byte.toString(16).padStart(2, "0")).join("");
+      let source: string;
+      try { source = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+      catch { throw new Error("CSV 1С должен быть в кодировке UTF-8."); }
+      if (currentScope.current !== selectedScope) return;
+      const result = compareTradeDocumentCsv(source, report);
+      if (currentScope.current === selectedScope) setComparison({ scope, filename: file.name, sha256, result });
+    } catch (reason) {
+      if (currentScope.current === selectedScope) setComparisonError({ scope,
+        message: reason instanceof Error ? reason.message : "Не удалось сравнить CSV 1С." });
     }
   }
 
@@ -139,6 +172,28 @@ export function AccountingTradeSettlements({ org, start, end, onEntry }: {
           {report.osv_reconciliation.missing_postings.map((posting) => <button key={posting.line_id} className="mr-3 text-accent underline" onClick={() => onEntry(posting.entry_id)}>Проводка № {posting.entry_id}, строка {posting.line_id}</button>)}
         </div>}
       {report.osv_reconciliation.status === "matched" && <div><Button variant="secondary" onClick={downloadCsv}>Скачать CSV для внутренней сверки</Button><p className="text-xs text-muted">Файл содержит данные выбранной книги и периода. Это не акт сверки и не подтверждение данных 1С.</p></div>}
+      {report.osv_reconciliation.status === "matched" && <section aria-label="Сравнение документов с 1С" className="space-y-3 rounded-lg border border-line bg-surface p-4">
+        <h3 className="font-semibold">Сравнение документов с выгрузкой 1С</h3>
+        <p className="text-sm text-muted">Нормализуйте выгрузку 1С по пустому шаблону: источник 1C, ID этой книги, выбранный период, один документ на строку и суммы в BYN. Сравнение использует точные текстовые аналитики; одноимённые объекты требуют отдельной проверки ID. Файл читается только в браузере, в ERP не отправляется. Название и совпадение сумм не доказывают происхождение файла или бухгалтерскую приёмку.</p>
+        <Button variant="secondary" onClick={() => downloadLocalCsv(`\uFEFF${EXTERNAL_TRADE_HEADER.join(",")}\r\n`, "trade-settlements-1c-template.csv")}>Скачать пустой шаблон 1С</Button>
+        <label className="block text-sm">Нормализованный CSV 1С
+          <input aria-label="Нормализованный CSV 1С" type="file" accept=".csv,text/csv" className="mt-1 block w-full text-sm"
+            onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void compareFile(file); }} />
+        </label>
+        {comparisonError?.scope === scope && <p role="alert" className="text-sm text-red-700">{comparisonError.message}</p>}
+        {comparison?.scope === scope && <div className="space-y-2 text-sm">
+          <p role={comparison.result.status === "matched" ? "status" : "alert"} className={comparison.result.status === "matched" ? "text-green-700" : "text-red-700"}>
+            {comparison.result.status === "matched" ? "В выбранных файлах суммы документов совпали." : `Расхождения: ${comparison.result.issues.length}.`}
+            {" "}ERP: {comparison.result.erp_rows}; 1С: {comparison.result.external_rows}; совпали: {comparison.result.matched_rows}. Это предварительная сверка, не акт приёмки.
+          </p>
+          <p className="break-all text-xs text-muted">Выбранный файл: {comparison.filename}; SHA-256 его байтов: {comparison.sha256}. Сверьте этот отпечаток с независимым пакетом исходных документов.</p>
+          {comparison.result.issues.map((issue, index) => <div key={`${issue.kind}:${index}`} className="rounded border border-red-200 p-2">
+            <p className="font-medium">{issue.kind === "missing_in_1c" ? "Есть в ERP, отсутствует в файле 1С" : issue.kind === "only_in_1c" ? "Есть в файле 1С, отсутствует в ERP" : "Суммы различаются"}: {issue.identity.account} · {issue.identity.counterparty} · {issue.identity.contract} · {issue.identity.document}</p>
+            {issue.differing_fields.map((field) => <p key={field}>{field}: ERP {issue.erp?.[field]} / 1С {issue.external?.[field]} BYN</p>)}
+            {issue.erp?.movements.map((movement) => <button key={movement.line_id} className="mr-3 text-accent underline" onClick={() => onEntry(movement.entry_id)}>Проводка № {movement.entry_id}, строка {movement.line_id}</button>)}
+          </div>)}
+        </div>}
+      </section>}
       {report.osv_reconciliation.status === "matched" && <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">{[
         ["Дебиторка", "receivable"], ["Кредиторка", "payable"], ["Авансы покупателей", "customer_advance"],
         ["Авансы поставщикам", "supplier_advance"], ["Не классифицировано", "unclassified"],
