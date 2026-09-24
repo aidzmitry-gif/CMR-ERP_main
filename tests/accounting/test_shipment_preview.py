@@ -97,6 +97,25 @@ async def test_shared_lot_whole_act_costs_and_tax_exactly_once_no_writes(db, boo
     assert result["confirmation_available"] is True
 
 
+@pytest.mark.parametrize("invoice_id", [27, 270])
+async def test_existing_manual_sale_on_exact_invoice_blocks_shipment_preview(db, book, posting, invoice_id):
+    receipt, raw = await fixture(db, book, posting)
+    manual = posting("historical-manual-sale", "62", "90.1", operation="inventory_sale", lines=[
+        {"account": "62", "side": "debit", "amount": "20.00",
+         "dimensions": {"settlement_document": f"sales:document:{invoice_id}"}},
+        {"account": "90.1", "side": "credit", "amount": "20.00"},
+    ])
+    await service.post(db, book[0], manual, "tester", inventory_sale=True)
+    data = shipment_preview.ShipmentPlanInput(**raw)
+    if invoice_id == 27:
+        with pytest.raises(service.AccountingError, match="manual sale posting"):
+            await shipment_preview.prepare(db, book[0], receipt, data)
+        assert await db.scalar(select(models.SourceControl.entry_id)) is None
+    else:
+        assert (await shipment_preview.prepare(db, book[0], receipt, data))["source"].startswith(
+            f"wms:physical-shipment:{book[0]}:")
+
+
 @pytest.mark.parametrize(
     "case",
     [

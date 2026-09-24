@@ -11,7 +11,7 @@ from pydantic import Field
 from sqlalchemy import select
 
 from modules.accounting import inventory_cost, sales, service
-from modules.accounting.models import SourceControl
+from modules.accounting.models import Entry, Line, SourceControl
 from modules.accounting.schemas import (
     Code,
     Input,
@@ -64,6 +64,14 @@ async def prepare(session, org_id, receipt, data: ShipmentPlanInput, *, procurem
     snap = receipt["snapshot"]
     if receipt["digest"] != data.expected_act_digest or snap["organization_id"] != org_id:
         raise service.AccountingError("Physical shipment identity changed")
+    linked_manual_sale = await session.scalar(select(Entry.id).join(Line, Line.entry_id == Entry.id).where(
+        Entry.organization_id == org_id,
+        Entry.operation == "inventory_sale",
+        ~Entry.source.startswith("wms:physical-shipment:"),
+        Line.dimensions["settlement_document"].as_string() == f"sales:document:{snap['document_id']}",
+    ).limit(1))
+    if linked_manual_sale is not None:
+        raise service.AccountingError("Invoice has a manual sale posting; reconcile it before shipment posting")
     source = f"wms:physical-shipment:{org_id}:{receipt['source_key']}"
     control = await session.scalar(
         select(SourceControl).where(

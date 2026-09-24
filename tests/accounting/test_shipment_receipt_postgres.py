@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 
-from modules.accounting import models, service, shipment_commands, shipment_preview
+from modules.accounting import models, sales, service, shipment_commands, shipment_preview
 from modules.accounting.schemas import PostingInput
 from tests.accounting.test_postgres import pg_factory  # noqa: F401
 from tests.integration.test_invoice_physical_shipments_postgres import physical_pg  # noqa: F401
@@ -148,6 +148,31 @@ async def test_sql_shared_lot_and_zero_cent_distribution(physical_pg, stock_cost
         )
         await session.commit()
         assert saved.snapshot["costs"][0]["issue_cost_byn"] == stock_cost
+
+
+async def test_historical_manual_sale_on_invoice_blocks_physical_shipment_posting(physical_pg):
+    factory, org, act, data = await prepare_accounting(physical_pg)
+    commercial = data.commercial_lines[0]
+    document = sales.SaleDocument(
+        source="historical-manual-sale", source_version=1,
+        document_date=data.document_date, operation_date=date.fromisoformat(act["snapshot"]["operation_date"]),
+        posting_date=data.posting_date, policy_id=data.policy_id, explanation="Historical manual sale",
+        account="41.2", warehouse="W", sku="A", lot="L", quantity="1",
+        expense_account="90.4", expense_dimensions={},
+        **commercial.model_dump(exclude={"line_no", "sku_identity"}),
+    )
+    async with factory() as session:
+        prepared = await sales.prepare(session, org, document)
+        await sales.confirm(session, org, document, prepared["cost"]["basis_digest"],
+                            prepared["digest"], "allocator")
+        await session.commit()
+    async with factory() as session:
+        with pytest.raises(service.AccountingError, match="manual sale posting"):
+            await shipment_preview.prepare(session, org, act, data)
+        assert await session.scalar(select(models.SourceControl.entry_id).where(
+            models.SourceControl.organization_id == org,
+            models.SourceControl.source == f"wms:physical-shipment:{org}:{act['source_key']}",
+        )) is None
 
 
 async def test_late_inventory_change_in_same_transaction_invalidates_receipt(physical_pg):

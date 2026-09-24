@@ -115,6 +115,33 @@ async def test_accountant_sale_requires_current_sku_snapshot(client, db, book, p
     assert await db.scalar(select(func.count()).select_from(models.InventorySaleReceipt)) == 0
 
 
+async def test_new_manual_sale_cannot_claim_crm_invoice_or_shipment_source(client, db, book, posting):
+    data = await setup_sale(db, book, posting)
+    base = f"/accounting/organizations/{book[0]}/sales/posting-preview"
+    linked = {**data, "buyer_dimensions": {**data["buyer_dimensions"],
+        "settlement_document": "sales:document:27"}}
+    response = await client.post(base, json=linked)
+    assert response.status_code == 422 and "physical shipment" in response.text
+    for source in ("sales:document:27", f"wms:physical-shipment:{book[0]}:some-key"):
+        response = await client.post(base, json={**data, "source": source})
+        assert response.status_code == 422 and "physical shipment" in response.text
+    assert await db.scalar(select(func.count()).select_from(models.InventorySaleReceipt)) == 0
+
+
+async def test_historical_crm_linked_manual_sale_exact_replay_remains_available(client, db, book, posting):
+    data = await setup_sale(db, book, posting)
+    old = {**data, "buyer_dimensions": {**data["buyer_dimensions"],
+        "settlement_document": "sales:document:27"}}
+    document = sales.SaleDocument.model_validate(old)
+    prepared = await sales.prepare(db, book[0], document)
+    first = await sales.confirm(db, book[0], document, prepared["cost"]["basis_digest"],
+                                prepared["digest"], "tester")
+    await db.commit()
+    repeated = await client.post(f"/accounting/organizations/{book[0]}/sales/confirm", json={**old,
+        "basis_digest": prepared["cost"]["basis_digest"], "digest": prepared["digest"]})
+    assert repeated.status_code == 201 and repeated.json()["id"] == first.id
+
+
 async def test_historical_sale_without_sku_id_replays_after_catalog_change(client, db, book, posting):
     data = await setup_sale(db, book, posting)
     old = {key: value for key, value in data.items() if key != "sku_identity"}

@@ -106,6 +106,13 @@ def belongs(code, root):
     return code == root or code.startswith(root + ".")
 
 
+def require_manual_origin(document):
+    settlement = document.buyer_dimensions.get("settlement_document", "")
+    if (document.source.startswith(("sales:document:", "wms:physical-shipment:"))
+            or re.fullmatch(r"sales:document:[1-9][0-9]*", settlement)):
+        raise service.AccountingError("CRM invoice sales must be posted from their physical shipment act")
+
+
 def commercial_lines(document):
     if document.net_amount <= 0 or not document.vat_basis.strip():
         raise service.AccountingError("Positive sale amount and an explicit VAT basis are required")
@@ -156,6 +163,8 @@ def posting_for(document, cost):
 
 async def prepare(session, org_id, document, *, procurement=None, source_allocations=False,
                   require_current_buyer=False, require_current_sku=False):
+    if require_current_sku:
+        require_manual_origin(document)
     if require_current_buyer:
         await verified_buyer(session, document)
     if require_current_sku:
