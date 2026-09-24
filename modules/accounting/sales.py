@@ -107,10 +107,10 @@ def belongs(code, root):
 
 
 def require_manual_origin(document):
-    settlement = document.buyer_dimensions.get("settlement_document", "")
-    if (document.source.startswith(("sales:document:", "wms:physical-shipment:"))
-            or re.fullmatch(r"sales:document:[1-9][0-9]*", settlement)):
-        raise service.AccountingError("CRM invoice sales must be posted from their physical shipment act")
+    reserved = ("sales:document:", "wms:physical-shipment:")
+    for value in (document.source, document.buyer_dimensions.get("settlement_document", "")):
+        if value.strip().casefold().startswith(reserved):
+            raise service.AccountingError("CRM invoice sales must be posted from their physical shipment act")
 
 
 def commercial_lines(document):

@@ -118,11 +118,14 @@ async def test_accountant_sale_requires_current_sku_snapshot(client, db, book, p
 async def test_new_manual_sale_cannot_claim_crm_invoice_or_shipment_source(client, db, book, posting):
     data = await setup_sale(db, book, posting)
     base = f"/accounting/organizations/{book[0]}/sales/posting-preview"
-    linked = {**data, "buyer_dimensions": {**data["buyer_dimensions"],
-        "settlement_document": "sales:document:27"}}
-    response = await client.post(base, json=linked)
-    assert response.status_code == 422 and "physical shipment" in response.text
-    for source in ("sales:document:27", f"wms:physical-shipment:{book[0]}:some-key"):
+    for reference in ("sales:document:27", "sales:document:027", " sales:document: 27 ",
+                      "SALES:DOCUMENT:27", f"wms:physical-shipment:{book[0]}:some-key"):
+        linked = {**data, "buyer_dimensions": {**data["buyer_dimensions"],
+            "settlement_document": reference}}
+        response = await client.post(base, json=linked)
+        assert response.status_code == 422 and "physical shipment" in response.text
+    for source in ("sales:document:27", "sales:document:027", " SALES:DOCUMENT:27 ",
+                   f"wms:physical-shipment:{book[0]}:some-key"):
         response = await client.post(base, json={**data, "source": source})
         assert response.status_code == 422 and "physical shipment" in response.text
     assert await db.scalar(select(func.count()).select_from(models.InventorySaleReceipt)) == 0
