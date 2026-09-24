@@ -16,6 +16,14 @@ function openPage(section: string, page: string) {
   fireEvent.click(screen.getByRole("button", { name: section, exact: true }));
   if (section !== page) fireEvent.click(screen.getByRole("button", { name: page, exact: true }));
 }
+function fillManualOperation() {
+  fireEvent.change(screen.getByLabelText("Основание"), { target: { value: "Справка 1" } });
+  fireEvent.change(screen.getByLabelText("Содержание"), { target: { value: "Поступление материалов" } });
+  fireEvent.change(screen.getByLabelText("Счёт 1"), { target: { value: "41" } });
+  fireEvent.change(screen.getByLabelText("Счёт 2"), { target: { value: "60" } });
+  fireEvent.change(screen.getByLabelText("Сумма 1"), { target: { value: "100.00" } });
+  fireEvent.change(screen.getByLabelText("Сумма 2"), { target: { value: "100.00" } });
+}
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
@@ -25,7 +33,12 @@ beforeEach(() => {
     if (input.endsWith("/policies")) return respond([{ id: 1, effective_from: "2020-01-01", reference: "Test", normative_verified: false }]);
     if (input.includes("/reports?")) return respond(input.includes("/2/") ? { ...report, organization_id: 2, trial_balance: [], movements: [] } : report);
     if (input.endsWith("/preview")) { const body = JSON.parse(String(init?.body)); return respond({ digest: "test", explanation: body.explanation, lines: body.lines, normative_verified: false }); }
-    if (input.endsWith("/entries")) return respond({ id: 6 });
+    if (input.endsWith("/entries")) {
+      const body = JSON.parse(String(init?.body));
+      return respond({ id: 6, organization_id: 1, source: body.source,
+        source_version: body.source_version, operation: body.operation,
+        policy_id: body.policy_id, posting_date: body.posting_date, digest: "test" });
+    }
     if (input.endsWith("/entries/5")) return respond({ id: 5, source: "Поступление 1", explanation: "Контрольное поступление", posting_date: "2026-09-01", lines: [{ id: 1, account_code: "41", account_title: "Товары", side: "debit", amount: "100.00" }] });
     throw new Error(input);
   });
@@ -178,18 +191,50 @@ describe("AccountingView", () => {
     openPage("Отчёты", "ОСВ и отчёты");
     await screen.findByText("Оборотно-сальдовая ведомость");
     openPage("Документы", "Ручная операция");
-    fireEvent.change(screen.getByLabelText("Основание"), { target: { value: "Справка 1" } });
-    fireEvent.change(screen.getByLabelText("Содержание"), { target: { value: "Поступление материалов" } });
-    fireEvent.change(screen.getByLabelText("Счёт 1"), { target: { value: "41" } });
-    fireEvent.change(screen.getByLabelText("Счёт 2"), { target: { value: "60" } });
-    fireEvent.change(screen.getByLabelText("Сумма 1"), { target: { value: "100.00" } });
-    fireEvent.change(screen.getByLabelText("Сумма 2"), { target: { value: "100.00" } });
+    fillManualOperation();
     expect(screen.queryByText("Подтвердить и провести")).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("Проверить проводки"));
     fireEvent.click(await screen.findByText("Подтвердить и провести"));
     expect(await screen.findByText("Операция № 6 проведена.")).toBeInTheDocument();
     const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/entries"));
     expect(JSON.parse(call?.[1].body).lines[0].amount).toBe("100.00");
+  });
+  it("closes a manual operation only after a matching server receipt", async () => {
+    const original = fetchMock.getMockImplementation()!;
+    let finish!: (value: unknown) => void;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url.endsWith("/entries")
+      ? new Promise((resolve) => { finish = resolve; }) : original(url, init));
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    openPage("Документы", "Ручная операция");
+    fillManualOperation();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Провести и закрыть" }));
+    expect(screen.getByLabelText("Основание")).toHaveValue("Справка 1");
+    expect(screen.getByRole("button", { name: "Провести и закрыть" })).toBeDisabled();
+    const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/entries"));
+    const body = JSON.parse(String(call?.[1]?.body));
+    await act(async () => finish({ ok: true, json: async () => ({ id: 6, organization_id: 1,
+      source: body.source, source_version: body.source_version, operation: body.operation,
+      policy_id: body.policy_id, posting_date: body.posting_date, digest: "test" }) }));
+    expect(await screen.findByText("Операция № 6 проведена, форма закрыта.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Основание")).not.toBeInTheDocument();
+  });
+  it("keeps the manual operation open when the response belongs to another book", async () => {
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url.endsWith("/entries")
+      ? respond({ id: 6, organization_id: 2, source: "Справка 1", source_version: 1,
+        operation: "manual", policy_id: 1, posting_date: new Date().toISOString().slice(0, 10), digest: "test" })
+      : original(url, init));
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    openPage("Документы", "Ручная операция");
+    fillManualOperation();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Провести и закрыть" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("ERP не подтвердила проведение этой операции");
+    expect(screen.getByLabelText("Основание")).toHaveValue("Справка 1");
+    expect(screen.getByRole("button", { name: "Провести и закрыть" })).toBeEnabled();
   });
   it("clears the previous organization report on selection change", async () => {
     render(<AccountingView />);

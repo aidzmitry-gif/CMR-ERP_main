@@ -43,6 +43,7 @@ type Policy = { id: number; effective_from: string; reference: string; normative
 type JournalLine = CurrencyFields & { account: string; title?: string; side: "debit" | "credit"; amount: string; dimensions: Record<string, string>; cash_activity?: string };
 type Posting = { source: string; source_version: number; operation: string; document_date: string; operation_date: string; posting_date: string; policy_id: number; correction_of?: number; rule_version: string; explanation: string; lines: JournalLine[] };
 type Preview = { digest: string; explanation: string; lines: JournalLine[]; normative_verified: boolean };
+type PostedEntryReceipt = { id: number; organization_id: number; source: string; source_version: number; operation: string; policy_id: number; posting_date: string; digest: string };
 type Trial = ExportTrial;
 type Movement = AccountMovement;
 type Report = { from: string; to: string; organization_id: number; status: string; pending_documents: number; review_items?: { code: string; count: number; message: string }[]; trial_balance: Trial[]; movements: Movement[]; opening_movements: Movement[]; balance: Record<string, string>; pnl: { income: string; expenses: string; profit: string }; cashflow: Record<string, string> };
@@ -105,6 +106,14 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
     throw new Error(detail ?? "Проверьте заполнение полей и права доступа.");
   }
   return data as T;
+}
+
+function confirmedManualEntry(value: PostedEntryReceipt, organization: string, posting: Posting, preview: Preview): boolean {
+  return Number.isSafeInteger(value?.id) && value.id > 0
+    && String(value.organization_id) === organization
+    && value.source === posting.source && value.source_version === posting.source_version
+    && value.operation === posting.operation && value.policy_id === posting.policy_id
+    && value.posting_date === posting.posting_date && value.digest === preview.digest;
 }
 
 export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?: string; suggestedEntry?: string }) {
@@ -215,11 +224,27 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     finally { if (token === generation.current) setBusy(false); }
   }
 
-  async function post() {
+  async function post(closeAfterPost = false) {
     if (!prepared || !preview) return;
     const token = generation.current;
+    const posting = prepared;
+    const checked = preview;
     setBusy(true); setError("");
-    try { const result = await request<{ id: number }>(`/organizations/${org}/entries`, prepared); if (token === generation.current) { await refresh(); setNotice(`Операция № ${result.id} проведена.`); } }
+    try {
+      const result = await request<PostedEntryReceipt>(`/organizations/${org}/entries`, posting);
+      if (!confirmedManualEntry(result, org, posting, checked)) {
+        throw new Error("ERP не подтвердила проведение этой операции. Форма и проверенный пакет оставлены открытыми для сверки.");
+      }
+      if (token === generation.current) {
+        await refresh();
+        if (closeAfterPost) {
+          setSource(""); setSourceVersion(1); setCorrectionOf(""); setExplanation("");
+          setLines([{ account: "", side: "debit", amount: "", dimensions: {} }, { account: "", side: "credit", amount: "", dimensions: {} }]);
+          setTab("reports");
+        }
+        setNotice(`Операция № ${result.id} проведена${closeAfterPost ? ", форма закрыта" : ""}.`);
+      }
+    }
     catch (e) { if (token === generation.current) setError((e as Error).message); }
     finally { setBusy(false); }
   }
@@ -307,7 +332,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
       <div className="grid gap-3 md:grid-cols-4"><label className="text-sm">Дата документа<Input aria-label="Дата документа" type="date" value={documentDate} disabled={locked} onChange={(e) => { invalidatePreview(); setDocumentDate(e.target.value); }} /></label><label className="text-sm">Дата хозяйственной операции<Input aria-label="Дата хозяйственной операции" type="date" value={economicDate} disabled={locked} onChange={(e) => { invalidatePreview(); setEconomicDate(e.target.value); }} /></label><label className="text-sm">Версия документа<Input aria-label="Версия документа" type="number" min="1" step="1" value={sourceVersion} disabled={locked} onChange={(e) => { invalidatePreview(); setSourceVersion(Number(e.target.value)); }} /></label><label className="text-sm">Исправляет операцию №<Input aria-label="Исправляет операцию" type="number" min="1" step="1" value={correctionOf} disabled={locked} onChange={(e) => { invalidatePreview(); setCorrectionOf(e.target.value); }} placeholder="Если это исправление" /></label></div>
       {lines.map((line, i) => <fieldset key={i} disabled={locked} className="space-y-2 rounded-lg border border-line p-3"><legend className="text-sm">Строка {i + 1}</legend><div className="grid gap-3 md:grid-cols-3"><Select aria-label={`Сторона ${i + 1}`} value={line.side} onChange={(e) => changeLine(i, { side: e.target.value as "debit" | "credit" })}><option value="debit">Дебет</option><option value="credit">Кредит</option></Select><Select aria-label={`Счёт ${i + 1}`} value={line.account} onChange={(e) => changeLine(i, { account: e.target.value, dimensions: {}, cash_activity: undefined, currency: "BYN", original_amount: undefined, rate: undefined, rate_scale: undefined, rate_date: undefined, rate_source: undefined, quantity: undefined })}><option value="">Выберите счёт</option>{accounts.map((a) => <option key={a.id} value={a.code}>{a.code} · {a.title}</option>)}</Select><Input aria-label={`Сумма ${i + 1}`} inputMode="decimal" value={line.amount} placeholder="0.00 BYN" onChange={(e) => changeLine(i, { amount: e.target.value })} /></div>{accounts.find((a) => a.code === line.account)?.required_dimensions.map((dimension) => <label key={dimension} className="block text-sm">{labels[dimension] || dimension}<Input value={line.dimensions[dimension] || ""} onChange={(e) => changeLine(i, { dimensions: { ...line.dimensions, [dimension]: e.target.value } })} /></label>)}{accounts.find((a) => a.code === line.account)?.cash && <label className="block text-sm">Вид денежного потока<Select value={line.cash_activity || ""} onChange={(e) => changeLine(i, { cash_activity: e.target.value })}><option value="">Выберите вид</option><option value="operating">Текущая деятельность</option><option value="investing">Инвестиционная</option><option value="financing">Финансовая</option><option value="internal">Внутреннее перемещение</option></Select></label>}<AccountingCurrencyFields value={line} currency={accounts.find((a) => a.code === line.account)?.currency_tracking ?? false} quantity={accounts.find((a) => a.code === line.account)?.quantity_tracking ?? false} onChange={(patch) => changeLine(i, patch)} /></fieldset>)}
       <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={locked} onClick={() => { invalidatePreview(); setLines([...lines, { account: "", side: "debit", amount: "", dimensions: {} }]); }}>Добавить строку</Button><Button disabled={locked || !org || !source || !explanation} onClick={() => void prepare()}>Проверить проводки</Button></div>
-      {preview && <div className="rounded-xl border border-accent p-4"><h3 className="font-semibold">Проверенные проводки</h3><p className="my-2">{preview.explanation}</p>{preview.lines.map((line, i) => <p key={i}>{line.side === "debit" ? "Дт" : "Кт"} {line.account} · {line.title} — {line.amount} BYN</p>)}{!preview.normative_verified && <p className="my-2 text-sm text-muted">Нормативная база не подтверждена: закрытие периода будет недоступно.</p>}<Button className="mt-3" disabled={locked} onClick={() => void post()}>Подтвердить и провести</Button></div>}
+      {preview && <div className="rounded-xl border border-accent p-4"><h3 className="font-semibold">Проверенные проводки</h3><p className="my-2">{preview.explanation}</p>{preview.lines.map((line, i) => <p key={i}>{line.side === "debit" ? "Дт" : "Кт"} {line.account} · {line.title} — {line.amount} BYN</p>)}{!preview.normative_verified && <p className="my-2 text-sm text-muted">Нормативная база не подтверждена: закрытие периода будет недоступно.</p>}<div className="mt-3 flex flex-wrap gap-2"><Button disabled={locked} onClick={() => void post()}>Подтвердить и провести</Button><Button variant="secondary" disabled={locked} onClick={() => void post(true)}>Провести и закрыть</Button></div></div>}
     </section>}
     {detail && <section aria-label="Карточка проводки" className="min-w-0 break-words rounded-xl border border-accent bg-surface p-4">
       <div className="flex flex-wrap justify-between gap-2"><h2 className="font-semibold">Операция № {detail.id}</h2><Button variant="ghost" onClick={() => { entryGeneration.current += 1; setDetail(null); }}>Закрыть карточку</Button></div>
