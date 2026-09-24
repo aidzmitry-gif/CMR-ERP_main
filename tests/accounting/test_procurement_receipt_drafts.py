@@ -15,6 +15,34 @@ def document():
                        "vat_basis": "Synthetic invoice fact"}]}
 
 
+async def test_catalog_supplier_snapshot_stays_in_revision_and_rejects_drift(client, db, book):
+    from modules.procurement.models import Supplier
+
+    async with db.bind.begin() as connection:
+        await connection.run_sync(lambda sync: Supplier.metadata.create_all(
+            sync, tables=[Supplier.__table__]))
+    supplier = Supplier(name="Selected supplier", unp="190000001", status="active")
+    db.add(supplier)
+    await db.commit()
+    data = {**document(), "supplier": supplier.name,
+            "supplier_id": supplier.id, "supplier_unp": supplier.unp}
+    path = f"/procurement/organizations/{book[0]}/receipt-documents"
+    created = await client.post(path, json={"key": "catalog-supplier", "document": data})
+    assert created.status_code == 201, created.text
+    assert created.json()["revisions"][0]["document"]["supplier_id"] == supplier.id
+    supplier.name = "Renamed supplier"
+    await db.commit()
+    replay = await client.post(path, json={"key": "catalog-supplier", "document": data})
+    assert replay.status_code == 201 and replay.json()["id"] == created.json()["id"]
+    assert replay.json()["revisions"][0]["document"]["supplier"] == "Selected supplier"
+    stale = await client.post(path, json={"key": "new-source", "document": data})
+    assert stale.status_code == 409
+    edited = await client.put(f"{path}/{created.json()['id']}",
+                              json={"expected_version": 1, "document": data})
+    assert edited.status_code == 409
+    assert len((await client.get(path)).json()) == 1
+
+
 async def test_order_line_without_order_rejected_and_legacy_payload_unchanged(client, book):
     from modules.procurement.receipt_documents import ReceiptContent
     data = document()

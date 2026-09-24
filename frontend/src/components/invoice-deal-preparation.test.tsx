@@ -11,6 +11,8 @@ function fixture({ assigned = false, bound = false } = {}) {
   const fetcher = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
     if (url.endsWith("ownership-preview")) return response({ assigned: owned, snapshot });
     if (url.endsWith("/ownership")) { owned = true; return response({ organization_id: 7, deal_id: 1, ...JSON.parse(init!.body as string), snapshot, evidence: "Ownership proof", actor: "chief" }); }
+    if (url.includes("/client-options?")) return response({ organization_id: 7, deal_id: 1,
+      items: [{ id: 12, name: "Exact buyer", unp: "123", revision: 1 }], truncated: false });
     if (url.includes("client-binding-preview")) return response({ assigned: false, snapshot: bindingSnapshot, binding: null });
     if (url.endsWith("/client-binding")) { confirmed = true; return response({ organization_id: 7, deal_id: 1, counterparty_id: 12, snapshot: bindingSnapshot, evidence: "Buyer proof", actor: "chief", created_at: "2026-09-10" }); }
     if (url.includes("/document-register?") && !owned) return response({}, 404);
@@ -36,7 +38,9 @@ it("unbound converted deal requires both explicit confirmations with no hidden m
   await inspect(); await screen.findByLabelText("Основание принадлежности организации");
   expect(fetcher.mock.calls.filter(([, i]) => i?.method === "POST")).toHaveLength(0);
   await claim();
-  fireEvent.change(await screen.findByLabelText("ID клиента для привязки"), { target: { value: "12" } });
+  fireEvent.change(await screen.findByLabelText("Поиск покупателя в справочнике"), { target: { value: "Exact buyer" } });
+  await screen.findByRole("option", { name: "Exact buyer · 123 · ID 12" });
+  fireEvent.change(screen.getByLabelText("Покупатель из справочника"), { target: { value: "12" } });
   fireEvent.click(screen.getByText("Просмотреть привязку клиента"));
   fireEvent.change(await screen.findByLabelText("Основание привязки клиента"), { target: { value: "Buyer proof" } });
   fireEvent.click(screen.getByRole("button", { name: "Подтвердить клиента сделки" }));
@@ -78,7 +82,7 @@ it("unknown ownership survives reopen; later 409 retains exact command until suc
   fireEvent.click(await screen.findByText("Повторить исходное подтверждение организации")); await screen.findByRole("alert");
   expect(loadOwnership("1")?.body).toBe(first[1]!.body);
   fireEvent.click(screen.getByText("Повторить исходное подтверждение организации"));
-  await screen.findByLabelText("ID клиента для привязки");
+  await screen.findByLabelText("Покупатель из справочника");
   const sends = f.mock.calls.filter(([, i]) => i?.method === "POST"); expect(sends).toHaveLength(3);
   expect(sends[1]).toEqual(first); expect(sends[2]).toEqual(first); expect(loadOwnership("1")).toBeNull();
 });
