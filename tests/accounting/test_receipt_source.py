@@ -1,5 +1,7 @@
+import pytest
 from sqlalchemy import func, select
 
+from core.domain.models import User
 from core.services.auth import CurrentUser, get_current_user
 from modules.accounting.models import AccessGrant, Entry
 from modules.procurement.receipt_documents import (
@@ -11,6 +13,8 @@ from modules.procurement.receipt_documents import (
 from modules.procurement.source_gateway import ProcurementSourceService
 from tests.accounting.test_procurement_receipt_drafts import document
 
+pytestmark = pytest.mark.usefixtures("receipt_catalog_sku")
+
 
 async def prepare(client, db, book):
     result = await client.post(f"/procurement/organizations/{book[0]}/receipt-documents",
@@ -18,6 +22,7 @@ async def prepare(client, db, book):
     assert result.status_code == 201
     receipt_id = result.json()["id"]
     client.test_app.state.core.services.procurement_source = ProcurementSourceService()
+    db.add(User(username="reader", full_name="Read-only accountant", role="finance", status="active"))
     db.add(AccessGrant(organization_id=book[0], subject="reader", role="reader"))
     await db.commit()
     client.test_app.dependency_overrides[get_current_user] = lambda: CurrentUser("reader", ["finance"])

@@ -1,10 +1,12 @@
 import pytest
 from sqlalchemy import func, select
 
-from core.domain.models import Counterparty
+from core.domain.models import Counterparty, Sku
 from core.services.auth import CurrentUser, get_current_user
 from modules.accounting.models import AccessGrant, Entry
 from modules.procurement.receipt_documents import ReceiptRevision
+
+pytestmark = pytest.mark.usefixtures("receipt_catalog_sku")
 
 
 def document():
@@ -12,9 +14,84 @@ def document():
             "operation_date": "2026-09-02", "supplier": "supplier1", "supplier_id": 1,
             "supplier_unp": "190000001", "contract": "contract1",
             "warehouse": "warehouse1", "explanation": "Synthetic primary invoice",
-            "items": [{"sku": "sku1", "lot": "lot1", "quantity": "2.000001",
+            "items": [{"sku_id": 1, "sku_title": "Synthetic receipt item", "sku": "sku1", "unit": "шт",
+                       "lot": "lot1", "quantity": "2.000001",
                        "net_amount": "100.01", "vat_rate": "20", "vat_amount": "20.00",
                        "vat_basis": "Synthetic invoice fact"}]}
+
+
+async def ensure_receipt_catalog_sku(session, *, unit="шт"):
+    connection = await session.connection()
+
+    def create_catalog(sync):
+        Sku.metadata.tables["ref_nomenclature_category"].create(sync, checkfirst=True)
+        Sku.__table__.create(sync, checkfirst=True)
+
+    await connection.run_sync(create_catalog)
+    sku = await session.get(Sku, 1)
+    if sku is None:
+        session.add(Sku(id=1, code="sku1", title="Synthetic receipt item", unit=unit, is_active=True))
+    else:
+        sku.unit = unit
+    await session.flush()
+
+
+async def test_receipt_sku_selection_freezes_snapshot_and_rejects_catalog_drift(client, db, book):
+    path = f"/procurement/organizations/{book[0]}/receipt-documents"
+    facts = document()
+    old_text = {**facts, "items": [{k: v for k, v in facts["items"][0].items()
+                                   if k not in {"sku_id", "sku_title"}}]}
+    assert (await client.post(path, json={"key": "unbound-item", "document": old_text})).status_code == 422
+
+    sku = await db.get(Sku, 1)
+    sku.title = "Renamed catalogue item"
+    await db.commit()
+    assert (await client.post(path, json={"key": "stale-item", "document": facts})).status_code == 409
+    sku.title = "Synthetic receipt item"
+    await db.commit()
+    created = await client.post(path, json={"key": "bound-item", "document": facts})
+    assert created.status_code == 201, created.text
+    assert created.json()["revisions"][0]["document"]["items"][0]["sku_id"] == 1
+
+    sku.title = "Renamed catalogue item"
+    await db.commit()
+    replay = await client.post(path, json={"key": "bound-item", "document": facts})
+    assert replay.status_code == 201 and replay.json()["id"] == created.json()["id"]
+    assert replay.json()["revisions"][0]["document"]["items"][0]["sku_title"] == "Synthetic receipt item"
+    assert (await client.put(f"{path}/{created.json()['id']}", json={
+        "expected_version": 1, "document": facts,
+    })).status_code == 409
+
+
+async def test_old_text_sku_draft_needs_explicit_selection_before_posting_or_warehouse(client, db, book):
+    from modules.procurement.receipt_documents import ReceiptDocument
+    from modules.procurement.source_gateway import ProcurementSourceService
+
+    facts = document()
+    legacy = {**facts, "items": [{k: v for k, v in facts["items"][0].items()
+                                  if k not in {"sku_id", "sku_title"}}]}
+    row = ReceiptDocument(organization_id=book[0], source_key="legacy-text-sku",
+                          current_version=1, status="draft", created_by="historical")
+    db.add(row)
+    await db.flush()
+    receipt_id = row.id
+    db.add(ReceiptRevision(receipt_id=receipt_id, version=1, document=legacy, actor="historical"))
+    await db.commit()
+    path = f"/procurement/organizations/{book[0]}/receipt-documents/{receipt_id}"
+    replay = await client.post(path.rsplit("/", 1)[0], json={"key": "legacy-text-sku", "document": legacy})
+    assert replay.status_code == 201 and replay.json()["id"] == receipt_id
+    preview = await client.post(path + "/preview", json={
+        "expected_version": 1, "posting_date": "2026-09-03", "policy_id": book[1],
+        "settlement_account": "60", "vat_account": None, "inventory_accounts": ["41"],
+    })
+    assert preview.status_code == 409 and "SKU catalogue" in preview.text
+    with pytest.raises(ValueError, match="SKU catalogue"):
+        await ProcurementSourceService().warehouse_receipt_source(db, book[0], receipt_id, 1)
+    edited = await client.put(path, json={"expected_version": 1, "document": facts})
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["version"] == 2
+    assert "sku_id" not in edited.json()["revisions"][0]["document"]["items"][0]
+    assert edited.json()["revisions"][1]["document"]["items"][0]["sku_id"] == 1
 
 
 async def test_catalog_supplier_snapshot_stays_in_revision_and_rejects_drift(client, db, book):
@@ -232,6 +309,7 @@ async def source_options(client, db, book, *, unit=None):
     from datetime import date
 
     from modules.accounting.models import Account
+    await ensure_receipt_catalog_sku(db, unit=unit or "шт")
     db.add(Account(organization_id=book[0], code="41.2", title="Synthetic goods", category="asset", valid_from=date(2026, 1, 1), required_dimensions=[], currency_tracking=False, quantity_tracking=True, cash=False, normative_ref="synthetic"))
     await db.commit()
     data = document()

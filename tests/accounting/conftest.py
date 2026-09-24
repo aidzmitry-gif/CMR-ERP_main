@@ -74,6 +74,14 @@ async def db():
 
 
 @pytest_asyncio.fixture
+async def receipt_catalog_sku(db):
+    sku = Sku(id=1, code="sku1", title="Synthetic receipt item", unit="шт", is_active=True)
+    db.add(sku)
+    await db.commit()
+    return sku
+
+
+@pytest_asyncio.fixture
 async def book(db):
     from datetime import date
 

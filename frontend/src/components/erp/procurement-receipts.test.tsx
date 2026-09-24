@@ -6,6 +6,12 @@ import { ProcurementReceipts } from "./procurement-receipts";
 
 afterEach(() => vi.unstubAllGlobals());
 
+async function selectReceiptSku() {
+  fireEvent.change(screen.getByLabelText("Поиск номенклатуры накладной"), { target: { value: "AKB" } });
+  await screen.findByRole("option", { name: "AKB · Аккумулятор · шт · ID 31" });
+  fireEvent.change(screen.getByLabelText("Номенклатура строки 1"), { target: { value: "31" } });
+}
+
 it("requires an explicit legal entity before opening supplier invoices", async () => {
   const fetcher = vi.fn(async () => ({ ok: true, json: async () => [
     { id: 7, name: "Белакб", unp: "123456789" },
@@ -58,6 +64,9 @@ it("requires a selected supplier and saves its directory snapshot in a new recei
     if (url.includes("supplier-options")) return { ok: true, json: async () => ({
       organization_id: 7, items: [{ id: 19, name: "Поставщик из каталога", unp: "190000001" }], truncated: false,
     }) };
+    if (url.includes("sku-options")) return { ok: true, json: async () => ({
+      organization_id: 7, items: [{ id: 31, code: "AKB", title: "Аккумулятор", unit: "шт" }], truncated: false,
+    }) };
     if (init?.method === "POST") {
       submitted = JSON.parse(String(init.body));
       return { ok: true, json: async () => ({ id: 41, version: 1, status: "draft", posting: null,
@@ -75,9 +84,13 @@ it("requires a selected supplier and saves its directory snapshot in a new recei
   await screen.findByRole("option", { name: "Поставщик из каталога · 190000001" });
   fireEvent.change(screen.getByLabelText("Поставщик накладной из справочника"), { target: { value: "19" } });
   fireEvent.click(screen.getByRole("button", { name: "Сохранить первичную накладную" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("Выберите номенклатуру каждой строки накладной из справочника");
+  expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  await selectReceiptSku();
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить первичную накладную" }));
   await waitFor(() => expect(submitted).not.toBeNull());
   expect(submitted!.document).toMatchObject({ supplier: "Поставщик из каталога", supplier_id: 19,
-    supplier_unp: "190000001" });
+    supplier_unp: "190000001", items: [{ sku_id: 31, sku: "AKB", sku_title: "Аккумулятор", unit: "шт" }] });
   expect(await screen.findByText("Накладная № 41: сохранена версия 1.")).toBeInTheDocument();
   expect(screen.getByLabelText("Номер первичной накладной")).toBeInTheDocument();
 });
@@ -125,6 +138,9 @@ it("closes a new receipt only after the server confirms its saved version", asyn
     if (url.includes("supplier-options")) return { ok: true, json: async () => ({
       organization_id: 7, items: [{ id: 19, name: "Поставщик из каталога", unp: "190000001" }], truncated: false,
     }) };
+    if (url.includes("sku-options")) return { ok: true, json: async () => ({
+      organization_id: 7, items: [{ id: 31, code: "AKB", title: "Аккумулятор", unit: "шт" }], truncated: false,
+    }) };
     if (init?.method === "POST") {
       const saved = JSON.parse(String(init.body));
       await savePending;
@@ -141,6 +157,7 @@ it("closes a new receipt only after the server confirms its saved version", asyn
   fireEvent.change(screen.getByLabelText("Поиск поставщика накладной"), { target: { value: "Поставщик" } });
   await screen.findByRole("option", { name: "Поставщик из каталога · 190000001" });
   fireEvent.change(screen.getByLabelText("Поставщик накладной из справочника"), { target: { value: "19" } });
+  await selectReceiptSku();
   fireEvent.change(screen.getByLabelText("Номер первичной накладной"), { target: { value: "INV-41" } });
   fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
   expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("INV-41");

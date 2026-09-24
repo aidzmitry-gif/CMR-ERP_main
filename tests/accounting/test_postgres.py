@@ -284,7 +284,14 @@ async def test_primary_receipt_http_concurrent_replay_and_snapshot(pg_factory, p
     from core.services.auth import CurrentUser, get_current_user
     from modules.accounting.gateway import AccountingService
     from modules.procurement.receipt_documents import ReceiptDocument, output, router
-    from tests.accounting.test_procurement_receipt_drafts import document
+    from tests.accounting.test_procurement_receipt_drafts import (
+        document,
+        ensure_receipt_catalog_sku,
+    )
+
+    async with pg_factory() as catalog_session:
+        await ensure_receipt_catalog_sku(catalog_session)
+        await catalog_session.commit()
 
     app = FastAPI()
     app.include_router(router, prefix="/procurement")
@@ -1020,9 +1027,13 @@ async def test_procurement_draft_versions_serialize_and_cannot_be_truncated(pg_f
         create_document,
         edit_document,
     )
-    from tests.accounting.test_procurement_receipt_drafts import document
+    from tests.accounting.test_procurement_receipt_drafts import (
+        document,
+        ensure_receipt_catalog_sku,
+    )
 
     async with pg_factory() as session:
+        await ensure_receipt_catalog_sku(session)
         saved = await create_document(pg_book[0], ReceiptCreate(key="primary1", document=document()), (session, "tester"), (session, AccountingService(), CurrentUser("tester", ["director"])))
         await session.commit()
 
@@ -1067,7 +1078,14 @@ async def test_primary_creation_and_month_close_are_serialized(pg_factory, pg_bo
     from core.services.auth import CurrentUser
     from modules.accounting.gateway import AccountingService
     from modules.procurement.receipt_documents import ReceiptCreate, create_document
-    from tests.accounting.test_procurement_receipt_drafts import document
+    from tests.accounting.test_procurement_receipt_drafts import (
+        document,
+        ensure_receipt_catalog_sku,
+    )
+
+    async with pg_factory() as catalog_session:
+        await ensure_receipt_catalog_sku(catalog_session)
+        await catalog_session.commit()
 
     async def creator():
         async with pg_factory() as session:
@@ -1276,13 +1294,17 @@ async def test_completeness_bootstrap_covers_preexisting_receipt_versions(pg_fac
         create_document,
         edit_document,
     )
-    from tests.accounting.test_procurement_receipt_drafts import document
+    from tests.accounting.test_procurement_receipt_drafts import (
+        document,
+        ensure_receipt_catalog_sku,
+    )
 
     class LegacyGateway(AccountingService):
         async def source_changed(self, *args):
             pass  # Previous primary API predates the completeness registry.
 
     async with pg_factory() as session:
+        await ensure_receipt_catalog_sku(session)
         access = (session, LegacyGateway(), CurrentUser("tester", ["director"]))
         receipt = await create_document(pg_book[0], ReceiptCreate(key="legacy", document=document()), (session, "tester"), access)
         await session.commit()

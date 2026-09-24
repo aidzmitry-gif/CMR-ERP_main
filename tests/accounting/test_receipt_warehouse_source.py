@@ -6,6 +6,8 @@ from modules.procurement.receipt_documents import ReceiptRevision
 from modules.procurement.source_gateway import ProcurementSourceService
 from tests.accounting.test_procurement_receipt_drafts import document
 
+pytestmark = pytest.mark.usefixtures("receipt_catalog_sku")
+
 
 async def create(client, org, *, quantity="2.00", unit="шт"):
     data = document()
@@ -16,7 +18,7 @@ async def create(client, org, *, quantity="2.00", unit="шт"):
     return response.json()["id"], data
 
 
-async def test_warehouse_source_keeps_version_line_identity_and_explicit_units(client, db, book):
+async def test_warehouse_source_keeps_version_line_identity_and_explicit_units(client, db, book, receipt_catalog_sku):
     org = book[0]
     receipt, data = await create(client, org)
     gateway = ProcurementSourceService()
@@ -24,6 +26,8 @@ async def test_warehouse_source_keeps_version_line_identity_and_explicit_units(c
     assert first["lines"] == [{"source_line": f"procurement:receipt:{receipt}:1:1", "position": 1,
                                "sku": "sku1", "lot": "lot1", "quantity": "2.00", "unit": "шт"}]
     assert await gateway.warehouse_receipt_source(db, org, receipt, 1) == first
+    receipt_catalog_sku.unit = "упак"
+    await db.commit()
     data["items"][0]["unit"] = "упак"
     data["items"].append({**data["items"][0]})
     edited = await client.put(f"/procurement/organizations/{org}/receipt-documents/{receipt}",
@@ -41,14 +45,13 @@ async def test_warehouse_source_keeps_version_line_identity_and_explicit_units(c
         await gateway.warehouse_receipt_source(db, org + 999, receipt, 2)
 
 
-@pytest.mark.parametrize("quantity,unit,message", [
-    ("2.00", None, "unit of measure"),
-    ("2.000001", "шт", "cannot be represented"),
-    ("1000000000000", "шт", "cannot be represented"),
+@pytest.mark.parametrize("quantity", [
+    "2.000001",
+    "1000000000000",
 ])
-async def test_warehouse_source_rejects_missing_units_and_incompatible_quantity(client, db, book, quantity, unit, message):
-    receipt, _ = await create(client, book[0], quantity=quantity, unit=unit)
-    with pytest.raises(ValueError, match=message):
+async def test_warehouse_source_rejects_incompatible_quantity(client, db, book, quantity):
+    receipt, _ = await create(client, book[0], quantity=quantity)
+    with pytest.raises(ValueError, match="cannot be represented"):
         await ProcurementSourceService().warehouse_receipt_source(db, book[0], receipt, 1)
     assert await db.scalar(select(func.count()).select_from(Entry)) == 0
 

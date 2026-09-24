@@ -7,6 +7,8 @@ from modules.accounting.models import AccessGrant, Organization
 from modules.procurement.models import PurchaseOrder, PurchaseRequest
 from modules.procurement.ownership import OrderRequestLink, PurchaseOwnership
 
+pytestmark = pytest.mark.usefixtures("receipt_catalog_sku")
+
 
 async def legacy_sources(db):
     order = PurchaseOrder(number="PO1", supplier="Synthetic supplier")
