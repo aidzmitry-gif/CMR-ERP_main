@@ -166,3 +166,14 @@ Consequently, source navigation is not evidence that a user can open
 
 Until these gates are evidenced, the source remains a locally verified
 candidate and 1C remains the archive/reconciliation source for historical data.
+
+## Integration comparison — 2026-09-24
+
+The isolated source `agent/crm-acc-prod009` is at `9dd63c4b622888d941202e457103177ea35a13a4`; the older local integration checkout `agent/crm-acc-integration-001` is at `6780c1b44c64f0123886d19f44d2a72badb917dc`. Their merge base is `e83deecc08ab8666fbfbf0cd8ef279392d31cf1c`. Neither checkout was modified by this comparison.
+
+- `git rev-list --left-right --count integration...source` reports 112 integration-only commit identities and 194 source-only identities. `git cherry source integration` marks all 112 integration commits as patch-equivalent to commits in source (zero unmatched integration patches); the reverse check marks 112 source commits as equivalent and 82 as additional patches. This is evidence against copying the older integration branch into source. Patch equivalence does not prove that the final trees, runtime behavior or release package match.
+- `alembic heads` reports one head in each checkout: `0158` in integration and `0174` in source. A deployment must inspect the target database history and rehearse the complete candidate transition on its owned copy. Neither local head is evidence of the target's installed revision.
+- Source records `modules/hr` at `f8a6e0142f1920b07ec56818f42d156a602ff9c3`. That object exists in the local HR repository under `agent/crm-acc-hr-safety-001`; its configured `origin` is another local repository, while the parent `.gitmodules` declares `https://github.com/aidzmitry-gif/HR-10.git`. The separate parallel HR checkout does not contain the object, and no advertised remote-tracking branch in the local HR repository contains it. Fetchability from the declared release remote and a clean parent/submodule checkout remain unproven. Check all recorded submodule objects against their declared remotes before packaging; do not substitute materialized local directories for a clean checkout.
+- The source worktree has an unrelated untracked `reports/CRM-ACC-001/` directory and the integration checkout has an untracked coordination file; both were left untouched. No merge, push, target inspection, package build or deployment occurred.
+
+The next release candidate should be assembled from the reviewed source commit and exact fetchable submodule commits, then tested against the actual target baseline by the migration-plus-frontend route in `ops/belakb-deploy/START-HERE.md`. The current v1 backend-only runner is not a path for this change. Real policies, opening balances, primary documents and accountant closes remain independent acceptance gates.
