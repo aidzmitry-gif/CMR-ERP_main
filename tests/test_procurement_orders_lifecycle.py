@@ -8,39 +8,83 @@ draft→ordered→shipped→customs→received (вперёд со скипами
 from __future__ import annotations
 
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import select
 
-from core.domain.models import OutboxEvent
-from modules.procurement.models import LandedCost, PurchaseOrder
+from core.domain.models import Counterparty, OutboxEvent
+from modules.procurement.models import LandedCost, PurchaseOrder, Supplier
+from modules.procurement.order_creation import PurchaseOrderCreation
+from modules.procurement.order_edit_commands import PurchaseOrderEditCommand
 
 pytestmark = pytest.mark.asyncio
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def catalog_supplier(session):
+    connection = await session.connection()
+    await connection.run_sync(lambda sync: PurchaseOrderCreation.__table__.create(sync, checkfirst=True))
+    await connection.run_sync(lambda sync: PurchaseOrderEditCommand.__table__.create(sync, checkfirst=True))
+    party = Counterparty(name="S", unp="999999993")
+    session.add(party)
+    await session.flush()
+    session.add(Supplier(counterparty_id=party.id, name="S", unp=party.unp, status="active"))
+    await session.commit()
+
+
+async def _organization(api):
+    books = (await api.get("/accounting/organizations")).json()
+    if books:
+        return books[0]["id"]
+    created = await api.post("/accounting/organizations", json={"name": "Synthetic procurement company", "unp": "999999994"})
+    assert created.status_code == 201, created.text
+    return created.json()["id"]
+
+
+async def _order_command(api, **over):
+    org = await _organization(api)
+    options = await api.get(f"/procurement/organizations/{org}/supplier-options?q=S")
+    assert options.status_code == 200, options.text
+    supplier = next(row for row in options.json()["items"] if row["name"] == "S")
+    lines = over.pop("lines", [{"sku_code": "A", "qty": 10, "goods_value_byn": 1000}])
+    freight = over.pop("freight_byn", 0)
+    body = {"request_key": str(uuid4()), "document": {
+        "supplier": supplier["name"], "supplier_id": supplier["id"], "supplier_unp": supplier["unp"],
+        "eta_date": "2026-10-01", "freight_byn": f"{Decimal(str(freight)):.2f}",
+        "lines": [{"sku_code": line["sku_code"], "qty": f"{Decimal(str(line['qty'])):.2f}",
+                   "goods_value_byn": f"{Decimal(str(line.get('goods_value_byn', 0))):.2f}",
+                   "weight": f"{Decimal(str(line.get('weight', 0))):.3f}",
+                   "volume": f"{Decimal(str(line.get('volume', 0))):.4f}"} for line in lines]},
+        "ownership_evidence": "Explicit synthetic lifecycle fixture", "request_basis": None}
+    body["document"].update(over)
+    return org, body
+
+
 async def _order(api, **over):
     api.headers["X-User"] = "procurement-owner-test"
-    body = {"supplier": "S", "lines": [{"sku_code": "A", "qty": 10, "goods_value_byn": 1000}]}
-    body.update(over)
-    receive_after_assignment = body.get("status") == "received"
-    if receive_after_assignment:
-        body["status"] = "ordered"
-    r = await api.post("/procurement/orders", json=body)
-    assert r.status_code == 201, r.text
-    books = (await api.get("/accounting/organizations")).json()
-    if not books:
-        created = await api.post("/accounting/organizations", json={"name": "Synthetic procurement company", "unp": "999999994"})
-        assert created.status_code == 201, created.text
-        books = [created.json()]
-    assigned = await api.post(f"/procurement/organizations/{books[0]['id']}/purchase-ownership", json={"kind": "order", "source_id": r.json()["id"], "evidence": "Explicit synthetic lifecycle fixture"})
-    assert assigned.status_code == 201, assigned.text
-    api.headers["X-Expected-Organization"] = str(books[0]["id"])
+    status = over.pop("status", None)
+    org, body = await _order_command(api, **over)
+    api.headers["X-Expected-Organization"] = str(org)
     api.headers["X-Expected-Principal"] = "procurement-owner-test"
-    if receive_after_assignment:
-        accepted = await _edit(api, "PATCH",f"/procurement/orders/{r.json()['id']}", json={"status": "received"})
+    r = await api.post(f"/procurement/organizations/{org}/orders", json=body)
+    assert r.status_code == 201, r.text
+    order_id = r.json()["order_id"]
+    result = {"id": order_id, "status": "draft", "received_at": None}
+    if status:
+        accepted = await _edit(api, "PATCH", f"/procurement/orders/{order_id}", json={"status": status})
         assert accepted.status_code == 200, accepted.text
-        return {**r.json(), "status": "received", "received_at": accepted.json()["effect"]["received_at"]}
-    return r.json()
+        result.update(status=status, received_at=accepted.json()["effect"].get("received_at"))
+    return result
+
+
+async def _post_command(api, **over):
+    api.headers["X-User"] = "procurement-owner-test"
+    org, body = await _order_command(api, **over)
+    api.headers["X-Expected-Organization"] = str(org)
+    api.headers["X-Expected-Principal"] = "procurement-owner-test"
+    return await api.post(f"/procurement/organizations/{org}/orders", json=body)
 
 
 async def _events(session, etype):
@@ -189,10 +233,7 @@ async def test_freight_partial_weight_falls_back_to_value(api):
 
 
 async def test_negative_freight_rejected(api):
-    r = await api.post(
-        "/procurement/orders",
-        json={"freight_byn": -100, "lines": [{"sku_code": "A", "qty": 1, "goods_value_byn": 100}]},
-    )
+    r = await _post_command(api, freight_byn=-100)
     assert r.status_code == 422  # отрицательный фрахт → невалидно
 
 
@@ -204,7 +245,7 @@ async def test_cancelled_order_not_editable(api):
 
 
 async def test_cannot_create_cancelled(api):
-    r = await api.post("/procurement/orders", json={"status": "cancelled", "lines": []})
+    r = await _post_command(api, status="cancelled")
     assert r.status_code == 422
 
 
@@ -228,7 +269,7 @@ async def test_landed_preview_no_fixation(api, session):
     assert (await session.execute(select(LandedCost))).scalars().all() == []
 
 async def test_create_received_order_cannot_bypass_organization_decision(api, session):
-    response = await api.post("/procurement/orders", json={"supplier": "S", "status": "received", "lines": [{"sku_code": "A", "qty": 1, "goods_value_byn": 10}]})
+    response = await _post_command(api, status="received")
     assert response.status_code == 422
     assert await _events(session, "procurement.received") == []
     assert (await session.scalars(select(PurchaseOrder))).all() == []

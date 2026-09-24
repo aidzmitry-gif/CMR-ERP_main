@@ -110,6 +110,9 @@ describe("ProcurementRfqView", () => {
   it("победитель отмечен «победитель», а форма и «Выбрать» скрыты у завершённого тендера", () => {
     render(<ProcurementRfqView initial={[rfqAwarded]} />);
     expect(screen.getByText("победитель")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Создать заказ поставщику" })).toHaveAttribute(
+      "href", "/erp/procurement/orders",
+    );
     // тендер разыгран (status !== open) → нет ни кнопки выбора, ни формы предложения
     expect(screen.queryByRole("button", { name: /Выбрать/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Предложение/ })).not.toBeInTheDocument();

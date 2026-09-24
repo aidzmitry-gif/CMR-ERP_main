@@ -94,6 +94,14 @@ async def test_multiline_standalone_exact_creation_and_replay(client, db, book):
     assert (await client.get(prefix(book) + f"/orders/{first['order_id']}")).json()["status"] == "ordered"
 
 
+async def test_order_without_eta_date_keeps_replay_consistent(client, db, book):
+    data = command()
+    data["document"]["eta_date"] = None
+    first = await create(client, book, data)
+    assert first["eta_date"] is None
+    assert await create(client, book, data) == first
+
+
 async def test_catalog_selected_lines_keep_immutable_snapshot_and_reject_stale_selection(client, db, book):
     products = [Sku(code="SKU-A", title="Первый товар", unit="шт"),
                 Sku(code="SKU-B", title="Второй товар", unit="уп")]

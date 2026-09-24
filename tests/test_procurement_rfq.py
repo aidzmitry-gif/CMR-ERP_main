@@ -9,8 +9,17 @@ import pytest
 from sqlalchemy import select
 
 from core.domain.models import OutboxEvent
+from modules.procurement.models import PurchaseOrder
 
 pytestmark = pytest.mark.asyncio
+
+
+async def test_unscoped_order_creation_cannot_bypass_organization(api, session):
+    response = await api.post("/procurement/orders", json={
+        "supplier": "Free text", "lines": [{"sku_code": "A", "qty": 1, "goods_value_byn": 10}],
+    })
+    assert response.status_code == 410
+    assert (await session.scalars(select(PurchaseOrder.id))).all() == []
 
 
 async def test_rfq_flow_award_and_event(api, session):
@@ -71,8 +80,8 @@ async def test_negative_bid_price_rejected(api):
     assert r.status_code == 422
 
 
-async def test_award_creates_draft_po_and_emits_po_drafted(api, session):
-    """P7: award → черновик PO у победителя с позицией из RFQ + эмит procurement.po.drafted."""
+async def test_award_selects_winner_without_creating_unowned_order(api, session):
+    """An unscoped RFQ cannot create an order or a payment forecast for an unknown company."""
     rfq = (
         await api.post("/procurement/rfq", json={"item": "АКБ", "sku_code": "AKB-1", "qty": 10})
     ).json()
@@ -82,27 +91,12 @@ async def test_award_creates_draft_po_and_emits_po_drafted(api, session):
     win = bid["best_bid_id"]  # 15 — лучшая цена
     awarded = (await api.post(f"/procurement/rfq/{rid}/award", json={"bid_id": win})).json()
 
-    oid = awarded["created_order_id"]
-    assert oid is not None
-    order = (await api.get(f"/procurement/orders/{oid}")).json()
-    assert order["status"] == "draft"  # черновик, не «в пути»
-    assert order["supplier_id"] == 9
-    assert len(order["lines"]) == 1
-    ln = order["lines"][0]
-    assert ln["sku_code"] == "AKB-1" and ln["qty"] == 10.0
-    assert ln["goods_value_byn"] == 150.0  # цена 15 × кол-во 10
-
-    drafted = [
-        e for e in (await session.execute(select(OutboxEvent))).scalars().all()
-        if e.event_type == "procurement.po.drafted"
-    ]
-    assert len(drafted) == 1
-    p = drafted[0].payload
-    assert p["po_ref"] == order["number"]
-    assert p["supplier_id"] == 9
-    assert p["planned_amount"] == "150.00"  # str(BYN) для finance FIN-B1
-    assert p["currency"] == "BYN"
-    assert p["deal_id"] is None  # PO обслуживает много сделок (фриз §2)
+    assert awarded["status"] == "awarded" and awarded["created_order_id"] is None
+    assert [b["supplier_id"] for b in awarded["bids"] if b["is_winner"]] == [9]
+    assert (await session.scalars(select(PurchaseOrder.id))).all() == []
+    events = (await session.execute(select(OutboxEvent))).scalars().all()
+    assert any(e.event_type == "procurement.rfq.awarded" for e in events)
+    assert not any(e.event_type == "procurement.po.drafted" for e in events)
 
 
 async def test_rfq_404(api):

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import clsx from "clsx";
 import { Award, Plus, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -232,6 +233,13 @@ export function ProcurementRfqView({ initial }: { initial: Rfq[] }) {
                   })}
                 </tbody>
               </table>
+
+              {selected.status === "awarded" && (
+                <div className="border-t border-line p-4 text-sm text-muted">
+                  Победитель выбран. Для заказа укажите юрлицо и подтвердите поставщика в справочнике.{" "}
+                  <Link className="text-accent underline" href="/erp/procurement/orders">Создать заказ поставщику</Link>
+                </div>
+              )}
 
               {selected.status === "open" && (
                 <div className="flex flex-wrap items-end gap-2 border-t border-line p-4">
