@@ -10,5 +10,6 @@ tzdata>=2024.1
 PyJWT[crypto]>=2.8
 gspread>=6.1
 weasyprint==70.0
+pypdf>=6.1,<7
 
 lxml>=6.1,<7  # ESCHF offline validation against the pinned official XSD.
