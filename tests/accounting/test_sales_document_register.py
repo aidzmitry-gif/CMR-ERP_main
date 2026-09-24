@@ -116,6 +116,9 @@ async def test_pages_exact_amounts_coverage_and_scoped_link_lookup(db, book, cli
     assert full["items"][4]["currency"] is None
     assert full["items"][4]["original_available"] is False
     assert full["items"][3]["preview_available"] is False  # order has no original route
+    assert full["items"][3]["draft_edit_token"] and len(full["items"][3]["draft_edit_token"]) == 64
+    assert full["items"][3]["payment_terms"] is None
+    assert full["items"][0]["draft_edit_token"] is None
 
 
 async def test_register_exposes_verified_internal_shipment_acts_without_calling_them_tn_ttn(db, book, client):

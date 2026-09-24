@@ -1097,6 +1097,7 @@ export interface DealDoc {
   status: string;
   onec_ref: string | null;
   amount: number;
+  currency?: string | null;
   payment_terms?: string | null;
   delivery_terms?: string | null;
   draft_edit_token?: string;

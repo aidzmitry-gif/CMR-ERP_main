@@ -7,6 +7,7 @@ export type ShipmentDocumentReference = {
 export type DocumentRegisterItem = {
   id: number; deal_id: number; organization_id: number; kind: string; number: string;
   version: number; status: string; amount: string; currency: string | null;
+  payment_terms: string | null; delivery_terms: string | null; draft_edit_token: string | null;
   created_at: string | null; issued_at: string | null; valid_until: string | null;
   expiry_reminder_at?: string | null;
   reserve_status: string; onec_ref: string | null; original_state: string;
@@ -65,6 +66,9 @@ function item(value: unknown, org: string, dealId: string): DocumentRegisterItem
     || !positive(value.version) || typeof value.amount !== "string" || !/^-?\d+(\.\d+)?$/.test(value.amount)
     || !["kind", "number", "status", "reserve_status", "original_state"].every((key) => typeof value[key] === "string")
     || !["currency", "created_at", "issued_at", "valid_until", "onec_ref", "content_sha256", "replacement_reason"].every((key) => nullableString(value[key]))
+    || !["payment_terms", "delivery_terms", "draft_edit_token"].every((key) => nullableString(value[key]))
+    || (value.draft_edit_token !== null && !hash(value.draft_edit_token))
+    || (value.draft_edit_token !== null && (value.status !== "draft" || value.original_state !== "draft"))
     || !["supersedes_id", "superseded_by_id"].every((key) => value[key] === null || positive(value[key]))
     || typeof value.original_available !== "boolean" || typeof value.preview_available !== "boolean") invalid();
   if (value.expiry_reminder_at !== undefined && value.expiry_reminder_at !== null

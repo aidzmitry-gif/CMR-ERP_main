@@ -29,7 +29,7 @@ it("preserves the primary Sales organization endpoint", async () => {
 });
 
 it("preserves the neutral historical consumed label", async () => {
-  const row = { id: 100, deal_id: 501, organization_id: 7, kind: "invoice", number: "TEST", version: 1, status: "paid", amount: "1200.01", currency: "BYN", created_at: null, issued_at: null, valid_until: null, reserve_status: "consumed", onec_ref: null, original_state: "legacy_unavailable", content_sha256: null, replacement_reason: null, supersedes_id: null, superseded_by_id: null, original_available: false, preview_available: false };
+  const row = { id: 100, deal_id: 501, organization_id: 7, kind: "invoice", number: "TEST", version: 1, status: "paid", amount: "1200.01", currency: "BYN", payment_terms: null, delivery_terms: null, draft_edit_token: null, created_at: null, issued_at: null, valid_until: null, reserve_status: "consumed", onec_ref: null, original_state: "legacy_unavailable", content_sha256: null, replacement_reason: null, supersedes_id: null, superseded_by_id: null, original_available: false, preview_available: false };
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok({ ...page, items: [row] })));
   render(<DealDocumentRegister dealId="501" org="7" />);
   expect(await screen.findByText(/Исторический статус резерва: требуется сверка/)).toBeInTheDocument();

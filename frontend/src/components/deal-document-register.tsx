@@ -8,6 +8,7 @@ import { InvoicePhysicalShipment } from "@/components/erp/invoice-physical-shipm
 import { InvoiceCancellation } from "@/components/erp/invoice-cancellation";
 import { InvoiceNotificationRegister } from "@/components/invoice-notification-register";
 import { ShipmentDocumentDraft } from "@/components/erp/shipment-document-draft";
+import { DealDocumentCard } from "@/components/deal-document-card";
 
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
@@ -90,7 +91,7 @@ function RegisterPage({ org, dealId, kind, initialDocumentId }: { org: string; d
     {page?.items.length === 0 && !error && !loading && <p>В этом реестре документы по фильтру не найдены.</p>}
     {page?.items.map((row) => <DocumentRow key={row.id} row={row} onSelect={setSelected} />)}
     {page?.next_after_id !== null && page && !error && <Button variant="secondary" disabled={loading} onClick={more}>Ещё документы</Button>}
-    {selected !== null && <SelectedDocument key={selected} org={org} dealId={dealId} id={selected} onSelect={setSelected} onClose={() => setSelected(null)} onCancelled={() => { setCursor(0); setRevision(n => n + 1); }} />}
+    {selected !== null && <SelectedDocument key={selected} org={org} dealId={dealId} id={selected} onSelect={setSelected} onClose={() => setSelected(null)} onChanged={() => { setCursor(0); setRevision(n => n + 1); }} />}
   </div>;
 }
 
@@ -109,7 +110,7 @@ function ShipmentDocuments({ page }: { page: DocumentRegisterPage }) {
 
 function DocumentRow({ row, onSelect, detail = false }: { row: DocumentRegisterItem; onSelect: (id: number) => void; detail?: boolean }) {
   return <article aria-label={`Версия документа ${row.id}`} className="space-y-1 rounded-lg border border-line p-3 text-sm">
-    <h3 className="font-semibold">{kinds[row.kind] || row.kind} · {row.number} · версия {row.version} · ID {row.id}</h3>
+    <h3 className="font-semibold">{kinds[row.kind] || row.kind} · {detail ? row.number : <button type="button" className="text-accent underline" onClick={() => onSelect(row.id)} aria-label={`Открыть документ № ${row.number}`}>{row.number}</button>} · версия {row.version} · ID {row.id}</h3>
     <p className="tabular-nums">{row.amount} {row.currency || "Валюта неизвестна"}</p>
     <p>{statuses[row.status] || row.status} · {reserves[row.reserve_status] || row.reserve_status}</p>
     <p>Выпущен: {row.issued_at || "не указан"} · Срок действия по оригиналу: {row.valid_until || "не указан"}</p>
@@ -133,7 +134,7 @@ function DocumentRow({ row, onSelect, detail = false }: { row: DocumentRegisterI
   </article>;
 }
 
-function SelectedDocument({ org, dealId, id, onSelect, onClose, onCancelled }: { org: string; dealId: string; id: number; onSelect: (id: number) => void; onClose: () => void; onCancelled: () => void }) {
+function SelectedDocument({ org, dealId, id, onSelect, onClose, onChanged }: { org: string; dealId: string; id: number; onSelect: (id: number) => void; onClose: () => void; onChanged: () => void }) {
   const [cancellation, setCancellation] = useState(false);
   const [shipment, setShipment] = useState(false);
   const [notifications, setNotifications] = useState(false);
@@ -152,8 +153,9 @@ function SelectedDocument({ org, dealId, id, onSelect, onClose, onCancelled }: {
     {!row && !error && <p role="status">Загрузка версии ID {id}…</p>}
     {error && <><p role="alert" className="text-red-700">{error}</p><Button variant="secondary" onClick={() => { setError(""); setRevision((n) => n + 1); }}>Повторить загрузку версии</Button></>}
     {row && <><DocumentRow row={row} onSelect={onSelect} detail />
+      <DealDocumentCard doc={{ ...row, amount: Number(row.amount), draft_edit_token: row.draft_edit_token ?? undefined }} label={`Условия и история документа № ${row.number}`} refresh={async () => { setRevision(n => n + 1); onChanged(); }} />
       {row.kind === "invoice" && <Button variant="secondary" onClick={() => setCancellation(true)}>Аннулирование счёта</Button>}
-      {cancellation && row.kind === "invoice" && <InvoiceCancellation scope={{ org: Number(org), deal: Number(dealId), document: id }} onCancelled={() => { setRevision(n => n + 1); onCancelled(); }} />}
+      {cancellation && row.kind === "invoice" && <InvoiceCancellation scope={{ org: Number(org), deal: Number(dealId), document: id }} onCancelled={() => { setRevision(n => n + 1); onChanged(); }} />}
       {row.kind === "invoice" && <Button variant="secondary" onClick={() => setShipment(true)}>Фактическая отгрузка и акты</Button>}
       {row.kind === "invoice" && <Button variant="secondary" onClick={() => setNotifications(true)}>Уведомления клиенту</Button>}
       {notifications && row.kind === "invoice" && <InvoiceNotificationRegister organizationId={Number(org)} dealId={dealId} documentId={id} />}

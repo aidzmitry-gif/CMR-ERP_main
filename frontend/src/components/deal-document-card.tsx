@@ -92,12 +92,12 @@ export function DealDocumentCard({ doc, refresh, label }: { doc: DealDoc; refres
 
   const labels: Record<string, string> = { payment_terms: "Условия оплаты", delivery_terms: "Условия поставки" };
   return <div className="mt-1">
-    <button type="button" className="text-accent-ink underline" aria-label={`Открыть документ № ${doc.number}`} onClick={open ? close : reveal}>
+    <button type="button" className="text-accent-ink underline" aria-label={label ?? `Открыть документ № ${doc.number}`} onClick={open ? close : reveal}>
       {label ?? `Открыть документ № ${doc.number}`}
     </button>
     {open && <section className="mt-2 space-y-2 rounded border border-line bg-surface p-3" aria-label={`Карточка документа ${doc.number}`}>
       <div className="flex items-center justify-between gap-2"><strong>{doc.number} · версия {doc.version ?? 1} · {doc.status}</strong><button type="button" onClick={close} disabled={busy}>Закрыть</button></div>
-      <p>Сделка: документ ID {doc.id}; сумма {doc.amount.toFixed(2)} в валюте оригинала.</p>
+      <p>Сделка: документ ID {doc.id}; сумма {doc.amount.toFixed(2)} {doc.currency || "(валюта не подтверждена)"}.</p>
       {doc.status === "draft" ? <>
         <label className="block">Условия оплаты<input className="mt-1 w-full rounded border border-line bg-surface p-2" value={payment} maxLength={255} onChange={(event) => setPayment(event.target.value)} /></label>
         <label className="block">Условия поставки<input className="mt-1 w-full rounded border border-line bg-surface p-2" value={delivery} maxLength={255} onChange={(event) => setDelivery(event.target.value)} /></label>

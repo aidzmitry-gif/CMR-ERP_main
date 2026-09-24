@@ -1,11 +1,11 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { DealDocumentRegister } from "./deal-document-register";
 vi.mock("@/components/erp/invoice-cancellation",()=>({InvoiceCancellation:({scope,onCancelled}:{scope:{org:number;deal:number;document:number};onCancelled:()=>void})=><div data-testid="cancellation-scope">{`${scope.org}/${scope.deal}/${scope.document}`}<button onClick={onCancelled}>Тестовое подтверждение отмены</button></div>}));
 
 afterEach(() => vi.unstubAllGlobals());
-const row = { id: 100, deal_id: 501, organization_id: 7, kind: "invoice", number: "TEST-100", version: 1, status: "paid", amount: "1200.01", currency: "BYN", created_at: null, issued_at: "2026-09-09", valid_until: null, reserve_status: "consumed", onec_ref: null, original_state: "issued", content_sha256: "sha", replacement_reason: null, supersedes_id: null, superseded_by_id: 101, original_available: true, preview_available: false };
+const row = { id: 100, deal_id: 501, organization_id: 7, kind: "invoice", number: "TEST-100", version: 1, status: "paid", amount: "1200.01", currency: "BYN", payment_terms: null, delivery_terms: null, draft_edit_token: null, created_at: null, issued_at: "2026-09-09", valid_until: null, reserve_status: "consumed", onec_ref: null, original_state: "issued", content_sha256: "sha", replacement_reason: null, supersedes_id: null, superseded_by_id: 101, original_available: true, preview_available: false };
 const page = { organization_id: 7, deal_id: 501, client_identity: { status: "unresolved", counterparty_id: null }, coverage: { sales_documents: "available", settlements: "separate_chief_register", shipments: "unavailable", tn_ttn: "not_connected" }, shipment_documents: [], items: [row], next_after_id: null };
 const organizations = [{ id: 7, name: "Book A", unp: "111" }, { id: 8, name: "Book B", unp: "222" }];
 const ok = (data: unknown) => ({ ok: true, status: 200, json: async () => data });
@@ -109,6 +109,34 @@ it("deep-links directly to an exact invoice without cancelling it automatically"
   await screen.findByRole("button", { name: "Аннулирование счёта" });
   expect(fetcher.mock.calls.some(([url]) => url === "/api/sales/organizations/7/deals/501/document-register/100")).toBe(true);
   expect(screen.queryByTestId("cancellation-scope")).not.toBeInTheDocument();
+});
+it("opens by document number and reuses draft save, history and refresh in the register", async () => {
+  const draft = { ...row, status: "draft", original_state: "draft", original_available: false,
+    number: "TEST-100", payment_terms: null, delivery_terms: null, draft_edit_token: "a".repeat(64) };
+  let updated = false;
+  const fetcher = vi.fn(async (url: string, options?: RequestInit) => {
+    if (url.endsWith("/field-history" ) || url.includes("/field-history?"))
+      return ok({ document_id: 100, items: [], next_before_id: null });
+    if (url.endsWith("/documents/100/draft") && options?.method === "PATCH") {
+      expect(JSON.parse(String(options.body))).toEqual({ payment_terms: "30 дней", delivery_terms: null, expected_edit_token: "a".repeat(64) });
+      updated = true;
+      return ok({ id: 100, status: "draft", payment_terms: "30 дней", delivery_terms: null, draft_edit_token: "b".repeat(64) });
+    }
+    const current = updated ? { ...draft, payment_terms: "30 дней", draft_edit_token: "b".repeat(64) } : draft;
+    return ok(url.includes("document-register?") ? { ...page, items: [current] } : current);
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<DealDocumentRegister dealId="501" org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Открыть документ № TEST-100" }));
+  await waitFor(() => expect(screen.getByLabelText("Выбранная версия")).not.toHaveTextContent("Загрузка версии"));
+  fireEvent.click(await screen.findByRole("button", { name: "Условия и история документа № TEST-100" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Условия оплаты" }), { target: { value: "30 дней" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
+  await waitFor(() => expect(fetcher.mock.calls.filter(([url]) => url.endsWith("document-register/100")).length).toBe(2));
+  await waitFor(() => expect(screen.queryByRole("region", { name: "Карточка документа TEST-100" })).toBeNull());
+  fireEvent.click(await screen.findByRole("button", { name: "Условия и история документа № TEST-100" }));
+  expect(await screen.findByRole("textbox", { name: "Условия оплаты" })).toHaveValue("30 дней");
+  expect(fetcher.mock.calls.some(([url]) => url === "/api/sales/documents/100/draft")).toBe(true);
 });
 it("does not open cancellation for a forged invoice deep-link response", async () => {
   vi.stubGlobal("fetch", vi.fn(async (url: string) => ok(url.endsWith("document-register/100") ? { ...row, deal_id: 999 } : page)));
