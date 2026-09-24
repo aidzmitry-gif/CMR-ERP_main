@@ -7,7 +7,7 @@ from calendar import monthrange
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from core.domain.reference import Currency
 from modules.accounting.models import (
@@ -38,9 +38,25 @@ class AccountingError(ValueError):
 
 
 async def lock_organization(session, organization_id):
-    org = await session.scalar(select(Organization).where(
-        Organization.id == organization_id
-    ).with_for_update().execution_options(populate_existing=True))
+    statement = select(Organization).where(Organization.id == organization_id)
+    if session.info.get("accounting_read_only_snapshot"):
+        # A repeatable-read, database-enforced read-only transaction cannot use
+        # FOR UPDATE.  Its stable snapshot replaces the writer lock only for
+        # this explicit pilot verification context.
+        dialect = session.bind.dialect.name
+        if dialect == "postgresql":
+            read_only = await session.scalar(text("SHOW transaction_read_only"))
+            isolation = await session.scalar(text("SHOW transaction_isolation"))
+            if read_only != "on" or isolation != "repeatable read":
+                raise AccountingError("Read-only accounting snapshot requires repeatable read")
+        elif dialect == "sqlite":
+            if await session.scalar(text("PRAGMA query_only")) != 1:
+                raise AccountingError("Read-only accounting snapshot requires query_only")
+        else:
+            raise AccountingError("Unsupported read-only accounting snapshot database")
+    else:
+        statement = statement.with_for_update()
+    org = await session.scalar(statement.execution_options(populate_existing=True))
     if org is None:
         raise AccountingError("Organization not found")
     return org
