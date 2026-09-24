@@ -10,6 +10,16 @@ afterEach(() => vi.unstubAllGlobals());
 const accounts = [{ code: "41", title: "Goods", category: "asset", cash: false, quantity_tracking: true, required_dimensions: [] }, { code: "43", title: "Finished goods", category: "asset", cash: false, quantity_tracking: true, required_dimensions: [] }, { code: "90.4", title: "Cost", category: "expense", cash: false, quantity_tracking: false, required_dimensions: [] }];
 const props = { org: "1", date: "2026-09-01", policyId: 1, accounts, onDate: vi.fn(), onBusyChange: vi.fn(), onPosted: vi.fn() };
 const calculation = { cost: { basis_digest: "basis", book_quantity: "3.000000", book_value_byn: "10.00", remaining_quantity: "1.500000", remaining_value_byn: "5.00", evidence: [{ entry_id: 2, line_id: 3, source: "receipt", source_version: 1, amount_byn: "10.00", quantity: "3.000000" }] }, digest: "posting", posting: { lines: [{ side: "debit", account: "90.4", amount: "5.00", quantity: null, dimensions: {} }, { side: "credit", account: "41", amount: "5.00", quantity: "1.500000", dimensions: { lot: "LOT" } }] } };
+function receipt(init: RequestInit, preview: { digest: string; cost: { basis_digest: string } } = calculation,
+                 options: { id?: number; sale?: boolean; zero?: boolean } = {}) {
+  const body = JSON.parse(String(init.body));
+  const facts = { organization_id: 1, source: body.source, source_version: body.source_version,
+    document_date: body.document_date, operation_date: body.operation_date, posting_date: body.posting_date,
+    policy_id: body.policy_id, operation: options.sale ? "inventory_sale" : "inventory_issue", digest: preview.digest };
+  return options.zero ? { ...facts, kind: "quantity_only_receipt", receipt_id: options.id ?? 9,
+    registration_token: 10, basis_digest: preview.cost.basis_digest, posted: true }
+    : { ...facts, id: options.id ?? 7 };
+}
 function fill(sale = false) {
   for (const [label, value] of [["Идентификатор основания", "ISSUE-1"], ["Склад партии", "W"], ["Номенклатура партии", "SKU"], ["Партия", "LOT"], ["Количество списания", "1,5"], [sale ? "Содержание продажи" : "Содержание списания", "Test issue"], ["Счёт запасов", "41"], ["Счёт расходов", "90.4"]]) fireEvent.change(screen.getByLabelText(label === "Партия" ? /^Партия/ : label, { exact: true }), { target: { value } });
 }
@@ -22,8 +32,8 @@ async function selectBuyer() {
 }
 
 it("shows the complete zero-cost receipt and confirms without client source IDs", async () => {
-  const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () => url.endsWith("confirm")
-    ? { kind: "quantity_only_receipt", receipt_id: 77 }
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => ({ ok: true, json: async () => url.endsWith("confirm")
+    ? receipt(init, { digest: "zero", cost: calculation.cost }, { id: 77, zero: true })
     : { kind: "quantity_only_receipt", posting: null, digest: "zero", cost: { ...calculation.cost, issue_quantity: "1.500000", issue_cost_byn: "0.00" },
       receipt: { zero_byn: true, source_layers: [{ entry_id: 11, line_id: 21, quantity: "1.000000" }, { entry_id: 12, line_id: 22, quantity: "0.500000" }] } } }));
   vi.stubGlobal("fetch", fetcher);
@@ -59,9 +69,9 @@ it("shows all allocated inventory layers separately from accounting postings", a
 
 it("requires preview and retries confirmation with the same prepared body", async () => {
   let fail = true;
-  const fetcher = vi.fn(async (url: string) => {
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => {
     if (url.endsWith("confirm") && fail) throw new Error("Network failure");
-    return { ok: true, json: async () => url.endsWith("confirm") ? { id: 7 } : calculation };
+    return { ok: true, json: async () => url.endsWith("confirm") ? receipt(init) : calculation };
   });
   vi.stubGlobal("fetch", fetcher);
   const onPosted = vi.fn();
@@ -82,6 +92,27 @@ it("requires preview and retries confirmation with the same prepared body", asyn
   expect(JSON.parse(String(first[1].body))).toMatchObject({ quantity: "1.5", basis_digest: "basis", digest: "posting" });
 });
 
+it("keeps a prepared issue when a successful response belongs to another book", async () => {
+  let wrong = true;
+  const onPosted = vi.fn();
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => ({ ok: true,
+    json: async () => url.endsWith("confirm")
+      ? { ...receipt(init), organization_id: wrong ? 2 : 1 } : calculation }));
+  vi.stubGlobal("fetch", fetcher);
+  render(<AccountingInventoryIssue {...props} onPosted={onPosted} />);
+  fill();
+  fireEvent.click(screen.getByText("Рассчитать списание"));
+  fireEvent.click(await screen.findByText("Подтвердить списание"));
+  expect(await screen.findByRole("alert")).toHaveTextContent("не подтвердила именно эту операцию");
+  expect(onPosted).not.toHaveBeenCalled();
+  expect(screen.getByText("Подтвердить списание")).toBeInTheDocument();
+  wrong = false;
+  fireEvent.click(screen.getByText("Подтвердить списание"));
+  expect(await screen.findByText("Бухгалтерское списание № 7 проведено.")).toBeInTheDocument();
+  expect(onPosted).toHaveBeenCalledOnce();
+  expect(fetcher.mock.calls[1][1].body).toBe(fetcher.mock.calls[2][1].body);
+});
+
 it("invalidates a calculation when form or posting date changes", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => calculation })));
   const view = render(<AccountingInventoryIssue {...props} />);
@@ -98,7 +129,7 @@ it("invalidates a calculation when form or posting date changes", async () => {
 
 it("shows a zero-value receipt honestly without a phantom posting or entry link", async () => {
   const zero = { kind: "quantity_only_receipt" as const, cost: { ...calculation.cost, issue_cost_byn: "0.00", evidence: [{ entry_id: null, line_id: null, receipt_id: 9, source: "zero", source_version: 1, amount_byn: "0.00", quantity: "0.500000", zero_value_disposal: true }] }, digest: "zero", posting: null, receipt: { source_layer: { entry_id: 2, line_id: 3, quantity: "0.500000" }, zero_byn: true } };
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, json: async () => url.endsWith("confirm") ? { kind: "quantity_only_receipt", receipt_id: 9, registration_token: 10 } : zero })));
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => ({ ok: true, json: async () => url.endsWith("confirm") ? receipt(init, zero, { id: 9, zero: true }) : zero })));
   const onEntry = vi.fn();
   const onPosted = vi.fn();
   render(<AccountingInventoryIssue {...props} onEntry={onEntry} onPosted={onPosted} />); fill(); fireEvent.click(screen.getByText("Рассчитать списание"));
@@ -125,7 +156,9 @@ it("allows FIFO to value a SKU across explicit lots", async () => {
 });
 
 it("previews sale with exact VAT inputs, invalidates edits and confirms its frozen package", async () => {
-  const fetcher = vi.fn(async () => ({ ok: true, json: async () => ({ ...calculation, net_amount_byn: "20.00", vat_amount_byn: "4.00", gross_amount_byn: "24.00" }) }));
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => ({ ok: true, json: async () => url.endsWith("confirm")
+    ? receipt(init, calculation, { sale: true })
+    : { ...calculation, net_amount_byn: "20.00", vat_amount_byn: "4.00", gross_amount_byn: "24.00" } }));
   vi.stubGlobal("fetch", fetcher);
   const saleAccounts = [...accounts, ...[["62", "asset"], ["90.1", "income"], ["90.2", "income"], ["68.2", "liability"]].map(([code, category]) => ({ code, category, title: code, cash: false, quantity_tracking: false, required_dimensions: [] }))];
   render(<AccountingInventoryIssue {...props} sale accounts={saleAccounts} />);
@@ -139,6 +172,7 @@ it("previews sale with exact VAT inputs, invalidates edits and confirms its froz
   expect(screen.queryByText("Подтвердить продажу")).not.toBeInTheDocument();
   fireEvent.click(screen.getByText("Рассчитать продажу"));
   fireEvent.click(await screen.findByText("Подтвердить продажу"));
+  expect(await screen.findByText("Продажа № 7 проведена.")).toBeInTheDocument();
   const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
   expect(calls[2][0]).toBe("/api/accounting/organizations/1/sales/confirm");
   expect(JSON.parse(String(calls[2][1].body))).toMatchObject({ net_amount: "20.00", vat_rate: "10", buyer_dimensions: { counterparty_id: "1", counterparty: "Buyer from MDM", counterparty_unp: "190000001", counterparty_revision: "2", contract: "contract", settlement_document: "sale" }, basis_digest: "basis", digest: "posting" });
@@ -146,7 +180,7 @@ it("previews sale with exact VAT inputs, invalidates edits and confirms its froz
 
 it("shows V4 zero-cost sale sources with commercial revenue and VAT postings", async () => {
   const zeroSale = { ...calculation, net_amount_byn: "20.00", vat_amount_byn: "4.00", gross_amount_byn: "24.00", cost: { ...calculation.cost, issue_quantity: "1.500000", issue_cost_byn: "0.00" }, posting: { lines: [{ side: "debit", account: "62", amount: "24.00", quantity: null, dimensions: {} }, { side: "credit", account: "90.1", amount: "24.00", quantity: null, dimensions: {} }, { side: "debit", account: "90.2", amount: "4.00", quantity: null, dimensions: {} }, { side: "credit", account: "68.2", amount: "4.00", quantity: null, dimensions: {} }] }, zero_value_command: { command_version: 4, inventory_layers: [{ source_entry_id: 11, source_line_id: 21, quantity: "1.000000" }, { source_entry_id: 12, source_line_id: 22, quantity: "0.500000" }] } };
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, json: async () => url.endsWith("confirm") ? { id: 17 } : zeroSale })));
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => ({ ok: true, json: async () => url.endsWith("confirm") ? receipt(init, zeroSale, { id: 17, sale: true }) : zeroSale })));
   const saleAccounts = [...accounts, ...[["62", "asset"], ["90.1", "income"], ["90.2", "income"], ["68.2", "liability"]].map(([code, category]) => ({ code, category, title: code, cash: false, quantity_tracking: false, required_dimensions: [] }))];
   render(<AccountingInventoryIssue {...props} sale accounts={saleAccounts} />);
   fill(true);

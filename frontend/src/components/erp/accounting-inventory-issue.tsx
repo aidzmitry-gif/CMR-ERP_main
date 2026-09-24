@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { searchAccountingBuyers, type AccountingBuyer } from "@/lib/accounting-buyers";
+import { confirmedIssueReceipt } from "@/lib/accounting-issue-receipt";
 
 const dimensionNames: Record<string, string> = { counterparty: "Контрагент", contract: "Договор", settlement_document: "Документ расчётов", department: "Подразделение", employee: "Сотрудник", asset: "Основное средство", warehouse: "Склад", sku: "Номенклатура", lot: "Партия", order: "Заказ" };
 
@@ -71,7 +72,13 @@ export function AccountingInventoryIssue({ org, date, policyId, inventoryMethod 
       const result = await response.json();
       if (!mounted.current) return;
       if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "Проверьте поля документа и учётную политику.");
-      if (confirm) { setPrepared(null); setNotice(result.kind === "quantity_only_receipt" ? `Запись списания № ${result.receipt_id} зарегистрирована.` : sale ? `Продажа № ${result.id} проведена.` : `Бухгалтерское списание № ${result.id} проведено.`); onPosted(); }
+      if (confirm) {
+        if (!confirmedIssueReceipt(result, org, current!.body, current!.calculation, sale))
+          throw new Error("ERP не подтвердила именно эту операцию. Проверенный пакет оставлен для сверки и точного повтора.");
+        setPrepared(null);
+        setNotice(result.kind === "quantity_only_receipt" ? `Запись списания № ${result.receipt_id} зарегистрирована.` : sale ? `Продажа № ${result.id} проведена.` : `Бухгалтерское списание № ${result.id} проведено.`);
+        onPosted();
+      }
       else setPrepared({ key, body, calculation: result });
     } catch (e) { if (mounted.current) setError(e instanceof Error ? e.message : "Не удалось выполнить запрос."); }
     finally { if (mounted.current) setBusy(false); onBusyChange(false); }

@@ -22,7 +22,7 @@ async def test_zero_replay_uses_gateway_for_value_and_recursive_allocation(monke
     command = AllocatedZeroValueDisposalCommand.model_validate(snapshot)
     # An earlier late-cost line must be authenticated even if its SKU is outside
     # the zero-cost selection. Keep the real verified_value_lines guard here.
-    rows = [(SimpleNamespace(id=15, operation="inventory_late_cost"),
+    rows = [(SimpleNamespace(id=15, operation="inventory_late_cost", rule_version="late-cost-v2"),
              SimpleNamespace(id=16, quantity=None))]
     session = SimpleNamespace(
         scalar=AsyncMock(return_value=SimpleNamespace(id=7, inventory_method="fifo", production_costing=None)),

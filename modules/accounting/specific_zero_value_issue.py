@@ -185,7 +185,11 @@ async def confirm(session, organization_id, document, basis_digest, digest, acto
         return {"kind": "quantity_only_receipt", "posting": None,
                 "cost": {"issue_cost_byn": "0.00", "issue_quantity": format(document.quantity, ".6f")},
                 "receipt_id": existing.id, "registration_token": existing.registration_token,
-                "basis_digest": existing.basis_digest, "digest": existing.digest, "posted": True}
+                "basis_digest": existing.basis_digest, "digest": existing.digest, "posted": True,
+                "organization_id": organization_id, "source": document.source,
+                "source_version": document.source_version, "operation": "inventory_issue",
+                "policy_id": document.policy_id, "posting_date": document.posting_date,
+                "document_date": document.document_date, "operation_date": document.operation_date}
     command, cost = await _command(session, organization_id, document, procurement=procurement)
     expected_digest = receipt_digest(organization_id, actor, command)
     if command.basis_digest != basis_digest or expected_digest != digest:
@@ -193,4 +197,8 @@ async def confirm(session, organization_id, document, basis_digest, digest, acto
     receipt = await register_standalone_zero_value_issue(session, organization_id, actor, command, procurement=procurement)
     return {"kind": "quantity_only_receipt", "posting": None, "cost": cost,
             "receipt_id": receipt.id, "registration_token": receipt.registration_token,
-            "basis_digest": command.basis_digest, "digest": expected_digest, "posted": True}
+            "basis_digest": command.basis_digest, "digest": expected_digest, "posted": True,
+            "organization_id": organization_id, "source": document.source,
+            "source_version": document.source_version, "operation": "inventory_issue",
+            "policy_id": document.policy_id, "posting_date": document.posting_date,
+            "document_date": document.document_date, "operation_date": document.operation_date}
