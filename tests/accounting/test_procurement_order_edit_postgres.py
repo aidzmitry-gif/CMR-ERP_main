@@ -9,8 +9,8 @@ import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 
-from core.domain.models import IdentityInvitationRequest, OutboxEvent, User
-from modules.procurement.models import PurchaseOrderMilestone, TransportMethod
+from core.domain.models import Counterparty, IdentityInvitationRequest, OutboxEvent, User
+from modules.procurement.models import PurchaseOrderMilestone, Supplier, TransportMethod
 from modules.procurement.ownership import request_command_hash
 from tests.accounting.test_postgres import pg_factory  # noqa: F401
 from tests.accounting.test_procurement_order_creation import command as creation_command
@@ -62,6 +62,9 @@ async def test_pg_owned_order_all_edit_actions_replay(issuance_pg):  # noqa: F81
     api, factory = issuance_pg
     # Existing migration 0072 tables, not part of the additive accounting DDL.
     async with factory() as session:
+        session.add(Counterparty(id=1, name="supplier1", unp="190000001"))
+        session.add(Supplier(id=1, name="supplier1", unp="190000001", status="active",
+                             counterparty_id=1))
         conn = await session.connection()
         await conn.run_sync(lambda c: TransportMethod.metadata.create_all(c,
             tables=[TransportMethod.__table__, PurchaseOrderMilestone.__table__], checkfirst=True))
