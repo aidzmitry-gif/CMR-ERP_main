@@ -11,7 +11,8 @@ import { ProcurementReceiptPosting, type ReceiptAccount } from "./procurement-re
 const item = () => ({ order_id: null as number | null, sku_id: null as number | null, sku_title: null as string | null, sku: "", unit: null as string | null, lot: "", quantity: "", net_amount: "", vat_amount: "", vat_rate: "", vat_basis: "" });
 const blank = () => ({ currency: "BYN", invoice_reference: "", document_date: "", operation_date: "", supplier: "", supplier_id: null as number | null, supplier_unp: null as string | null, contract: "", warehouse: "", explanation: "", items: [item()] });
 type Document = ReturnType<typeof blank>;
-type Receipt = { id: number; version: number; status?: string; posting?: { entry_id: number; version: number } | null; revisions: { version: number; actor: string; created_at: string; document: Document }[] };
+type Receipt = { id: number; key?: string; version: number; status?: string; posting?: { entry_id: number; version: number } | null; revisions: { version: number; request_key?: string | null; actor: string; created_at: string; document: Document }[] };
+type PendingSave = { org: string; receiptId: number | null; version: number; key: string; document: Document; closeAfterSave: boolean };
 type OwnedOrder = { kind: string; source_id: number; snapshot: { number: string; supplier: string } };
 const fields = [["invoice_reference", "Номер первичной накладной"], ["document_date", "Дата первичной накладной"], ["operation_date", "Дата поступления"], ["contract", "Договор накладной"], ["warehouse", "Склад накладной"], ["explanation", "Содержание накладной"]] as const;
 const itemFields = [["lot", "Партия"], ["quantity", "Количество"], ["net_amount", "Стоимость без НДС"], ["vat_rate", "Ставка НДС %"], ["vat_amount", "Сумма НДС"], ["vat_basis", "Основание НДС"]] as const;
@@ -40,7 +41,7 @@ function revisionChanges(previous: Document, current: Document) {
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`/api/procurement${path}`, { cache: "no-store", ...options });
   const data = await response.json();
-  if (!response.ok) throw new Error(response.status === 409 ? "Версия или ключ документа уже изменены. Обновите список и откройте актуальную накладную." : typeof data.detail === "string" ? data.detail : "Проверьте реквизиты, даты и суммы накладной.");
+  if (!response.ok) throw Object.assign(new Error(response.status === 409 ? "Версия или ключ документа уже изменены. Обновите список и откройте актуальную накладную." : typeof data.detail === "string" ? data.detail : "Проверьте реквизиты, даты и суммы накладной."), { status: response.status });
   return data;
 }
 export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], policyId, date = "", onPosted, onPendingChange }: { org: string; initialReceipt?: string; accounts?: ReceiptAccount[]; policyId?: number; date?: string; onPosted?: () => void; onPendingChange?: (pending: boolean) => void }) {
@@ -55,17 +56,18 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   const [skuOptions, setSkuOptions] = useState<ProcurementSkuOption[]>([]);
   const [skuError, setSkuError] = useState("");
   const [selected, setSelected] = useState<Receipt | null>(null), [busy, setBusy] = useState(false);
+  const [uncertain, setUncertain] = useState(false);
   const [editorOpen, setEditorOpen] = useState(true);
   const [error, setError] = useState(""), [notice, setNotice] = useState(""), [reload, setReload] = useState(0);
   const [loadedKey, setLoadedKey] = useState("");
-  const key = useRef<string | null>(null), active = useRef(true);
+  const pending = useRef<PendingSave | null>(null), active = useRef(true);
   const initialOpened = useRef(false);
   const [initialLoading, setInitialLoading] = useState(initialReceipt !== undefined);
   const path = `/organizations/${org}/receipt-documents`;
   const listKey = `${path}/${reload}`;
   const listLoaded = loadedKey === listKey;
   const dirty = JSON.stringify(document) !== JSON.stringify(selected ? selected.revisions.at(-1)!.document : blank());
-  const confirmDiscard = useUnsavedDocumentGuard(dirty || busy, onPendingChange);
+  const confirmDiscard = useUnsavedDocumentGuard(dirty || busy || uncertain, onPendingChange);
   const search = query.trim().toLocaleLowerCase("ru");
   const visible = rows.filter((row) => {
     const source = row.revisions.at(-1)!.document;
@@ -114,7 +116,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
         if (row) {
           setSelected(row); setDocument(structuredClone(row.revisions.at(-1)!.document));
           setEditorOpen(true);
-          key.current = null; setError(""); setNotice("");
+          pending.current = null; setUncertain(false); setError(""); setNotice("");
         }
         else setError("Накладная из ссылки не найдена в выбранном юрлице.");
       }
@@ -125,39 +127,60 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
     if (!confirmDiscard()) return;
     setSelected(row); setDocument(row ? structuredClone(row.revisions.at(-1)!.document) : blank());
     setEditorOpen(true);
-    key.current = null; setError(""); setNotice("");
+    pending.current = null; setUncertain(false); setError(""); setNotice("");
   }
-  async function save(closeAfterSave = false) {
-    if (selected?.posting) return;
+  function save(closeAfterSave = false) {
+    if (selected?.posting || busy || uncertain || pending.current) return;
     if (!document.supplier_id || document.supplier_unp == null) {
       setError("Выберите поставщика накладной из справочника."); return;
     }
     if (document.items.some(row => !row.sku_id || !row.sku_title || !row.unit)) {
       setError("Выберите номенклатуру каждой строки накладной из справочника."); return;
     }
-    key.current ??= crypto.randomUUID();
+    const command: PendingSave = { org, receiptId: selected?.id ?? null, version: selected?.version ?? 0,
+      key: crypto.randomUUID(), document: structuredClone(document), closeAfterSave };
+    pending.current = command;
+    void submit(command);
+  }
+  async function submit(command: PendingSave) {
     setBusy(true); setError(""); setNotice("");
     try {
-      const row = await request<Receipt>(selected ? `${path}/${selected.id}` : path, {
-        method: selected ? "PUT" : "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(selected ? { expected_version: selected.version, document } : { key: key.current, document }),
+      const target = `/organizations/${command.org}/receipt-documents`;
+      const row = await request<Receipt>(command.receiptId ? `${target}/${command.receiptId}` : target, {
+        method: command.receiptId ? "PUT" : "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(command.receiptId
+          ? { key: command.key, expected_version: command.version, document: command.document }
+          : { key: command.key, document: command.document }),
       });
       const revision = row?.revisions?.at(-1);
       if (!Number.isSafeInteger(row?.id) || row.id < 1 || !Number.isSafeInteger(row.version)
-        || row.version !== (selected?.version ?? 0) + 1
+        || row.version !== command.version + 1
         || revision?.version !== row.version || !revision.document
-        || (selected && row.id !== selected.id)) {
+        || (command.receiptId ? row.id !== command.receiptId || revision.request_key !== command.key
+          : row.key !== command.key)) {
         throw new Error("Сервер не подтвердил сохранённую версию этой накладной. Форма оставлена открытой.");
       }
       if (!active.current) return;
-      key.current = null;
-      setSelected(closeAfterSave ? null : row);
-      setDocument(closeAfterSave ? blank() : structuredClone(revision.document));
-      setEditorOpen(!closeAfterSave);
+      pending.current = null; setUncertain(false);
+      setSelected(command.closeAfterSave ? null : row);
+      setDocument(command.closeAfterSave ? blank() : structuredClone(revision.document));
+      setEditorOpen(!command.closeAfterSave);
       setRows((current) => [row, ...current.filter((item) => item.id !== row.id)]);
-      setNotice(`Накладная № ${row.id}: сохранена версия ${row.version}${closeAfterSave ? ", форма закрыта" : ""}.`);
-    } catch (e) { if (active.current) setError((e as Error).message); }
+      setNotice(`Накладная № ${row.id}: сохранена версия ${row.version}${command.closeAfterSave ? ", форма закрыта" : ""}.`);
+    } catch (e) { if (active.current) {
+      const status = (e as Error & { status?: number }).status;
+      if (status === undefined || status >= 500) {
+        setUncertain(true);
+        setError(`${(e as Error).message} Результат сохранения неизвестен. Повторите подтверждение той же редакции.`);
+      } else {
+        pending.current = null; setUncertain(false); setError((e as Error).message);
+      }
+    } }
     finally { if (active.current) setBusy(false); }
+  }
+  function retryPending() {
+    if (busy || !pending.current || pending.current.org !== org) return;
+    void submit(pending.current);
   }
   if (initialLoading) return <section className="space-y-3 rounded-xl border border-line bg-surface p-4"><p role="status">Загрузка накладной из ссылки…</p>{error && <><p role="alert">{error}</p><Button onClick={() => setReload(value => value + 1)}>Повторить загрузку накладной</Button></>}</section>;
   return <section className="space-y-4 rounded-xl border border-line bg-surface p-4">
@@ -166,6 +189,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {orderError && <p role="alert">{orderError}</p>}
     <fieldset disabled={busy} className="space-y-3">
+      {uncertain && <div className="rounded border border-accent p-3"><p>Форма сохранена до сверки результата. Повтор отправит те же реквизиты и ключ операции.</p><Button onClick={retryPending}>Повторить подтверждение той же редакции</Button></div>}
       <div className="flex gap-2"><Button variant="secondary" onClick={() => open(null)}>Новая первичная накладная</Button><Button variant="secondary" onClick={() => setReload((v) => v + 1)}>Обновить реестр</Button></div>
       <div className="grid gap-3 md:grid-cols-2"><label>Поиск по номеру, поставщику или дате<Input aria-label="Поиск накладных" value={query} onChange={(e) => setQuery(e.target.value)} /></label><label>Статус накладной<Select aria-label="Статус накладной" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="all">Все</option><option value="draft">Черновики</option><option value="posted">Проведённые</option></Select></label></div>
       {!listLoaded && !error && <p role="status">Загрузка реестра накладных…</p>}
@@ -180,7 +204,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       })}</ul>}
       {listLoaded && !visible.length && <p className="text-sm text-muted">Накладных по выбранному фильтру нет.</p>}
       {selected?.posting && <p role="status">Проведена · проводка № {selected.posting.entry_id}. Первичные данные доступны для просмотра.</p>}
-      {editorOpen && <fieldset disabled={Boolean(selected?.posting)} className="space-y-3">
+      {editorOpen && <fieldset disabled={Boolean(selected?.posting) || uncertain} className="space-y-3">
       <div className="grid gap-3 md:grid-cols-3">{fields.map(([field, label]) => <label key={field}>{label}<Input type={field.endsWith("date") ? "date" : "text"} value={document[field]} onChange={(e) => setDocument({ ...document, [field]: e.target.value })} /></label>)}</div>
       <div className="grid gap-3 md:grid-cols-2"><label>Поиск поставщика<Input aria-label="Поиск поставщика накладной" maxLength={100} value={supplierSearch} onChange={(e) => { setSupplierSearch(e.target.value); setSupplierOptions([]); setSupplierError(""); setDocument((current) => ({ ...current, supplier: "", supplier_id: null, supplier_unp: null })); }} /></label><label>Поставщик накладной из справочника<Select aria-label="Поставщик накладной из справочника" value={document.supplier_id ?? ""} onChange={(e) => {
         const supplier = supplierOptions.find((option) => String(option.id) === e.target.value);

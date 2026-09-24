@@ -59,7 +59,7 @@ async def test_receipt_sku_selection_freezes_snapshot_and_rejects_catalog_drift(
     assert replay.status_code == 201 and replay.json()["id"] == created.json()["id"]
     assert replay.json()["revisions"][0]["document"]["items"][0]["sku_title"] == "Synthetic receipt item"
     assert (await client.put(f"{path}/{created.json()['id']}", json={
-        "expected_version": 1, "document": facts,
+        "key": "stale-sku-edit", "expected_version": 1, "document": facts,
     })).status_code == 409
 
 
@@ -88,7 +88,7 @@ async def test_old_text_sku_draft_needs_explicit_selection_before_posting_or_war
     assert preview.status_code == 409 and "SKU catalogue" in preview.text
     with pytest.raises(ValueError, match="SKU catalogue"):
         await ProcurementSourceService().warehouse_receipt_source(db, book[0], receipt_id, 1)
-    edited = await client.put(path, json={"expected_version": 1, "document": facts})
+    edited = await client.put(path, json={"key": "legacy-sku-upgrade", "expected_version": 1, "document": facts})
     assert edited.status_code == 200, edited.text
     assert edited.json()["version"] == 2
     assert all(field not in edited.json()["revisions"][0]["document"]["items"][0] for field in missing)
@@ -121,7 +121,7 @@ async def test_catalog_supplier_snapshot_stays_in_revision_and_rejects_drift(cli
     stale = await client.post(path, json={"key": "new-source", "document": data})
     assert stale.status_code == 409
     edited = await client.put(f"{path}/{created.json()['id']}",
-                              json={"expected_version": 1, "document": data})
+                              json={"key": "stale-supplier-edit", "expected_version": 1, "document": data})
     assert edited.status_code == 409
     supplier.name = "Selected supplier"
     party.name = "Changed MDM supplier"
@@ -158,10 +158,10 @@ async def test_new_text_only_receipt_is_rejected_but_legacy_replay_and_upgrade_w
     assert replay.status_code == 201 and replay.json()["id"] == receipt_id
     assert "supplier_id" not in replay.json()["revisions"][0]["document"]
     assert (await client.put(f"{path}/{receipt_id}", json={
-        "expected_version": 1, "document": legacy,
+        "key": "legacy-unbound-edit", "expected_version": 1, "document": legacy,
     })).status_code == 422
     upgraded = await client.put(f"{path}/{receipt_id}", json={
-        "expected_version": 1, "document": bound,
+        "key": "legacy-bound-edit", "expected_version": 1, "document": bound,
     })
     assert upgraded.status_code == 200, upgraded.text
     assert upgraded.json()["version"] == 2
@@ -252,14 +252,27 @@ async def test_primary_draft_preserves_versions_and_never_posts(client, db, book
     assert first.json()["id"] == repeat.json()["id"]
     assert first.json()["status"] == "draft"
     changed = {**document(), "invoice_reference": "INV1 corrected"}
-    second = await client.put(path + f"/{first.json()['id']}", json={"expected_version": 1, "document": changed})
+    second = await client.put(path + f"/{first.json()['id']}", json={"key": "edit-v2", "expected_version": 1, "document": changed})
     assert second.status_code == 200
     assert second.json()["version"] == 2
     revisions = second.json()["revisions"]
     assert [r["document"]["invoice_reference"] for r in revisions] == ["INV1", "INV1 corrected"]
     assert revisions[0]["document"]["items"][0]["quantity"] == "2.000001"
     assert all(r["actor"] == "tester" for r in revisions)
-    assert (await client.put(path + f"/{first.json()['id']}", json={"expected_version": 1, "document": changed})).status_code == 409
+    replay = await client.put(path + f"/{first.json()['id']}", json={"key": "edit-v2", "expected_version": 1, "document": changed})
+    assert replay.status_code == 200 and replay.json()["version"] == 2
+    assert len(replay.json()["revisions"]) == 2
+    assert replay.json()["revisions"][1]["request_key"] == "edit-v2"
+    sku = await db.get(Sku, 1)
+    sku.title = "Renamed after accepted edit"
+    await db.commit()
+    replay_after_catalog_change = await client.put(path + f"/{first.json()['id']}", json={
+        "key": "edit-v2", "expected_version": 1, "document": changed,
+    })
+    assert replay_after_catalog_change.status_code == 200
+    assert len(replay_after_catalog_change.json()["revisions"]) == 2
+    assert (await client.put(path + f"/{first.json()['id']}", json={"key": "stale-edit", "expected_version": 1, "document": changed})).status_code == 409
+    assert (await client.put(path + f"/{first.json()['id']}", json={"key": "edit-v2", "expected_version": 1, "document": document()})).status_code == 409
     assert (await client.post(path, json={**data, "document": changed})).status_code == 409
     assert await db.scalar(select(func.count()).select_from(Entry)) == 0
     assert len((await client.get(path)).json()) == 1
@@ -330,7 +343,7 @@ async def test_source_posting_uses_facts_and_freezes_document(client, db, book):
     revised = document()
     revised["invoice_reference"] = "INV1 revised"
     revised["items"][0].update(vat_rate="0", vat_amount="0.00")
-    assert (await client.put(path, json={"expected_version": 1, "document": revised})).status_code == 200
+    assert (await client.put(path, json={"key": "source-revision", "expected_version": 1, "document": revised})).status_code == 200
     options["expected_version"] = 2
     preview = await client.post(path + "/preview", json=options)
     assert preview.status_code == 200, preview.text
@@ -358,7 +371,7 @@ async def test_source_posting_uses_facts_and_freezes_document(client, db, book):
     assert basis["entry_id"] == first.json()["entry_id"]
     assert await db.scalar(select(func.count()).select_from(Entry)) == 1
     assert await db.scalar(select(func.count()).select_from(ReceiptPosting)) == 1
-    assert (await client.put(path, json={"expected_version": 1, "document": document()})).status_code == 409
+    assert (await client.put(path, json={"key": "posted-edit", "expected_version": 1, "document": document()})).status_code == 409
     assert (await client.post(path + "/confirm", json={**confirmed, "posting_date": "2026-09-04"})).status_code == 409
     rows = (await client.get(path.rsplit("/", 1)[0])).json()
     assert rows[0]["status"] == "posted"
@@ -383,7 +396,7 @@ async def test_source_posting_uses_facts_and_freezes_document(client, db, book):
 async def test_stale_source_preview_and_reader_cannot_post(client, db, book):
     path, options = await source_options(client, db, book)
     preview = (await client.post(path + "/preview", json=options)).json()
-    assert (await client.put(path, json={"expected_version": 1, "document": document()})).status_code == 200
+    assert (await client.put(path, json={"key": "stale-preview-edit", "expected_version": 1, "document": document()})).status_code == 200
     assert (await client.post(path + "/confirm", json={**options, "digest": preview["digest"]})).status_code == 409
     db.add(AccessGrant(organization_id=book[0], subject="buyer", role="reader"))
     await db.commit()
@@ -402,7 +415,7 @@ async def test_vat_worksheet_traces_confirmed_primary_revision(client, db, book)
     await db.commit()
     revised = document()
     revised["invoice_reference"] = "INV1 VAT revision"
-    assert (await client.put(path, json={"expected_version": 1, "document": revised})).status_code == 200
+    assert (await client.put(path, json={"key": "vat-revision", "expected_version": 1, "document": revised})).status_code == 200
     options.update(expected_version=2, vat_account="18")
     preview = await client.post(path + "/preview", json=options)
     assert preview.status_code == 200, preview.text

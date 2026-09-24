@@ -31,7 +31,7 @@ async def test_warehouse_source_keeps_version_line_identity_and_explicit_units(c
     data["items"][0]["unit"] = "упак"
     data["items"].append({**data["items"][0]})
     edited = await client.put(f"/procurement/organizations/{org}/receipt-documents/{receipt}",
-                              json={"expected_version": 1, "document": data})
+                              json={"key": "warehouse-revision", "expected_version": 1, "document": data})
     assert edited.status_code == 200, edited.text
     with pytest.raises(ValueError, match="version changed"):
         await gateway.warehouse_receipt_source(db, org, receipt, 1)

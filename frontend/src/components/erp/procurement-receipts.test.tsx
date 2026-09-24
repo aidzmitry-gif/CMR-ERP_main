@@ -69,7 +69,7 @@ it("requires a selected supplier and saves its directory snapshot in a new recei
     }) };
     if (init?.method === "POST") {
       submitted = JSON.parse(String(init.body));
-      return { ok: true, json: async () => ({ id: 41, version: 1, status: "draft", posting: null,
+      return { ok: true, json: async () => ({ id: 41, key: submitted!.key, version: 1, status: "draft", posting: null,
         revisions: [{ version: 1, actor: "buyer", created_at: "2026-09-24", document: submitted!.document }] }) };
     }
     return { ok: true, json: async () => [] };
@@ -144,7 +144,7 @@ it("closes a new receipt only after the server confirms its saved version", asyn
     if (init?.method === "POST") {
       const saved = JSON.parse(String(init.body));
       await savePending;
-      const row = { id: 41, version: 1, status: "draft", posting: null,
+      const row = { id: 41, key: saved.key, version: 1, status: "draft", posting: null,
         revisions: [{ version: 1, actor: "buyer", created_at: "2026-09-24", document: saved.document }] };
       rows = [row];
       return { ok: true, json: async () => row };
@@ -187,6 +187,44 @@ it("keeps an edited receipt open after the server rejects Save and Close", async
   expect(await screen.findByRole("alert")).toHaveTextContent("Версия или ключ документа уже изменены");
   expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("INV-EDIT");
   expect(screen.getByRole("button", { name: "Сохранить и закрыть" })).toBeEnabled();
+});
+
+it("retries an uncertain receipt edit with the same key and closes only after confirmation", async () => {
+  const original = {
+    currency: "BYN", invoice_reference: "INV-OLD", document_date: "2026-09-24",
+    operation_date: "2026-09-24", supplier: "Поставщик", supplier_id: 19,
+    supplier_unp: "190000001", contract: "", warehouse: "", explanation: "", items: [],
+  };
+  const row = { id: 41, version: 1, status: "draft", posting: null,
+    revisions: [{ version: 1, actor: "buyer", created_at: "2026-09-24", document: original }] };
+  const commands: string[] = [];
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === "PUT") {
+      const body = String(init.body);
+      commands.push(body);
+      const command = JSON.parse(body);
+      const saved = { ...row, version: 2, revisions: [...row.revisions,
+        { version: 2, request_key: command.key, actor: "buyer", created_at: "2026-09-25", document: command.document }] };
+      if (commands.length === 1) throw new Error("Network response lost");
+      return { ok: true, json: async () => saved };
+    }
+    return { ok: true, json: async () => url.includes("purchase-ownership") ? [] : [row] };
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /INV-OLD/ }));
+  fireEvent.change(screen.getByLabelText("Номер первичной накладной"), { target: { value: "INV-EDIT" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Результат сохранения неизвестен");
+  expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("INV-EDIT");
+  expect(screen.getByLabelText("Номер первичной накладной")).toBeDisabled();
+  expect(screen.queryByText(/форма закрыта/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Повторить подтверждение той же редакции" }));
+  expect(await screen.findByText("Накладная № 41: сохранена версия 2, форма закрыта.")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Номер первичной накладной")).not.toBeInTheDocument();
+  expect(commands).toHaveLength(2);
+  expect(commands[1]).toBe(commands[0]);
+  expect(JSON.parse(commands[0])).toMatchObject({ expected_version: 1, document: { invoice_reference: "INV-EDIT" } });
 });
 
 it.each([

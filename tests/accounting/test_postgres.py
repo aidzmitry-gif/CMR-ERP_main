@@ -65,6 +65,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0176_payroll_organization_review.py",
     "0177_procurement_catalog_receipt_guards.py",
     "0178_procurement_atomic_order_save.py",
+    "0183_receipt_edit_request_key.py",
 )
 
 
@@ -314,6 +315,7 @@ async def test_primary_receipt_http_concurrent_replay_and_snapshot(pg_factory, p
             header = await reader.scalar(select(ReceiptDocument).where(ReceiptDocument.id == receipt_id))
             assert header.current_version == 1
             changed = await client.put(path + f"/{receipt_id}", json={
+                "key": "pg-edit-v2",
                 "expected_version": 1,
                 "document": {**document(), "invoice_reference": "INV2"},
             })
@@ -339,7 +341,7 @@ async def test_primary_receipt_http_concurrent_replay_and_snapshot(pg_factory, p
             await session.commit()
         facts = document()
         facts["items"][0].update(vat_rate="0", vat_amount="0.00", order_id=44)
-        assert (await client.put(path + f"/{receipt_id}", json={"expected_version": 2, "document": facts})).status_code == 200
+        assert (await client.put(path + f"/{receipt_id}", json={"key": "pg-edit-v3", "expected_version": 2, "document": facts})).status_code == 200
         options = {"expected_version": 3, "posting_date": "2026-09-03", "policy_id": pg_book[1],
                    "settlement_account": "60", "vat_account": None, "inventory_accounts": ["41.2"]}
         preview = await client.post(path + f"/{receipt_id}/preview", json=options)
@@ -1041,7 +1043,7 @@ async def test_procurement_draft_versions_serialize_and_cannot_be_truncated(pg_f
         async with pg_factory() as session:
             try:
                 result = await edit_document(pg_book[0], saved["id"], ReceiptEdit(
-                    expected_version=1, document={**document(), "invoice_reference": reference},
+                    key=reference, expected_version=1, document={**document(), "invoice_reference": reference},
                 ), (session, "tester"), (session, AccountingService(), CurrentUser("tester", ["director"])))
                 await session.commit()
                 return result["version"]
@@ -1050,6 +1052,8 @@ async def test_procurement_draft_versions_serialize_and_cannot_be_truncated(pg_f
                 return exc.status_code
 
     assert sorted(await asyncio.gather(editor("second-A"), editor("second-B"))) == [2, 409]
+    accepted = "second-A" if await editor("second-A") == 2 else "second-B"
+    assert await asyncio.gather(editor(accepted), editor(accepted)) == [2, 2]
     async with pg_factory() as session:
         assert await session.scalar(text("SELECT count(*) FROM procurement.receipt_revision")) == 2
         with pytest.raises(DBAPIError, match="immutable"):
@@ -1308,7 +1312,7 @@ async def test_completeness_bootstrap_covers_preexisting_receipt_versions(pg_fac
         access = (session, LegacyGateway(), CurrentUser("tester", ["director"]))
         receipt = await create_document(pg_book[0], ReceiptCreate(key="legacy", document=document()), (session, "tester"), access)
         await session.commit()
-        await edit_document(pg_book[0], receipt["id"], ReceiptEdit(expected_version=1, document={**document(), "invoice_reference": "legacy-v2"}), (session, "tester"), access)
+        await edit_document(pg_book[0], receipt["id"], ReceiptEdit(key="legacy-edit-v2", expected_version=1, document={**document(), "invoice_reference": "legacy-v2"}), (session, "tester"), access)
         await session.commit()
         assert await session.scalar(text("SELECT count(*) FROM accounting.source_control")) == 0
         # Bootstrap is installed before its guard in the frozen migration.
