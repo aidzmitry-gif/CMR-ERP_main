@@ -1,6 +1,7 @@
 import pytest
 from sqlalchemy import func, select
 
+from core.domain.models import Counterparty
 from core.services.auth import CurrentUser, get_current_user
 from modules.accounting.models import AccessGrant, Entry
 from modules.procurement.receipt_documents import ReceiptRevision
@@ -22,7 +23,10 @@ async def test_catalog_supplier_snapshot_stays_in_revision_and_rejects_drift(cli
     async with db.bind.begin() as connection:
         await connection.run_sync(lambda sync: Supplier.metadata.create_all(
             sync, tables=[Supplier.__table__]))
-    supplier = Supplier(name="Selected supplier", unp="190000001", status="active")
+    party = Counterparty(name="Selected supplier", unp="190000003")
+    db.add(party)
+    await db.flush()
+    supplier = Supplier(name="Selected supplier", unp="190000003", status="active", counterparty_id=party.id)
     db.add(supplier)
     await db.commit()
     data = {**document(), "supplier": supplier.name,
@@ -41,6 +45,17 @@ async def test_catalog_supplier_snapshot_stays_in_revision_and_rejects_drift(cli
     edited = await client.put(f"{path}/{created.json()['id']}",
                               json={"expected_version": 1, "document": data})
     assert edited.status_code == 409
+    supplier.name = "Selected supplier"
+    party.name = "Changed MDM supplier"
+    await db.commit()
+    replay = await client.post(path, json={"key": "catalog-supplier", "document": data})
+    assert replay.status_code == 201 and replay.json()["id"] == created.json()["id"]
+    assert (await client.post(path, json={"key": "mdm-changed", "document": data})).status_code == 409
+    preview = await client.post(f"{path}/{created.json()['id']}/preview", json={
+        "expected_version": 1, "posting_date": "2026-09-03", "policy_id": book[1],
+        "settlement_account": "60", "vat_account": None, "inventory_accounts": ["41"],
+    })
+    assert preview.status_code == 409
     assert len((await client.get(path)).json()) == 1
 
 
@@ -242,6 +257,9 @@ async def test_source_posting_uses_facts_and_freezes_document(client, db, book):
     assert preview.json()["lines"][0]["amount"] == "100.01"
     confirmed = {**options, "digest": preview.json()["digest"]}
     first = await client.post(path + "/confirm", json=confirmed)
+    party = await db.get(Counterparty, 1)
+    party.name = "supplier1 renamed after posting"
+    await db.commit()
     again = await client.post(path + "/confirm", json=confirmed)
     assert first.status_code == again.status_code == 201, first.text
     assert first.json()["entry_id"] == again.json()["entry_id"]
