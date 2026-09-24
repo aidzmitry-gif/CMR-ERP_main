@@ -169,6 +169,8 @@ def test_preflight_validates_complete_package_without_exposing_artifact_contents
     assert result["opening_import"]["entry_count"] == 1
     assert len(result["opening_import"]["command_digest"]) == 64
     assert result["opening_import"]["source_file_sha256"] == digest(tmp_path / "opening-source.txt")
+    assert result["osv"]["reconciliation_ready"] is True
+    assert result["osv"]["cutover_ready"] is False
     assert result["osv"]["period_from"] == "2026-09-01"
     assert result["osv"]["left_source_class"] == "external_system_export"
     assert result["osv"]["left_source_system"] == "1c-export"

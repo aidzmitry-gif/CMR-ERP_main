@@ -389,9 +389,9 @@ def _validate_osv(left: dict[str, Any], right: dict[str, Any], month: str,
         result = compare(_read_structured_artifact(left["path"]), _read_structured_artifact(right["path"]))
     except (UnicodeDecodeError, ValueError) as exc:
         raise PreflightError("OSV artifacts are not a compatible normalized pair") from exc
-    if not result["cutover_ready"]:
+    if not result["reconciliation_ready"]:
         blockers = ", ".join(result["eligibility_blockers"])
-        raise PreflightError(f"OSV pair is not eligible for cutover: {blockers}")
+        raise PreflightError(f"OSV pair is not eligible for reconciliation: {blockers}")
     if result["left"]["organization_id"] != erp_book_id:
         raise PreflightError("OSV organization_id must match organization.erp_book_id")
     if result["left"]["from"] != cutover.isoformat() or result["left"]["to"][:7] != month:
@@ -497,6 +497,8 @@ def preflight(manifest_path: Path) -> dict[str, Any]:
         },
         "osv": {
             "organization_id": osv["left"]["organization_id"],
+            "reconciliation_ready": osv["reconciliation_ready"],
+            "cutover_ready": False,
             "period_from": osv["left"]["from"],
             "period_to": osv["left"]["to"],
             "left_source_class": artifacts["osv_left"][0]["source_class"],

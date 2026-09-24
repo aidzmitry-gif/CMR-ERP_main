@@ -33,7 +33,7 @@ it("shows validation failures without a successful protocol", async () => {
 });
 
 it("downloads the selected ERP period and blocks acceptance when uploaded right CSV differs from ledger", async () => {
-  const candidate = { status: "no_numeric_differences", cutover_ready: false, erp_ledger_verified: false,
+  const candidate = { status: "no_numeric_differences", reconciliation_ready: false, cutover_ready: false, erp_ledger_verified: false,
     eligibility_blockers: ["erp_snapshot_mismatch"],
     left: { from: "2026-09-01", to: "2026-09-30", sha256: "left", status: "closed_periods" },
     right: { sha256: "right", status: "closed_periods" }, differences: [] };
@@ -51,8 +51,8 @@ it("downloads the selected ERP period and blocks acceptance when uploaded right 
 });
 
 it("persists a scoped immutable queue for mismatches with the responsible owner", async () => {
-  const candidate = { status: "differences", cutover_ready: false, eligibility_blockers: ["numeric_differences"], left: { from: "2026-09-01", to: "2026-09-30", sha256: "left", status: "closed_periods", pending_documents: 0 }, right: { sha256: "right", status: "closed_periods", pending_documents: 0 }, differences: [{ account: "001", currency: "USD", off_balance: false, dimensions: { sku: "A" }, presence: "both", fields: { debit: { left: "1.00", right: "2.00", right_minus_left: "1.00" } } }] };
-  const queued = { organization_id: 7, issue_id: 18, request_key: "00000000-0000-4000-8000-000000000018", period_from: "2026-09-01", period_to: "2026-09-30", left_digest: "left", right_digest: "right", difference_count: 1, eligibility_blockers: ["numeric_differences"], responsible: "accountant:stock", evidence: "Расхождение передано по складскому источнику", requires_fresh_comparison: true, accepted_by_accountant: false, cutover_ready: false };
+  const candidate = { status: "differences", reconciliation_ready: false, cutover_ready: false, eligibility_blockers: ["numeric_differences"], left: { from: "2026-09-01", to: "2026-09-30", sha256: "left", status: "closed_periods", pending_documents: 0 }, right: { sha256: "right", status: "closed_periods", pending_documents: 0 }, differences: [{ account: "001", currency: "USD", off_balance: false, dimensions: { sku: "A" }, presence: "both", fields: { debit: { left: "1.00", right: "2.00", right_minus_left: "1.00" } } }] };
+  const queued = { organization_id: 7, issue_id: 18, request_key: "00000000-0000-4000-8000-000000000018", period_from: "2026-09-01", period_to: "2026-09-30", left_digest: "left", right_digest: "right", difference_count: 1, eligibility_blockers: ["numeric_differences"], responsible: "accountant:stock", evidence: "Расхождение передано по складскому источнику", requires_fresh_comparison: true, accepted_by_accountant: false, reconciliation_ready: false, cutover_ready: false };
   const fetcher = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => candidate }).mockResolvedValueOnce({ ok: true, json: async () => queued });
   vi.stubGlobal("fetch", fetcher);
   vi.stubGlobal("crypto", { randomUUID: () => queued.request_key });
@@ -69,8 +69,8 @@ it("persists a scoped immutable queue for mismatches with the responsible owner"
 });
 
 it("freezes an uncertain queue write and repeats exactly the same command", async () => {
-  const candidate = { status: "differences", cutover_ready: false, eligibility_blockers: ["numeric_differences"], left: { from: "2026-09-01", to: "2026-09-30", sha256: "left", status: "closed_periods" }, right: { sha256: "right", status: "closed_periods" }, differences: [{ account: "001", currency: "BYN", off_balance: false, dimensions: {}, presence: "both", fields: { debit: { left: "1.00", right: "2.00", right_minus_left: "1.00" } } }] };
-  const queued = { organization_id: 7, issue_id: 19, request_key: "00000000-0000-4000-8000-000000000019", period_from: "2026-09-01", period_to: "2026-09-30", left_digest: "left", right_digest: "right", difference_count: 1, eligibility_blockers: ["numeric_differences"], responsible: "accountant:stock", evidence: "Расхождение передано по складскому источнику", requires_fresh_comparison: true, accepted_by_accountant: false, cutover_ready: false };
+  const candidate = { status: "differences", reconciliation_ready: false, cutover_ready: false, eligibility_blockers: ["numeric_differences"], left: { from: "2026-09-01", to: "2026-09-30", sha256: "left", status: "closed_periods" }, right: { sha256: "right", status: "closed_periods" }, differences: [{ account: "001", currency: "BYN", off_balance: false, dimensions: {}, presence: "both", fields: { debit: { left: "1.00", right: "2.00", right_minus_left: "1.00" } } }] };
+  const queued = { organization_id: 7, issue_id: 19, request_key: "00000000-0000-4000-8000-000000000019", period_from: "2026-09-01", period_to: "2026-09-30", left_digest: "left", right_digest: "right", difference_count: 1, eligibility_blockers: ["numeric_differences"], responsible: "accountant:stock", evidence: "Расхождение передано по складскому источнику", requires_fresh_comparison: true, accepted_by_accountant: false, reconciliation_ready: false, cutover_ready: false };
   const fetcher = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => candidate }).mockRejectedValueOnce(new Error("network")).mockResolvedValueOnce({ ok: true, json: async () => queued });
   vi.stubGlobal("fetch", fetcher);
   vi.stubGlobal("crypto", { randomUUID: () => queued.request_key });
@@ -90,8 +90,8 @@ it("freezes an uncertain queue write and repeats exactly the same command", asyn
 });
 
 it("offers one idempotent accountant acceptance for a closed complete match", async () => {
-  const candidate = { status: "no_numeric_differences", cutover_ready: true, accepted_by_accountant: false, eligibility_blockers: [], left: { from: "2026-09-01", to: "2026-09-30", sha256: "left", status: "closed_periods", pending_documents: 0 }, right: { sha256: "right", status: "closed_periods", pending_documents: 0 }, differences: [] };
-  const receipt = { organization_id: 7, request_key: "00000000-0000-4000-8000-000000000001", accepted_by_accountant: true, cutover_ready: true, receipt_id: 12 };
+  const candidate = { status: "no_numeric_differences", reconciliation_ready: true, cutover_ready: false, accepted_by_accountant: false, eligibility_blockers: [], left: { from: "2026-09-01", to: "2026-09-30", sha256: "left", status: "closed_periods", pending_documents: 0 }, right: { sha256: "right", status: "closed_periods", pending_documents: 0 }, differences: [] };
+  const receipt = { organization_id: 7, request_key: "00000000-0000-4000-8000-000000000001", accepted_by_accountant: true, reconciliation_ready: true, cutover_ready: false, receipt_id: 12 };
   const fetcher = vi.fn()
     .mockResolvedValueOnce({ ok: true, json: async () => candidate })
     .mockResolvedValueOnce({ ok: true, json: async () => receipt });
@@ -104,12 +104,13 @@ it("offers one idempotent accountant acceptance for a closed complete match", as
   fireEvent.change(screen.getByLabelText("Основание принятия сверки"), { target: { value: "Проверено главным бухгалтером по протоколу" } });
   fireEvent.click(screen.getByText("Принять протокол бухгалтером"));
   expect(await screen.findByText(/Протокол принят бухгалтером/)).toBeInTheDocument();
+  expect(screen.getByText(/Одна принятая сверка не означает готовность к отказу от 1С/)).toBeInTheDocument();
   expect(fetcher).toHaveBeenCalledTimes(2);
   expect(JSON.parse(fetcher.mock.calls[1][1].body).request_key).toBe(receipt.request_key);
 });
 
 it("keeps source files and evidence locked until acceptance finishes", async () => {
-  const candidate = { status: "no_numeric_differences", cutover_ready: true, left: { from: "2026-09-01", to: "2026-09-30", sha256: "left", status: "closed_periods" }, right: { sha256: "right", status: "closed_periods" }, differences: [] };
+  const candidate = { status: "no_numeric_differences", reconciliation_ready: true, cutover_ready: false, left: { from: "2026-09-01", to: "2026-09-30", sha256: "left", status: "closed_periods" }, right: { sha256: "right", status: "closed_periods" }, differences: [] };
   let finish!: (response: unknown) => void;
   const pending = new Promise(resolve => { finish = resolve; });
   const fetcher = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => candidate }).mockReturnValueOnce(pending);

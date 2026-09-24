@@ -2,6 +2,8 @@ import base64
 import csv
 import io
 import json
+from datetime import date, datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -51,12 +53,29 @@ def test_empty_and_equal_comparisons_retain_preliminary_status():
         assert not result["cutover_ready"]
 
 
-def test_equal_closed_complete_comparison_is_cutover_candidate_but_not_accepted():
+def test_equal_closed_complete_comparison_can_be_reconciled_but_not_cut_over():
     result = compare(snapshot(status="closed_periods", pending="0"),
                      snapshot(status="closed_periods", pending="0"))
-    assert result["cutover_ready"] is True
+    assert result["format"] == "crm-osv-comparison-v2"
+    assert result["reconciliation_ready"] is True
+    assert result["cutover_ready"] is False
     assert result["eligibility_blockers"] == []
     assert result["accepted_by_accountant"] is False
+
+
+def test_legacy_receipt_replay_keeps_history_without_claiming_full_cutover():
+    historical = {"format": "crm-osv-comparison-v1", "cutover_ready": True,
+                  "erp_ledger_verified": True}
+    receipt = SimpleNamespace(
+        organization_id=1, id=7, request_key="legacy", period_from=date(2026, 9, 1),
+        period_to=date(2026, 9, 30), left_digest="a" * 64, right_digest="b" * 64,
+        command_digest="c" * 64, evidence="Legacy accountant receipt", snapshot=historical,
+        digest="d" * 64, actor="accountant", created_at=datetime(2026, 10, 1),
+    )
+    result = reconciliation._receipt_result(receipt)
+    assert result["snapshot"] is historical
+    assert result["reconciliation_ready"] is True
+    assert result["cutover_ready"] is False
 
 
 @pytest.mark.parametrize("other", [snapshot(org="2"), snapshot(duplicate=True), snapshot(blank=True), snapshot(amount="NaN"), snapshot(amount="-1"), snapshot(amount="1.001")])
@@ -224,7 +243,9 @@ async def test_accountant_can_accept_only_closed_equal_pair_and_replay_is_idempo
     response = await client.post(f"/accounting/organizations/{book[0]}/reconciliation/confirm", json=data)
     assert response.status_code == 200, response.text
     receipt = response.json()
-    assert receipt["accepted_by_accountant"] is True and receipt["cutover_ready"] is True
+    assert receipt["accepted_by_accountant"] is True
+    assert receipt["reconciliation_ready"] is True
+    assert receipt["cutover_ready"] is False
     assert receipt["erp_ledger_verified"] is True
     assert receipt["already_confirmed"] is False
     assert await db.scalar(select(func.count()).select_from(Entry)) == entries_before
@@ -236,6 +257,8 @@ async def test_accountant_can_accept_only_closed_equal_pair_and_replay_is_idempo
     replay = await client.post(f"/accounting/organizations/{book[0]}/reconciliation/confirm", json=data)
     assert replay.status_code == 200, replay.text
     assert replay.json()["already_confirmed"] is True
+    assert replay.json()["reconciliation_ready"] is True
+    assert replay.json()["cutover_ready"] is False
     assert await db.scalar(select(func.count()).select_from(ReconciliationReceipt)) == 1
 
     monkeypatch.setattr(reconciliation, "erp_snapshot", matching_ledger)
@@ -295,7 +318,8 @@ async def test_closed_erp_export_can_be_compared_and_accepted_without_reposting(
     })
     assert preview.status_code == 200, preview.text
     assert preview.json()["erp_ledger_verified"] is True
-    assert preview.json()["cutover_ready"] is True
+    assert preview.json()["reconciliation_ready"] is True
+    assert preview.json()["cutover_ready"] is False
     accepted = await client.post(f"{prefix}/reconciliation/confirm", json={
         "request_key": "00000000-0000-4000-8000-000000000025",
         "left_base64": encoded, "right_base64": encoded,

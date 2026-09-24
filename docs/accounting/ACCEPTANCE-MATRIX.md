@@ -36,6 +36,11 @@ restore and targeted payroll guards, not the target database.
   the live ERP ledger export for the same book and period. An identical pair of
   uploaded CSVs alone cannot become a cutover receipt. Existing receipts
   without this verification remain readable but are not marked cutover-ready.
+- A matching closed pair now reports `reconciliation_ready`, which permits one
+  accountant reconciliation receipt. It does not report `cutover_ready`: the
+  external 1C origin and the required close, recovery and release sequence are
+  independent acceptance evidence. Historical receipts remain immutable and
+  their top-level cutover result is false on replay.
 - The accountant screen exposes organization and date range, plan of accounts,
   journal/OSV reports, period controls and document queue.  The UI tests cover
   organization isolation, review-before-posting, report drill-down and safe

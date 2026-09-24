@@ -105,8 +105,9 @@ def compare(left_raw: bytes, right_raw: bytes):
         blockers.append("reports_not_closed")
     if left["pending_documents"] != 0 or right["pending_documents"] != 0:
         blockers.append("pending_documents")
-    return {"format": "crm-osv-comparison-v1", "status": "differences" if differences else "no_numeric_differences",
-            "accepted_by_accountant": False, "cutover_ready": not blockers,
+    return {"format": "crm-osv-comparison-v2", "status": "differences" if differences else "no_numeric_differences",
+            "accepted_by_accountant": False, "reconciliation_ready": not blockers,
+            "cutover_ready": False,
             "eligibility_blockers": blockers,
             "left": {k: v for k, v in left.items() if k != "balances"},
             "right": {k: v for k, v in right.items() if k != "balances"},
@@ -180,7 +181,8 @@ async def verify_erp_snapshot(session, org_id: int, right_raw: bytes, protocol: 
         blockers.append("erp_snapshot_mismatch")
     return {**protocol, "erp_ledger_verified": verified,
             "erp_ledger_sha256": hashlib.sha256(current).hexdigest(),
-            "eligibility_blockers": blockers, "cutover_ready": not blockers}
+            "eligibility_blockers": blockers, "reconciliation_ready": not blockers,
+            "cutover_ready": False}
 
 
 def prepare_queue_uploads(org_id: int, left_base64: str, right_base64: str) -> tuple[bytes, bytes, dict]:
@@ -233,7 +235,8 @@ def _receipt_result(receipt: ReconciliationReceipt) -> dict:
         "created_at": receipt.created_at,
         "accepted_by_accountant": True,
         "erp_ledger_verified": erp_verified,
-        "cutover_ready": erp_verified,
+        "reconciliation_ready": erp_verified,
+        "cutover_ready": False,
         "already_confirmed": False,
     }
 
@@ -253,7 +256,7 @@ async def confirm_uploads(session, org_id: int, left_base64: str, right_base64: 
             raise service.AccountingError("Ключ сверки уже использован с другим протоколом")
         return {**_receipt_result(existing), "already_confirmed": True}
     protocol = await verify_erp_snapshot(session, org_id, right_raw, protocol)
-    if not protocol["cutover_ready"]:
+    if not protocol["reconciliation_ready"]:
         blockers = ", ".join(protocol["eligibility_blockers"])
         raise ValueError(f"Сверка не готова к подтверждению: {blockers}")
     duplicate = await session.scalar(select(ReconciliationReceipt).where(
@@ -380,6 +383,7 @@ def _issue_result(issue: ReconciliationIssue, *, already_queued: bool = False) -
         # closed comparison can later become an accountant acceptance.
         "requires_fresh_comparison": True,
         "accepted_by_accountant": False,
+        "reconciliation_ready": False,
         "cutover_ready": False,
     }
 
@@ -420,7 +424,7 @@ async def queue_uploads(session, org_id: int, left_base64: str, right_base64: st
             raise service.AccountingError("Ключ очереди сверки уже использован с другими файлами или ответственным")
         return _issue_result(existing, already_queued=True)
     protocol = await verify_erp_snapshot(session, org_id, right_raw, protocol)
-    if protocol["cutover_ready"]:
+    if protocol["reconciliation_ready"]:
         raise ValueError("Совпадающую закрытую ОСВ не помещают в очередь; подтвердите протокол бухгалтером")
     duplicate = await session.scalar(select(ReconciliationIssue).where(
         ReconciliationIssue.organization_id == org_id,

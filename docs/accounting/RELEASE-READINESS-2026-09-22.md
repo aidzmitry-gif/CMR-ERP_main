@@ -10,6 +10,13 @@ checks the uploaded right-hand OSV against current ERP ledger bytes; legacy
 receipts without that proof are not cutover-ready. This is local source and
 schema evidence, not a target-database or deployment receipt.
 
+One accepted OSV pair is now labelled `reconciliation_ready` only. The API's
+top-level `cutover_ready` remains false for new and replayed receipts until
+the independent external-source, two-month, quarter/year, recovery and release
+gates are evidenced. The source HR gitlink `f8a6e014` exists in the local HR
+repository but was absent from all four advertised HR-10 branches in the
+2026-09-24 read-only remote check; a clean release fetch remains unproven.
+
 Current local synthetic PostgreSQL upgrade/restore and payroll-guard evidence
 for source head `0172` is recorded in
 [POSTGRES-ACCEPTANCE-2026-09-23.md](POSTGRES-ACCEPTANCE-2026-09-23.md).
