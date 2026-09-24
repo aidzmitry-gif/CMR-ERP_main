@@ -56,6 +56,11 @@ read-only root и временным `/tmp`, без исходников/`node_m
 `NugLquCeWhonBTHKU0uZf`. Один статический JS вернул 200, а анонимный
 `/erp/accounting` перешёл на `/login?error=session_expired`. Временный
 контейнер удалён. Это доказывает переносимость файлового runtime в указанной
-Linux/Node среде; версия Node, способ запуска и rollback действующего
-`cmr-frontend.service` на сервере ещё требуют свежей проверки. Оба архива
-остались локальными; на сервер ничего не отправлялось.
+Linux/Node среде. Read-only сверка сервера 24.09.2026, 08:34 UTC показала:
+`/usr/bin/node` v22.22.3, ABI 127; действующий `cmr-frontend.service` активен
+и запускает `node_modules/.bin/next start -p 3100` из
+`/opt/cmr-erp-releases/crm-ready-r4-ui-20260916/frontend`, BUILD_ID
+`F_-CH9cdxitoaicSnuYyR`. Локальная проверка архива шла на Node 22.23.3;
+совместимость с точной серверной patch-версией, systemd switch и rollback
+ещё не проверены. Оба архива остались локальными; на сервер ничего не
+отправлялось.

@@ -24,6 +24,16 @@
 препятствие доставки исходников закрыто. Это не разрешение на серверное
 переключение: остальные ворота ниже остаются обязательными.
 
+Read-only серверная проверка 24.09.2026, 08:34 UTC: действующий
+`cmr-frontend.service` активен; `/usr/bin/node` v22.22.3 (ABI 127),
+ExecStart — `node_modules/.bin/next start -p 3100`, WorkingDirectory —
+`/opt/cmr-erp-releases/crm-ready-r4-ui-20260916/frontend`, BUILD_ID
+`F_-CH9cdxitoaicSnuYyR`. Новый распакованный standalone проверен локально
+на Linux Node 22.23.3 через `node server.js` с `PORT=3100`, но не на точной
+серверной patch-версии и не под systemd. Для переключения нужен новый
+проверенный drop-in с отдельным ExecStart/WorkingDirectory и сохранённой
+старой точкой возврата; существующие env/drop-in не копировать вслепую.
+
 ## Ворота до начала окна
 
 1. Повторно считать фактические server image ID, `alembic current`,
