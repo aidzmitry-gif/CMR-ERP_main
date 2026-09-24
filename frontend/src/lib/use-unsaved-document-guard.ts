@@ -3,9 +3,14 @@
 import { useEffect, useRef } from "react";
 
 const warning = "Есть несохранённые изменения документа. Уйти без сохранения?";
+const programmaticNavigation = "erp:document-navigation";
 
 export function confirmDiscardUnsaved(pending: boolean): boolean {
   return !pending || window.confirm(warning);
+}
+
+export function confirmProgrammaticDocumentNavigation(): boolean {
+  return document.dispatchEvent(new Event(programmaticNavigation, { cancelable: true }));
 }
 
 export function useUnsavedDocumentGuard(pending: boolean, onPendingChange?: (pending: boolean) => void) {
@@ -34,11 +39,16 @@ export function useUnsavedDocumentGuard(pending: boolean, onPendingChange?: (pen
         event.stopImmediatePropagation();
       }
     };
+    const programmatic = (event: Event) => {
+      if (!event.defaultPrevented && !confirmDiscardUnsaved(pendingRef.current)) event.preventDefault();
+    };
     window.addEventListener("beforeunload", beforeUnload);
     document.addEventListener("click", linkClick, true);
+    document.addEventListener(programmaticNavigation, programmatic);
     return () => {
       window.removeEventListener("beforeunload", beforeUnload);
       document.removeEventListener("click", linkClick, true);
+      document.removeEventListener(programmaticNavigation, programmatic);
     };
   }, []);
   return () => confirmDiscardUnsaved(pendingRef.current);
