@@ -78,6 +78,8 @@ it("requires a selected supplier and saves its directory snapshot in a new recei
   await waitFor(() => expect(submitted).not.toBeNull());
   expect(submitted!.document).toMatchObject({ supplier: "Поставщик из каталога", supplier_id: 19,
     supplier_unp: "190000001" });
+  expect(await screen.findByText("Накладная № 41: сохранена версия 1.")).toBeInTheDocument();
+  expect(screen.getByLabelText("Номер первичной накладной")).toBeInTheDocument();
 });
 
 it("warns before replacing an unsaved new receipt", async () => {
@@ -112,4 +114,80 @@ it("keeps the legal entity when an unsaved receipt switch is cancelled", async (
   confirm.mockReturnValue(true);
   fireEvent.change(screen.getByLabelText("Юрлицо поступления"), { target: { value: "8" } });
   expect(screen.getByLabelText("Юрлицо поступления")).toHaveValue("8");
+});
+
+it("closes a new receipt only after the server confirms its saved version", async () => {
+  let releaseSave!: () => void;
+  const savePending = new Promise<void>((resolve) => { releaseSave = resolve; });
+  let rows: Record<string, unknown>[] = [];
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("purchase-ownership")) return { ok: true, json: async () => [] };
+    if (url.includes("supplier-options")) return { ok: true, json: async () => ({
+      organization_id: 7, items: [{ id: 19, name: "Поставщик из каталога", unp: "190000001" }], truncated: false,
+    }) };
+    if (init?.method === "POST") {
+      const saved = JSON.parse(String(init.body));
+      await savePending;
+      const row = { id: 41, version: 1, status: "draft", posting: null,
+        revisions: [{ version: 1, actor: "buyer", created_at: "2026-09-24", document: saved.document }] };
+      rows = [row];
+      return { ok: true, json: async () => row };
+    }
+    return { ok: true, json: async () => rows };
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  await screen.findByText("Показано 0 из 0 накладных выбранного юрлица за все даты.");
+  fireEvent.change(screen.getByLabelText("Поиск поставщика накладной"), { target: { value: "Поставщик" } });
+  await screen.findByRole("option", { name: "Поставщик из каталога · 190000001" });
+  fireEvent.change(screen.getByLabelText("Поставщик накладной из справочника"), { target: { value: "19" } });
+  fireEvent.change(screen.getByLabelText("Номер первичной накладной"), { target: { value: "INV-41" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
+  expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("INV-41");
+  expect(screen.getByRole("button", { name: "Сохранить и закрыть" })).toBeDisabled();
+  releaseSave();
+  expect(await screen.findByText("Накладная № 41: сохранена версия 1, форма закрыта.")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Номер первичной накладной")).not.toBeInTheDocument();
+  fireEvent.click(await screen.findByRole("button", { name: /INV-41/ }));
+  expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("INV-41");
+});
+
+it("keeps an edited receipt open after the server rejects Save and Close", async () => {
+  const original = {
+    currency: "BYN", invoice_reference: "INV-OLD", document_date: "2026-09-24",
+    operation_date: "2026-09-24", supplier: "Поставщик", supplier_id: 19,
+    supplier_unp: "190000001", contract: "", warehouse: "", explanation: "", items: [],
+  };
+  const row = { id: 41, version: 1, status: "draft", posting: null,
+    revisions: [{ version: 1, actor: "buyer", created_at: "2026-09-24", document: original }] };
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => init?.method === "PUT"
+    ? { ok: false, status: 409, json: async () => ({ detail: "Version changed" }) }
+    : { ok: true, json: async () => _url.includes("purchase-ownership") ? [] : [row] }));
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /INV-OLD/ }));
+  fireEvent.change(screen.getByLabelText("Номер первичной накладной"), { target: { value: "INV-EDIT" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Версия или ключ документа уже изменены");
+  expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("INV-EDIT");
+  expect(screen.getByRole("button", { name: "Сохранить и закрыть" })).toBeEnabled();
+});
+
+it("does not close when a successful HTTP response names another receipt", async () => {
+  const original = {
+    currency: "BYN", invoice_reference: "INV-OLD", document_date: "2026-09-24",
+    operation_date: "2026-09-24", supplier: "Поставщик", supplier_id: 19,
+    supplier_unp: "190000001", contract: "", warehouse: "", explanation: "", items: [],
+  };
+  const row = { id: 41, version: 1, status: "draft", posting: null,
+    revisions: [{ version: 1, actor: "buyer", created_at: "2026-09-24", document: original }] };
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => init?.method === "PUT"
+    ? { ok: true, json: async () => ({ ...row, id: 42, version: 2,
+      revisions: [...row.revisions, { version: 2, actor: "buyer", created_at: "2026-09-24", document: original }] }) }
+    : { ok: true, json: async () => _url.includes("purchase-ownership") ? [] : [row] }));
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /INV-OLD/ }));
+  fireEvent.change(screen.getByLabelText("Номер первичной накладной"), { target: { value: "INV-EDIT" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Сервер не подтвердил сохранённую версию этой накладной");
+  expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("INV-EDIT");
 });
