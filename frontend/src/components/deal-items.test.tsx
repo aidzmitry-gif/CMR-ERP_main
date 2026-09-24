@@ -5,8 +5,8 @@ vi.mock("@/lib/api", () => ({
   fetchDealItems: vi.fn(),
   fetchSkus: vi.fn(),
   addDealItem: vi.fn(),
-  updateDealItem: vi.fn(),
-  deleteDealItem: vi.fn(),
+  updateDealItemIfCurrent: vi.fn(),
+  deleteDealItemIfCurrent: vi.fn(),
 }));
 
 // Себес/маржа позиций берутся из фасада маржи (тот же источник, что карточка метрик).
@@ -32,7 +32,7 @@ beforeEach(() => {
   vi.mocked(margin.fetchDealMargin).mockResolvedValue(null);
 });
 
-const item = { id: 5, sku_id: 1, code: "AKB-60", title: "Аккумулятор 60", unit: "шт", qty: 2, unit_price: 1200, last_price: 1500, min_price: 1450 };
+const item = { id: 5, sku_id: 1, code: "AKB-60", title: "Аккумулятор 60", unit: "шт", qty: 2, unit_price: 1200, last_price: 1500, min_price: 1450, edit_token: "a".repeat(64) };
 
 function marginWith(cost_source: "demo" | "onec" | "landed") {
   return {
@@ -56,23 +56,23 @@ describe("DealItems", () => {
     expect(await screen.findByText("Позиций пока нет")).toBeInTheDocument();
     await waitFor(() => expect(api.fetchSkus).toHaveBeenCalled());
     fireEvent.click(screen.getByText("Добавить"));
-    await waitFor(() => expect(api.addDealItem).toHaveBeenCalledWith("1", 1, 1, null));
+    await waitFor(() => expect(api.addDealItem).toHaveBeenCalledWith("1", 1, 1, null, expect.any(String)));
   });
 
   it("изменение количества и удаление позиции", async () => {
     mock(api.fetchDealItems).mockResolvedValue([item]);
     mock(api.fetchSkus).mockResolvedValue([]);
-    mock(api.updateDealItem).mockResolvedValue(true);
-    mock(api.deleteDealItem).mockResolvedValue(true);
+    mock(api.updateDealItemIfCurrent).mockResolvedValue("saved");
+    mock(api.deleteDealItemIfCurrent).mockResolvedValue("saved");
     render(<DealItems dealId="1" />);
     expect(await screen.findByText("Аккумулятор 60")).toBeInTheDocument();
 
     fireEvent.change(screen.getByDisplayValue("2"), { target: { value: "7" } });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить позицию Аккумулятор 60" }));
-    await waitFor(() => expect(api.updateDealItem).toHaveBeenCalledWith(5, 7));
+    await waitFor(() => expect(api.updateDealItemIfCurrent).toHaveBeenCalledWith(5, 7, 1200, item.edit_token));
 
     fireEvent.click(screen.getByTitle("Удалить позицию"));
-    await waitFor(() => expect(api.deleteDealItem).toHaveBeenCalledWith(5));
+    await waitFor(() => expect(api.deleteDealItemIfCurrent).toHaveBeenCalledWith(5, item.edit_token));
   });
 
   it("меняет SKU и количество перед добавлением", async () => {
@@ -87,7 +87,7 @@ describe("DealItems", () => {
     fireEvent.change(screen.getByLabelText("Номенклатура (справочник из 1С через MDM)"), { target: { value: "2" } });
     fireEvent.change(screen.getByLabelText("Количество новой позиции"), { target: { value: "4" } });
     fireEvent.click(screen.getByText("Добавить"));
-    await waitFor(() => expect(api.addDealItem).toHaveBeenCalledWith("1", 2, 4, null));
+    await waitFor(() => expect(api.addDealItem).toHaveBeenCalledWith("1", 2, 4, null, expect.any(String)));
   });
 
   it("показывает себес/маржу и метку источника из фасада (демо)", async () => {
@@ -143,27 +143,27 @@ describe("DealItems", () => {
     fireEvent.change(screen.getByLabelText("Количество новой позиции"), { target: { value: "3" } });
     fireEvent.change(screen.getByLabelText("Цена за единицу новой позиции"), { target: { value: "125.5" } });
     fireEvent.click(screen.getByText("Добавить"));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось добавить позицию");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Добавление не подтверждено");
     expect(screen.getByLabelText("Количество новой позиции")).toHaveValue(3);
     expect(screen.getByLabelText("Цена за единицу новой позиции")).toHaveValue(125.5);
     expect(screen.getByText("Добавить")).toBeEnabled();
     expect(api.fetchDealItems).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByText("Добавить"));
     await waitFor(() => expect(screen.getByLabelText("Цена за единицу новой позиции")).toHaveValue(null));
-    expect(add).toHaveBeenNthCalledWith(2, "1", 1, 3, 125.5);
+    expect(add).toHaveBeenNthCalledWith(2, "1", 1, 3, 125.5, add.mock.calls[0][4]);
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it.each([0, null, 999.25])("сохраняет явную новую цену %s в строке", async (price) => {
     vi.mocked(api.fetchDealItems).mockResolvedValue([item]);
     vi.mocked(api.fetchSkus).mockResolvedValue([]);
-    vi.mocked(api.updateDealItem).mockResolvedValue(true);
+    vi.mocked(api.updateDealItemIfCurrent).mockResolvedValue("saved");
     render(<DealItems dealId="1" />);
     await screen.findByText(item.title);
     fireEvent.change(screen.getByLabelText(`Цена за единицу ${item.title}`), { target: { value: price == null ? "" : String(price) } });
     vi.mocked(api.fetchDealItems).mockResolvedValueOnce([{ ...item, unit_price: price }]);
     fireEvent.click(screen.getByRole("button", { name: `Сохранить позицию ${item.title}` }));
-    await waitFor(() => expect(api.updateDealItem).toHaveBeenCalledWith(item.id, item.qty, price));
+    await waitFor(() => expect(api.updateDealItemIfCurrent).toHaveBeenCalledWith(item.id, item.qty, price, item.edit_token));
     await waitFor(() => expect(screen.getByRole("button", { name: `Сохранить позицию ${item.title}` })).toBeDisabled());
     expect(screen.getByLabelText(`Цена за единицу ${item.title}`)).toHaveValue(price);
   });
@@ -171,10 +171,10 @@ describe("DealItems", () => {
   it.each(["false", "rejection"])("редактирование при %s сохраняет черновик и подтверждённую цену", async (failure) => {
     vi.mocked(api.fetchDealItems).mockResolvedValue([item]);
     vi.mocked(api.fetchSkus).mockResolvedValue([]);
-    const update = vi.mocked(api.updateDealItem);
-    if (failure === "false") update.mockResolvedValueOnce(false);
+    const update = vi.mocked(api.updateDealItemIfCurrent);
+    if (failure === "false") update.mockResolvedValueOnce("unconfirmed");
     else update.mockRejectedValueOnce(new Error("network"));
-    update.mockResolvedValueOnce(true);
+    update.mockResolvedValueOnce("saved");
     render(<DealItems dealId="1" />);
     await screen.findByText(item.title);
     const agreed = screen.getByText(/Согласованная цена:/).textContent;
@@ -182,7 +182,7 @@ describe("DealItems", () => {
     fireEvent.change(screen.getByLabelText(`Количество ${item.title}`), { target: { value: "3" } });
     const save = screen.getByRole("button", { name: `Сохранить позицию ${item.title}` });
     fireEvent.click(save);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось сохранить позицию");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Сохранение не подтверждено");
     expect(screen.getByLabelText(`Цена за единицу ${item.title}`)).toHaveValue(0);
     expect(screen.getByLabelText(`Количество ${item.title}`)).toHaveValue(3);
     expect(screen.getByText(/Согласованная цена:/).textContent).toBe(agreed);
@@ -191,8 +191,36 @@ describe("DealItems", () => {
     vi.mocked(api.fetchDealItems).mockResolvedValueOnce([{ ...item, qty: 3, unit_price: 0 }]);
     fireEvent.click(save);
     await waitFor(() => expect(save).toBeDisabled());
-    expect(update).toHaveBeenNthCalledWith(2, item.id, 3, 0);
+    expect(update).toHaveBeenNthCalledWith(2, item.id, 3, 0, item.edit_token);
     expect(screen.queryByRole("alert")).toBeNull();
     await waitFor(() => expect(screen.getByText(/Согласованная цена:/).textContent).not.toBe(agreed));
+  });
+
+  it("при конфликте сохраняет введённое и не удаляет изменённую строку", async () => {
+    vi.mocked(api.fetchDealItems).mockResolvedValue([item]);
+    vi.mocked(api.fetchSkus).mockResolvedValue([]);
+    vi.mocked(api.updateDealItemIfCurrent).mockResolvedValue("conflict");
+    vi.mocked(api.deleteDealItemIfCurrent).mockResolvedValue("conflict");
+    render(<DealItems dealId="1" />);
+    await screen.findByText(item.title);
+    fireEvent.change(screen.getByLabelText(`Количество ${item.title}`), { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: `Сохранить позицию ${item.title}` }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Позицию изменил другой сотрудник");
+    expect(screen.getByLabelText(`Количество ${item.title}`)).toHaveValue(9);
+    fireEvent.click(screen.getByTitle("Удалить позицию"));
+    await waitFor(() => expect(api.deleteDealItemIfCurrent).toHaveBeenCalledWith(item.id, item.edit_token));
+    expect(screen.getByRole("alert")).toHaveTextContent("Позиция изменилась");
+    expect(screen.getByLabelText(`Количество ${item.title}`)).toHaveValue(9);
+  });
+
+  it("без серверной редакции не отправляет изменение", async () => {
+    vi.mocked(api.fetchDealItems).mockResolvedValue([{ ...item, edit_token: undefined }]);
+    vi.mocked(api.fetchSkus).mockResolvedValue([]);
+    render(<DealItems dealId="1" />);
+    await screen.findByText(item.title);
+    fireEvent.change(screen.getByLabelText(`Количество ${item.title}`), { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: `Сохранить позицию ${item.title}` }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Редакция позиции неизвестна");
+    expect(api.updateDealItemIfCurrent).not.toHaveBeenCalled();
   });
 });

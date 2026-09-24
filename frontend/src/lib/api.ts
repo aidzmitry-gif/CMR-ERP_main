@@ -496,6 +496,8 @@ export interface DealItemFull {
   unit_price?: number | null;
   last_price: number | null;
   min_price: number | null;
+  /** Отпечаток текущих количества и цены для защиты от параллельного изменения. */
+  edit_token?: string;
 }
 
 /** Справочник номенклатуры для подбора (клиент, через /api). */
@@ -577,12 +579,12 @@ export async function fetchLastOrder(dealId: string): Promise<DealItemFull[]> {
 }
 
 /** Добавить позицию в сделку. */
-export async function addDealItem(dealId: string, skuId: number, qty: number, unitPrice?: number | null): Promise<boolean> {
+export async function addDealItem(dealId: string, skuId: number, qty: number, unitPrice?: number | null, requestKey?: string): Promise<boolean> {
   try {
     const res = await fetch(`/api/sales/deals/${dealId}/items`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sku_id: skuId, qty, unit_price: unitPrice }),
+      body: JSON.stringify({ sku_id: skuId, qty, unit_price: unitPrice, request_key: requestKey }),
     });
     return res.ok;
   } catch {
@@ -611,6 +613,36 @@ export async function deleteDealItem(itemId: number): Promise<boolean> {
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+export type DealItemWriteResult = "saved" | "conflict" | "unconfirmed";
+
+/** Успехом считаем только ответ сервера на запись именно показанной редакции строки. */
+export async function updateDealItemIfCurrent(itemId: number, qty: number, unitPrice: number | null,
+  editToken: string): Promise<DealItemWriteResult> {
+  try {
+    const res = await fetch(`/api/sales/deal-items/${itemId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ qty, unit_price: unitPrice, expected_edit_token: editToken }),
+    });
+    if (res.status === 409) return "conflict";
+    return res.ok ? "saved" : "unconfirmed";
+  } catch {
+    return "unconfirmed";
+  }
+}
+
+export async function deleteDealItemIfCurrent(itemId: number, editToken: string): Promise<DealItemWriteResult> {
+  try {
+    const res = await fetch(`/api/sales/deal-items/${itemId}`, {
+      method: "DELETE", headers: { "If-Match": editToken },
+    });
+    if (res.status === 409) return "conflict";
+    return res.ok ? "saved" : "unconfirmed";
+  } catch {
+    return "unconfirmed";
   }
 }
 

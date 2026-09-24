@@ -34,3 +34,18 @@ it("does not display a response for another deal", async () => {
   expect(screen.queryByText("Записанных изменений пока нет.")).toBeNull();
   await waitFor(() => expect(screen.getByRole("button", { name: "Повторить" })).toBeEnabled());
 });
+
+it("shows product row changes with SKU, actor and before/after values", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({
+    deal_id: 7, next_before_id: null, items: [{ id: 8, actor: "seller", changed_at: "2026-09-25T10:00:00",
+      deal_number: "CRM-7", organization_id: 1, event_type: "sales.deal.item_changed",
+      item_id: 12, sku_code: "AKB-60", item_action: "updated",
+      changes: { qty: { before: "2.00", after: "3.00" }, unit_price: { before: "1200.00", after: "1100.00" } } }],
+  }) }));
+  render(<DealFieldHistory dealId="7" />);
+  fireEvent.click(screen.getByRole("button", { name: "История изменений" }));
+  expect(await screen.findByText("Позиция № 12 · AKB-60 · изменена")).toBeInTheDocument();
+  expect(screen.getByText("Количество: было «2.00», стало «3.00».")).toBeInTheDocument();
+  expect(screen.getByText("Цена за единицу: было «1200.00», стало «1100.00».")).toBeInTheDocument();
+  expect(screen.getByText("Сделка CRM-7 · 2026-09-25T10:00:00 · seller")).toBeInTheDocument();
+});

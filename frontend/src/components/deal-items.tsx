@@ -1,19 +1,20 @@
 "use client";
 
 import { Package, Plus, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   addDealItem,
   type DealItemFull,
-  deleteDealItem,
+  deleteDealItemIfCurrent,
   fetchDealItems,
   fetchSkus,
   type SkuOption,
-  updateDealItem,
+  updateDealItemIfCurrent,
 } from "@/lib/api";
 import { useCurrency } from "@/components/kanban/currency-context";
 import { COST_SRC_LABEL, fetchDealMargin, type MarginLine, marginBySku } from "@/lib/margin";
 import { DealProcurementDemands } from "@/components/deal-procurement-demands";
+import { useUnsavedDocumentGuard } from "@/lib/use-unsaved-document-guard";
 
 export function DealItems({ dealId }: { dealId: string }) {
   const { fmt } = useCurrency(); // цены/себес в валюте выбранного ЮЛ (CurrencyProvider в crm/layout)
@@ -28,6 +29,8 @@ export function DealItems({ dealId }: { dealId: string }) {
   const [drafts, setDrafts] = useState<Record<number, { qty: string; price: string }>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const addRequest = useRef<{ fingerprint: string; key: string } | null>(null);
+  useUnsavedDocumentGuard(Object.keys(drafts).length > 0 || qty !== 1 || unitPrice !== "");
 
   async function refresh() {
     setItems(await fetchDealItems(dealId));
@@ -53,15 +56,19 @@ export function DealItems({ dealId }: { dealId: string }) {
     setBusy(true);
     setError(null);
     try {
-      if (!await addDealItem(dealId, skuId, qty, price)) {
-        setError("Не удалось добавить позицию. Введённые данные сохранены.");
+      const fingerprint = JSON.stringify({ dealId, skuId, qty, price });
+      if (addRequest.current?.fingerprint !== fingerprint)
+        addRequest.current = { fingerprint, key: crypto.randomUUID() };
+      if (!await addDealItem(dealId, skuId, qty, price, addRequest.current.key)) {
+        setError("Добавление не подтверждено. Введённые данные сохранены; повторите команду без изменения полей.");
         return;
       }
+      addRequest.current = null;
       setQty(1);
       setUnitPrice("");
       await refresh();
     } catch {
-      setError("Не удалось добавить позицию. Введённые данные сохранены.");
+      setError("Добавление не подтверждено. Введённые данные сохранены; повторите команду без изменения полей.");
     } finally {
       setBusy(false);
     }
@@ -86,11 +93,15 @@ export function DealItems({ dealId }: { dealId: string }) {
     setBusy(true);
     setError(null);
     try {
-      const saved = price === (item.unit_price ?? null)
-        ? await updateDealItem(item.id, quantity)
-        : await updateDealItem(item.id, quantity, price);
-      if (!saved) {
-        setError("Не удалось сохранить позицию. Введённые данные сохранены.");
+      if (!item.edit_token) {
+        setError("Редакция позиции неизвестна. Обновите страницу перед сохранением; введённые данные сохранены.");
+        return;
+      }
+      const result = await updateDealItemIfCurrent(item.id, quantity, price, item.edit_token);
+      if (result !== "saved") {
+        setError(result === "conflict"
+          ? "Позицию изменил другой сотрудник. Введённые данные сохранены; обновите страницу и сверьте значения."
+          : "Сохранение не подтверждено. Введённые данные сохранены; проверьте состояние позиции перед повтором.");
         return;
       }
       setDrafts((prev) => {
@@ -100,23 +111,29 @@ export function DealItems({ dealId }: { dealId: string }) {
       });
       await refresh();
     } catch {
-      setError("Не удалось сохранить позицию. Введённые данные сохранены.");
+      setError("Сохранение не подтверждено. Введённые данные сохранены; проверьте состояние позиции перед повтором.");
     } finally {
       setBusy(false);
     }
   }
 
-  async function onDelete(itemId: number) {
+  async function onDelete(item: DealItemFull) {
+    if (!item.edit_token) {
+      setError("Редакция позиции неизвестна. Обновите страницу перед удалением.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      if (!await deleteDealItem(itemId)) {
-        setError("Не удалось удалить позицию.");
+      const result = await deleteDealItemIfCurrent(item.id, item.edit_token);
+      if (result !== "saved") {
+        setError(result === "conflict" ? "Позиция изменилась. Обновите страницу перед удалением."
+          : "Удаление не подтверждено. Проверьте состояние позиции перед повтором.");
         return;
       }
       await refresh();
     } catch {
-      setError("Не удалось удалить позицию.");
+      setError("Удаление не подтверждено. Проверьте состояние позиции перед повтором.");
     } finally {
       setBusy(false);
     }
@@ -199,7 +216,7 @@ export function DealItems({ dealId }: { dealId: string }) {
               Сохранить
             </button>
             <button
-              onClick={() => onDelete(item.id)}
+              onClick={() => onDelete(item)}
               disabled={busy}
               title="Удалить позицию"
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-faint hover:bg-red-50 hover:text-red-600 disabled:opacity-60"
