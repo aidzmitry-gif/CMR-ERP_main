@@ -685,10 +685,22 @@ async def settlement_offset_register(org_id: int, ctx=Depends(member)):
     return [serialize(row) for row in await settlement_offsets.list_offsets(ctx[0], org_id)]
 
 
+async def require_existing_direct_purchase(session, org_id: int, data: PurchaseDocument) -> None:
+    """Keep exact legacy retries readable; new primary receipts belong to Procurement."""
+    existing = await session.scalar(select(Entry.id).where(
+        Entry.organization_id == org_id, Entry.source == data.source,
+        Entry.source_version == data.source_version,
+        Entry.operation == "inventory_purchase",
+    ))
+    if existing is None:
+        raise HTTPException(410, "Save the incoming invoice in Procurement → Receipts")
+
+
 @router.post("/organizations/{org_id}/purchases/preview")
 async def purchase_preview(org_id: int, data: PurchaseDocument, ctx=Depends(member)):
     if any(item.order_id is not None for item in data.items):
         raise HTTPException(422, "Order references require a saved procurement receipt")
+    await require_existing_direct_purchase(ctx[0], org_id, data)
     posting, accounts, policy = await preview_purchase(ctx[0], org_id, data)
     return {"posting": posting.model_dump(mode="json"), "digest": service.digest(posting),
             "normative_verified": policy.normative_verified, "vat_deducted": False,
@@ -701,6 +713,7 @@ async def purchase_confirm(org_id: int, data: PurchaseDocument, ctx=Depends(memb
     if any(item.order_id is not None for item in data.items):
         raise HTTPException(422, "Order references require a saved procurement receipt")
     await service.lock_organization(ctx[0], org_id)
+    await require_existing_direct_purchase(ctx[0], org_id, data)
     posting, _, _ = await preview_purchase(ctx[0], org_id, data)
     return serialize(await service.post(ctx[0], org_id, posting, ctx[1], core.services.event_bus))
 

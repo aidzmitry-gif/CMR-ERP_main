@@ -181,13 +181,17 @@ async def catalog_adoption_on(session, org_id, on):
     ).order_by(CatalogAdoption.effective_from.desc(), CatalogAdoption.id.desc()).limit(1))
 
 
-async def validate_posting(session, org_id, data: PostingInput, *, inventory_issue=False, inventory_sale=False,
+async def validate_posting(session, org_id, data: PostingInput, *, inventory_purchase=False, inventory_issue=False, inventory_sale=False,
                            financial_transfer=False, late_cost=False, production_overhead=False, production_correction=False,
                            production_output_transfer=False, production_output_correction=False, production_labor_import=False,
                            payroll_accrual_import=False,
                            payroll_statutory_import=False,
                            fixed_asset_depreciation=False, repair_accounting=False,
                            fx_revaluation=False, settlement_offset=False):
+    if data.operation == "inventory_purchase" and not inventory_purchase:
+        raise AccountingError("Inventory purchases require a saved Procurement primary receipt")
+    if inventory_purchase and (data.operation != "inventory_purchase" or data.opening):
+        raise AccountingError("Invalid internal inventory purchase")
     if data.operation == 'production_output_cost_correction' and not production_output_correction:
         raise AccountingError('Output cost correction requires dedicated reviewed confirmation')
     if production_output_correction and (data.operation != 'production_output_cost_correction' or data.opening or not data.correction_of):
@@ -359,7 +363,7 @@ async def validate_posting(session, org_id, data: PostingInput, *, inventory_iss
     return accounts, policy
 
 
-async def preview_posting(session, org_id, data: PostingInput):
+async def preview_posting(session, org_id, data: PostingInput, *, inventory_purchase=False):
     """An identical retry remains previewable even after posting/period close."""
     existing = await session.scalar(select(Entry).where(
         Entry.organization_id == org_id, Entry.source == data.source,
@@ -369,10 +373,10 @@ async def preview_posting(session, org_id, data: PostingInput):
         if existing.digest != digest(data):
             raise AccountingError("Idempotency key reused with different content")
         return await accounts_on(session, org_id, data.posting_date), await session.get(Policy, existing.policy_id)
-    return await validate_posting(session, org_id, data)
+    return await validate_posting(session, org_id, data, inventory_purchase=inventory_purchase)
 
 
-async def post(session, org_id, data: PostingInput, actor, event_bus=None, *, inventory_issue=False, inventory_sale=False,
+async def post(session, org_id, data: PostingInput, actor, event_bus=None, *, inventory_purchase=False, inventory_issue=False, inventory_sale=False,
                financial_transfer=False, late_cost=False, production_overhead=False, production_correction=False,
                production_output_transfer=False, production_output_correction=False, production_labor_import=False,
                payroll_accrual_import=False,
@@ -389,7 +393,7 @@ async def post(session, org_id, data: PostingInput, actor, event_bus=None, *, in
         if existing.digest != checksum:
             raise AccountingError("Idempotency key reused with different content")
         return existing
-    accounts, _ = await validate_posting(session, org_id, data, inventory_issue=inventory_issue,
+    accounts, _ = await validate_posting(session, org_id, data, inventory_purchase=inventory_purchase, inventory_issue=inventory_issue,
                                         inventory_sale=inventory_sale, financial_transfer=financial_transfer, late_cost=late_cost,
                                         production_overhead=production_overhead, production_correction=production_correction,
                                         production_output_transfer=production_output_transfer,

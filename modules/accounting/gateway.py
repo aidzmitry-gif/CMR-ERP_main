@@ -224,7 +224,8 @@ class AccountingService:
         if confirm_digest is not None:
             if digest != confirm_digest:
                 raise HTTPException(409, "Posting preview is stale; calculate it again")
-            entry = await service.post(session, organization_id, posting, actor, event_bus)
+            entry = await service.post(session, organization_id, posting, actor, event_bus,
+                                       inventory_purchase=True)
             if control.entry_id is None:
                 control.entry_id = entry.id
                 service.audit(session, organization_id, actor, "source_posted", {

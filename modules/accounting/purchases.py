@@ -94,7 +94,7 @@ class PurchaseDocument(Input):
 
 async def preview_purchase(session, org_id, document: PurchaseDocument, *, verified_counterparty_id=None):
     posting = document.posting(verified_counterparty_id=verified_counterparty_id)
-    accounts, policy = await service.preview_posting(session, org_id, posting)
+    accounts, policy = await service.preview_posting(session, org_id, posting, inventory_purchase=True)
     # This bounded rule accepts only inventory/input VAT/supplier settlement roles.
     # Account names are versioned and configurable; synthetic roots define this rule.
     for item in document.items:

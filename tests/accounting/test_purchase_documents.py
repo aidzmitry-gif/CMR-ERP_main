@@ -4,7 +4,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import func, select
 
-from modules.accounting import models, reports
+from modules.accounting import models, purchases, reports, service
 
 
 @pytest_asyncio.fixture
@@ -32,14 +32,36 @@ def purchase(book):
                 ])
 
 
+async def seed_legacy_purchase(db, book, data):
+    """Represent a receipt posted before the direct accounting route was retired."""
+    posting, _, _ = await purchases.preview_purchase(db, book[0], purchases.PurchaseDocument.model_validate(data))
+    entry = await service.post(db, book[0], posting, "legacy-accountant", inventory_purchase=True)
+    await db.commit()
+    return entry
+
+
+async def test_generic_manual_posting_cannot_create_an_inventory_purchase(db, purchase_book):
+    document = purchases.PurchaseDocument.model_validate(purchase(purchase_book))
+    posting = document.posting()
+    with pytest.raises(service.AccountingError, match="saved Procurement primary receipt"):
+        await service.preview_posting(db, purchase_book[0], posting)
+    with pytest.raises(service.AccountingError, match="saved Procurement primary receipt"):
+        await service.post(db, purchase_book[0], posting, "manual-accountant")
+    assert await db.scalar(select(func.count()).select_from(models.Entry)) == 0
+
+
 async def test_receipt_has_inventory_and_input_vat_without_expense_or_deduction(client, db, purchase_book):
     prefix = f"/accounting/organizations/{purchase_book[0]}/purchases"
     data = purchase(purchase_book)
     assert (await client.post(prefix + "/preview", json={**data, "counterparty_id": 1})).status_code == 422
+    assert (await client.post(prefix + "/preview", json=data)).status_code == 410
+    assert (await client.post(prefix + "/confirm", json=data)).status_code == 410
+    assert await db.scalar(select(func.count()).select_from(models.Entry)) == 0
+    await seed_legacy_purchase(db, purchase_book, data)
     response = await client.post(prefix + "/preview", json=data)
     assert response.status_code == 200, response.text
     assert response.json()["vat_deducted"] is False
-    assert await db.scalar(select(func.count()).select_from(models.Entry)) == 0
+    assert await db.scalar(select(func.count()).select_from(models.Entry)) == 1
     assert [(r["account"], r["side"], r["amount"]) for r in response.json()["lines"]] == [
         ("41.1", "debit", "100.00"), ("18", "debit", "20.00"),
         ("41.1", "debit", "50.00"), ("18", "debit", "5.00"), ("60", "credit", "175.00"),
@@ -70,15 +92,20 @@ async def test_purchase_invalid_line_is_atomic(client, db, purchase_book, field,
     data = purchase(purchase_book)
     data["items"][0][field] = value
     response = await client.post(f"/accounting/organizations/{purchase_book[0]}/purchases/confirm", json=data)
-    assert response.status_code == 422
+    assert response.status_code == (410 if field == "account" else 422)
+    if field == "account":
+        with pytest.raises(service.AccountingError):
+            await purchases.preview_purchase(db, purchase_book[0], purchases.PurchaseDocument.model_validate(data))
     assert await db.scalar(select(func.count()).select_from(models.Entry)) == 0
 
 
-async def test_zero_tax_has_explicit_basis_and_no_vat_movement(client, purchase_book):
+async def test_zero_tax_has_explicit_basis_and_no_vat_movement(client, db, purchase_book):
     data = purchase(purchase_book)
     data["items"] = [{**data["items"][0], "vat_rate": "0", "vat_amount": "0", "vat_basis": "synthetic exemption"}]
     data["vat_account"] = None
     prefix = f"/accounting/organizations/{purchase_book[0]}/purchases/preview"
+    assert (await client.post(prefix, json=data)).status_code == 410
+    await seed_legacy_purchase(db, purchase_book, data)
     response = await client.post(prefix, json=data)
     assert response.status_code == 200
     assert len(response.json()["lines"]) == 2
@@ -87,11 +114,13 @@ async def test_zero_tax_has_explicit_basis_and_no_vat_movement(client, purchase_
         assert (await client.post(prefix, json={**data, field: value})).status_code == 422
 
 
-async def test_zero_vat_rejects_unrecorded_account_change_on_replay(client, purchase_book):
+async def test_zero_vat_rejects_unrecorded_account_change_on_replay(client, db, purchase_book):
     data = purchase(purchase_book)
     data["items"] = [{**data["items"][0], "vat_rate": "0", "vat_amount": "0"}]
     data["vat_account"] = None
     prefix = f"/accounting/organizations/{purchase_book[0]}/purchases"
+    assert (await client.post(prefix + "/confirm", json=data)).status_code == 410
+    await seed_legacy_purchase(db, purchase_book, data)
     first = await client.post(prefix + "/confirm", json=data)
     assert first.status_code == 201
     for account in ["18", "18.999"]:
