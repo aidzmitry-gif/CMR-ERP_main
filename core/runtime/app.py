@@ -105,18 +105,30 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await services.db.connect()
-        await _run_hooks(core.startup_hooks)
-        background_task = asyncio.create_task(_background_loop(services, core.tick_hooks))
-        currency_task = asyncio.create_task(sync_nbrb(services))
+        async_writers_disabled = os.getenv("AIOS_DISABLE_ASYNC_WRITERS") == "1"
+        app.state.async_writers_disabled = async_writers_disabled
+        background_task = None
+        currency_task = None
+        if async_writers_disabled:
+            logger.warning("Фоновые процессы и startup-хуки отключены для контролируемого запуска")
+        else:
+            await _run_hooks(core.startup_hooks)
+            background_task = asyncio.create_task(_background_loop(services, core.tick_hooks))
+            currency_task = asyncio.create_task(sync_nbrb(services))
         logger.info("Приложение запущено")
-        yield
-        background_task.cancel()
-        currency_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await currency_task
-        await _run_hooks(core.shutdown_hooks)
-        await services.db.disconnect()
-        logger.info("Приложение остановлено")
+        try:
+            yield
+        finally:
+            if background_task is not None and currency_task is not None:
+                background_task.cancel()
+                currency_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await background_task
+                with suppress(asyncio.CancelledError):
+                    await currency_task
+                await _run_hooks(core.shutdown_hooks)
+            await services.db.disconnect()
+            logger.info("Приложение остановлено")
 
     app = FastAPI(title=services.config.app_name, version="0.1.0", lifespan=lifespan)
     app.state.core = core
