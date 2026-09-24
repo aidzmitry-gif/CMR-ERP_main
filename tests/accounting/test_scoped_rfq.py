@@ -6,6 +6,7 @@ import pytest_asyncio
 from sqlalchemy import func, select
 
 from core.domain.models import Counterparty
+from core.services.auth import CurrentUser, get_current_user
 from modules.accounting.models import AccessGrant, Organization
 from modules.procurement import rfq_scoped, routes
 from modules.procurement.models import PurchaseOrder, PurchaseRequest, Rfq, RfqBid, Supplier
@@ -118,3 +119,16 @@ async def test_bid_requires_current_bound_supplier(client, rfq_case, db):
     await db.commit()
     assert (await client.post(bid_url, json={**bad, "supplier_id": 2})).status_code == 409
     assert (await db.scalar(select(func.count()).select_from(RfqBid))) == 0
+
+
+async def test_reader_can_view_but_cannot_change_rfq(client, rfq_case, db):
+    org, _, request_id, _ = rfq_case
+    rfq = (await client.post(base(org), json={"request_key": str(uuid4()), "request_id": request_id})).json()
+    db.add(AccessGrant(organization_id=org, subject="viewer", role="reader"))
+    await db.commit()
+    client.test_app.dependency_overrides[get_current_user] = lambda: CurrentUser("viewer", ["director"])
+    assert (await client.get(base(org))).status_code == 200
+    assert (await client.post(base(org), json={"request_key": str(uuid4()), "request_id": request_id})).status_code == 403
+    assert (await client.post(base(org) + f"/{rfq['id']}/bids", json={
+        "bid_key": str(uuid4()), "supplier_id": 1, "price_byn": "100.00"})).status_code == 403
+    assert (await client.post(base(org) + f"/{rfq['id']}/award", json={"bid_id": 1})).status_code == 403
