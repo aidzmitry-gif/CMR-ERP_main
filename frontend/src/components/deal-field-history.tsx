@@ -58,7 +58,6 @@ export function DealFieldHistory({ dealId }: { dealId: string }) {
   }, [dealId, open, request]);
 
   function load(before: number | null) {
-    if (loading) return;
     setLoading(true);
     setError("");
     setRequest({ before, revision: (request?.revision ?? 0) + 1 });
@@ -66,7 +65,7 @@ export function DealFieldHistory({ dealId }: { dealId: string }) {
 
   return <section aria-label="История изменений сделки" className="text-sm">
     <button className="text-accent-ink underline" aria-expanded={open} onClick={() => {
-      if (!open && !request) load(null);
+      if (!open) { setItems([]); setNext(null); load(null); }
       setOpen(!open);
     }}>История изменений</button>
     {open && <div className="mt-2 space-y-2 rounded border border-line p-3">

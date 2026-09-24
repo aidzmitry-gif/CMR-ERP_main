@@ -19,6 +19,9 @@ it("shows the exact deal's author, time and field values before and after", asyn
   expect(screen.getByText("Сделка CRM-7 · 2026-09-24T13:00:00 · manager")).toBeInTheDocument();
   expect(screen.getByText("Юрлицо на момент правки не установлено.")).toBeInTheDocument();
   expect(fetchMock.mock.calls[0][0]).toBe("/api/sales/deals/7/field-history?limit=20");
+  fireEvent.click(screen.getByRole("button", { name: "История изменений" }));
+  fireEvent.click(screen.getByRole("button", { name: "История изменений" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 });
 
 it("does not display a response for another deal", async () => {
