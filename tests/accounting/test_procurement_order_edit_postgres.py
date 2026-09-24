@@ -132,6 +132,52 @@ async def test_pg_owned_order_all_edit_actions_replay(issuance_pg):  # noqa: F81
                     FROM procurement.order_line_edit_proof LIMIT 1'''))
 
 
+async def test_pg_atomic_save_has_one_history_receipt_and_line_proof(issuance_pg):  # noqa: F811
+    api, factory = issuance_pg
+    async with factory() as session:
+        conn = await session.connection()
+        await conn.run_sync(lambda c: TransportMethod.metadata.create_all(c,
+            tables=[TransportMethod.__table__, PurchaseOrderMilestone.__table__], checkfirst=True))
+        await session.commit()
+    org = await api.post('/accounting/organizations', json={'name': 'Synthetic atomic save', 'unp': '999999935'})
+    assert org.status_code == 201, org.text
+    org_id = org.json()['id']
+    prefix = f'/procurement/organizations/{org_id}'
+    headers = {'X-Expected-Organization': str(org_id), 'X-Expected-Principal': 'issuer'}
+    created = await api.post(prefix + '/orders', json=creation_command(), headers=headers)
+    assert created.status_code == 201, created.text
+    order_id = created.json()['order_id']
+    endpoint = prefix + f'/orders/{order_id}/edit-commands'
+    cmd = command(order_id, 'save', {'add_line': command(order_id)['payload'],
+        'header': {'freight_byn': '7.13'},
+        'plan': {'transport_method_code': 'truck', 'target_arrival_date': '2026-12-01'},
+        'status': {'status': 'ordered'}})
+    saved = await api.post(endpoint, json=cmd, headers=headers)
+    assert saved.status_code == 200, saved.text
+    assert set(saved.json()['effect']) == set(cmd['payload'])
+    history = await api.get(prefix + f'/orders/{order_id}/edit-history')
+    assert history.status_code == 200, history.text
+    assert len(history.json()['items']) == 1
+    assert [x['field'] for x in history.json()['items'][0]['changes']][1:] == ['freight_byn', 'plan', 'status']
+    assert (await api.post(endpoint, json=cmd, headers=headers)).json() == saved.json()
+    async with factory() as session:
+        assert await session.scalar(text('SELECT count(*) FROM procurement.purchase_order_edit_command')) == 1
+        assert await session.scalar(text("SELECT count(*) FROM procurement.purchase_order_line WHERE order_id=:id AND sku_code='NEW'"), {'id': order_id}) == 1
+        assert str(await session.scalar(text('SELECT freight_byn FROM procurement.purchase_order WHERE id=:id'), {'id': order_id})) == '7.13'
+        assert await session.scalar(text('SELECT status FROM procurement.purchase_order WHERE id=:id'), {'id': order_id}) == 'ordered'
+        forged_cmd, forged_result = deepcopy(cmd), deepcopy(saved.json())
+        forged_cmd['request_key'] = str(uuid4())
+        forged_result.update(request_key=forged_cmd['request_key'], command_hash=request_command_hash(forged_cmd))
+        with pytest.raises(DBAPIError, match='matching line mutation proof'):
+            async with session.begin_nested():
+                await session.execute(text('''INSERT INTO procurement.purchase_order_edit_command
+                    (organization_id,request_key,actor,target_order_id,action,outcome,ownership_id,command,command_hash,result)
+                    VALUES (:org,:key,'issuer',:order_id,'save','applied',:owner,CAST(:command AS json),:checksum,CAST(:result AS json))'''),
+                    {'org': org_id, 'key': forged_cmd['request_key'], 'order_id': order_id,
+                     'owner': forged_result['ownership_id'], 'command': json.dumps(forged_cmd),
+                     'checksum': forged_result['command_hash'], 'result': json.dumps(forged_result)})
+
+
 @pytest.mark.parametrize('case', ['same', 'changed', 'execute-reconcile', 'reconcile-execute', 'rollback', 'revoke', 'revoke-replay'])
 async def test_pg_edit_real_lock_wait(issuance_pg, tmp_path, case):  # noqa: F811
     api, factory = issuance_pg

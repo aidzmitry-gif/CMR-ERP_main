@@ -64,6 +64,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0175_payroll_applicability_review.py",
     "0176_payroll_organization_review.py",
     "0177_procurement_catalog_receipt_guards.py",
+    "0178_procurement_atomic_order_save.py",
 )
 
 

@@ -4,6 +4,7 @@ from copy import deepcopy
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import func, select, update
 
 from core.domain.models import OutboxEvent, Sku
@@ -67,6 +68,43 @@ async def test_exact_replay_and_reconcile_preserve_effect(client, db, book, sour
         assert await state(db, source[0]) == before
         assert (await db.scalars(select(OutboxEvent.id))).all() == events
     assert await db.scalar(select(func.count()).select_from(commands.PurchaseOrderEditCommand)) == 1
+
+
+async def test_save_batches_changes_in_one_receipt_and_replays_without_writes(client, db, book, source):
+    changes = {"add_line": command(source[0])["payload"],
+               "header": {"freight_byn": "7.13"},
+               "plan": {"transport_method_code": "truck", "target_arrival_date": "2026-12-01"},
+               "status": {"status": "ordered"}}
+    cmd = command(source[0], "save", changes)
+    saved = await client.post(url(book, source), json=cmd)
+    assert saved.status_code == 200, saved.text
+    assert set(saved.json()["effect"]) == set(changes)
+    assert await db.scalar(select(func.count()).select_from(commands.PurchaseOrderEditCommand)) == 1
+    history = (await client.get(f"/procurement/organizations/{book[0]}/orders/{source[0]}/edit-history")).json()
+    assert len(history["items"]) == 1
+    assert [change["field"] for change in history["items"][0]["changes"]] == [
+        f"lines/{saved.json()['effect']['add_line']['line']['id']}", "freight_byn", "plan", "status"]
+    before = await state(db, source[0])
+    events = (await db.scalars(select(OutboxEvent.id))).all()
+    assert (await client.post(url(book, source), json=cmd)).content == saved.content
+    assert (await client.post(url(book, source, True), json=cmd)).content == saved.content
+    assert await state(db, source[0]) == before
+    assert (await db.scalars(select(OutboxEvent.id))).all() == events
+
+
+async def test_save_later_step_failure_rolls_back_earlier_changes(client, db, book, source, monkeypatch):
+    before = await state(db, source[0])
+    async def broken_plan(*_args, **_kwargs):
+        raise HTTPException(409, "Injected plan failure")
+    monkeypatch.setattr(commands.routes, "apply_order_plan", broken_plan)
+    cmd = command(source[0], "save", {"add_line": command(source[0])["payload"],
+               "header": {"freight_byn": "7.13"},
+               "plan": {"transport_method_code": "truck", "target_arrival_date": "2026-12-01"}})
+    failed = await client.post(url(book, source), json=cmd)
+    assert failed.status_code == 409
+    db.expire_all()
+    assert await state(db, source[0]) == before
+    assert await db.scalar(select(func.count()).select_from(commands.PurchaseOrderEditCommand)) == 0
 
 
 @pytest.mark.parametrize("action", ACTIONS)

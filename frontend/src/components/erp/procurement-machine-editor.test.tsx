@@ -48,12 +48,16 @@ beforeEach(() => {
       if (!result && url.endsWith("/reconcile")) { result = { ...common, outcome: "rejected", code: "command_abandoned", no_business_write: true }; serverReceipts.set(c.request_key, result); }
       if (!result) {
         if (mode === "lost") throw new Error("lost response");
-        const body = c.payload; let effect: unknown;
-        if (c.action === "add_line") { const row = { id: 12, sku_code: body.sku_code, qty: body.qty, goods_value_byn: body.goods_value_byn, weight: body.weight, volume: body.volume } as typeof lines[number]; lines.push(row); effect = { line: row }; }
-        else if (c.action === "delete_line") { effect = { line: lines.find(x => x.id === body.line_id) }; lines = lines.filter(x => x.id !== body.line_id); }
-        else if (c.action === "header") { effect = { before: { freight_byn: freight }, after: body }; freight = String(body.freight_byn); }
-        else if (c.action === "plan") { date = String(body.target_arrival_date); effect = plan(org); }
-        else { effect = { from: status, to: body.status, received_at: null, event_ids: status === body.status ? [] : [1] }; status = String(body.status); }
+        const apply = (action: string, body: Record<string, unknown>): unknown => {
+          if (action === "add_line") { const row = { id: 12, sku_code: body.sku_code, qty: body.qty, goods_value_byn: body.goods_value_byn, weight: body.weight, volume: body.volume } as typeof lines[number]; lines.push(row); return { line: row }; }
+          if (action === "delete_line") { const effect = { line: lines.find(x => x.id === body.line_id) }; lines = lines.filter(x => x.id !== body.line_id); return effect; }
+          if (action === "header") { const effect = { before: { freight_byn: freight }, after: body }; freight = String(body.freight_byn); return effect; }
+          if (action === "plan") { date = String(body.target_arrival_date); return plan(org); }
+          const effect = { from: status, to: body.status, received_at: null, event_ids: status === body.status ? [] : [1] }; status = String(body.status); return effect;
+        };
+        const effect = c.action === "save"
+          ? Object.fromEntries(["add_line", "header", "plan", "status"].filter(step => step in c.payload).map(step => [step, apply(step, c.payload[step] as Record<string, unknown>)]))
+          : apply(c.action, c.payload);
         result = { ...common, outcome: "applied", ownership_id: 9, effect }; serverReceipts.set(c.request_key, result);
       }
       if (mode === "lost-after") throw new Error("lost after commit");
@@ -109,11 +113,22 @@ it("saves and closes only after the server confirms a changed order", async () =
   await ready(); fireEvent.change(screen.getByLabelText("Фрахт партии, BYN"), { target: { value: "200.13" } });
   fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
   await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/erp/procurement/orders?org=1"));
-  expect(JSON.parse(String(writes()[0][1].body)).payload).toEqual({ freight_byn: "200.13" });
+  expect(JSON.parse(String(writes()[0][1].body))).toMatchObject({ action: "save", payload: { header: { freight_byn: "200.13" } } });
 });
-it("retains unsaved fields and stays open when a later change fails", async () => {
+it("saves line, freight and plan in one confirmed command", async () => {
+  await ready(); await selectNewSku();
+  fireEvent.change(screen.getByLabelText("Фрахт партии, BYN"), { target: { value: "200.13" } });
+  fireEvent.change(screen.getByLabelText("В Минске до"), { target: { value: "2026-12-01" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
+  await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/erp/procurement/orders?org=1"));
+  expect(writes()).toHaveLength(1);
+  expect(JSON.parse(String(writes()[0][1].body))).toMatchObject({ action: "save", payload: {
+    add_line: { sku_id: 99, sku_code: "NEW" }, header: { freight_byn: "200.13" },
+    plan: { transport_method_code: "truck", target_arrival_date: "2026-12-01" } } });
+});
+it("retains all unsaved fields and sends one command when an atomic save fails", async () => {
   const original = f.getMockImplementation()!;
-  f.mockImplementation((url: string, init?: RequestInit) => init?.method && JSON.parse(String(init.body)).action === "header"
+  f.mockImplementation((url: string, init?: RequestInit) => init?.method && JSON.parse(String(init.body)).action === "save"
     ? Promise.resolve({ ok: false, status: 409, json: async () => ({ detail: "conflict" }) })
     : original(url, init));
   await ready(); await selectNewSku();
@@ -121,8 +136,10 @@ it("retains unsaved fields and stays open when a later change fails", async () =
   fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("409"));
   expect(screen.getByLabelText("Фрахт партии, BYN")).toHaveValue("200.13");
-  expect(screen.getByText("NEW")).toBeInTheDocument();
-  expect(writes()).toHaveLength(2);
+  expect(screen.getByLabelText("Номенклатура из справочника")).toHaveValue("99");
+  expect(writes()).toHaveLength(1);
+  expect(lines.some(row => row.sku_code === "NEW")).toBe(false);
+  expect(freight).toBe("100.00");
   expect(navigation.push).not.toHaveBeenCalled();
 });
 it("keeps the editor open when the save result is unknown", async () => {
