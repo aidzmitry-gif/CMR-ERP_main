@@ -4,6 +4,8 @@ export type Identity = { organization_id: number; principal: string; can_manage:
 export type Organization = { id: number; name: string; unp: string };
 export type ProcurementSkuOption = { id: number; code: string; title: string; unit: string };
 export type ProcurementSkuOptions = { organization_id: number; items: ProcurementSkuOption[]; truncated: boolean };
+export type ProcurementSupplierOption = { id: number; name: string; unp: string };
+export type ProcurementSupplierOptions = { organization_id: number; items: ProcurementSupplierOption[]; truncated: boolean };
 export type MachineLine = { id: number; sku_code: string; qty: string; goods_value_byn: string; weight: string; volume: string };
 export type NewLine = Omit<MachineLine, "id">;
 export type MachineOrder = { organization_id: number; id: number; number: string; supplier: string; status: string; eta_date: string | null; freight_byn: string; lines: MachineLine[]; next_after_line_id: number | null };
@@ -60,6 +62,15 @@ export async function fetchProcurementSkus(org: number, search = ""): Promise<Pr
       || value.items.length > 50 || value.items.some((row) => !id(row.id) || !row.code || !row.title || !row.unit
         || typeof row.code !== "string" || typeof row.title !== "string" || typeof row.unit !== "string")) {
     throw new Error("Некорректный справочник номенклатуры закупок");
+  }
+  return value;
+}
+export async function fetchProcurementSuppliers(org: number, search = ""): Promise<ProcurementSupplierOptions> {
+  const value = await read<ProcurementSupplierOptions>(`${prefix(org)}/supplier-options?q=${encodeURIComponent(search)}`);
+  if (value.organization_id !== org || typeof value.truncated !== "boolean" || !Array.isArray(value.items)
+      || value.items.length > 50 || value.items.some((row) => !id(row.id) || typeof row.name !== "string" || !row.name
+        || typeof row.unp !== "string")) {
+    throw new Error("Некорректный справочник поставщиков закупок");
   }
   return value;
 }

@@ -8,8 +8,8 @@ from sqlalchemy import event, func, select, update
 from core.domain.models import Sku
 from core.services.auth import CurrentUser, get_current_user
 from modules.accounting.models import AccessGrant, Organization
-from modules.procurement import order_creation, routes
-from modules.procurement.models import PurchaseOrder, PurchaseOrderLine, PurchaseRequest
+from modules.procurement import order_creation, routes, scoped_reads
+from modules.procurement.models import PurchaseOrder, PurchaseOrderLine, PurchaseRequest, Supplier
 from modules.procurement.order_creation import PurchaseOrderCreation
 from modules.procurement.ownership import (
     OrderRequestLink,
@@ -25,9 +25,11 @@ async def order_routes(client, db):
     conn = await db.connection()
     await conn.run_sync(lambda c: PurchaseOrderCreation.__table__.create(c))
     await conn.run_sync(lambda c: PurchaseRequestCreation.__table__.create(c))
+    await conn.run_sync(lambda c: Supplier.__table__.create(c, checkfirst=True))
     await db.commit()
     client.test_app.include_router(order_creation.router, prefix="/procurement")
     client.test_app.include_router(routes.router, prefix="/procurement")
+    client.test_app.include_router(scoped_reads.router, prefix="/procurement")
 
 
 def command():
@@ -117,6 +119,37 @@ async def test_incomplete_catalog_reference_rejected_before_receipt(client, db, 
     result = await client.post(prefix(book) + "/orders", json=data, headers=HEADERS)
     assert result.status_code == 422
     assert (await counts(db))["PurchaseOrderCreation"] == 0
+
+
+async def test_supplier_selection_is_scoped_and_snapshotted_on_order_creation(client, db, book):
+    supplier = Supplier(name="Поставщик А", unp="190000001", status="active")
+    blocked = Supplier(name="Заблокированный", unp="190000002", status="blocked")
+    db.add_all([supplier, blocked])
+    await db.commit()
+    supplier_id = supplier.id
+    options = await client.get(prefix(book) + "/supplier-options", params={"q": "Поставщик"})
+    assert options.status_code == 200
+    assert options.json()["items"] == [{"id": supplier_id, "name": "Поставщик А", "unp": "190000001"}]
+    other = Organization(name="No access", unp="999999996")
+    db.add(other)
+    await db.commit()
+    assert (await client.get(f"/procurement/organizations/{other.id}/supplier-options")).status_code == 403
+    data = command()
+    data["document"].update(supplier="Поставщик А", supplier_id=supplier_id, supplier_unp="190000001")
+    first = await create(client, book, data)
+    row = await db.get(PurchaseOrder, first["order_id"])
+    assert row.supplier_id == supplier_id
+    receipt = await db.scalar(select(PurchaseOrderCreation).where(PurchaseOrderCreation.order_id == first["order_id"]))
+    assert receipt.command["document"]["supplier_unp"] == "190000001"
+    supplier.name = "Новое имя"
+    await db.commit()
+    assert await create(client, book, data) == first
+    stale = deepcopy(data)
+    stale["request_key"] = str(uuid4())
+    rejected = await client.post(prefix(book) + "/orders", json=stale, headers=HEADERS)
+    assert rejected.status_code == 409 and rejected.json()["code"] == "supplier_catalog_changed"
+    assert rejected.json()["no_business_write"] is True
+    assert (await counts(db))["PurchaseOrder"] == 1
 
 
 async def test_from_request_atomic_link_and_current_basis(client, db, book):
