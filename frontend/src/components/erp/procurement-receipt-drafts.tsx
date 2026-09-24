@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { fetchProcurementSuppliers, type ProcurementSupplierOption } from "@/lib/procurement-machine";
+import { useUnsavedDocumentGuard } from "@/lib/use-unsaved-document-guard";
 import { ProcurementReceiptPosting, type ReceiptAccount } from "./procurement-receipt-posting";
 
 const item = () => ({ order_id: null as number | null, sku: "", unit: null as string | null, lot: "", quantity: "", net_amount: "", vat_amount: "", vat_rate: "", vat_basis: "" });
@@ -20,7 +21,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   if (!response.ok) throw new Error(response.status === 409 ? "Версия или ключ документа уже изменены. Обновите список и откройте актуальную накладную." : typeof data.detail === "string" ? data.detail : "Проверьте реквизиты, даты и суммы накладной.");
   return data;
 }
-export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], policyId, date = "", onPosted }: { org: string; initialReceipt?: string; accounts?: ReceiptAccount[]; policyId?: number; date?: string; onPosted?: () => void }) {
+export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], policyId, date = "", onPosted, onPendingChange }: { org: string; initialReceipt?: string; accounts?: ReceiptAccount[]; policyId?: number; date?: string; onPosted?: () => void; onPendingChange?: (pending: boolean) => void }) {
   const [rows, setRows] = useState<Receipt[]>([]), [document, setDocument] = useState(blank);
   const [query, setQuery] = useState(""), [statusFilter, setStatusFilter] = useState("all");
   const [orders, setOrders] = useState<OwnedOrder[]>([]);
@@ -37,7 +38,8 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   const path = `/organizations/${org}/receipt-documents`;
   const listKey = `${path}/${reload}`;
   const listLoaded = loadedKey === listKey;
-  const dirty = selected && JSON.stringify(document) !== JSON.stringify(selected.revisions.at(-1)!.document);
+  const dirty = JSON.stringify(document) !== JSON.stringify(selected ? selected.revisions.at(-1)!.document : blank());
+  const confirmDiscard = useUnsavedDocumentGuard(dirty || busy, onPendingChange);
   const search = query.trim().toLocaleLowerCase("ru");
   const visible = rows.filter((row) => {
     const source = row.revisions.at(-1)!.document;
@@ -73,13 +75,17 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
         initialOpened.current = true;
         setInitialLoading(false);
         const row = data.find(row => String(row.id) === initialReceipt);
-        if (row) open(row);
+        if (row) {
+          setSelected(row); setDocument(structuredClone(row.revisions.at(-1)!.document));
+          key.current = null; setError(""); setNotice("");
+        }
         else setError("Накладная из ссылки не найдена в выбранном юрлице.");
       }
     } }).catch((e: Error) => { if (current) setError(e.message); });
     return () => { current = false; };
   }, [path, listKey, initialReceipt]);
   function open(row: Receipt | null) {
+    if (!confirmDiscard()) return;
     setSelected(row); setDocument(row ? structuredClone(row.revisions.at(-1)!.document) : blank());
     key.current = null; setError(""); setNotice("");
   }
