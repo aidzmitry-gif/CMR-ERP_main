@@ -4,9 +4,11 @@ import { WmsPrimaryReceipt } from "./wms-primary-receipt";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); sessionStorage.clear(); });
 const source = { organization_id: 1, source_receipt_id: 9, source_version: 2, source_warehouse: "По документу", lines: [{ position: 1, sku: "Материал", lot: "Партия", quantity: "2.00", unit: "кг" }] };
+const warehouseOptions = { organization_id: 1, items: [{ id: 5, name: "Склад А", title: "Основной склад" }], truncated: false };
 async function fill() {
   await screen.findByText("Строка 1: Материал");
-  fireEvent.change(screen.getByLabelText("Склад приёмки"), { target: { value: "Склад А" } });
+  await screen.findByRole("option", { name: "Склад А · Основной склад" });
+  fireEvent.change(screen.getByLabelText("Склад приёмки"), { target: { value: "5" } });
   fireEvent.change(screen.getByLabelText("Основание сопоставления"), { target: { value: "Проверено по накладной" } });
   fireEvent.change(screen.getByLabelText("Складской SKU строки 1"), { target: { value: "MAT" } });
   fireEvent.change(screen.getByLabelText("Количество приёмки строки 1"), { target: { value: "1.25" } });
@@ -20,7 +22,8 @@ it("restores the identical command after unknown delivery and verifies saved rec
       return { ok: true, json: async () => ({ organization_id: 1, source_receipt_id: 9, source_version: 2, request_key: JSON.parse(options.body as string).request_key, receipt_id: 12 }) };
     }
     return { ok: true, json: async () => url.endsWith("/receipts/12") ? { id: 12, organization_id: 1,
-      entity_ref: "procurement:receipt:9:2", source: "procurement", warehouse: "Склад А" } : source };
+      entity_ref: "procurement:receipt:9:2", source: "procurement", warehouse: "Склад А" }
+      : url.includes("warehouse-options") ? warehouseOptions : source };
   });
   vi.stubGlobal("fetch", fetcher);
   const view = render(<WmsPrimaryReceipt org="1" receipt="9" version="2" />);
@@ -33,6 +36,7 @@ it("restores the identical command after unknown delivery and verifies saved rec
   fireEvent.click(await screen.findByRole("button", { name: "Повторить ту же команду" }));
   expect(await screen.findByRole("link", { name: "Открыть контроль качества" })).toHaveAttribute("href", "/erp/wms/receipts/12");
   expect(bodies[0]).toBe(bodies[1]);
+  expect(JSON.parse(bodies[0])).toMatchObject({ warehouse_id: 5, warehouse: "Склад А" });
   expect(sessionStorage.getItem("wms-primary-receipt:1:9:2")).toBeNull();
 });
 it("keeps the exact command when the stored receipt names a different warehouse", async () => {
@@ -46,7 +50,8 @@ it("keeps the exact command when the stored receipt names a different warehouse"
         source_version: 2, request_key: JSON.parse(body).request_key, receipt_id: 12 }) };
     }
     return { ok: true, json: async () => url.endsWith("/receipts/12") ? { id: 12, organization_id: 1,
-      entity_ref: "procurement:receipt:9:2", source: "procurement", warehouse: actualWarehouse } : source };
+      entity_ref: "procurement:receipt:9:2", source: "procurement", warehouse: actualWarehouse }
+      : url.includes("warehouse-options") ? warehouseOptions : source };
   }));
   render(<WmsPrimaryReceipt org="1" receipt="9" version="2" />);
   await fill();
@@ -63,11 +68,44 @@ it("keeps the exact command when the stored receipt names a different warehouse"
 it("allows fixing an explicitly rejected warehouse SKU without claiming creation", async () => {
   vi.stubGlobal("fetch", vi.fn(async (_url: string, options?: RequestInit) => options?.method === "POST"
     ? { ok: false, status: 409, json: async () => ({ detail: "Select an existing warehouse SKU with the exact primary unit" }) }
-    : { ok: true, json: async () => source }));
+    : { ok: true, json: async () => _url.includes("warehouse-options") ? warehouseOptions : source }));
   render(<WmsPrimaryReceipt org="1" receipt="9" version="2" />);
   await fill();
   fireEvent.click(screen.getByRole("button", { name: "Создать приёмку для QC" }));
   await screen.findByText(/Команда отклонена до сохранения/);
   expect(screen.getByLabelText("Складской SKU строки 1")).toBeEnabled();
   expect(screen.queryByRole("link", { name: "Открыть контроль качества" })).not.toBeInTheDocument();
+});
+
+it("registers an owned warehouse before preparing a new physical receipt", async () => {
+  let posted: Record<string, unknown> | null = null;
+  const fetcher = vi.fn(async (url: string, options?: RequestInit) => {
+    if (url.endsWith("/warehouses") && options?.method === "POST") {
+      const body = JSON.parse(String(options.body));
+      return { ok: true, json: async () => ({ id: 5, organization_id: 1, ...body }) };
+    }
+    if (options?.method === "POST") {
+      posted = JSON.parse(String(options.body));
+      return { ok: true, json: async () => ({ organization_id: 1, source_receipt_id: 9, source_version: 2,
+        request_key: posted!.request_key, receipt_id: 12 }) };
+    }
+    return { ok: true, json: async () => url.endsWith("/receipts/12") ? { id: 12, organization_id: 1,
+      entity_ref: "procurement:receipt:9:2", source: "procurement", warehouse: "Склад А" }
+      : url.includes("warehouse-options") ? { organization_id: 1, items: [] } : source };
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<WmsPrimaryReceipt org="1" receipt="9" version="2" />);
+  await screen.findByText("Строка 1: Материал");
+  expect(screen.getByLabelText("Склад приёмки")).toHaveValue("");
+  fireEvent.change(screen.getByLabelText("Код нового склада"), { target: { value: "Склад А" } });
+  fireEvent.change(screen.getByLabelText("Название нового склада"), { target: { value: "Основной склад" } });
+  fireEvent.click(screen.getByRole("button", { name: "Зарегистрировать склад" }));
+  expect(await screen.findByRole("option", { name: "Склад А · Основной склад" })).toBeInTheDocument();
+  expect(screen.getByLabelText("Склад приёмки")).toHaveValue("5");
+  fireEvent.change(screen.getByLabelText("Основание сопоставления"), { target: { value: "Проверено по документу" } });
+  fireEvent.change(screen.getByLabelText("Складской SKU строки 1"), { target: { value: "MAT" } });
+  fireEvent.change(screen.getByLabelText("Количество приёмки строки 1"), { target: { value: "1.25" } });
+  fireEvent.click(screen.getByRole("button", { name: "Создать приёмку для QC" }));
+  expect(await screen.findByRole("link", { name: "Открыть контроль качества" })).toBeInTheDocument();
+  expect(posted).toMatchObject({ warehouse_id: 5, warehouse: "Склад А" });
 });

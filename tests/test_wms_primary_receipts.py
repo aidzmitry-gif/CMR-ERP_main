@@ -9,8 +9,9 @@ from sqlalchemy import func, select
 
 from core.domain.models import Counterparty, Sku
 from core.services.auth import CurrentUser
+from modules.accounting.models import Organization
 from modules.procurement.models import Supplier
-from modules.wms.models import Receipt, ReceiptLine, StockMovement
+from modules.wms.models import Receipt, ReceiptLine, StockMovement, WarehouseDirectory
 from modules.wms.primary_receipts import (
     PrimaryReceiptBinding,
     PrimaryReceiptCommand,
@@ -24,9 +25,15 @@ async def setup(api, session, services):
     org = await book(api)
     session.add(Counterparty(id=1, name="supplier1", unp="190000001"))
     session.add(Supplier(id=1, counterparty_id=1, name="supplier1", unp="190000001", status="active"))
-    session.add(Sku(id=1, code="sku1", title="Synthetic receipt item", unit="кг"))
+    source_sku = Sku(code="sku1", title="Synthetic receipt item", unit="кг")
+    session.add(source_sku)
+    session.add(WarehouseDirectory(organization_id=org, name="Main", title="Main warehouse",
+                                   created_by="wms-owner-test"))
+    await session.flush()
+    sku_id = source_sku.id
     await session.commit()
     data = document()
+    data["items"][0]["sku_id"] = sku_id
     data["items"][0].update(quantity="2.00", unit="кг")
     response = await api.post(f"/procurement/organizations/{org}/receipt-documents", json={"key": "physical-source", "document": data})
     assert response.status_code == 201, response.text
@@ -37,7 +44,7 @@ async def setup(api, session, services):
 
 def command(quantity="1.25", **changes):
     return PrimaryReceiptCommand.model_validate({"request_key": str(uuid4()), "expected_version": 1,
-        "warehouse": "Main", "evidence": "Synthetic explicit SKU and warehouse correspondence",
+        "warehouse_id": 1, "warehouse": "Main", "evidence": "Synthetic explicit SKU and warehouse correspondence",
         "lines": [{"position": 1, "sku_code": "WAREHOUSE-SKU", "quantity": quantity}], **changes})
 
 
@@ -75,6 +82,38 @@ async def test_partial_primary_receipts_preserve_source_and_replay_without_stock
     assert Decimal(totals["unallocated"]) == 0
     with pytest.raises(ValueError, match="different content"):
         await create_from_primary(session, core, user, org, source, command("0.50", request_key=first_command.request_key))
+
+
+async def test_physical_warehouse_catalog_is_company_scoped_and_replayable(api, session, services):
+    org, source, core, user, _ = await setup(api, session, services)
+    path = f"/wms/organizations/{org}"
+    options = await api.get(path + "/warehouse-options")
+    assert options.status_code == 200, options.text
+    assert [(row["id"], row["name"]) for row in options.json()["items"]] == [(1, "Main")]
+    created = await api.post(path + "/warehouses", json={"name": "Overflow", "title": "Overflow store"})
+    assert created.status_code == 201, created.text
+    assert created.json()["organization_id"] == org
+    assert (await api.post(path + "/warehouses", json={"name": "Overflow", "title": "Overflow store"})).json()["id"] == created.json()["id"]
+    assert (await api.post(path + "/warehouses", json={"name": "Overflow", "title": "Changed"})).status_code == 409
+    assert (await api.get(f"/wms/organizations/{org + 999}/warehouse-options")).status_code == 403
+    assert (await api.post(path + "/warehouses", headers={"X-User": "outsider"},
+                           json={"name": "Foreign", "title": "Not ours"})).status_code == 403
+    other = Organization(name="Another owner", unp="999999994")
+    session.add(other)
+    await session.flush()
+    foreign = WarehouseDirectory(organization_id=other.id, name="Foreign", title="Another company",
+                                 created_by="other")
+    session.add(foreign)
+    await session.flush()
+    foreign_id = foreign.id
+    await session.commit()
+    for selection in (command(warehouse_id=None), command(warehouse_id=created.json()["id"], warehouse="Main")):
+        with pytest.raises(ValueError, match="warehouse"):
+            await create_from_primary(session, core, user, org, source, selection)
+    with pytest.raises(ValueError, match="warehouse"):
+        await create_from_primary(session, core, user, org, source,
+                                  command(warehouse_id=foreign_id, warehouse="Foreign"))
+    assert await session.scalar(select(func.count()).select_from(Receipt)) == 0
 
 
 async def test_primary_change_requires_reconciliation_after_physical_preparation(api, session, services):

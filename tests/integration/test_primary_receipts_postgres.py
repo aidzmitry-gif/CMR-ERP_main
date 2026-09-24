@@ -54,6 +54,19 @@ async def test_concurrent_partial_receipts_serialize_limit_and_exact_replay(issu
         assert await session.scalar(select(func.count()).select_from(PrimaryReceiptBinding)) == 1
         assert await session.scalar(select(func.count()).select_from(Receipt)) == 1
         assert await session.scalar(select(func.count()).select_from(StockMovement)) == 0
+        with pytest.raises(DBAPIError, match="warehouse catalogue ID is required"):
+            async with session.begin_nested():
+                await session.execute(text("""
+                    INSERT INTO wms.primary_receipt_binding
+                    (receipt_id, organization_id, request_key, source_receipt_id, source_version,
+                     command, source_snapshot, line_bindings, actor)
+                    SELECT receipt_id, organization_id, request_key, source_receipt_id, source_version,
+                           (command::jsonb - 'warehouse_id')::json, source_snapshot, line_bindings, actor
+                    FROM wms.primary_receipt_binding
+                """))
+        with pytest.raises(DBAPIError, match="Warehouse identity cannot be changed"):
+            async with session.begin_nested():
+                await session.execute(text("UPDATE wms.warehouse_directory SET name='renamed'"))
         for statement in (
             "UPDATE wms.primary_receipt_binding SET actor = 'changed'",
             "DELETE FROM wms.primary_receipt_binding",
@@ -112,8 +125,7 @@ async def test_concurrent_partial_receipts_serialize_limit_and_exact_replay(issu
     accepted = await api.post(f"/wms/receipts/{replay[0]}/accept")
     assert accepted.status_code == 200, accepted.text
     assert (await api.post(f"/wms/receipts/{replay[0]}/accept")).status_code == 200
-    report = await api.get(f"/accounting/organizations/{org}/receipts/{source}/warehouse-reconciliation",
-                           headers={"X-User-Roles": "finance"})
+    report = await api.get(f"/accounting/organizations/{org}/receipts/{source}/warehouse-reconciliation")
     assert report.status_code == 200, report.text
     assert report.headers["cache-control"] == "private, no-store"
     assert report.json()["rows"][0]["accepted"] == "1.00"

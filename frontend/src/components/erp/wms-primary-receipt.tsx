@@ -3,16 +3,21 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 
 type Source = { organization_id: number; source_receipt_id: number; source_version: number; source_warehouse: string; lines: { position: number; sku: string; lot: string; quantity: string; unit: string }[] };
 type Line = { position: number; sku_code: string; quantity: string };
-type Command = { request_key: string; expected_version: number; warehouse: string; evidence: string; lines: Line[] };
+type Warehouse = { id: number; name: string; title: string };
+type Command = { request_key: string; expected_version: number; warehouse_id?: number; warehouse: string; evidence: string; lines: Line[] };
 
 export function WmsPrimaryReceipt({ org, receipt, version }: { org: string; receipt: string; version: string }) {
   const valid = [org, receipt, version].every(value => /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value)));
   const [source, setSource] = useState<Source | null>(null);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]), [warehouseError, setWarehouseError] = useState("");
+  const [warehouseId, setWarehouseId] = useState<number | null>(null);
   const [warehouse, setWarehouse] = useState(""), [evidence, setEvidence] = useState("");
+  const [newWarehouseName, setNewWarehouseName] = useState(""), [newWarehouseTitle, setNewWarehouseTitle] = useState("");
+  const [registerBusy, setRegisterBusy] = useState(false);
   const [lines, setLines] = useState<Line[]>([]), [error, setError] = useState("");
   const [busy, setBusy] = useState(false), [frozen, setFrozen] = useState(false), [created, setCreated] = useState<number | null>(null);
   const pending = useRef<string | null>(null), running = useRef(false), active = useRef(true);
@@ -39,15 +44,41 @@ export function WmsPrimaryReceipt({ org, receipt, version }: { org: string; rece
         if (!controller.signal.aborted) setSource(data);
       }).catch(reason => { if (!controller.signal.aborted) setError(reason.message); }).finally(() => {
         if (!controller.signal.aborted) {
-          if (restored) { setFrozen(true); setWarehouse(restored.warehouse); setEvidence(restored.evidence); setLines(restored.lines); }
+          if (restored) { setFrozen(true); setWarehouseId(restored.warehouse_id ?? null); setWarehouse(restored.warehouse); setEvidence(restored.evidence); setLines(restored.lines); }
           if (recoveryFailed) { setSource(null); setError("Не удалось прочитать сохранённую команду приёмки."); }
         }
       });
+      void fetch(`/api/wms/organizations/${org}/warehouse-options`, { cache: "no-store", signal: controller.signal }).then(async response => {
+        if (!response.ok) throw new Error("Не удалось загрузить справочник складов этого юрлица.");
+        const data = await response.json();
+        if (data.organization_id !== Number(org) || !Array.isArray(data.items)) throw new Error("Справочник складов вернул данные другого юрлица.");
+        if (!controller.signal.aborted) { setWarehouses(data.items); setWarehouseError(""); }
+      }).catch(reason => { if (!controller.signal.aborted) setWarehouseError(reason.message); });
     }
     return () => { active.current = false; controller.abort(); };
   }, [org, receipt, version, path, storageKey, valid]);
   function update(position: number, field: "sku_code" | "quantity", value: string) {
     setLines(current => [...current.filter(line => line.position !== position), { ...(current.find(line => line.position === position) ?? { position, sku_code: "", quantity: "" }), [field]: value }]);
+  }
+  async function registerWarehouse() {
+    if (registerBusy || frozen || !newWarehouseName.trim() || !newWarehouseTitle.trim()) return;
+    setRegisterBusy(true); setWarehouseError("");
+    try {
+      const response = await fetch(`/api/wms/organizations/${org}/warehouses`, { method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newWarehouseName.trim(), title: newWarehouseTitle.trim() }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Не удалось зарегистрировать склад.");
+      if (data.organization_id !== Number(org) || !Number.isSafeInteger(data.id)
+        || data.name !== newWarehouseName.trim() || data.title !== newWarehouseTitle.trim())
+        throw new Error("Сервер не подтвердил регистрацию склада этого юрлица.");
+      if (active.current) {
+        setWarehouses(current => [...current.filter(row => row.id !== data.id), data]);
+        setWarehouseId(data.id); setWarehouse(data.name);
+        setNewWarehouseName(""); setNewWarehouseTitle("");
+      }
+    } catch (reason) { if (active.current) setWarehouseError(reason instanceof Error ? reason.message : "Не удалось зарегистрировать склад."); }
+    finally { if (active.current) setRegisterBusy(false); }
   }
   async function submit() {
     if (running.current || created !== null) return;
@@ -55,8 +86,11 @@ export function WmsPrimaryReceipt({ org, receipt, version }: { org: string; rece
     try {
       if (!pending.current) {
         const selected = lines.filter(line => line.sku_code.trim() || line.quantity.trim());
-        if (!source || !warehouse.trim() || !evidence.trim() || !selected.length || selected.some(line => !line.sku_code.trim() || !/^\d+(\.\d{1,2})?$/.test(line.quantity) || Number(line.quantity) <= 0)) throw new Error("Укажите склад, основание и точное количество хотя бы одной позиции.");
-        const cmd: Command = { request_key: crypto.randomUUID(), expected_version: Number(version), warehouse: warehouse.trim(), evidence: evidence.trim(), lines: selected.map(line => ({ ...line, sku_code: line.sku_code.trim() })) };
+        if (!source || !warehouseId || !warehouses.some(row => row.id === warehouseId && row.name === warehouse)
+          || !evidence.trim() || !selected.length || selected.some(line => !line.sku_code.trim() || !/^\d+(\.\d{1,2})?$/.test(line.quantity) || Number(line.quantity) <= 0))
+          throw new Error("Выберите склад из справочника, укажите основание и точное количество хотя бы одной позиции.");
+        const cmd: Command = { request_key: crypto.randomUUID(), expected_version: Number(version), warehouse_id: warehouseId,
+          warehouse, evidence: evidence.trim(), lines: selected.map(line => ({ ...line, sku_code: line.sku_code.trim() })) };
         const body = JSON.stringify(cmd);
         sessionStorage.setItem(storageKey, body);
         pending.current = body; setFrozen(true);
@@ -70,6 +104,8 @@ export function WmsPrimaryReceipt({ org, receipt, version }: { org: string; rece
           "Physical receipts exceed the primary line quantity",
           "Primary receipt line does not exist",
           "Primary lot exceeds physical receipt storage; explicit mapping required",
+          "Select the physical warehouse from the organization catalogue",
+          "Physical warehouse catalogue selection changed; select it again",
         ].includes(failure.detail));
         if (rejected) {
           sessionStorage.removeItem(storageKey); pending.current = null;
@@ -97,10 +133,18 @@ export function WmsPrimaryReceipt({ org, receipt, version }: { org: string; rece
     <h1 className="text-xl font-semibold">Приёмка по накладной № {receipt} · версия {version}</h1>
     <p>Юрлицо № {org}. Создаётся документ контроля качества; приход товара выполняется после QC.</p>
     {error && <p role="alert">{error}</p>}
+    {warehouseError && <p role="alert">{warehouseError}</p>}
     {frozen && !created && <p role="status">Команда сохранена в этой вкладке. Поля заблокированы для безопасного повтора.</p>}
+    {frozen && warehouse && !created && <p>Склад сохранённой команды: {warehouse}.</p>}
     {source && <fieldset disabled={frozen || busy} className="space-y-3">
-      <p>Склад в накладной: {source.source_warehouse}. Подтвердите склад физической приёмки.</p>
-      <label>Склад приёмки<Input value={warehouse} onChange={e => setWarehouse(e.target.value)} /></label>
+      <p>Склад в накладной: {source.source_warehouse}. Выберите склад фактической приёмки своего юрлица; если он отличается, укажите основание сопоставления.</p>
+      <label>Склад приёмки<Select value={warehouseId ?? ""} onChange={e => {
+        const selected = warehouses.find(row => String(row.id) === e.target.value);
+        setWarehouseId(selected?.id ?? null); setWarehouse(selected?.name ?? "");
+      }}><option value="">Выберите склад из справочника</option>{warehouses.map(row =>
+        <option key={row.id} value={row.id}>{row.name} · {row.title}</option>)}</Select></label>
+      {!warehouses.length && <p>Для этого юрлица нет зарегистрированных складов. Сначала добавьте склад физической приёмки.</p>}
+      <div className="flex flex-wrap items-end gap-2"><label>Код нового склада<Input aria-label="Код нового склада" maxLength={128} value={newWarehouseName} onChange={e => setNewWarehouseName(e.target.value)} /></label><label>Название нового склада<Input aria-label="Название нового склада" maxLength={255} value={newWarehouseTitle} onChange={e => setNewWarehouseTitle(e.target.value)} /></label><Button variant="secondary" disabled={registerBusy} onClick={() => void registerWarehouse()}>Зарегистрировать склад</Button></div>
       <label>Основание сопоставления<Input value={evidence} onChange={e => setEvidence(e.target.value)} /></label>
       {source.lines.map(fact => <fieldset key={fact.position} className="rounded border border-line p-3"><legend>Строка {fact.position}: {fact.sku}</legend><p>Партия {fact.lot} · по накладной {fact.quantity} {fact.unit}</p>
         <label>Код складской номенклатуры<Input aria-label={`Складской SKU строки ${fact.position}`} value={lines.find(line => line.position === fact.position)?.sku_code ?? ""} onChange={e => update(fact.position, "sku_code", e.target.value)} /></label>

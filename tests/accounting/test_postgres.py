@@ -66,6 +66,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0177_procurement_catalog_receipt_guards.py",
     "0178_procurement_atomic_order_save.py",
     "0183_receipt_edit_request_key.py",
+    "0184_organization_warehouse_directory.py",
 )
 
 
@@ -431,7 +432,7 @@ async def pg_factory():
                         continue  # Added by registered migration 0131 after the accounting baseline.
                     if table.schema == "wms" and table.name == "production_arrival":
                         continue  # Added by the shared unallocated proposal, not the legacy baseline.
-                    if table.schema == "wms" and table.name not in {"primary_receipt_binding", "reservation_version", "reservation_event_state", "reservation_pick", "invoice_reservation", "invoice_reservation_release", "invoice_reservation_release_line", "physical_shipment_act", "physical_shipment_line", "production_material_issue"}:
+                    if table.schema == "wms" and table.name not in {"primary_receipt_binding", "reservation_version", "reservation_event_state", "reservation_pick", "invoice_reservation", "invoice_reservation_release", "invoice_reservation_release_line", "physical_shipment_act", "physical_shipment_line", "production_material_issue", "warehouse_directory"}:
                         copied = table.to_metadata(baseline)
                         for constraint in list(copied.constraints):
                             if "source_event_id" in constraint.columns or "organization_id" in str(getattr(constraint, "sqltext", "")):
@@ -540,11 +541,12 @@ async def pg_factory():
 async def pg_book(pg_factory, db, book):
     from sqlalchemy import select
 
+    from core.domain.models import Counterparty
     from modules.accounting.models import AccessGrant, Account, Organization, Policy
     from modules.procurement.models import Supplier
 
     async with pg_factory() as session:
-        for model in (Organization, AccessGrant, Account, Policy, Supplier):
+        for model in (Organization, AccessGrant, Account, Policy, Counterparty, Supplier):
             rows = (await db.scalars(select(model))).all()
             for row in rows:
                 session.add(model(**{c.key: getattr(row, c.key) for c in model.__table__.columns}))
