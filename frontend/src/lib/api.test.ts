@@ -878,12 +878,12 @@ describe("api client — телефония", () => {
   });
 
   it("subscribeCalls — no-op без EventSource (jsdom не предоставляет), не бросает", () => {
-    const unsubscribe = subscribeCalls("Иванов", () => {});
+    const unsubscribe = subscribeCalls(() => {});
     expect(typeof unsubscribe).toBe("function");
     expect(() => unsubscribe()).not.toThrow();
   });
 
-  it("subscribeCalls строит URL с owner и без; onmessage парсит карточку", () => {
+  it("subscribeCalls использует URL потока без owner и разбирает карточки", () => {
     const instances: { url: string; onmessage: ((e: { data: string }) => void) | null; close: () => void }[] = [];
     class FakeEventSource {
       onmessage: ((e: { data: string }) => void) | null = null;
@@ -895,8 +895,8 @@ describe("api client — телефония", () => {
     vi.stubGlobal("EventSource", FakeEventSource as unknown as typeof EventSource);
 
     const cards: { id: number }[] = [];
-    const unsub = subscribeCalls("Иванов", (c) => cards.push(c as unknown as { id: number }));
-    expect(instances[0].url).toBe("/api/sales/calls/stream?owner=%D0%98%D0%B2%D0%B0%D0%BD%D0%BE%D0%B2");
+    const unsub = subscribeCalls((c) => cards.push(c as unknown as { id: number }));
+    expect(instances[0].url).toBe("/api/sales/calls/stream");
     instances[0].onmessage?.({ data: JSON.stringify({ id: 1 }) });
     expect(cards).toEqual([{ id: 1 }]);
     // «шум» потока (heartbeat/невалидный JSON) — не бросает и не добавляет карточку
@@ -905,7 +905,7 @@ describe("api client — телефония", () => {
     unsub();
     expect(instances[0].close).toHaveBeenCalled();
 
-    subscribeCalls(undefined, () => {});
+    subscribeCalls(() => {});
     expect(instances[1].url).toBe("/api/sales/calls/stream");
   });
 });

@@ -1341,13 +1341,10 @@ export interface CallRow {
  * EventSource ходит на /api-прокси (он добавляет роль из cookie + стримит SSE).
  * Возвращает функцию отписки.
  */
-export function subscribeCalls(owner: string | undefined, onCard: (card: CallCard) => void): () => void {
+export function subscribeCalls(onCard: (card: CallCard) => void): () => void {
   // SSR / тестовая среда (jsdom) без EventSource — подписка не нужна, возвращаем no-op.
   if (typeof EventSource === "undefined") return () => {};
-  const url = owner
-    ? `/api/sales/calls/stream?owner=${encodeURIComponent(owner)}`
-    : "/api/sales/calls/stream";
-  const es = new EventSource(url);
+  const es = new EventSource("/api/sales/calls/stream");
   es.onmessage = (e) => {
     try {
       onCard(JSON.parse(e.data) as CallCard);

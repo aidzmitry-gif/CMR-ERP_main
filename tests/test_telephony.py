@@ -224,7 +224,7 @@ async def test_incoming_logs_resolves_and_pushes(session):
     await session.commit()
 
     # продавец подписан на поток своих звонков
-    queue = calls_mod.subscribe("Сидоров С.С.")
+    queue = calls_mod.subscribe(owner.employee_id)
     ctx, _ = _ctx(session)
     payload = {"call_id": "CALL-1", "direction": "in", "phone_e164": "+375291110000", "did": "375171234567"}
     await calls_mod.on_incoming_call(payload, ctx)
@@ -233,6 +233,7 @@ async def test_incoming_logs_resolves_and_pushes(session):
     rows = (await session.execute(select(CallLog))).scalars().all()
     assert len(rows) == 1
     assert rows[0].owner == "Сидоров С.С."
+    assert rows[0].owner_id == owner.employee_id
     assert rows[0].status == "ringing"
     assert rows[0].deal_id is not None
     assert rows[0].counterparty_id is not None
@@ -242,7 +243,7 @@ async def test_incoming_logs_resolves_and_pushes(session):
     assert card["call_id"] == "CALL-1"
     assert card["owner"] == "Сидоров С.С."
     assert card["deal_id"] == rows[0].deal_id
-    calls_mod.unsubscribe("Сидоров С.С.", queue)
+    calls_mod.unsubscribe(owner.employee_id, queue)
 
     # событие sales.call.logged ушло в шину
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]

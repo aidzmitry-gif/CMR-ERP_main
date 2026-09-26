@@ -41,9 +41,8 @@ export async function AppShell({
     // деньги (карточка/drawer/окно звонка), а окно звонка живёт внутри ActiveCallProvider,
     // поэтому провайдер обязан быть выше него (иначе входящий звонок вне /crm дал бы ₽).
     <CurrencyProvider>
-      {/* Подписка на входящие звонки (SSE) + всплывающее окно — на любом экране оболочки.
-          owner = ФИО продавца (cookie aios_user), по нему backend пушит карточки (SALES-50). */}
-      <ActiveCallProvider owner={userName ?? undefined}>
+      {/* Подписка на собственные входящие звонки (SSE) + окно на любом экране оболочки. */}
+      <ActiveCallProvider>
         <div className="flex h-screen overflow-hidden max-md:[&>aside:first-child]:w-14">
           <Sidebar allowedSlugs={allowedSlugs} userName={userName} roleTitle={roleTitle} />
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden">

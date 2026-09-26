@@ -73,14 +73,15 @@ async def test_form_body_overrides_query_and_preserves_encoded_values(api, sessi
 
 
 def test_slow_sse_subscriber_does_not_drop_other_subscribers_or_old_cards(caplog):
-    owner = "COVERAGE-SSE"
+    owner = 981
     slow, healthy = calls.subscribe(owner), calls.subscribe(owner)
     sentinel = {"call_id": "OLD"}
     try:
         assert calls.has_subscriber(owner)
         for _ in range(slow.maxsize):
             slow.put_nowait(sentinel)
-        call = CallLog(call_id="NEW", direction="in", owner=owner, status="ringing")
+        call = CallLog(call_id="NEW", direction="in", owner="Coverage Seller", owner_id=owner,
+                       status="ringing")
         assert calls._push_card(call) is True
         card = healthy.get_nowait()
         call.status = "ended"
@@ -98,6 +99,28 @@ def test_slow_sse_subscriber_does_not_drop_other_subscribers_or_old_cards(caplog
         calls.unsubscribe(owner, healthy)
     assert not calls.has_subscriber(owner)
     calls.unsubscribe(owner, healthy)  # disconnect retry is harmless
+
+
+def test_sse_subscribers_with_same_display_name_are_isolated_by_employee_id():
+    first_owner_id, second_owner_id = 982, 983
+    first = calls.subscribe(first_owner_id)
+    second = calls.subscribe(second_owner_id)
+    try:
+        first_call = CallLog(call_id="SAME-NAME-1", direction="in", owner="Shared Name",
+                             owner_id=first_owner_id, status="ringing")
+        second_call = CallLog(call_id="SAME-NAME-2", direction="in", owner="Shared Name",
+                              owner_id=second_owner_id, status="ringing")
+
+        assert calls._push_card(first_call) is True
+        assert first.get_nowait()["call_id"] == "SAME-NAME-1"
+        assert second.empty()
+
+        assert calls._push_card(second_call) is True
+        assert second.get_nowait()["call_id"] == "SAME-NAME-2"
+        assert first.empty()
+    finally:
+        calls.unsubscribe(first_owner_id, first)
+        calls.unsubscribe(second_owner_id, second)
 
 
 async def test_invalid_direct_handler_input_has_no_call_or_outbox_side_effects(session):

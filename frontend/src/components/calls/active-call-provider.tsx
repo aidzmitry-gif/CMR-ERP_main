@@ -35,13 +35,8 @@ function contextFromCard(card: CallCard): CallContext {
 /**
  * Глобальная подписка продавца на поток входящих звонков (SSE) + всплывающее окно.
  * Монтируется в оболочке (AppShell) — окно доступно на любом экране CRM/ERP.
- * ``owner`` — ФИО продавца (= Deal.owner), по которому backend пушит карточки.
  */
-export function ActiveCallProvider({
-  owner,
-  children,
-}: {
-  owner?: string;
+export function ActiveCallProvider({ children }: {
   children: React.ReactNode;
 }) {
   const [card, setCard] = useState<CallCard | null>(null);
@@ -50,7 +45,7 @@ export function ActiveCallProvider({
   const router = useRouter();
 
   // subscribeCalls возвращает функцию отписки → она же cleanup эффекта.
-  useEffect(() => subscribeCalls(owner, setCard), [owner]);
+  useEffect(() => subscribeCalls(setCard), []);
 
   return (
     <>

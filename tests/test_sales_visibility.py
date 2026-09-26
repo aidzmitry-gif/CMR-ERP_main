@@ -1,7 +1,9 @@
 """Regression contract for server-enforced per-employee deal visibility."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -379,3 +381,89 @@ async def test_own_funnels_have_only_visible_counts_and_open_boards(api, session
                            headers={"X-User": "contact-hr", "X-User-Roles": "hr"})
     assert denied.status_code == 403
     assert "sales.deal.read" in denied.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_calls_stream_uses_authenticated_employee_and_rejects_owner_override(api, session):
+    from starlette.requests import Request
+
+    from core.services.auth import CurrentUser
+    from core.services.crm_access import CrmAccess
+    from modules.sales.access import _OWN_ROUTE_NAMES, deny_unscoped_own_routes
+    from modules.sales.calls import _push_card, has_subscriber
+    from modules.sales.routes import calls_stream
+
+    employee_id = 614
+    session.add(User(
+        username="call-stream-owner", full_name="Shared Name", employee_id=employee_id,
+        department="Продажи", role="sales", status="active", deal_visibility="own",
+    ))
+    await session.commit()
+
+    response = await api.get(
+        "/sales/calls/stream?owner=Other%20Seller",
+        headers=_sales_headers("call-stream-owner"),
+    )
+    assert response.status_code == 400
+    assert response.headers.get("content-type") != "text/event-stream"
+    assert "Shared Name" not in response.text
+    assert "calls_stream" in _OWN_ROUTE_NAMES
+
+    session.add(User(
+        username="call-stream-unlinked", full_name="Unlinked Seller", employee_id=None,
+        department="Продажи", role="sales", status="active", deal_visibility="all",
+    ))
+    await session.commit()
+    for headers in (
+        _sales_headers("call-stream-unlinked"),
+        {"X-User": "unlinked-super", "X-User-Roles": "admin"},
+    ):
+        denied = await asyncio.wait_for(api.get("/sales/calls/stream", headers=headers), timeout=1)
+        assert denied.status_code == 403
+        assert denied.headers.get("content-type") != "text/event-stream"
+        assert "Shared Name" not in denied.text
+
+    request = Request({"type": "http", "route": SimpleNamespace(name="calls_stream")})
+    await deny_unscoped_own_routes(request, CrmAccess("own", employee_id))
+
+    stream_response = await calls_stream(
+        owner=None,
+        user=CurrentUser(username="call-stream-owner", roles=["sales"]),
+        access=CrmAccess("own", employee_id),
+    )
+    stream = stream_response.body_iterator
+    try:
+        assert await stream.__anext__() == ": connected\n\n"
+        call = CallLog(
+            id=3001, call_id="STREAM-OWN", direction="in", owner="Shared Name",
+            owner_id=employee_id, status="ringing",
+        )
+        assert _push_card(call) is True
+        event = await asyncio.wait_for(stream.__anext__(), timeout=1)
+        assert "STREAM-OWN" in event
+    finally:
+        await stream.aclose()
+    assert not has_subscriber(employee_id)
+
+
+@pytest.mark.parametrize("roles", [["sales"], ["admin"]])
+async def test_calls_stream_denies_users_without_employee_link(roles, monkeypatch):
+    from fastapi import HTTPException
+
+    from core.services.auth import CurrentUser
+    from core.services.crm_access import CrmAccess
+    from modules.sales import calls
+    from modules.sales.routes import calls_stream
+
+    monkeypatch.setattr(calls, "subscribe", lambda _employee_id: pytest.fail(
+        "users without an employee link must be rejected before stream registration"
+    ))
+
+    with pytest.raises(HTTPException) as error:
+        await calls_stream(
+            owner=None,
+            user=CurrentUser(username="unlinked", roles=roles),
+            access=CrmAccess("all", None),
+        )
+
+    assert error.value.status_code == 403
