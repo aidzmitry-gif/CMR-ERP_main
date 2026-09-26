@@ -6,11 +6,13 @@ real source documents, organization policy, PostgreSQL recovery evidence and
 the accountant's close.  It is therefore an operating checklist, not a claim
 that 1C can already be retired.
 
-Current source branch: `agent/crm-acc-prod009`; `alembic heads` on 2026-09-24
-reports the single source head `0182`. The earlier local synthetic PostgreSQL
+Current source branch: `agent/crm-acc-prod009`; `alembic heads` on 2026-09-26
+reports the single source head `0186`. Two focused tests on a disposable local
+PostgreSQL 16 database passed for the supplier-contract revocation migration
+and procurement receipt history; the temporary container was removed. The earlier local synthetic PostgreSQL
 [checkpoint](POSTGRES-ACCEPTANCE-2026-09-23.md) covers an empty-base upgrade
 through its recorded revision, restore and targeted payroll guards, not the
-current target database or the later source migrations.
+current target database or all later source migrations.
 
 | Requirement | Source evidence | Still required for acceptance |
 | --- | --- | --- |
