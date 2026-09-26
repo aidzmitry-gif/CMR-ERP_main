@@ -268,7 +268,11 @@ _PRIVATE_CACHE_V1_GROUPS = {
 _PRIVATE_CACHE_V2_GROUPS = _PRIVATE_CACHE_V1_GROUPS | {
     "bx_comment_binary_links", "bx_comment_binary_inventory",
 }
+_PRIVATE_CACHE_V3_GROUPS = _PRIVATE_CACHE_V2_GROUPS | {
+    "bx_call_binary_links", "bx_call_binary_inventory",
+}
 _PRIVATE_CACHE_V2_FORMAT = "CRM-LIVE-001-private-cache-v2"
+_PRIVATE_CACHE_V3_FORMAT = "CRM-LIVE-001-private-cache-v3"
 _MAX_PRIVATE_ATTACHMENT_BYTES = 2 * 1024 * 1024 * 1024
 _SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -309,11 +313,36 @@ def _private_jsonl_rows(cache_dir: Path, name: str) -> list[dict]:
     return rows
 
 
-def _verify_private_comment_binary_files(cache_dir: Path, manifest: dict) -> None:
+def _check_private_binary_tree(folder: Path, expected_names: set[str]) -> None:
+    """Recheck directory membership after reading bytes to catch late additions."""
+    if folder.is_symlink() or not folder.is_dir():
+        raise ValueError("invalid private binary directory")
+    actual_names: set[str] = set()
+    for path in folder.iterdir():
+        if (path.is_symlink() or not path.is_file()
+                or not re.fullmatch(r"[0-9a-f]{64}\.bin", path.name)):
+            raise ValueError("invalid private binary file")
+        actual_names.add(path.name)
+    if actual_names != expected_names:
+        raise ValueError("private binary inventory mismatch")
+
+
+def _verify_private_comment_binary_files(
+    cache_dir: Path, manifest: dict,
+    cache_snapshot: _PrivateCacheSnapshot | None = None,
+) -> None:
     """Verify the exact v2 file tree and its bounded inventory before database access."""
     try:
-        inventory_rows = _private_jsonl_rows(cache_dir, "bx_comment_binary_inventory")
-        link_rows = _private_jsonl_rows(cache_dir, "bx_comment_binary_links")
+        inventory_rows = (
+            _load_jsonl("bx_comment_binary_inventory", cache_snapshot)
+            if cache_snapshot is not None
+            else _private_jsonl_rows(cache_dir, "bx_comment_binary_inventory")
+        )
+        link_rows = (
+            _load_jsonl("bx_comment_binary_links", cache_snapshot)
+            if cache_snapshot is not None
+            else _private_jsonl_rows(cache_dir, "bx_comment_binary_links")
+        )
         inventory: dict[str, dict] = {}
         filenames: set[str] = set()
         for row in inventory_rows:
@@ -410,6 +439,161 @@ def _verify_private_comment_binary_files(cache_dir: Path, manifest: dict) -> Non
         linked_keys = {row["binary_key"] for row in link_rows}
         if linked_keys != set(inventory):
             raise ValueError("binary inventory mismatch")
+        if cache_snapshot is not None:
+            _check_private_binary_tree(folder, filenames)
+    except (OSError, KeyError, TypeError, ValueError, UnicodeError):
+        raise RuntimeError("PRIVATE_CACHE_CHANGED") from None
+
+
+def _verify_private_call_binary_files(
+    cache_dir: Path, manifest: dict, cache_snapshot: _PrivateCacheSnapshot,
+) -> int:
+    """Verify v3 call links against source rows and the exact local binary tree."""
+    try:
+        call_rows = _load_jsonl("bx_calls", cache_snapshot)
+        source_calls: dict[str, tuple[str, str, str, str, str]] = {}
+        calls_requiring_recording: set[str] = set()
+
+        def optional_id(value: object) -> str:
+            if value is None or value == "":
+                return ""
+            candidate = str(value)
+            if (not candidate.isascii() or not candidate.isdigit()
+                    or int(candidate) < 1):
+                raise ValueError("invalid call identity")
+            return candidate
+
+        def identity_text(value: object) -> str:
+            if value is None or value == "":
+                return ""
+            if (not isinstance(value, str) or value != value.strip()
+                    or len(value) > 64
+                    or any(ord(char) < 32 or ord(char) == 127 for char in value)):
+                raise ValueError("invalid call identity")
+            return value
+
+        for row in call_rows:
+            if "CALL_RECORD_URL" in row:
+                raise ValueError("source call URL must not be cached")
+            source_id = _canonical_positive_id(row.get("ID"))
+            if len(source_id) > 20 or source_id in source_calls:
+                raise ValueError("invalid source call ID")
+            call_id = _canonical_bitrix_call_id(row)
+            record_file_id = optional_id(row.get("RECORD_FILE_ID"))
+            identity = (
+                call_id,
+                record_file_id,
+                identity_text(row.get("CRM_ENTITY_TYPE")),
+                optional_id(row.get("CRM_ENTITY_ID")),
+                optional_id(row.get("PORTAL_USER_ID")),
+            )
+            source_calls[source_id] = identity
+            if record_file_id:
+                calls_requiring_recording.add(source_id)
+
+        inventory_rows = _load_jsonl("bx_call_binary_inventory", cache_snapshot)
+        link_rows = _load_jsonl("bx_call_binary_links", cache_snapshot)
+        inventory: dict[str, dict] = {}
+        filenames: set[str] = set()
+        for row in inventory_rows:
+            if set(row) != {"key", "filename", "bytes", "sha256", "content_type"}:
+                raise ValueError("invalid call binary inventory")
+            key = row.get("key")
+            if not isinstance(key, str) or not re.fullmatch(r"call:[1-9][0-9]*", key):
+                raise ValueError("invalid call binary inventory")
+            filename = row.get("filename")
+            expected_filename = hashlib.sha256(key.encode("ascii")).hexdigest() + ".bin"
+            size = row.get("bytes")
+            digest = row.get("sha256")
+            content_type = row.get("content_type")
+            if (
+                key in inventory
+                or not isinstance(filename, str)
+                or filename != expected_filename
+                or filename in filenames
+                or type(size) is not int
+                or not 0 <= size <= _MAX_PRIVATE_ATTACHMENT_BYTES
+                or not isinstance(digest, str)
+                or not _SHA256_HEX_RE.fullmatch(digest)
+                or not isinstance(content_type, str)
+                or len(content_type) > 255
+            ):
+                raise ValueError("invalid call binary inventory")
+            inventory[key] = row
+            filenames.add(filename)
+
+        linked_call_ids: set[str] = set()
+        for row in link_rows:
+            if set(row) != {
+                "source", "source_id", "call_id", "record_file_id", "entity_type",
+                "entity_id", "portal_user_id", "binary_key",
+            }:
+                raise ValueError("invalid call binary link")
+            source_id = row.get("source_id")
+            if (row.get("source") != "call" or not isinstance(source_id, str)
+                    or not re.fullmatch(r"[1-9][0-9]{0,19}", source_id)
+                    or source_id in linked_call_ids):
+                raise ValueError("invalid call binary link")
+            expected_identity = source_calls.get(source_id)
+            expected_key = "call:" + source_id
+            actual_identity = (
+                row.get("call_id"), row.get("record_file_id"), row.get("entity_type"),
+                row.get("entity_id"), row.get("portal_user_id"),
+            )
+            if (expected_identity is None or actual_identity != expected_identity
+                    or row.get("binary_key") != expected_key
+                    or expected_key not in inventory):
+                raise ValueError("call binary link mismatch")
+            linked_call_ids.add(source_id)
+
+        if (not linked_call_ids or not calls_requiring_recording.issubset(linked_call_ids)
+                or {row["binary_key"] for row in link_rows} != set(inventory)):
+            raise ValueError("call binary inventory mismatch")
+
+        folder = cache_dir / "call_binary_files"
+        if folder.is_symlink() or not folder.is_dir():
+            raise ValueError("invalid call binary files directory")
+        actual_names: set[str] = set()
+        for path in folder.iterdir():
+            if (path.is_symlink() or not path.is_file()
+                    or not re.fullmatch(r"[0-9a-f]{64}\.bin", path.name)):
+                raise ValueError("invalid call binary file")
+            actual_names.add(path.name)
+        if actual_names != filenames:
+            raise ValueError("call binary inventory mismatch")
+
+        total_bytes = 0
+        fingerprint = hashlib.sha256()
+        for row in sorted(inventory.values(), key=lambda item: item["filename"]):
+            path = folder / row["filename"]
+            digest = hashlib.sha256()
+            size = 0
+            with path.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    size += len(chunk)
+                    if size > row["bytes"] or size > _MAX_PRIVATE_ATTACHMENT_BYTES:
+                        raise ValueError("call binary size mismatch")
+                    digest.update(chunk)
+            if size != row["bytes"] or digest.hexdigest() != row["sha256"]:
+                raise ValueError("call binary digest mismatch")
+            total_bytes += size
+            fingerprint.update(
+                f"{row['filename']}:{size}:{digest.hexdigest()}\n".encode("ascii")
+            )
+
+        summary = manifest["call_binary_files"]
+        if (
+            not isinstance(summary, dict)
+            or set(summary) != {"records", "bytes", "sha256"}
+            or type(summary.get("records")) is not int
+            or summary["records"] != len(inventory)
+            or type(summary.get("bytes")) is not int
+            or summary["bytes"] != total_bytes
+            or summary.get("sha256") != fingerprint.hexdigest()
+        ):
+            raise ValueError("call binary manifest mismatch")
+        _check_private_binary_tree(folder, filenames)
+        return len(link_rows)
     except (OSError, KeyError, TypeError, ValueError, UnicodeError):
         raise RuntimeError("PRIVATE_CACHE_CHANGED") from None
 
@@ -431,6 +615,9 @@ def _verify_private_cache(cache_dir: Path) -> _PrivateCacheSnapshot | None:
                 cache_dir / "comment_binary_files",
                 cache_dir / "bx_comment_binary_links.jsonl",
                 cache_dir / "bx_comment_binary_inventory.jsonl",
+                cache_dir / "call_binary_files",
+                cache_dir / "bx_call_binary_links.jsonl",
+                cache_dir / "bx_call_binary_inventory.jsonl",
             )
         ):
             raise RuntimeError("PRIVATE_CACHE_NOT_LOADABLE")
@@ -445,43 +632,65 @@ def _verify_private_cache(cache_dir: Path) -> _PrivateCacheSnapshot | None:
         if not isinstance(manifest, dict):
             raise RuntimeError("PRIVATE_CACHE_CHANGED")
         cache_format = manifest.get("format")
-        if cache_format not in {"CRM-LIVE-001-private-cache-v1", _PRIVATE_CACHE_V2_FORMAT}:
+        if cache_format not in {
+            "CRM-LIVE-001-private-cache-v1", _PRIVATE_CACHE_V2_FORMAT,
+            _PRIVATE_CACHE_V3_FORMAT,
+        }:
             raise RuntimeError("PRIVATE_CACHE_NOT_LOADABLE")
         expected_marker = cache_format + ":" + hashlib.sha256(manifest_body).hexdigest() + "\n"
         if marker.read_text(encoding="ascii") != expected_marker:
             raise RuntimeError("PRIVATE_CACHE_CHANGED")
         entries = manifest["cache"]
-        expected_groups = (
-            _PRIVATE_CACHE_V2_GROUPS
-            if cache_format == _PRIVATE_CACHE_V2_FORMAT
-            else _PRIVATE_CACHE_V1_GROUPS
-        )
+        expected_groups = {
+            "CRM-LIVE-001-private-cache-v1": _PRIVATE_CACHE_V1_GROUPS,
+            _PRIVATE_CACHE_V2_FORMAT: _PRIVATE_CACHE_V2_GROUPS,
+            _PRIVATE_CACHE_V3_FORMAT: _PRIVATE_CACHE_V3_GROUPS,
+        }[cache_format]
         base_manifest_keys = {
             "format", "cache", "ready_for_load", "blocked_source_groups",
         }
-        valid_manifest_keys = (
-            {frozenset(base_manifest_keys | {"source_manifests", "comment_binary_files"})}
-            if cache_format == _PRIVATE_CACHE_V2_FORMAT
-            else {
+        if cache_format == _PRIVATE_CACHE_V2_FORMAT:
+            valid_manifest_keys = {
+                frozenset(base_manifest_keys | {"source_manifests", "comment_binary_files"})
+            }
+        elif cache_format == _PRIVATE_CACHE_V3_FORMAT:
+            valid_manifest_keys = {
+                frozenset(base_manifest_keys | {
+                    "source_manifests", "comment_binary_files", "call_binary_files",
+                })
+            }
+        else:
+            valid_manifest_keys = {
                 frozenset(base_manifest_keys),
                 frozenset(base_manifest_keys | {"source_manifests"}),
             }
-        )
-        allowed_group_sets = {frozenset(expected_groups), frozenset(expected_groups | {"bx_tasks"})}
+        allowed_group_sets = {
+            frozenset(expected_groups), frozenset(expected_groups | {"bx_tasks"}),
+        }
         if (frozenset(manifest) not in valid_manifest_keys
-                or manifest["ready_for_load"] is not True
-                or manifest["blocked_source_groups"] != {}
+                or (cache_format != _PRIVATE_CACHE_V3_FORMAT
+                    and (manifest["ready_for_load"] is not True
+                         or manifest["blocked_source_groups"] != {}))
                 or not isinstance(entries, dict)
                 or frozenset(entries) not in allowed_group_sets
                 or {path.stem for path in cache_dir.glob("*.jsonl")} != set(entries)):
             raise RuntimeError("PRIVATE_CACHE_NOT_LOADABLE")
         if (
-            cache_format != _PRIVATE_CACHE_V2_FORMAT
+            cache_format not in {_PRIVATE_CACHE_V2_FORMAT, _PRIVATE_CACHE_V3_FORMAT}
             and ((cache_dir / "comment_binary_files").exists()
-                 or (cache_dir / "comment_binary_files").is_symlink())
+                 or (cache_dir / "comment_binary_files").is_symlink()
+                 or (cache_dir / "call_binary_files").exists()
+                 or (cache_dir / "call_binary_files").is_symlink())
         ):
             raise RuntimeError("PRIVATE_CACHE_NOT_LOADABLE")
-        if cache_format == _PRIVATE_CACHE_V2_FORMAT:
+        if cache_format in {_PRIVATE_CACHE_V2_FORMAT, _PRIVATE_CACHE_V3_FORMAT}:
+            expected_paths = (
+                {"PRIVATE_CACHE_FORMAT", "private-source-manifest.json",
+                 "comment_binary_files"}
+                | {f"{name}.jsonl" for name in entries}
+            )
+            if cache_format == _PRIVATE_CACHE_V3_FORMAT:
+                expected_paths.add("call_binary_files")
             source_manifests = manifest["source_manifests"]
             if (
                 not isinstance(source_manifests, dict)
@@ -491,9 +700,7 @@ def _verify_private_cache(cache_dir: Path) -> _PrivateCacheSnapshot | None:
                     for value in source_manifests.values()
                 )
                 or {path.name for path in cache_dir.iterdir()}
-                != ({"PRIVATE_CACHE_FORMAT", "private-source-manifest.json",
-                     "comment_binary_files"}
-                    | {f"{name}.jsonl" for name in entries})
+                != expected_paths
             ):
                 raise RuntimeError("PRIVATE_CACHE_NOT_LOADABLE")
         elif "source_manifests" in manifest:
@@ -529,9 +736,7 @@ def _verify_private_cache(cache_dir: Path) -> _PrivateCacheSnapshot | None:
             verified_entries[name] = (
                 expected["records"], expected["bytes"], expected["sha256"]
             )
-        if cache_format == _PRIVATE_CACHE_V2_FORMAT:
-            _verify_private_comment_binary_files(cache_dir, manifest)
-        return _PrivateCacheSnapshot(
+        cache_snapshot = _PrivateCacheSnapshot(
             cache_dir=cache_dir,
             cache_format=cache_format,
             entries=MappingProxyType(verified_entries),
@@ -540,6 +745,35 @@ def _verify_private_cache(cache_dir: Path) -> _PrivateCacheSnapshot | None:
                 if cache_format == _PRIVATE_CACHE_V2_FORMAT else 0
             ),
         )
+        if cache_format in {_PRIVATE_CACHE_V2_FORMAT, _PRIVATE_CACHE_V3_FORMAT}:
+            _verify_private_comment_binary_files(
+                cache_dir, manifest,
+                cache_snapshot if cache_format == _PRIVATE_CACHE_V3_FORMAT else None,
+            )
+        if cache_format == _PRIVATE_CACHE_V3_FORMAT:
+            linked_call_count = _verify_private_call_binary_files(
+                cache_dir, manifest, cache_snapshot,
+            )
+            blocked_groups = manifest.get("blocked_source_groups")
+            if (
+                manifest.get("ready_for_load") is not False
+                or not isinstance(blocked_groups, dict)
+                or type(blocked_groups.get("call_recordings")) is not int
+                or blocked_groups["call_recordings"] != linked_call_count
+                or any(
+                    not isinstance(name, str) or not name
+                    or type(count) is not int or count < 1
+                    for name, count in blocked_groups.items()
+                )
+            ):
+                raise RuntimeError("PRIVATE_CACHE_NOT_LOADABLE")
+            root_paths = list(cache_dir.iterdir())
+            if ({path.name for path in root_paths} != expected_paths
+                    or any(path.is_symlink() for path in root_paths)):
+                raise RuntimeError("PRIVATE_CACHE_CHANGED")
+            # V3 binaries are now verified, but there is no CallRecording importer yet.
+            raise RuntimeError("BITRIX_CALL_RECORDINGS_UNSUPPORTED")
+        return cache_snapshot
     except RuntimeError:
         raise
     except (OSError, KeyError, TypeError, ValueError):

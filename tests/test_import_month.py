@@ -120,17 +120,23 @@ def _write_comment_binary_bundle(
 
 
 def _seal_private_cache_for_test(
-    root: Path, *, binary_v2: bool = False, ready: bool = True,
+    root: Path, *, binary_v2: bool = False, binary_v3: bool = False,
+    ready: bool = True,
     include_tasks: bool = False,
     blocked: dict | None = None,
 ) -> None:
+    if binary_v2 and binary_v3:
+        raise AssertionError("choose one private cache format")
+    binary_cache = binary_v2 or binary_v3
     names = {
         "bx_deals", "bx_contacts", "bx_leads", "bx_calls", "bx_users",
         "bx_companies", "bx_requisites", "onec_counterparties", "onec_sku",
         "bx_product_rows", "bx_products", "bx_stage_history", "bx_timeline_comments",
     }
-    if binary_v2:
+    if binary_cache:
         names.update({"bx_comment_binary_links", "bx_comment_binary_inventory"})
+    if binary_v3:
+        names.update({"bx_call_binary_links", "bx_call_binary_inventory"})
     if include_tasks:
         names.add("bx_tasks")
     (root / "onec_sales.jsonl").unlink(missing_ok=True)
@@ -148,7 +154,8 @@ def _seal_private_cache_for_test(
             "sha256": hashlib.sha256(data).hexdigest(),
         }
     cache_format = (
-        "CRM-LIVE-001-private-cache-v2" if binary_v2
+        "CRM-LIVE-001-private-cache-v3" if binary_v3
+        else "CRM-LIVE-001-private-cache-v2" if binary_v2
         else "CRM-LIVE-001-private-cache-v1"
     )
     manifest = {
@@ -157,7 +164,7 @@ def _seal_private_cache_for_test(
         "ready_for_load": ready,
         "blocked_source_groups": blocked if blocked is not None else {},
     }
-    if binary_v2:
+    if binary_cache:
         folder = root / "comment_binary_files"
         folder.mkdir(exist_ok=True)
         inventory = [
@@ -180,10 +187,80 @@ def _seal_private_cache_for_test(
             "records": len(inventory), "bytes": total_bytes,
             "sha256": fingerprint.hexdigest(),
         }
+    if binary_v3:
+        folder = root / "call_binary_files"
+        folder.mkdir(exist_ok=True)
+        inventory = [
+            json.loads(line)
+            for line in (root / "bx_call_binary_inventory.jsonl").read_text(
+                encoding="utf-8"
+            ).splitlines()
+        ]
+        fingerprint = hashlib.sha256()
+        total_bytes = 0
+        for row in sorted(inventory, key=lambda item: item["filename"]):
+            body = (folder / row["filename"]).read_bytes()
+            digest = hashlib.sha256(body).hexdigest()
+            total_bytes += len(body)
+            fingerprint.update(
+                f"{row['filename']}:{len(body)}:{digest}\n".encode("ascii")
+            )
+        manifest["call_binary_files"] = {
+            "records": len(inventory), "bytes": total_bytes,
+            "sha256": fingerprint.hexdigest(),
+        }
     body = json.dumps(manifest).encode("utf-8")
     (root / "private-source-manifest.json").write_bytes(body)
     (root / "PRIVATE_CACHE_FORMAT").write_text(
         cache_format + ":" + hashlib.sha256(body).hexdigest() + "\n",
+        encoding="ascii",
+    )
+
+
+def _stage_synthetic_v3_call_cache(root: Path) -> Path:
+    root = root.resolve()
+    root.mkdir()
+    _make_cache(root)
+    call = json.loads((root / "bx_calls.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    call.update({"CALL_ID": "call-50", "RECORD_FILE_ID": "42"})
+    _write_jsonl(root, "bx_calls", [call])
+    _write_comment_binary_bundle(root, [])
+
+    key = "call:50"
+    filename = hashlib.sha256(key.encode("ascii")).hexdigest() + ".bin"
+    content = b"synthetic call recording bytes"
+    call_folder = root / "call_binary_files"
+    call_folder.mkdir()
+    (call_folder / filename).write_bytes(content)
+    _write_jsonl(root, "bx_call_binary_links", [{
+        "source": "call", "source_id": "50", "call_id": "call-50",
+        "record_file_id": "42", "entity_type": "CONTACT", "entity_id": "20",
+        "portal_user_id": "1", "binary_key": key,
+    }])
+    _write_jsonl(root, "bx_call_binary_inventory", [{
+        "key": key, "filename": filename, "bytes": len(content),
+        "sha256": hashlib.sha256(content).hexdigest(),
+        "content_type": "audio/wav",
+    }])
+    _seal_private_cache_for_test(
+        root, binary_v3=True, ready=False, blocked={"call_recordings": 1},
+    )
+    return root
+
+
+def _reseal_v3_manifest_for_test(root: Path, manifest: dict) -> None:
+    manifest["cache"] = {}
+    for path in sorted(root.glob("*.jsonl")):
+        data = path.read_bytes()
+        manifest["cache"][path.stem] = {
+            "records": len(data.splitlines()),
+            "bytes": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }
+    body = json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8")
+    (root / "private-source-manifest.json").write_bytes(body)
+    (root / "PRIVATE_CACHE_FORMAT").write_text(
+        "CRM-LIVE-001-private-cache-v3:" + hashlib.sha256(body).hexdigest() + "\n",
         encoding="ascii",
     )
 
@@ -775,6 +852,186 @@ async def test_sealed_cache_rejects_a_forged_unresolved_blocker(
         + hashlib.sha256(manifest_body).hexdigest() + "\n",
         encoding="ascii",
     )
+
+    db_path = (tmp_path / "isolated.sqlite3").resolve()
+    _set_load_environment(monkeypatch, cache, db_path)
+    with pytest.raises(RuntimeError, match="PRIVATE_CACHE_NOT_LOADABLE"):
+        await module.load()
+    assert not db_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_sealed_v3_call_cache_is_verified_but_blocked_before_database_use(
+    monkeypatch, tmp_path
+):
+    module = _module()
+    cache = _stage_synthetic_v3_call_cache(tmp_path / "cache")
+    manifest = json.loads((cache / "private-source-manifest.json").read_bytes())
+    assert manifest["format"] == "CRM-LIVE-001-private-cache-v3"
+    assert manifest["ready_for_load"] is False
+    assert manifest["blocked_source_groups"] == {"call_recordings": 1}
+    db_path = (tmp_path / "isolated.sqlite3").resolve()
+    _set_load_environment(monkeypatch, cache, db_path)
+    with pytest.raises(RuntimeError, match="BITRIX_CALL_RECORDINGS_UNSUPPORTED"):
+        await module.load()
+    assert not db_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("source_id", "51"),
+        ("call_id", "call-drift"),
+        ("record_file_id", "43"),
+        ("entity_type", "DEAL"),
+        ("entity_id", "21"),
+        ("portal_user_id", "2"),
+        ("binary_key", "call:51"),
+    ],
+)
+def test_sealed_v3_call_links_must_match_source_call_identity(
+    tmp_path, field, value
+):
+    module = _module()
+    cache = _stage_synthetic_v3_call_cache(tmp_path / "cache")
+    links_path = cache / "bx_call_binary_links.jsonl"
+    links = [json.loads(line) for line in links_path.read_text(encoding="utf-8").splitlines()]
+    links[0][field] = value
+    _write_jsonl(cache, "bx_call_binary_links", links)
+    manifest = json.loads((cache / "private-source-manifest.json").read_bytes())
+    _reseal_v3_manifest_for_test(cache, manifest)
+
+    with pytest.raises(RuntimeError, match="PRIVATE_CACHE_CHANGED"):
+        module._verify_private_cache(cache)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("ID", "51"),
+        ("CALL_ID", "call-drift"),
+        ("RECORD_FILE_ID", "43"),
+        ("CRM_ENTITY_TYPE", "DEAL"),
+        ("CRM_ENTITY_ID", "21"),
+        ("PORTAL_USER_ID", "2"),
+        ("CALL_RECORD_URL", "https://example.invalid/synthetic.wav"),
+    ],
+)
+def test_sealed_v3_source_call_identity_and_url_are_rechecked(
+    tmp_path, field, value
+):
+    module = _module()
+    cache = _stage_synthetic_v3_call_cache(tmp_path / "cache")
+    calls_path = cache / "bx_calls.jsonl"
+    calls = [json.loads(line) for line in calls_path.read_text(encoding="utf-8").splitlines()]
+    calls[0][field] = value
+    _write_jsonl(cache, "bx_calls", calls)
+    manifest = json.loads((cache / "private-source-manifest.json").read_bytes())
+    _reseal_v3_manifest_for_test(cache, manifest)
+
+    with pytest.raises(RuntimeError, match="PRIVATE_CACHE_CHANGED"):
+        module._verify_private_cache(cache)
+
+
+def test_sealed_v3_call_identity_preserves_source_identifier_spelling(tmp_path):
+    module = _module()
+    cache = _stage_synthetic_v3_call_cache(tmp_path / "cache")
+    calls_path = cache / "bx_calls.jsonl"
+    calls = [json.loads(line) for line in calls_path.read_text(encoding="utf-8").splitlines()]
+    calls[0]["RECORD_FILE_ID"] = "042"
+    _write_jsonl(cache, "bx_calls", calls)
+    links_path = cache / "bx_call_binary_links.jsonl"
+    links = [json.loads(line) for line in links_path.read_text(encoding="utf-8").splitlines()]
+    links[0]["record_file_id"] = "042"
+    _write_jsonl(cache, "bx_call_binary_links", links)
+    manifest = json.loads((cache / "private-source-manifest.json").read_bytes())
+    _reseal_v3_manifest_for_test(cache, manifest)
+
+    with pytest.raises(RuntimeError, match="BITRIX_CALL_RECORDINGS_UNSUPPORTED"):
+        module._verify_private_cache(cache)
+
+
+def test_sealed_v3_call_semantics_use_manifest_bound_jsonl_bytes(monkeypatch, tmp_path):
+    module = _module()
+    cache = _stage_synthetic_v3_call_cache(tmp_path / "cache")
+    original = module._verify_private_call_binary_files
+
+    def mutate_after_manifest_digest(cache_dir, manifest, snapshot):
+        calls_path = cache_dir / "bx_calls.jsonl"
+        calls = [json.loads(line) for line in calls_path.read_text(encoding="utf-8").splitlines()]
+        calls[0]["RECORD_FILE_ID"] = "43"
+        _write_jsonl(cache_dir, "bx_calls", calls)
+        links_path = cache_dir / "bx_call_binary_links.jsonl"
+        links = [json.loads(line) for line in links_path.read_text(encoding="utf-8").splitlines()]
+        links[0]["record_file_id"] = "43"
+        _write_jsonl(cache_dir, "bx_call_binary_links", links)
+        return original(cache_dir, manifest, snapshot)
+
+    monkeypatch.setattr(module, "_verify_private_call_binary_files", mutate_after_manifest_digest)
+    with pytest.raises(RuntimeError, match="PRIVATE_CACHE_CHANGED"):
+        module._verify_private_cache(cache)
+
+
+@pytest.mark.parametrize("late_file", ["binary", "root"])
+def test_sealed_v3_rechecks_file_tree_after_binary_read(monkeypatch, tmp_path, late_file):
+    module = _module()
+    cache = _stage_synthetic_v3_call_cache(tmp_path / "cache")
+    call_file = next((cache / "call_binary_files").iterdir())
+    original_open = Path.open
+    injected = False
+
+    def open_with_late_file(path, *args, **kwargs):
+        nonlocal injected
+        if path == call_file and not injected:
+            injected = True
+            if late_file == "binary":
+                (cache / "call_binary_files" / ("f" * 64 + ".bin")).write_bytes(b"late")
+            else:
+                (cache / "extra.txt").write_text("late", encoding="utf-8")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", open_with_late_file)
+    with pytest.raises(RuntimeError, match="PRIVATE_CACHE_CHANGED"):
+        module._verify_private_cache(cache)
+    assert injected
+
+
+@pytest.mark.parametrize("tamper", ["file_bytes", "extra_file", "inventory_digest", "summary_bytes"])
+def test_sealed_v3_call_binary_tree_and_summary_are_exact(tmp_path, tamper):
+    module = _module()
+    cache = _stage_synthetic_v3_call_cache(tmp_path / "cache")
+    manifest = json.loads((cache / "private-source-manifest.json").read_bytes())
+    if tamper == "file_bytes":
+        call_file = next((cache / "call_binary_files").iterdir())
+        call_file.write_bytes(call_file.read_bytes() + b"changed")
+    elif tamper == "extra_file":
+        (cache / "call_binary_files" / ("f" * 64 + ".bin")).write_bytes(b"extra")
+    elif tamper == "inventory_digest":
+        inventory_path = cache / "bx_call_binary_inventory.jsonl"
+        inventory = [
+            json.loads(line) for line in inventory_path.read_text(encoding="utf-8").splitlines()
+        ]
+        inventory[0]["sha256"] = "0" * 64
+        _write_jsonl(cache, "bx_call_binary_inventory", inventory)
+        _reseal_v3_manifest_for_test(cache, manifest)
+    else:
+        manifest["call_binary_files"]["bytes"] += 1
+        _reseal_v3_manifest_for_test(cache, manifest)
+
+    with pytest.raises(RuntimeError, match="PRIVATE_CACHE_CHANGED"):
+        module._verify_private_cache(cache)
+
+
+@pytest.mark.asyncio
+async def test_forged_ready_v3_manifest_stays_blocked_before_database_use(
+    monkeypatch, tmp_path
+):
+    module = _module()
+    cache = _stage_synthetic_v3_call_cache(tmp_path / "cache")
+    manifest = json.loads((cache / "private-source-manifest.json").read_bytes())
+    manifest["ready_for_load"] = True
+    manifest["blocked_source_groups"] = {}
+    _reseal_v3_manifest_for_test(cache, manifest)
 
     db_path = (tmp_path / "isolated.sqlite3").resolve()
     _set_load_environment(monkeypatch, cache, db_path)
