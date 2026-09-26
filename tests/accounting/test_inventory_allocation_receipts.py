@@ -1,3 +1,5 @@
+import hashlib
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -6,7 +8,12 @@ from modules.accounting.inventory_allocation_receipts import validate_inventory_
 from modules.accounting.inventory_issues import posting_for, rule_version
 from modules.accounting.sales import SaleDocument
 from modules.accounting.sales import posting_for as sale_posting_for
-from modules.accounting.schemas import InventoryIssueDocument, PostingInput
+from modules.accounting.schemas import (
+    InventoryIssueDocument,
+    InventorySkuIdentity,
+    InventoryWarehouseIdentity,
+    PostingInput,
+)
 from modules.accounting.service import AccountingError, digest
 
 
@@ -89,6 +96,17 @@ def test_legacy_issue_rule_and_shape_are_unchanged():
     legacy = {key: value for key, value in receipt.cost.items() if key != "source_allocation_version"}
     posting = posting_for(document, legacy)
     assert posting.rule_version == rule_version(document, legacy["basis_digest"])
+    old_document = document.model_dump(mode="json")
+    old_document.pop("warehouse_identity", None)
+    old_document.pop("sku_identity", None)
+    raw = json.dumps({"document": old_document, "basis": legacy["basis_digest"]},
+                     sort_keys=True, ensure_ascii=False)
+    assert posting.rule_version == "inventory-issue-v2:" + hashlib.sha256(raw.encode()).hexdigest()
+    bound = document.model_copy(update={
+        "warehouse_identity": InventoryWarehouseIdentity(id=4, name="W", title="Main warehouse"),
+        "sku_identity": InventorySkuIdentity(id=8, code="S", title="Item S", unit="шт"),
+    })
+    assert rule_version(bound, legacy["basis_digest"]) != posting.rule_version
     assert len(posting.lines) == 3
 
 

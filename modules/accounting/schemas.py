@@ -473,6 +473,23 @@ class InventoryIssuePreviewInput(Input):
     quantity: Quantity
 
 
+class InventoryWarehouseIdentity(Input):
+    """Directory identity saved with a new accountant-entered stock document."""
+
+    id: int = Field(gt=0, le=2147483647, strict=True)
+    name: str = Field(min_length=1, max_length=128)
+    title: str = Field(min_length=1, max_length=255)
+
+
+class InventorySkuIdentity(Input):
+    """Golden-record identity and historical description of one SKU."""
+
+    id: int = Field(gt=0, le=2147483647, strict=True)
+    code: str = Field(min_length=1, max_length=64)
+    title: str = Field(min_length=1, max_length=255)
+    unit: str = Field(min_length=1, max_length=16)
+
+
 class InventoryIssueDocument(InventoryIssuePreviewInput):
     source: str = Field(min_length=1, max_length=160)
     source_version: int = Field(ge=1)
@@ -481,6 +498,8 @@ class InventoryIssueDocument(InventoryIssuePreviewInput):
     expense_account: Code
     expense_dimensions: dict[str, str] = Field(default_factory=dict)
     explanation: str = Field(min_length=1, max_length=1000)
+    warehouse_identity: InventoryWarehouseIdentity | None = None
+    sku_identity: InventorySkuIdentity | None = None
 
 
 class InventoryIssueConfirm(InventoryIssueDocument):

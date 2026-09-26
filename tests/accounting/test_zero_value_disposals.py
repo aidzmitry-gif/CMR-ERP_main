@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from modules.accounting.zero_value_disposals import (
     AllocatedZeroValueDisposalCommand,
+    DirectoryBoundSpecificZeroValueIssueCommand,
     ZeroValueDisposalCommand,
     parse_zero_value_command,
     preview_standalone_zero_value_issue_basis,
@@ -87,6 +88,31 @@ def test_dated_snapshot_preserves_legacy_digest_and_separate_dates():
                     {key: value for key, value in dated.items() if key != "document_date"}):
         with pytest.raises(ValueError):
             parse_zero_value_command(invalid)
+
+
+def test_v6_specific_issue_binds_complete_directory_document_without_changing_v2_replay():
+    legacy = command(inventory_layers=[command().inventory_layers[0].model_dump(mode="json")])
+    dated = {**legacy.model_dump(mode="json"), "command_version": 2,
+             "document_date": "2026-10-29", "operation_date": "2026-10-30"}
+    old = parse_zero_value_command(dated)
+    document = {
+        "source": old.source, "source_version": old.source_version,
+        "document_date": "2026-10-29", "operation_date": "2026-10-30",
+        "posting_date": "2026-10-31", "policy_id": 7, "account": "43",
+        "warehouse": "MAIN", "sku": "A", "lot": "L1", "quantity": "1.250000",
+        "expense_account": "20", "expense_dimensions": {"order": "42"},
+        "explanation": old.explanation,
+        "warehouse_identity": {"id": 4, "name": "MAIN", "title": "Main warehouse"},
+        "sku_identity": {"id": 8, "code": "A", "title": "Item A", "unit": "шт"},
+    }
+    bound = parse_zero_value_command({**dated, "command_version": 6, "document": document})
+    assert isinstance(bound, DirectoryBoundSpecificZeroValueIssueCommand)
+    assert bound.document["warehouse_identity"]["id"] == 4
+    assert receipt_digest(1, "chief", parse_zero_value_command(dated)) == receipt_digest(1, "chief", old)
+    with pytest.raises(ValueError, match="requires warehouse and SKU"):
+        parse_zero_value_command({**dated, "command_version": 6,
+                                  "document": {key: value for key, value in document.items()
+                                               if key != "sku_identity"}})
 
 
 def allocation_snapshot(*, sale=False, valuation_method="fifo"):

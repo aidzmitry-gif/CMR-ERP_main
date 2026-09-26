@@ -11,6 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError
 
+from core.domain.models import Sku
 from core.runtime.deps import get_session
 from core.services.auth import CurrentUser, get_current_user
 from modules.accounting import models, routes, service
@@ -26,6 +27,7 @@ from modules.accounting.production_output_transfer import (
     prepare_output_transfer,
 )
 from modules.accounting.schemas import LineInput, PostingInput
+from modules.wms.models import WarehouseDirectory
 from tests.accounting.test_finished_goods_inventory_postgres import _output_cost_command
 from tests.accounting.test_inventory_allocation_cost_stream_postgres import TwoOutputs
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
@@ -39,17 +41,33 @@ from tests.accounting.test_zero_value_output_cost_postgres import run_migration
 pytestmark = pytest.mark.integration
 
 
-async def output_sources(factory, book, method, *, guarded=True):
+async def inventory_identities(factory, book):
+    """Seed and return the two directory snapshots required by a public issue."""
+    async with factory() as session:
+        warehouse = await session.scalar(select(WarehouseDirectory).where(
+            WarehouseDirectory.organization_id == book[0], WarehouseDirectory.name == "Main"))
+        if warehouse is None:
+            warehouse = WarehouseDirectory(
+                organization_id=book[0], name="Main", title="Main warehouse", created_by="tester")
+            session.add(warehouse)
+        sku = await session.scalar(select(Sku).where(Sku.code == "SYN-WIDGET"))
+        if sku is None:
+            sku = Sku(code="SYN-WIDGET", title="Synthetic widget", unit="шт", is_active=True)
+            session.add(sku)
+        await session.flush()
+        result = {
+            "warehouse_identity": {"id": warehouse.id, "name": warehouse.name, "title": warehouse.title},
+            "sku_identity": {"id": sku.id, "code": sku.code, "title": sku.title, "unit": sku.unit},
+        }
+        await session.commit()
+        return result
+
+
+async def output_sources(factory, book, method):
     policy_id = await _seed_production_book(factory, book, method)
     await _seed_wip(factory, book, policy_id, [("SHOP", "ORDER-42", "0.01"), ("SHOP", "ORDER-43", "0.01")])
     production, output_ids = TwoOutputs(), []
     async with factory() as session:
-        migrations = ["0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
-                      "0142_zero_value_command_dates.py", "0143_zero_value_sales.py"]
-        if guarded:
-            migrations += ["0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py"]
-        for revision in migrations:
-            await run_migration(session, revision, "upgrade")
         for order_id in (42, 43):
             command = transfer_input(policy_id).model_copy(update={
                 "order_id": order_id, "analytical_order": f"ORDER-{order_id}", "output_document_ids": [order_id + 59]})
@@ -60,6 +78,7 @@ async def output_sources(factory, book, method, *, guarded=True):
                                                    production=production, warehouse_gateway=object())
             output_ids.append(output.id)
         await session.commit()
+    await inventory_identities(factory, book)
     return policy_id, output_ids
 
 
@@ -77,23 +96,26 @@ def application(factory):
     return app
 
 
-def issue_document(policy_id):
+def issue_document(policy_id, identities):
     return {"source": "mixed-accountant-api", "source_version": 1, "policy_id": policy_id,
             "document_date": "2026-10-29", "operation_date": "2026-10-30", "posting_date": "2026-10-31",
             "account": "43", "warehouse": "Main", "sku": "SYN-WIDGET", "lot": "", "quantity": "2.1",
-            "expense_account": "90.4", "expense_dimensions": {}, "explanation": "Reviewed mixed issue via HTTP"}
+            "expense_account": "90.4", "expense_dimensions": {}, "explanation": "Reviewed mixed issue via HTTP",
+            **identities}
 
 
 @pytest.mark.parametrize("method", ["fifo", "weighted_average"])
 @pytest.mark.parametrize("sale", [False, True])
 async def test_accountant_mixed_allocation_http_confirm_retry_stock_and_late_cost(pg_factory, pg_book, method, sale):
     policy_id, outputs = await output_sources(pg_factory, pg_book, method)
-    payload = issue_document(policy_id)
+    payload = issue_document(policy_id, await inventory_identities(pg_factory, pg_book))
     if sale:
         payload |= {"net_amount": "10.00", "vat_rate": "0", "vat_basis": "Synthetic exemption",
                     "buyer_account": "62", "revenue_account": "90.1", "vat_revenue_account": "90.2",
                     "vat_payable_account": "68", "buyer_dimensions": {
-                        "counterparty": "BUYER", "contract": "CONTRACT", "settlement_document": "INVOICE"}}
+                        "counterparty_id": "1", "counterparty": "supplier1",
+                        "counterparty_unp": "190000001", "counterparty_revision": "1",
+                        "contract": "CONTRACT", "settlement_document": "INVOICE"}}
     org_url = f"/accounting/organizations/{pg_book[0]}"
     base = org_url + ("/sales" if sale else "/inventory/issues")
     async with AsyncClient(transport=ASGITransport(app=application(pg_factory)), base_url="http://test") as client:
@@ -172,9 +194,12 @@ async def test_accountant_mixed_allocation_http_confirm_retry_stock_and_late_cos
         assert blocked.status_code == 422 and "FIFO or weighted-average" in blocked.text
 
 
-async def test_missing_database_allocation_guards_refuses_mixed_packet(pg_factory, pg_book):
-    policy_id, _ = await output_sources(pg_factory, pg_book, "weighted_average", guarded=False)
+async def test_public_issue_requires_both_directory_snapshots(pg_factory, pg_book):
+    policy_id, _ = await output_sources(pg_factory, pg_book, "weighted_average")
+    payload = issue_document(policy_id, await inventory_identities(pg_factory, pg_book))
+    payload.pop("warehouse_identity")
+    payload.pop("sku_identity")
     async with AsyncClient(transport=ASGITransport(app=application(pg_factory)), base_url="http://test") as client:
         response = await client.post(f"/accounting/organizations/{pg_book[0]}/inventory/issues/posting-preview",
-                                     json=issue_document(policy_id))
-        assert response.status_code == 422 and "0144 and 0145" in response.text
+                                     json=payload)
+        assert response.status_code == 422 and "warehouse and item" in response.text

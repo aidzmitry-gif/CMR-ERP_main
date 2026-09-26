@@ -1,16 +1,14 @@
 """HTTP/PG evidence for the narrow specific zero-value issue adapter."""
 # ruff: noqa: F811 -- imported fixtures are used by pytest parameter lookup.
 import asyncio
-import runpy
 from types import SimpleNamespace
 
 import pytest
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 
+from core.domain.models import Sku
 from core.runtime.deps import get_session
 from core.services.auth import CurrentUser, get_current_user
 from modules.accounting import inventory_issues, routes, service
@@ -18,31 +16,21 @@ from modules.accounting.gateway import AccountingService
 from modules.accounting.models import Audit, Organization, Period, ZeroValueInventoryDisposalReceipt
 from modules.accounting.production_output_cost_workflow import confirm_output_cost_correction
 from modules.accounting.schemas import LineInput, PostingInput
+from modules.wms.models import WarehouseDirectory
 from tests.accounting.test_finished_goods_inventory_postgres import _output_cost_command
-from tests.accounting.test_inventory_allocation_api_postgres import output_sources
+from tests.accounting.test_inventory_allocation_api_postgres import (
+    inventory_identities,
+    output_sources,
+)
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_zero_value_disposals_postgres import zeroed_output
 
 pytestmark = pytest.mark.integration
 
-
-async def migrate(session, revision):
-    def upgrade(connection):
-        migration = runpy.run_path(f"migrations/versions/{revision}")
-        with Operations.context(MigrationContext.configure(connection)):
-            migration["upgrade"]()
-
-    await (await session.connection()).run_sync(upgrade)
-
-
 @pytest.mark.parametrize("concurrent", [False, True])
 async def test_http_specific_zero_issue_preview_confirm_retry_and_remaining(pg_factory, pg_book, concurrent):
-    async with pg_factory() as session:
-        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
-                         "0142_zero_value_command_dates.py"):
-            await migrate(session, revision)
-        await session.commit()
     policy_id, output_id, _ = await zeroed_output(pg_factory, pg_book)
+    identities = await inventory_identities(pg_factory, pg_book)
     app = FastAPI()
     app.include_router(routes.router, prefix="/accounting")
     app.state.core = SimpleNamespace(services=SimpleNamespace(event_bus=None, accounting=AccountingService()))
@@ -60,6 +48,7 @@ async def test_http_specific_zero_issue_preview_confirm_retry_and_remaining(pg_f
         "account": "43", "warehouse": "Main", "sku": "SYN-WIDGET", "lot": "LOT-1", "quantity": "0.5",
         "expense_account": "90.4", "expense_dimensions": {},
         "explanation": "API verified zero value issue",
+        **identities,
     }
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         rejected_wip = await client.post(base + "/posting-preview", json={
@@ -68,10 +57,31 @@ async def test_http_specific_zero_issue_preview_confirm_retry_and_remaining(pg_f
         rejected_production = await client.post(base + "/posting-preview", json={
             **payload, "source": "production:material:forged"})
         assert rejected_production.status_code == 422 and "reviewed production workflow" in rejected_production.text
+        if not concurrent:
+            async with pg_factory() as session:
+                foreign_org = Organization(id=999, name="Foreign directory owner", unp="888888888")
+                session.add(foreign_org)
+                await session.flush()
+                foreign_warehouse = WarehouseDirectory(
+                    organization_id=foreign_org.id, name="Foreign", title="Foreign warehouse", created_by="tester")
+                session.add(foreign_warehouse)
+                await session.flush()
+                foreign_identity = {
+                    "id": foreign_warehouse.id, "name": foreign_warehouse.name,
+                    "title": foreign_warehouse.title,
+                }
+                await session.commit()
+            rejected_foreign = await client.post(base + "/posting-preview", json={
+                **payload, "warehouse": "Foreign", "warehouse_identity": foreign_identity,
+            })
+            assert rejected_foreign.status_code == 422 and "Warehouse directory record changed" in rejected_foreign.text
         preview = await client.post(base + "/posting-preview", json=payload)
         assert preview.status_code == 200, preview.text
         body = preview.json()
         assert body["kind"] == "quantity_only_receipt" and body["posting"] is None
+        assert body["command"]["command_version"] == 6
+        assert body["command"]["document"]["warehouse_identity"] == identities["warehouse_identity"]
+        assert body["command"]["document"]["sku_identity"] == identities["sku_identity"]
         initial_lots = await client.get(f"/accounting/organizations/{pg_book[0]}/inventory/lots", params={
             "policy_id": policy_id, "posting_date": "2026-10-31", "account": "43", "warehouse": "Main", "sku": "SYN-WIDGET",
         })
@@ -170,6 +180,20 @@ async def test_http_specific_zero_issue_preview_confirm_retry_and_remaining(pg_f
             async with pg_factory() as session:
                 historical = await inventory_issues.verify_receipt(session, pg_book[0], money_id)
                 assert historical.model_dump() == original.model_dump()
+                warehouse = await session.get(WarehouseDirectory, identities["warehouse_identity"]["id"])
+                sku = await session.get(Sku, identities["sku_identity"]["id"])
+                warehouse.title = "Renamed warehouse"
+                sku.title = "Renamed synthetic widget"
+                await session.commit()
+            zero_after_rename = await client.post(base + "/confirm", json=confirmation)
+            assert zero_after_rename.status_code == 201
+            assert zero_after_rename.json()["receipt_id"] == saved.json()["receipt_id"]
+            money_after_rename = await client.post(base + "/confirm", json=money_confirm)
+            assert money_after_rename.status_code == 201 and money_after_rename.json()["id"] == money_id
+            stale_new = await client.post(base + "/posting-preview", json={
+                **payload, "source": "inventory:stale:after-directory-rename",
+            })
+            assert stale_new.status_code == 422 and "record changed" in stale_new.text
 
     app.dependency_overrides[get_current_user] = lambda: CurrentUser("outsider", ["director"])
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -194,9 +218,8 @@ async def test_http_v4_zero_issue_multi_source_confirm_retry_after_late_cost(pg_
         for output_id in outputs:
             await confirm_output_cost_correction(session, pg_book[0], "2026-10",
                                                  await _output_cost_command(session, pg_book[0], output_id), "tester")
-        for revision in ("0146_zero_value_allocation_basis.py", "0147_zero_value_allocation_runtime.py"):
-            await migrate(session, revision)
         await session.commit()
+    identities = await inventory_identities(pg_factory, pg_book)
 
     app = FastAPI()
     app.include_router(routes.router, prefix="/accounting")
@@ -212,13 +235,16 @@ async def test_http_v4_zero_issue_multi_source_confirm_retry_after_late_cost(pg_
     payload = {"source": f"v4-zero-issue:{method}", "source_version": 1, "policy_id": policy_id,
                "document_date": "2026-10-29", "operation_date": "2026-10-30", "posting_date": "2026-10-31",
                "account": "43", "warehouse": "Main", "sku": "SYN-WIDGET", "lot": "", "quantity": "3.1",
-               "expense_account": "90.4", "expense_dimensions": {}, "explanation": "Reviewed zero allocation issue"}
+               "expense_account": "90.4", "expense_dimensions": {}, "explanation": "Reviewed zero allocation issue",
+               **identities}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         preview = await client.post(base + "/posting-preview", json=payload)
         assert preview.status_code == 200, preview.text
         body = preview.json()
         assert body["kind"] == "quantity_only_receipt" and body["posting"] is None
         assert body["command"]["command_version"] == 4
+        assert body["command"]["document"]["warehouse_identity"] == identities["warehouse_identity"]
+        assert body["command"]["document"]["sku_identity"] == identities["sku_identity"]
         assert body["receipt"]["zero_byn"] is True and "source_layer" not in body["receipt"]
         assert len(body["receipt"]["source_layers"]) == 2
         confirmation = {**payload, "basis_digest": body["basis_digest"], "digest": body["digest"]}

@@ -5,9 +5,19 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import func, select
 
-from modules.accounting import inventory_cost, models, service
+from modules.accounting import inventory_cost, inventory_issues, models, service
 from modules.accounting.schemas import InventoryIssuePreviewInput
 from modules.accounting.service import AccountingError
+
+
+@pytest.fixture(autouse=True)
+def sqlite_legacy_issue_contract(monkeypatch):
+    """Keep valuation tests focused; PostgreSQL API tests prove migration 0189."""
+    async def available(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(inventory_issues, "require_directory_schema", available)
+    monkeypatch.setattr(inventory_issues, "verify_inventory_identity", available)
 
 
 async def move(db, book, posting, source, quantity, amount, *, issue=False, day="2026-09-01", lot="lot1", dimensions=True, cash=False, currency="BYN", contract=None):

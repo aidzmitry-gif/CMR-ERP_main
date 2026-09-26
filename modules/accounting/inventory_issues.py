@@ -13,11 +13,50 @@ from modules.accounting.schemas import (
     LineInput,
     PostingInput,
 )
+from modules.accounting.sku_snapshot import verified_sku_snapshot
+from modules.accounting.warehouse_snapshot import verified_warehouse_snapshot
 from modules.accounting.zero_value_disposals import InventoryDispositionAllocation
 
 
+def document_snapshot(document):
+    """Serialize a command without adding optional identity fields to old history."""
+    snapshot = document.model_dump(mode="json")
+    for field in ("warehouse_identity", "sku_identity"):
+        if snapshot.get(field) is None:
+            snapshot.pop(field, None)
+    return snapshot
+
+
+async def verify_inventory_identity(session, organization_id, document):
+    """Authenticate the two directory snapshots required for a new public issue."""
+    warehouse = document.warehouse_identity
+    sku = document.sku_identity
+    if warehouse is None or sku is None:
+        raise service.AccountingError("Select the warehouse and item from their directories")
+    if warehouse.name != document.warehouse or sku.code != document.sku:
+        raise service.AccountingError("Inventory directory selection differs from the document")
+    await verified_warehouse_snapshot(session, organization_id, {
+        "warehouse_id": str(warehouse.id), "warehouse": warehouse.name,
+        "warehouse_title": warehouse.title,
+    })
+    await verified_sku_snapshot(session, {
+        "sku_id": str(sku.id), "sku": sku.code,
+        "sku_title": sku.title, "sku_unit": sku.unit,
+    })
+
+
+async def require_directory_schema(session):
+    """Keep the public issue API closed until DB receipt guards understand IDs."""
+    ready = session.get_bind().dialect.name == "postgresql" and await session.scalar(text(
+        "SELECT to_regprocedure('accounting.inventory_issue_directory_version()') IS NOT NULL "
+        "AND accounting.inventory_issue_directory_version() = 1"
+    )) is True
+    if not ready:
+        raise service.AccountingError("Inventory issue directory identities require migration 0189")
+
+
 def rule_version(document, basis_digest, *, allocation_version=None):
-    raw = json.dumps({"document": document.model_dump(mode="json"), "basis": basis_digest}, sort_keys=True, ensure_ascii=False)
+    raw = json.dumps({"document": document_snapshot(document), "basis": basis_digest}, sort_keys=True, ensure_ascii=False)
     if allocation_version is None:
         return "inventory-issue-v2:" + hashlib.sha256(raw.encode()).hexdigest()
     if type(allocation_version) is not int or allocation_version != 1:
@@ -55,8 +94,10 @@ def explicit_allocation(document, cost):
 
 
 async def prepare(session, org_id, document, *, procurement=None, allow_production_material=False,
-                  source_allocations=False):
+                  source_allocations=False, require_current_inventory=False):
     _guard_production_material_source(document, allow_production_material)
+    if require_current_inventory:
+        await verify_inventory_identity(session, org_id, document)
     zero_schema = document.source.startswith("production:material:") and session.get_bind().dialect.name == "postgresql" and await session.scalar(text(
         "SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt') IS NOT NULL"
     )) is True
@@ -206,7 +247,8 @@ async def verify_receipt(session, organization_id, entry_id, *, procurement=None
 
 
 async def confirm(session, org_id, document, basis_digest, digest, actor, event_bus=None, *, procurement=None,
-                  allow_production_material=False, source_allocations=False):
+                  allow_production_material=False, source_allocations=False,
+                  require_current_inventory=False):
     _guard_production_material_source(document, allow_production_material)
     await service.lock_organization(session, org_id)
     existing = await session.scalar(select(Entry).where(
@@ -225,12 +267,13 @@ async def confirm(session, org_id, document, basis_digest, digest, actor, event_
                              allow_production_material=allow_production_material)
         return existing
     cost, posting = await prepare(session, org_id, document, procurement=procurement,
-                                  allow_production_material=allow_production_material, source_allocations=source_allocations)
+                                  allow_production_material=allow_production_material, source_allocations=source_allocations,
+                                  require_current_inventory=require_current_inventory)
     if cost["basis_digest"] != basis_digest or service.digest(posting) != digest:
         raise service.AccountingError("Inventory cost basis changed; preview again")
     entry = await service.post(session, org_id, posting, actor, event_bus, inventory_issue=True)
     session.add(InventoryIssueReceipt(entry_id=entry.id, organization_id=org_id,
-        command=document.model_dump(mode="json"), cost=json.loads(json.dumps(cost, default=str)),
+        command=document_snapshot(document), cost=json.loads(json.dumps(cost, default=str)),
         posting=posting.model_dump(mode="json"), digest=digest, actor=actor))
     await session.flush()
     if "source_allocation_version" in cost:

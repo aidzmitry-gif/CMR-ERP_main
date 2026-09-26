@@ -50,6 +50,15 @@ def canonical_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def compatible_document_snapshot(document, original: dict) -> dict:
+    """Do not add newly optional identity keys while authenticating old commands."""
+    snapshot = document.model_dump(mode="json")
+    for field in ("warehouse_identity", "sku_identity"):
+        if field not in original and snapshot.get(field) is None:
+            snapshot.pop(field, None)
+    return snapshot
+
+
 def source_identity(source: str, source_version: int, operation: str) -> tuple[str, int, str]:
     """Return the exact identity shared with ``accounting.entry`` uniqueness."""
     if not source or source != source.strip() or any(character.isspace() for character in source):
@@ -159,6 +168,44 @@ class DatedZeroValueDisposalCommand(ZeroValueDisposalCommand):
     operation_date: date
 
 
+class DirectoryBoundSpecificZeroValueIssueCommand(DatedZeroValueDisposalCommand):
+    """V6 keeps a complete directory-bound document for a specific zero layer."""
+
+    command_version: Literal[6]
+    operation: Literal["inventory_issue"]
+    document: dict
+
+    @field_validator("command_version", mode="before")
+    @classmethod
+    def exact_command_version(cls, value):
+        if type(value) is not int or value != 6:
+            raise ValueError("Directory-bound zero issue version must be the integer 6")
+        return value
+
+    @model_validator(mode="after")
+    def bind_full_document(self):
+        from modules.accounting.schemas import InventoryIssueDocument
+
+        document = InventoryIssueDocument.model_validate(self.document)
+        if document.warehouse_identity is None or document.sku_identity is None:
+            raise ValueError("Directory-bound zero issue requires warehouse and SKU identities")
+        for name in ("source", "source_version", "document_date", "operation_date",
+                     "posting_date", "policy_id", "explanation"):
+            if getattr(document, name) != getattr(self, name):
+                raise ValueError(f"Directory-bound zero issue {name} differs from its document")
+        if (document.expense_account != self.destination_account
+                or document.expense_dimensions != self.destination_dimensions
+                or len(self.inventory_layers) != 1):
+            raise ValueError("Directory-bound zero issue destination or source count differs")
+        layer, = self.inventory_layers
+        if (layer.inventory_account != document.account or layer.quantity != document.quantity
+                or layer.inventory_dimensions != {"warehouse": document.warehouse,
+                                                   "sku": document.sku, "lot": document.lot}):
+            raise ValueError("Directory-bound zero issue layer differs from its document")
+        self.document = document.model_dump(mode="json", exclude_none=True)
+        return self
+
+
 class ZeroValueSaleCommand(DatedZeroValueDisposalCommand):
     """Full sale intent; persistence additionally binds its monetary Entry."""
 
@@ -170,7 +217,8 @@ class ZeroValueSaleCommand(DatedZeroValueDisposalCommand):
     def bind_sale_document(self):
         from modules.accounting.sales import SaleDocument, commercial_lines
 
-        sale = SaleDocument.model_validate(self.sale_document)
+        original = self.sale_document
+        sale = SaleDocument.model_validate(original)
         commercial_lines(sale)
         for name in ("source", "source_version", "document_date", "operation_date",
                      "posting_date", "policy_id", "explanation"):
@@ -186,7 +234,7 @@ class ZeroValueSaleCommand(DatedZeroValueDisposalCommand):
         if (layer.inventory_account != sale.account or layer.quantity != sale.quantity
                 or layer.inventory_dimensions != {"warehouse": sale.warehouse, "sku": sale.sku, "lot": sale.lot}):
             raise ValueError("Zero-value sale quantity or inventory identity differs")
-        self.sale_document = sale.model_dump(mode="json")
+        self.sale_document = compatible_document_snapshot(sale, original)
         return self
 
 
@@ -210,7 +258,8 @@ class AllocatedZeroValueDisposalCommand(DatedZeroValueDisposalCommand):
         from modules.accounting.schemas import InventoryIssueDocument
 
         document_type = SaleDocument if self.operation == "inventory_sale" else InventoryIssueDocument
-        document = document_type.model_validate(self.document)
+        original = self.document
+        document = document_type.model_validate(original)
         if isinstance(document, SaleDocument):
             commercial_lines(document)
         for name in ("source", "source_version", "document_date", "operation_date",
@@ -229,7 +278,7 @@ class AllocatedZeroValueDisposalCommand(DatedZeroValueDisposalCommand):
                     or dimensions.get("sku") != document.sku
                     or document.lot and dimensions.get("lot") != document.lot):
                 raise ValueError("Allocation zero-value layer differs from its document inventory identity")
-        self.document = document.model_dump(mode="json")
+        self.document = compatible_document_snapshot(document, original)
         self.allocation
         return self
 
@@ -292,8 +341,10 @@ def parse_zero_value_command(snapshot: object) -> ZeroValueDisposalCommand:
         raise ValueError("Zero-value disposal command must be an object")
     if "command_version" not in snapshot:
         return ZeroValueDisposalCommand.model_validate(snapshot)
-    if type(snapshot["command_version"]) is not int or snapshot["command_version"] not in (2, 3, 4, 5):
+    if type(snapshot["command_version"]) is not int or snapshot["command_version"] not in (2, 3, 4, 5, 6):
         raise ValueError("Unsupported zero-value disposal command version")
+    if snapshot["command_version"] == 6:
+        return DirectoryBoundSpecificZeroValueIssueCommand.model_validate(snapshot)
     if snapshot["command_version"] == 5:
         return ProductionMaterialZeroValueDisposalCommand.model_validate(snapshot)
     if snapshot["command_version"] == 4:

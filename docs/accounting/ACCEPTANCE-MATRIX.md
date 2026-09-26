@@ -19,7 +19,7 @@ The bounded test-and-fix workflow is recorded in
 acceptance counts.
 
 Current source branch: `agent/crm-acc-prod009`; `alembic heads` on 2026-09-26
-reports the single development source head `0188`. The fixed first-release candidate
+reports the single development source head `0189`. The fixed first-release candidate
 remains at `0186`; this later manual-document change is not part of that release.
 Two focused tests on a disposable local
 PostgreSQL 16 database passed for the supplier-contract revocation migration
@@ -80,6 +80,18 @@ current target database or all later source migrations.
   descriptions; exact replay keeps posted history. Focused API 7/7, UI 35/35,
   TypeScript, ESLint, Ruff and disposable PostgreSQL 1/1 passed. Contracts and
   other manual analytics remain open.
+- Development migration `0189` and the inventory-issue API bind every new
+  accountant stock issue to the selected organization warehouse ID/name/title
+  and active SKU ID/code/title/unit. The UI submits directory snapshots rather
+  than free text; both monetary receipts and zero-value V6/V4 commands retain
+  them. Existing V2/V4 history keeps its old digest. On a disposable PostgreSQL
+  16 database, 9/9 focused API scenarios passed for monetary, specific-zero and
+  allocated-zero issues, including concurrent confirm, foreign/stale directory
+  rejection and exact replay; a separate replay check passed after both source
+  directory titles were changed. Focused backend tests passed 105/105 and the
+  issue UI passed 13/13 with TypeScript, ESLint, Ruff and the single Alembic head
+  check. This remains local development evidence: G03D still includes the rest
+  of the document lifecycle and no operational acceptance group is closed.
 - CRM deal Save and Close now requires a response with the exact deal ID,
   submitted editor fields and a valid new edit token. The PATCH response is
   generated from the saved deal; two concurrent edits on disposable

@@ -71,6 +71,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0186_supplier_contract_revocation.py",
     "0187_manual_document_drafts.py",
     "0188_manual_document_void.py",
+    "0189_inventory_issue_directory_identity.py",
 )
 
 
@@ -496,6 +497,20 @@ async def pg_factory():
                 ProductionOrder.__table__.create(connection)
 
                 Currency.__table__.create(connection)
+                # SKU is an existing public master-data table used by the
+                # accounting directory guard.  The fixture keeps only the
+                # production columns needed by the ORM and the immutable
+                # document snapshot; its category FK belongs to another
+                # legacy catalog outside this accounting migration graph.
+                connection.execute(text("""CREATE TABLE public.sku (
+                    id SERIAL PRIMARY KEY, code varchar(64) NOT NULL UNIQUE,
+                    title varchar(255) NOT NULL, unit varchar(16) NOT NULL DEFAULT 'шт',
+                    category_id integer NULL, weight_kg double precision NULL,
+                    volume_m3 double precision NULL, tnved_code varchar(16) NULL,
+                    vat_code varchar(16) NULL, shelf_life_days integer NULL,
+                    is_active boolean NOT NULL DEFAULT true,
+                    attributes json NOT NULL DEFAULT '{}', provenance json NOT NULL DEFAULT '{}'
+                )"""))
                 OutboxEvent.__table__.create(connection)
                 AuditLog.__table__.create(connection)
                 # Reproduce pre-issuance widths; the proposal must perform the

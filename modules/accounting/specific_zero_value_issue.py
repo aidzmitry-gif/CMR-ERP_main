@@ -6,10 +6,11 @@ from sqlalchemy import select
 from modules.accounting import inventory_cost, inventory_issues, service
 from modules.accounting.models import Account, Line, Policy, ZeroValueInventoryDisposalReceipt
 from modules.accounting.production_output_inventory import verified_output_lines
-from modules.accounting.schemas import SpecificZeroValueIssueDocument
+from modules.accounting.schemas import InventoryIssueDocument, SpecificZeroValueIssueDocument
 from modules.accounting.zero_value_disposals import (
     AllocatedZeroValueDisposalCommand,
     DatedZeroValueDisposalCommand,
+    DirectoryBoundSpecificZeroValueIssueCommand,
     ZeroValueInventoryLayer,
     parse_zero_value_command,
     preview_standalone_zero_value_issue_basis,
@@ -17,6 +18,12 @@ from modules.accounting.zero_value_disposals import (
     register_standalone_zero_value_issue,
     require_public_zero_value_schema,
 )
+
+
+def public_document_snapshot(document):
+    """Drop server-selected ledger IDs from the saved public issue document."""
+    public = InventoryIssueDocument(**document.model_dump(include=set(InventoryIssueDocument.model_fields)))
+    return inventory_issues.document_snapshot(public)
 
 
 async def _command(session, organization_id, document, *, procurement=None):
@@ -42,7 +49,7 @@ async def _command(session, organization_id, document, *, procurement=None):
                 quantity=layer["quantity"],
             ) for layer in cost["inventory_layers"]], explanation=document.explanation,
             document_date=document.document_date, operation_date=document.operation_date,
-            valuation_method=policy.inventory_method, document=document.model_dump(mode="json"),
+            valuation_method=policy.inventory_method, document=inventory_issues.document_snapshot(document),
         )
         basis = await preview_standalone_zero_value_issue_basis(session, organization_id, command, procurement=procurement)
         return command.model_copy(update={"basis_digest": basis}), cost
@@ -66,8 +73,12 @@ async def _command(session, organization_id, document, *, procurement=None):
     ).order_by(Account.valid_from.desc()).limit(1))
     if expense is None or expense.cash or expense.quantity_tracking or expense.category != "expense":
         raise service.AccountingError("Select a noncash expense account without quantity tracking")
-    command = DatedZeroValueDisposalCommand(
-        command_version=2, operation="inventory_issue", source=document.source,
+    command_type = (DirectoryBoundSpecificZeroValueIssueCommand
+                    if document.warehouse_identity is not None and document.sku_identity is not None
+                    else DatedZeroValueDisposalCommand)
+    command_version = 6 if command_type is DirectoryBoundSpecificZeroValueIssueCommand else 2
+    command = command_type(
+        command_version=command_version, operation="inventory_issue", source=document.source,
         source_version=document.source_version, posting_date=document.posting_date,
         policy_id=document.policy_id, basis_digest="0" * 64,
         destination_account=document.expense_account, destination_dimensions=document.expense_dimensions,
@@ -75,6 +86,7 @@ async def _command(session, organization_id, document, *, procurement=None):
             source_line_id=document.source_line_id, inventory_account=document.account,
             inventory_dimensions=target, quantity=document.quantity)], explanation=document.explanation,
         document_date=document.document_date, operation_date=document.operation_date,
+        **({"document": public_document_snapshot(document)} if command_version == 6 else {}),
     )
     basis = await preview_standalone_zero_value_issue_basis(session, organization_id, command, procurement=procurement)
     return command.model_copy(update={"basis_digest": basis}), cost
@@ -97,9 +109,12 @@ async def preview(session, organization_id, document, actor, *, procurement=None
             "command": command.model_dump(mode="json"), "confirmation_available": True, "posted": False}
 
 
-async def implicit_document(session, organization_id, document, *, procurement=None):
+async def implicit_document(session, organization_id, document, *, procurement=None,
+                            require_current_inventory=False):
     """Select verified origins server-side; browser clients never submit ledger IDs."""
     inventory_issues._guard_production_material_source(document, False)
+    if require_current_inventory:
+        await inventory_issues.verify_inventory_identity(session, organization_id, document)
     cost = await inventory_cost.preview_issue(session, organization_id, document, procurement=procurement,
                                               source_allocations=True)
     if Decimal(cost["issue_cost_byn"]) != 0:
@@ -125,7 +140,8 @@ async def implicit_document(session, organization_id, document, *, procurement=N
     return SpecificZeroValueIssueDocument(**document.model_dump(), source_entry_id=candidates[0][0], source_line_id=candidates[0][1])
 
 
-async def implicit_confirm(session, organization_id, document, basis_digest, digest, actor, *, procurement=None):
+async def implicit_confirm(session, organization_id, document, basis_digest, digest, actor, *, procurement=None,
+                           require_current_inventory=False):
     await service.lock_organization(session, organization_id)
     existing = await session.scalar(select(ZeroValueInventoryDisposalReceipt).where(
         ZeroValueInventoryDisposalReceipt.organization_id == organization_id,
@@ -144,7 +160,8 @@ async def implicit_confirm(session, organization_id, document, basis_digest, dig
             explicit = SpecificZeroValueIssueDocument(**document.model_dump(), source_entry_id=layer.source_entry_id,
                                                        source_line_id=layer.source_line_id)
     else:
-        explicit = await implicit_document(session, organization_id, document, procurement=procurement)
+        explicit = await implicit_document(session, organization_id, document, procurement=procurement,
+                                           require_current_inventory=require_current_inventory)
         if explicit is None:
             return None
     return await confirm(session, organization_id, explicit, basis_digest, digest, actor, procurement=procurement)
@@ -162,7 +179,7 @@ async def confirm(session, organization_id, document, basis_digest, digest, acto
         saved = parse_zero_value_command(existing.command)
         if isinstance(saved, AllocatedZeroValueDisposalCommand):
             unchanged = (existing.actor == actor and existing.basis_digest == basis_digest and existing.digest == digest
-                         and saved.document == document.model_dump(mode="json"))
+                         and saved.document == inventory_issues.document_snapshot(document))
         else:
             layer, = saved.inventory_layers
             unchanged = (
@@ -176,6 +193,8 @@ async def confirm(session, organization_id, document, basis_digest, digest, acto
                     "warehouse": document.warehouse, "sku": document.sku, "lot": document.lot,
                 } and layer.quantity == document.quantity
             )
+            if isinstance(saved, DirectoryBoundSpecificZeroValueIssueCommand):
+                unchanged = unchanged and saved.document == public_document_snapshot(document)
         if not unchanged:
             raise service.AccountingError("Zero-value issue already registered with different content")
         if isinstance(saved, AllocatedZeroValueDisposalCommand):

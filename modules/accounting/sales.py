@@ -1,5 +1,4 @@
 """Pilot BYN goods sale preview; recognition and VAT basis are accountant inputs."""
-import hashlib
 import json
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 from typing import Annotated
@@ -23,13 +22,6 @@ from modules.accounting.schemas import (
 from modules.accounting.sku_snapshot import verified_sku_snapshot
 
 
-class SaleSkuIdentity(Input):
-    id: int = Field(gt=0, le=2147483647, strict=True)
-    code: str = Field(min_length=1, max_length=64)
-    title: str = Field(min_length=1, max_length=255)
-    unit: str = Field(min_length=1, max_length=16)
-
-
 class SaleTerms(Input):
     net_amount: Money
     vat_rate: Annotated[Decimal, BeforeValidator(exact), Field(ge=0, le=100, decimal_places=4)]
@@ -41,7 +33,6 @@ class SaleTerms(Input):
     buyer_dimensions: dict[str, str]
     revenue_dimensions: dict[str, str] = Field(default_factory=dict)
     vat_dimensions: dict[str, str] = Field(default_factory=dict)
-    sku_identity: SaleSkuIdentity | None = None
 
 
 class SaleDocument(InventoryIssueDocument, SaleTerms):
@@ -54,20 +45,7 @@ class SaleConfirm(SaleDocument):
 
 
 def rule_version(document, basis_digest, *, allocation_version=None):
-    if document.sku_identity is None:
-        # This optional field did not exist in historical sale commands. Keep
-        # their original rule digest so an exact replay remains possible.
-        old_document = document.model_dump(mode="json")
-        old_document.pop("sku_identity", None)
-        raw = json.dumps({"document": old_document, "basis": basis_digest},
-                         sort_keys=True, ensure_ascii=False)
-        issue_rule = "inventory-issue-v2:" + hashlib.sha256(raw.encode()).hexdigest()
-        if allocation_version is not None:
-            if type(allocation_version) is not int or allocation_version != 1:
-                raise service.AccountingError("Explicit allocation version must be integer 1")
-            issue_rule += ":a1"
-    else:
-        issue_rule = inventory_issues.rule_version(document, basis_digest, allocation_version=allocation_version)
+    issue_rule = inventory_issues.rule_version(document, basis_digest, allocation_version=allocation_version)
     return "sale-v1:" + issue_rule.removeprefix("inventory-issue-v2:")
 
 
