@@ -15,6 +15,10 @@ type SupplierContract = { id: number; organization_id: number; supplier_id: numb
 type ContractHistoryPage = { organization_id: number; supplier_id: number; status: string; items: SupplierContract[]; truncated: boolean; next_before_at: string | null; next_before_id: number | null };
 type ContractHistoryCursor = { at: string; id: number };
 type Receipt = { id: number; organization_id?: number; key?: string; version: number; status?: string; posting?: { entry_id: number; version: number } | null; correction_of?: { receipt_id: number; version: number; entry_id: number } | null; revisions: { version: number; request_key?: string | null; actor: string; created_at: string; document: Document }[] };
+const correctionFlagNames = ["physical_change", "inventory_value_change", "vat_change", "primary_document_change", "operation_date_change", "explanation_only", "no_difference"] as const;
+type CorrectionFlag = typeof correctionFlagNames[number];
+type CorrectionReadiness = { organization_id: number; receipt_id: number; current_version: number; correction_of: { receipt_id: number; version: number; entry_id: number }; classification: string[]; physical_change: boolean; inventory_value_change: boolean; vat_change: boolean; primary_document_change: boolean; operation_date_change: boolean; explanation_only: boolean; no_difference: boolean; posting_available: false; wms_movement_available: false; blockers: string[] };
+type CorrectionReadinessState = { context: string; status: "idle" | "loading" | "ready" | "error"; data?: CorrectionReadiness };
 type PendingSave = { org: string; receiptId: number | null; version: number; key: string; document: Document; closeAfterSave: boolean };
 type PendingContractRevoke = { org: string; supplierId: number; contractId: number; key: string; reason: string };
 type OwnedOrder = { kind: string; source_id: number; snapshot: { number: string; supplier: string } };
@@ -30,6 +34,63 @@ const exactKeys = (value: Record<string, unknown>, required: string[], optional:
 };
 const positiveIdOrNull = (value: unknown) => value === null
   || typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+function checkedCorrectionReadiness(value: unknown, org: string, receipt: Receipt): CorrectionReadiness {
+  const invalid = () => new Error("Проверка исправления вернула неверное юрлицо, редакцию или классификацию.");
+  if (!value || typeof value !== "object" || Array.isArray(value) || !receipt.correction_of) throw invalid();
+  const data = value as Record<string, unknown>;
+  const required = ["organization_id", "receipt_id", "current_version", "correction_of", "classification",
+    ...correctionFlagNames, "posting_available", "wms_movement_available", "blockers"];
+  const positiveInteger = (item: unknown) => typeof item === "number" && Number.isSafeInteger(item) && item > 0;
+  if (!exactKeys(data, required)
+    || !positiveInteger(Number(org)) || data.organization_id !== Number(org)
+    || data.receipt_id !== receipt.id || data.current_version !== receipt.version
+    || !positiveInteger(data.organization_id) || !positiveInteger(data.receipt_id) || !positiveInteger(data.current_version)
+    || !data.correction_of || typeof data.correction_of !== "object" || Array.isArray(data.correction_of)
+    || !exactKeys(data.correction_of as Record<string, unknown>, ["receipt_id", "version", "entry_id"])
+    || !positiveInteger((data.correction_of as Record<string, unknown>).receipt_id)
+    || !positiveInteger((data.correction_of as Record<string, unknown>).version)
+    || !positiveInteger((data.correction_of as Record<string, unknown>).entry_id)
+    || (data.correction_of as Record<string, unknown>).receipt_id !== receipt.correction_of.receipt_id
+    || (data.correction_of as Record<string, unknown>).version !== receipt.correction_of.version
+    || (data.correction_of as Record<string, unknown>).entry_id !== receipt.correction_of.entry_id
+    || correctionFlagNames.some((flag) => typeof data[flag] !== "boolean")
+    || data.posting_available !== false || data.wms_movement_available !== false
+    || !Array.isArray(data.classification) || !data.classification.every((flag) => typeof flag === "string")
+    || !Array.isArray(data.blockers) || !data.blockers.every((blocker) => typeof blocker === "string" && blocker.trim().length > 0)
+    || new Set(data.blockers as string[]).size !== (data.blockers as string[]).length) throw invalid();
+  const flags = Object.fromEntries(correctionFlagNames.map((flag) => [flag, data[flag]])) as Record<CorrectionFlag, boolean>;
+  const classification = correctionFlagNames.filter((flag) => flags[flag]);
+  const economicChange = correctionFlagNames.slice(0, 5).some((flag) => flags[flag]);
+  const expectedBlockers = [
+    ...(flags.physical_change ? ["physical_receipt_adjustment_required"] : []),
+    ...(flags.inventory_value_change ? ["inventory_cost_layer_correction_required"] : []),
+    ...(flags.vat_change ? ["vat_register_and_eschf_evidence_required"] : []),
+    ...(flags.primary_document_change ? ["primary_document_reissue_evidence_required"] : []),
+    ...(economicChange ? ["correction_posting_period_required"] : []),
+    ...(flags.explanation_only || flags.no_difference ? ["no_economic_difference"] : []),
+    "posting_workflow_not_approved",
+  ];
+  if (data.classification.length !== classification.length
+    || data.classification.some((flag, index) => flag !== classification[index])
+    || Number(economicChange) + Number(flags.explanation_only) + Number(flags.no_difference) !== 1
+    || (flags.explanation_only && (flags.no_difference || correctionFlagNames.slice(0, 5).some((flag) => flags[flag])))
+    || (flags.no_difference && correctionFlagNames.slice(0, 6).some((flag) => flags[flag]))
+    || data.blockers.length !== expectedBlockers.length
+    || data.blockers.some((blocker, index) => blocker !== expectedBlockers[index])) throw invalid();
+  return data as CorrectionReadiness;
+}
+function correctionBlockerLabel(code: string) {
+  const labels: Record<string, string> = {
+    physical_receipt_adjustment_required: "Нужна отдельная корректировка физической приёмки.",
+    inventory_cost_layer_correction_required: "Нужна отдельная корректировка слоя себестоимости.",
+    vat_register_and_eschf_evidence_required: "Нужна отдельная сверка НДС и подтверждение по ЭСЧФ.",
+    primary_document_reissue_evidence_required: "Нужно подтверждение исправленного первичного документа.",
+    correction_posting_period_required: "Нужно отдельно определить период учёта исправления.",
+    no_economic_difference: "Экономические реквизиты исправления не отличаются.",
+    posting_workflow_not_approved: "Процесс проведения исправлений пока не утверждён.",
+  };
+  return labels[code] ?? "Сервер сообщил дополнительное ограничение для исправления.";
+}
 function validSavedDocument(value: unknown): value is Document {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const document = value as Record<string, unknown>;
@@ -178,7 +239,8 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   const [skuSearch, setSkuSearch] = useState("");
   const [skuOptions, setSkuOptions] = useState<ProcurementSkuOption[]>([]);
   const [skuError, setSkuError] = useState("");
-  const [selected, setSelected] = useState<Receipt | null>(null), [busy, setBusy] = useState(false);
+  const [selected, setSelected] = useState<Receipt | null>(null), [selectedOrg, setSelectedOrg] = useState<string | null>(null), [busy, setBusy] = useState(false);
+  const [correctionReadiness, setCorrectionReadiness] = useState<CorrectionReadinessState>({ context: "", status: "idle" });
   const [uncertain, setUncertain] = useState(false);
   const [recoveryBlocked, setRecoveryBlocked] = useState(false);
   const [editorOpen, setEditorOpen] = useState(true);
@@ -197,6 +259,14 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   const path = `/organizations/${org}/receipt-documents`;
   const listKey = `${path}/${reload}`;
   const listLoaded = loadedKey === listKey;
+  const correctionContext = selected?.correction_of
+    ? JSON.stringify([org, selectedOrg, selected.id, selected.version, selected.correction_of.receipt_id,
+      selected.correction_of.version, selected.correction_of.entry_id]) : "";
+  const correctionContextRef = useRef(correctionContext);
+  correctionContextRef.current = correctionContext;
+  const correctionReadinessForSelection: CorrectionReadinessState = correctionReadiness.context === correctionContext
+    ? correctionReadiness
+    : { context: correctionContext, status: selected?.correction_of ? selectedOrg === org ? "loading" : "error" : "idle" };
   const dirty = JSON.stringify(document) !== JSON.stringify(selected ? selected.revisions.at(-1)!.document : blank());
   const confirmDiscard = useUnsavedDocumentGuard(dirty || busy || uncertain || contractBusy || contractRevokeUncertain, onPendingChange);
   const search = query.trim().toLocaleLowerCase("ru");
@@ -312,7 +382,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       }
       else if (saved?.org === org) {
         const row = saved.receiptId === null ? null : data.find((item) => item.id === saved.receiptId) ?? null;
-        setSelected(row);
+        setSelected(row); setSelectedOrg(row ? org : null);
         setDocument(structuredClone(saved.document));
         setEditorOpen(true);
         setUncertain(true);
@@ -326,7 +396,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
         setInitialLoading(false);
         const row = data.find(row => String(row.id) === initialReceipt);
         if (row) {
-          setSelected(row); setDocument(structuredClone(row.revisions.at(-1)!.document));
+          setSelected(row); setSelectedOrg(org); setDocument(structuredClone(row.revisions.at(-1)!.document));
           setEditorOpen(true);
           pending.current = null; setUncertain(false); setError(""); setNotice("");
         }
@@ -335,6 +405,30 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
     } }).catch((e: Error) => { if (current) setError(e.message); });
     return () => { current = false; };
   }, [path, listKey, initialReceipt, org]);
+  useEffect(() => {
+    if (!selected?.correction_of) {
+      setCorrectionReadiness({ context: "", status: "idle" });
+      return;
+    }
+    const context = correctionContext;
+    if (selectedOrg !== org) {
+      setCorrectionReadiness({ context, status: "error" });
+      return;
+    }
+    let current = true;
+    setCorrectionReadiness({ context, status: "loading" });
+    void request<unknown>(`/organizations/${org}/receipt-documents/${selected.id}/correction-readiness`)
+      .then((data) => {
+        if (!current || correctionContextRef.current !== context) return;
+        const checked = checkedCorrectionReadiness(data, org, selected);
+        setCorrectionReadiness({ context, status: "ready", data: checked });
+      })
+      .catch(() => {
+        if (current && correctionContextRef.current === context)
+          setCorrectionReadiness({ context, status: "error" });
+      });
+    return () => { current = false; };
+  }, [org, selectedOrg, selected, correctionContext]);
   function open(row: Receipt | null) {
     if (pending.current || uncertain) {
       setError("Сначала подтвердите сохранённую попытку той же редакции. Открытие другой накладной сейчас запрещено.");
@@ -342,7 +436,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
     }
     if (!confirmDiscard()) return;
     setContracts([]); setContractError("");
-    setSelected(row); setDocument(row ? structuredClone(row.revisions.at(-1)!.document) : blank());
+    setSelected(row); setSelectedOrg(row ? org : null); setDocument(row ? structuredClone(row.revisions.at(-1)!.document) : blank());
     setEditorOpen(true);
     pending.current = null; setUncertain(false); setError(""); setNotice("");
   }
@@ -396,7 +490,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       if (!active.current) return;
       clearPendingSave(command);
       pending.current = null; unknownSave.current = false; setUncertain(false); setRecoveryBlocked(false);
-      setSelected(command.closeAfterSave ? null : row);
+      setSelected(command.closeAfterSave ? null : row); setSelectedOrg(command.closeAfterSave ? null : org);
       setDocument(command.closeAfterSave ? blank() : structuredClone(revision.document));
       setEditorOpen(!command.closeAfterSave);
       setRows((current) => [row, ...current.filter((item) => item.id !== row.id)]);
@@ -524,6 +618,36 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       })}</ul>}
       {listLoaded && !visible.length && <p className="text-sm text-muted">Накладных по выбранному фильтру нет.</p>}
       {selected?.correction_of && <p role="status">Связанный черновик исправления накладной № {selected.correction_of.receipt_id}, версии {selected.correction_of.version}, проводка № {selected.correction_of.entry_id}. Исходная накладная и её проводка не меняются; проведение и передача в WMS заблокированы до отдельного workflow.</p>}
+      {selected?.correction_of && <section aria-labelledby="correction-readiness-heading" className="space-y-2 rounded border border-line p-3">
+        <h3 id="correction-readiness-heading" className="font-semibold">Проверка исправления</h3>
+        <p>Проведение недоступно. Эта проверка показывает различия и не выдаёт разрешение; движение WMS также недоступно.</p>
+        {correctionReadinessForSelection.status === "loading" && <p role="status">Загрузка проверки для текущей версии исправления…</p>}
+        {correctionReadinessForSelection.status === "error" && <p role="alert">Не удалось подтвердить проверку для выбранного юрлица и версии. Проведение и движение WMS остаются недоступны.</p>}
+        {correctionReadinessForSelection.status === "ready" && correctionReadinessForSelection.data && <>
+          <dl className="grid gap-2 md:grid-cols-2">
+            <div><dt className="font-medium">Физическое изменение / WMS</dt><dd>{correctionReadinessForSelection.data.physical_change
+              ? "Изменилось количество или склад. Физическая корректировка требует отдельного процесса; движение WMS недоступно."
+              : "Изменение количества или склада не выявлено; движение WMS всё равно недоступно."}</dd></div>
+            <div><dt className="font-medium">Стоимость / слой себестоимости</dt><dd>{correctionReadinessForSelection.data.inventory_value_change
+              ? "Стоимость изменилась и может повлиять на слой себестоимости; нужна отдельная оценка исправления."
+              : "Изменение стоимости и слоя себестоимости не выявлено."}</dd></div>
+            <div><dt className="font-medium">НДС / ЭСЧФ</dt><dd>{correctionReadinessForSelection.data.vat_change
+              ? "Изменилась ставка, сумма или основание НДС; нужны отдельная сверка НДС и подтверждение по ЭСЧФ."
+              : "Изменение реквизитов НДС не выявлено."}</dd></div>
+            <div><dt className="font-medium">Первичный документ</dt><dd>{correctionReadinessForSelection.data.primary_document_change
+              ? "Изменились реквизиты первичного документа; нужно подтвердить исправленный документ."
+              : "Изменение реквизитов первичного документа не выявлено."}</dd></div>
+            <div><dt className="font-medium">Дата операции</dt><dd>{correctionReadinessForSelection.data.operation_date_change
+              ? "Дата операции изменилась; период учёта исправления нужно определить отдельно."
+              : "Изменение даты операции не выявлено."}</dd></div>
+          </dl>
+          {correctionReadinessForSelection.data.explanation_only && <p>Изменилось только пояснение; складские, стоимостные, налоговые и первичные реквизиты и дата операции не изменились.</p>}
+          {correctionReadinessForSelection.data.no_difference && <p>Различий между исходной накладной и исправлением не выявлено.</p>}
+          {correctionReadinessForSelection.data.blockers.length > 0 && <div><h4 className="font-medium">Ограничения</h4>
+            <ul className="list-disc pl-5">{correctionReadinessForSelection.data.blockers.map((blocker) => <li key={blocker}>{correctionBlockerLabel(blocker)}</li>)}</ul>
+          </div>}
+        </>}
+      </section>}
       {selected?.posting && <p role="status">Проведена · проводка № {selected.posting.entry_id}. Первичные данные доступны для просмотра.</p>}
       {contractRevokeUncertain && <Button variant="secondary" disabled={contractBusy || pendingContractRevoke.current?.org !== org} onClick={() => { if (pendingContractRevoke.current) void submitContractRevoke(pendingContractRevoke.current); }}>Повторить отзыв договора с тем же ключом</Button>}
       {editorOpen && <fieldset disabled={Boolean(selected?.posting) || uncertain || contractBusy || contractRevokeUncertain} className="space-y-3">

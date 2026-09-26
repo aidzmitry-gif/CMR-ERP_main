@@ -614,6 +614,171 @@ async def test_posted_receipt_correction_draft_is_exact_idempotent_and_fail_clos
     assert await db.get(ReceiptPosting, original_id) is not None
 
 
+async def create_readiness_correction(client, db, book):
+    path, options = await source_options(client, db, book)
+    preview = await client.post(path + "/preview", json=options)
+    assert preview.status_code == 200, preview.text
+    confirmed = await client.post(path + "/confirm", json={**options, "digest": preview.json()["digest"]})
+    assert confirmed.status_code == 201, confirmed.text
+    created = await client.post(path + "/correction-drafts", json={
+        "key": str(uuid4()), "expected_version": 1, "expected_entry_id": confirmed.json()["entry_id"],
+    })
+    assert created.status_code == 201, created.text
+    readiness_path = f"/procurement/organizations/{book[0]}/receipt-documents/{created.json()['id']}/correction-readiness"
+    return readiness_path, created.json()
+
+
+async def test_correction_readiness_is_read_only_and_classifies_unchanged_or_explanation_only(client, db, book):
+    from modules.procurement.receipt_documents import ReceiptPosting
+
+    readiness_path, draft = await create_readiness_correction(client, db, book)
+    entry_count = await db.scalar(select(func.count()).select_from(Entry))
+    posting_count = await db.scalar(select(func.count()).select_from(ReceiptPosting))
+
+    unchanged = await client.get(readiness_path)
+    assert unchanged.status_code == 200, unchanged.text
+    result = unchanged.json()
+    assert result["correction_of"] == draft["correction_of"]
+    assert result["current_version"] == 1
+    assert result["classification"] == ["no_difference"]
+    assert result["no_difference"] is True
+    assert all(result[key] is False for key in (
+        "physical_change", "inventory_value_change", "vat_change", "primary_document_change",
+        "operation_date_change", "explanation_only", "posting_available", "wms_movement_available",
+    ))
+    assert result["blockers"] == ["no_economic_difference", "posting_workflow_not_approved"]
+
+    edited = await client.put(f"/procurement/organizations/{book[0]}/receipt-documents/{draft['id']}", json={
+        "key": str(uuid4()), "expected_version": 1,
+        "document": {**draft["revisions"][0]["document"], "explanation": "Reviewed correction note"},
+    })
+    assert edited.status_code == 200, edited.text
+    explanation = (await client.get(readiness_path)).json()
+    assert explanation["current_version"] == 2
+    assert explanation["classification"] == ["explanation_only"]
+    assert explanation["explanation_only"] is True and explanation["no_difference"] is False
+    assert explanation["blockers"] == ["no_economic_difference", "posting_workflow_not_approved"]
+    assert await db.scalar(select(func.count()).select_from(Entry)) == entry_count
+    assert await db.scalar(select(func.count()).select_from(ReceiptPosting)) == posting_count
+
+
+async def test_correction_readiness_classifies_inventory_value_and_vat_changes(client, db, book):
+    readiness_path, draft = await create_readiness_correction(client, db, book)
+    corrected = {**draft["revisions"][0]["document"], "items": [
+        {**draft["revisions"][0]["document"]["items"][0], "net_amount": "125.00",
+         "vat_rate": "20", "vat_amount": "25.00", "vat_basis": "Corrected VAT invoice basis"},
+    ]}
+    edited = await client.put(f"/procurement/organizations/{book[0]}/receipt-documents/{draft['id']}", json={
+        "key": str(uuid4()), "expected_version": 1, "document": corrected,
+    })
+    assert edited.status_code == 200, edited.text
+
+    result = (await client.get(readiness_path)).json()
+    assert result["classification"] == ["inventory_value_change", "vat_change"]
+    assert result["inventory_value_change"] is True and result["vat_change"] is True
+    assert result["physical_change"] is False and result["primary_document_change"] is False
+    assert result["blockers"] == [
+        "inventory_cost_layer_correction_required", "vat_register_and_eschf_evidence_required",
+        "correction_posting_period_required", "posting_workflow_not_approved",
+    ]
+    assert result["posting_available"] is False and result["wms_movement_available"] is False
+
+
+def test_correction_classification_keeps_value_and_vat_changes_on_shared_lines_when_other_lines_change():
+    from modules.procurement.receipt_documents import ReceiptContent, classify_receipt_correction
+
+    first = document()
+    first["items"] = [
+        {**first["items"][0], "sku": "A", "sku_title": "A", "lot": "A",
+         "net_amount": "100.00", "vat_amount": "20.00"},
+        {**first["items"][0], "sku": "B", "sku_title": "B", "lot": "B",
+         "net_amount": "200.00", "vat_amount": "40.00"},
+    ]
+    corrected = {**first, "items": [
+        {**first["items"][0], "net_amount": "200.00", "vat_amount": "40.00"},
+        {**first["items"][1], "sku": "C", "sku_title": "C", "lot": "C",
+         "net_amount": "100.00", "vat_amount": "20.00"},
+    ]}
+
+    flags, classification = classify_receipt_correction(
+        ReceiptContent.model_validate(first), ReceiptContent.model_validate(corrected),
+    )
+
+    assert flags["physical_change"] is True
+    assert flags["inventory_value_change"] is True
+    assert flags["vat_change"] is True
+    assert classification[:3] == ["physical_change", "inventory_value_change", "vat_change"]
+
+
+async def test_correction_readiness_classifies_physical_primary_and_operation_date_changes(client, db, book):
+    readiness_path, draft = await create_readiness_correction(client, db, book)
+    original = draft["revisions"][0]["document"]
+    corrected = {
+        **original,
+        "invoice_reference": "INV2",
+        "document_date": "2026-09-05",
+        "operation_date": "2026-09-05",
+        "contract": "contract2",
+        "warehouse": "warehouse2",
+        "items": [{**original["items"][0], "lot": "lot2", "quantity": "3.000000"}],
+    }
+    edited = await client.put(f"/procurement/organizations/{book[0]}/receipt-documents/{draft['id']}", json={
+        "key": str(uuid4()), "expected_version": 1, "document": corrected,
+    })
+    assert edited.status_code == 200, edited.text
+
+    result = (await client.get(readiness_path)).json()
+    assert result["classification"] == ["physical_change", "primary_document_change", "operation_date_change"]
+    assert result["physical_change"] is True
+    assert result["primary_document_change"] is True
+    assert result["operation_date_change"] is True
+    assert result["inventory_value_change"] is False and result["vat_change"] is False
+    assert result["blockers"] == [
+        "physical_receipt_adjustment_required", "primary_document_reissue_evidence_required",
+        "correction_posting_period_required", "posting_workflow_not_approved",
+    ]
+
+
+async def test_correction_readiness_is_organization_scoped_and_rejects_non_drafts_or_invalid_json(client, db, book):
+    from sqlalchemy import update
+
+    from modules.accounting.models import Organization
+    from modules.procurement.receipt_documents import ReceiptDocument
+
+    readiness_path, draft = await create_readiness_correction(client, db, book)
+    foreign = Organization(name="Readiness foreign company", unp="999999993")
+    db.add(foreign)
+    await db.commit()
+    foreign_response = await client.get(
+        f"/procurement/organizations/{foreign.id}/receipt-documents/{draft['id']}/correction-readiness",
+    )
+    assert foreign_response.status_code == 403
+
+    ordinary = await client.post(f"/procurement/organizations/{book[0]}/receipt-documents", json={
+        "key": "readiness-ordinary-receipt", "document": document(),
+    })
+    assert ordinary.status_code == 201, ordinary.text
+    ordinary_response = await client.get(
+        f"/procurement/organizations/{book[0]}/receipt-documents/{ordinary.json()['id']}/correction-readiness",
+    )
+    assert ordinary_response.status_code == 409
+
+    row = await db.get(ReceiptDocument, draft["id"])
+    row.current_version = 2
+    await db.commit()
+    stale = await client.get(readiness_path)
+    assert stale.status_code == 409 and "current draft revision is missing" in stale.text
+    row.current_version = 1
+    await db.commit()
+
+    await db.execute(update(ReceiptRevision).where(
+        ReceiptRevision.receipt_id == draft["id"], ReceiptRevision.version == 1,
+    ).values(document={"invoice_reference": "incomplete"}))
+    await db.commit()
+    invalid = await client.get(readiness_path)
+    assert invalid.status_code == 409 and "incomplete or invalid" in invalid.text
+
+
 async def test_stale_source_preview_and_reader_cannot_post(client, db, book):
     path, options = await source_options(client, db, book)
     preview = (await client.post(path + "/preview", json=options)).json()

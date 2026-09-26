@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { ProcurementReceiptDrafts } from "./procurement-receipt-drafts";
@@ -31,6 +31,33 @@ function durableReceiptDocument(invoiceReference = "INV-DURABLE") {
       sku_title: "Аккумулятор", sku: "AKB", unit: "шт", lot: "LOT-1", quantity: "2.000001",
       net_amount: "100.01", vat_rate: "20", vat_amount: "20.00", vat_basis: "ОСН" }],
   };
+}
+
+function correctionReadiness(receiptId = 92, flagOverrides: Record<string, boolean> = {}, overrides: Record<string, unknown> = {}) {
+  const flags = { physical_change: false, inventory_value_change: false, vat_change: false,
+    primary_document_change: false, operation_date_change: false, explanation_only: false, no_difference: true,
+    ...flagOverrides };
+  return { organization_id: 7, receipt_id: receiptId, current_version: 1,
+    correction_of: { receipt_id: 81, version: 3, entry_id: 42 },
+    classification: Object.entries(flags).filter(([, changed]) => changed).map(([flag]) => flag), ...flags,
+    posting_available: false, wms_movement_available: false,
+    blockers: flags.no_difference || flags.explanation_only ? ["no_economic_difference", "posting_workflow_not_approved"] : ["posting_workflow_not_approved"],
+    ...overrides };
+}
+
+function correctionRow(id = 92, invoiceReference = `CORR-${id}`) {
+  const document = { currency: "BYN", invoice_reference: invoiceReference, document_date: "2026-09-24",
+    operation_date: "2026-09-24", supplier: "Поставщик", supplier_id: 19, supplier_unp: "190000001",
+    contract: "D-1", contract_id: 50, contract_basis: null, warehouse: "Основной", explanation: "Исправление", items: [] };
+  return { id, organization_id: 7, version: 1, status: "draft", posting: null,
+    correction_of: { receipt_id: 81, version: 3, entry_id: 42 },
+    revisions: [{ version: 1, actor: "accountant", created_at: "2026-09-26", document }] };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
 }
 
 it("requires an explicit legal entity before opening supplier invoices", async () => {
@@ -70,6 +97,9 @@ it("shows draft and posted invoices from every date in the procurement register"
     "href", "/erp/procurement/receipts/posted/42?org=7",
   );
   expect(screen.getByText("Черновик · версия 1")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /INV-NEW/ }));
+  expect(screen.queryByText("Проверка исправления")).not.toBeInTheDocument();
+  expect(fetcher.mock.calls.some(([url]) => url.includes("correction-readiness"))).toBe(false);
 
   fireEvent.change(screen.getByLabelText("Поиск накладных"), { target: { value: "Acme" } });
   expect(screen.getByText("Показано 1 из 2 накладных выбранного юрлица за все даты.")).toBeInTheDocument();
@@ -79,23 +109,102 @@ it("shows draft and posted invoices from every date in the procurement register"
 });
 
 it("identifies linked correction drafts and keeps accounting and WMS actions hidden", async () => {
-  const document = { currency: "BYN", invoice_reference: "CORR-1", document_date: "2026-09-24",
-    operation_date: "2026-09-24", supplier: "Поставщик", supplier_id: 19, supplier_unp: "190000001",
-    contract: "D-1", contract_id: 50, contract_basis: null, warehouse: "Основной", explanation: "Исправление", items: [] };
-  const rows = [{ id: 92, organization_id: 7, version: 1, status: "draft", posting: null,
-    correction_of: { receipt_id: 81, version: 3, entry_id: 42 },
-    revisions: [{ version: 1, actor: "accountant", created_at: "2026-09-26", document }] }];
-  const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes("purchase-ownership") ? [] : rows }));
+  const rows = [correctionRow(92, "CORR-1")];
+  const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes("correction-readiness")
+    ? correctionReadiness() : url.includes("purchase-ownership") ? [] : rows }));
   vi.stubGlobal("fetch", fetcher);
 
   render(<ProcurementReceiptDrafts org="7" date="2026-09-26" />);
   expect(await screen.findByText("Черновик исправления · версия 1")).toBeInTheDocument();
   expect(screen.getByText(/К накладной № 81, версия 3 · проводка № 42/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: /CORR-1/ }));
-  expect(screen.getByRole("status").textContent).toContain("Исходная накладная и её проводка не меняются");
-  expect(screen.getByRole("status").textContent).toContain("передача в WMS заблокированы до отдельного workflow");
+  expect(screen.getByText(/Связанный черновик исправления/).textContent).toContain("Исходная накладная и её проводка не меняются");
+  expect(screen.getByText(/Связанный черновик исправления/).textContent).toContain("передача в WMS заблокированы до отдельного workflow");
+  expect(await screen.findByText("Проверка исправления")).toBeInTheDocument();
+  expect(screen.getByText("Проведение недоступно. Эта проверка показывает различия и не выдаёт разрешение; движение WMS также недоступно.")).toBeInTheDocument();
+  expect(fetcher.mock.calls.find(([url]) => url.includes("correction-readiness"))?.[1]).toMatchObject({ cache: "no-store" });
   expect(screen.queryByRole("link", { name: "Подготовить складскую приёмку" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /Провести/ })).not.toBeInTheDocument();
+});
+
+it("explains each correction classification flag without enabling posting", async () => {
+  const flags = { physical_change: true, inventory_value_change: true, vat_change: true,
+    primary_document_change: true, operation_date_change: true, no_difference: false };
+  const rows = [correctionRow(92), correctionRow(93), correctionRow(94)];
+  const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes("/92/correction-readiness")
+    ? correctionReadiness(92, flags, { blockers: ["physical_receipt_adjustment_required", "inventory_cost_layer_correction_required",
+      "vat_register_and_eschf_evidence_required", "primary_document_reissue_evidence_required", "correction_posting_period_required",
+      "posting_workflow_not_approved"] }) : url.includes("/93/correction-readiness")
+      ? correctionReadiness(93, { no_difference: false, explanation_only: true }) : url.includes("/94/correction-readiness")
+        ? correctionReadiness(94) : url.includes("supplier-contracts") ? emptyContracts(url)
+          : url.includes("purchase-ownership") ? [] : rows }));
+  vi.stubGlobal("fetch", fetcher);
+
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  expect(await screen.findByText(/Изменилось количество или склад/)).toBeInTheDocument();
+  expect(screen.getByText(/может повлиять на слой себестоимости/)).toBeInTheDocument();
+  expect(screen.getByText(/^Изменилась ставка, сумма или основание НДС/)).toBeInTheDocument();
+  expect(screen.getByText(/^Изменились реквизиты первичного документа/)).toBeInTheDocument();
+  expect(screen.getByText(/Дата операции изменилась/)).toBeInTheDocument();
+  expect(screen.getByText("Процесс проведения исправлений пока не утверждён.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /CORR-93/ }));
+  expect(await screen.findByText(/Изменилось только пояснение/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /CORR-94/ }));
+  expect(await screen.findByText("Различий между исходной накладной и исправлением не выявлено.")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Провести/ })).not.toBeInTheDocument();
+});
+
+it("fails closed for foreign and malformed readiness responses", async () => {
+  const rows = [correctionRow(92), correctionRow(93), correctionRow(94)];
+  const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes("/92/correction-readiness")
+    ? correctionReadiness(92, {}, { organization_id: 8 }) : url.includes("/93/correction-readiness")
+      ? correctionReadiness(93, {}, { blockers: ["__proto__"] }) : url.includes("/94/correction-readiness")
+        ? correctionReadiness(94, { no_difference: false }, { blockers: ["posting_workflow_not_approved"] })
+        : url.includes("supplier-contracts") ? emptyContracts(url) : url.includes("purchase-ownership") ? [] : rows }));
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  expect(await screen.findByText(/Не удалось подтвердить проверку для выбранного юрлица и версии/))
+    .toHaveTextContent("Проведение и движение WMS остаются недоступны");
+  expect(screen.queryByText(/Изменение количества или склада не выявлено/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /CORR-93/ }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Проведение и движение WMS остаются недоступны");
+  expect(screen.queryByText(/Различий между исходной накладной и исправлением не выявлено/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /CORR-94/ }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Проведение и движение WMS остаются недоступны");
+  expect(screen.queryByRole("button", { name: /Провести/ })).not.toBeInTheDocument();
+});
+
+it("ignores readiness responses made stale by changing the selected correction or organization", async () => {
+  const oldDocumentResponse = deferred<unknown>(), oldOrganizationResponse = deferred<unknown>();
+  const rows = [correctionRow(92), correctionRow(93)];
+  const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes("/92/correction-readiness")
+    ? oldDocumentResponse.promise : url.includes("/93/correction-readiness") ? oldOrganizationResponse.promise
+      : url.includes("supplier-contracts") ? emptyContracts(url)
+        : url.includes("purchase-ownership") ? [] : url.includes("/organizations/7/") ? rows : [] }));
+  vi.stubGlobal("fetch", fetcher);
+  const view = render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => url.includes("/92/correction-readiness"))).toBe(true));
+  fireEvent.click(screen.getByRole("button", { name: /CORR-93/ }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => url.includes("/93/correction-readiness"))).toBe(true));
+  await act(async () => {
+    oldDocumentResponse.resolve(correctionReadiness(92, { physical_change: true, no_difference: false }));
+    await oldDocumentResponse.promise;
+  });
+  expect(screen.getByText("Загрузка проверки для текущей версии исправления…")).toBeInTheDocument();
+  view.rerender(<ProcurementReceiptDrafts org="8" />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Проведение и движение WMS остаются недоступны");
+  await act(async () => {
+    oldOrganizationResponse.resolve(correctionReadiness(93, { vat_change: true, no_difference: false }));
+    await oldOrganizationResponse.promise;
+  });
+  expect(screen.getByText(/Не удалось подтвердить проверку для выбранного юрлица и версии/))
+    .toHaveTextContent("Проведение и движение WMS остаются недоступны");
+  expect(fetcher.mock.calls.some(([url]) => url.includes("/organizations/8/receipt-documents/93/correction-readiness"))).toBe(false);
+  expect(screen.queryByText(/Изменилось количество или склад/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Изменилась ставка/)).not.toBeInTheDocument();
 });
 
 it("requires a selected supplier and saves its directory snapshot in a new receipt", async () => {
