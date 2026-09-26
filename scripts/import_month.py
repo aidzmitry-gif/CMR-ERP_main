@@ -2714,6 +2714,10 @@ def _source_reconciliation(
 
     source_call_semantic = []
     source_call_deal_links = call_deal_expected_links or {}
+    source_deal_company_links = {
+        f"BX-{row['ID']}": company_link(row.get("COMPANY_ID"))
+        for row in supported_deals
+    }
     for row in calls:
         try:
             call_id = _canonical_bitrix_call_id(row)
@@ -2738,6 +2742,8 @@ def _source_reconciliation(
             if entity_type == "COMPANY"
             else company_link(contact.get("COMPANY_ID")) if contact else None
         )
+        if entity_type == "DEAL" and source_call_deal_links.get(call_id):
+            counterparty = source_deal_company_links.get(source_call_deal_links[call_id])
         source_call_semantic.append(
             {
                 "identity": call_id,
@@ -4345,6 +4351,36 @@ async def _load_sales_prices(
         item.updated_at = now
 
 
+async def _eligible_bitrix_employee_ids(session, portal_ids: Iterable[str], *, lock: bool) -> dict[str, int]:
+    """Map exact Bitrix account IDs to active, unique CRM employee identities."""
+    from core.domain.models import User
+    from core.services.crm_owners import resolve_crm_owner
+    from fastapi import HTTPException
+
+    usernames = {
+        f"bitrix:{portal_id}" for portal_id in portal_ids
+        if portal_id not in ("", "0")
+    }
+    if not usernames:
+        return {}
+    users = (await session.execute(
+        select(User).where(User.username.in_(usernames))
+    )).scalars().all()
+    eligible: dict[str, int] = {}
+    for user in users:
+        if user.employee_id is None:
+            continue
+        try:
+            owner = await resolve_crm_owner(
+                session, employee_id=user.employee_id, lock=lock
+            )
+        except HTTPException:
+            continue
+        if owner.id == user.id and owner.employee_id is not None:
+            eligible[user.username.removeprefix("bitrix:")] = owner.employee_id
+    return eligible
+
+
 async def load() -> None:
     cache_snapshot = _require_isolated_cache_snapshot()
     cache_dir = cache_snapshot.cache_dir if cache_snapshot is not None else OUT_DIR
@@ -4356,9 +4392,7 @@ async def load() -> None:
         cache_snapshot is not None
         and cache_snapshot.cache_format == _PRIVATE_CACHE_V2_FORMAT
     )
-    from core.domain.models import Contact, Counterparty, CounterpartyAlias, Sku, User
-    from core.services.crm_owners import resolve_crm_owner
-    from fastapi import HTTPException
+    from core.domain.models import Contact, Counterparty, CounterpartyAlias, Sku
     from modules.finance.models import Payment
     from modules.leads.models import Lead
     from modules.sales.models import CallLog, Deal
@@ -4790,26 +4824,14 @@ async def load() -> None:
             if str(row.get("CATEGORY_ID") or "0") in ("0", "7")
             and str(row.get("ASSIGNED_BY_ID") or "").strip() not in ("", "0")
         }
-        bitrix_usernames = {f"bitrix:{user_id}" for user_id in assigned_bitrix_ids}
-        crosswalk_users = (
-            (await s.execute(
-                select(User).where(User.username.in_(bitrix_usernames))
-            )).scalars().all()
-            if bitrix_usernames else []
+        call_portal_user_ids = {
+            str(row.get("PORTAL_USER_ID") or "").strip()
+            for row in call_source_rows
+            if str(row.get("PORTAL_USER_ID") or "").strip() not in ("", "0")
+        }
+        eligible_employee_by_bitrix_id = await _eligible_bitrix_employee_ids(
+            s, assigned_bitrix_ids | call_portal_user_ids, lock=True
         )
-        eligible_employee_by_bitrix_id: dict[str, int] = {}
-        for user in crosswalk_users:
-            if user.employee_id is None:
-                continue
-            try:
-                eligible_owner = await resolve_crm_owner(
-                    s, employee_id=user.employee_id, lock=True
-                )
-            except HTTPException:
-                continue
-            if eligible_owner.id == user.id and eligible_owner.employee_id is not None:
-                source_user_id = user.username.removeprefix("bitrix:")
-                eligible_employee_by_bitrix_id[source_user_id] = eligible_owner.employee_id
         new_deal_owner_ids = {
             str(row.get("ID") or ""): eligible_employee_by_bitrix_id[
                 str(row.get("ASSIGNED_BY_ID") or "").strip()
@@ -4950,6 +4972,10 @@ async def load() -> None:
         call_deal_numbers = {
             number for number in prepared_call_deal_links.values() if number is not None
         }
+        call_deal_source_rows = {
+            f"BX-{row['ID']}": row for row in deal_source_rows
+            if str(row.get("CATEGORY_ID") or "0") in ("0", "7")
+        }
         call_deals_by_number: dict[str, Deal] = {}
         if call_deal_numbers:
             await s.flush()
@@ -4978,11 +5004,19 @@ async def load() -> None:
                 if ent_type == "COMPANY" and ent_id in cp_by_bx_company
                 else cp_by_bx_contact.get(ent_id) if ent_type == "CONTACT" else None
             )
+            if ent_type == "DEAL" and deal_number is not None:
+                deal_source = call_deal_source_rows.get(deal_number)
+                source_company_id = str(deal_source.get("COMPANY_ID") or "") if deal_source else ""
+                matched_company = cp_by_bx_company.get(source_company_id)
+                counterparty_id = matched_company.id if matched_company is not None else None
             contact_id = contact_id_map.get(ent_id) if ent_type == "CONTACT" else None
             call_values = {
                 "direction": "out" if str(c.get("CALL_TYPE")) in ("1", "4") else "in",
                 "phone_e164": (c.get("PHONE_NUMBER") or "")[:32] or None,
                 "owner": users.get(str(c.get("PORTAL_USER_ID") or ""), "")[:128],
+                "owner_id": eligible_employee_by_bitrix_id.get(
+                    str(c.get("PORTAL_USER_ID") or "").strip()
+                ),
                 "counterparty_id": counterparty_id,
                 "contact_id": contact_id,
                 "deal_id": call_deal.id if call_deal is not None else None,
@@ -5142,6 +5176,27 @@ async def _destination_reconciliation(
     onec_sku_identity_expected = onec_sku_identity_expected or {}
     destination_task_semantic_rows = []
     async with db.session_factory() as session:
+        if source_semantic_rows is not None:
+            # Owner identity depends on the active 1C/CRM employee crosswalk in this DB.
+            # Resolve it with the same rule as load so owner drift is visible in fidelity.
+            call_portal_ids: dict[str, str] = {}
+            for source_call in _load_jsonl("bx_calls", cache_snapshot):
+                try:
+                    call_id = _canonical_bitrix_call_id(source_call)
+                except ValueError:
+                    continue
+                portal_id = str(source_call.get("PORTAL_USER_ID") or "").strip()
+                call_portal_ids[call_id] = portal_id
+            expected_owners = await _eligible_bitrix_employee_ids(
+                session, call_portal_ids.values(), lock=False
+            )
+            for source_call in source_semantic_rows.get("bitrix_calls", []):
+                source_call["owner_id"] = expected_owners.get(
+                    call_portal_ids.get(source_call["identity"], "")
+                )
+            source_semantic["bitrix_calls"] = _semantic_summary(
+                source_semantic_rows.get("bitrix_calls", [])
+            )
         counts = {
             "counterparties": await count(Counterparty),
             "counterparty_aliases_bitrix_companies": await count(
@@ -5968,6 +6023,7 @@ async def _destination_reconciliation(
                 "direction": row.direction,
                 "phone_e164": row.phone_e164,
                 "owner": row.owner,
+                "owner_id": row.owner_id,
                 "counterparty_link": bitrix_company_link(row.counterparty_id),
                 "contact_link": (
                     _opaque_identity(

@@ -4398,6 +4398,133 @@ async def test_bitrix_deal_call_import_is_idempotent_and_reconciled(
     assert "BX-30" not in output
 
 
+@pytest.mark.asyncio
+async def test_direct_deal_call_uses_proven_company_and_employee_for_client_card(
+    monkeypatch, tmp_path, capsys
+):
+    module = _module()
+    cache = (tmp_path / "cache").resolve()
+    cache.mkdir()
+    _make_cache(cache)
+    _set_call_primary_deal(cache)
+    db_path = (tmp_path / "isolated.sqlite3").resolve()
+    _set_load_environment(monkeypatch, cache, db_path)
+    await _seed_bitrix_owner_account(module)
+
+    await module.load()
+    capsys.readouterr()
+    await module.load()
+    capsys.readouterr()
+
+    from sqlalchemy import select
+    from modules.sales.models import CallLog, CrmClient, Deal
+
+    db = module._isolated_database()
+    await db.connect()
+    async with db.session_factory() as session:
+        call = (await session.execute(select(CallLog).where(CallLog.call_id == "50"))).scalar_one()
+        deal = (await session.execute(select(Deal).where(Deal.number == "BX-30"))).scalar_one()
+        client = await session.get(CrmClient, deal.crm_client_id)
+        assert call.deal_id == deal.id
+        assert call.owner_id == 901
+        assert client is not None and client.counterparty_id is not None
+        assert call.counterparty_id == client.counterparty_id
+    await db.disconnect()
+
+    await module.reconcile()
+    report = json.loads(capsys.readouterr().out)
+    assert report["destination"]["fidelity"]["bitrix_calls"]["match"] is True
+
+
+@pytest.mark.asyncio
+async def test_call_owner_uses_its_portal_user_and_reconcile_detects_owner_drift(
+    monkeypatch, tmp_path, capsys
+):
+    module = _module()
+    cache = (tmp_path / "cache").resolve()
+    cache.mkdir()
+    _make_cache(cache)
+    _set_call_primary_deal(cache)
+    _write_jsonl(cache, "bx_users", [
+        {"ID": "1", "NAME": "Deal", "LAST_NAME": "Owner"},
+        {"ID": "2", "NAME": "Call", "LAST_NAME": "Owner"},
+    ])
+    source_call = json.loads((cache / "bx_calls.jsonl").read_text(encoding="utf-8"))
+    source_call["PORTAL_USER_ID"] = "2"
+    _write_jsonl(cache, "bx_calls", [source_call])
+    db_path = (tmp_path / "isolated.sqlite3").resolve()
+    _set_load_environment(monkeypatch, cache, db_path)
+    await _seed_bitrix_owner_account(module, username="bitrix:1", employee_id=901)
+    await _seed_bitrix_owner_account(module, username="bitrix:2", employee_id=902)
+
+    await module.load()
+    capsys.readouterr()
+    await module.load()
+    capsys.readouterr()
+
+    from sqlalchemy import select
+    from modules.sales.models import CallLog, Deal
+
+    db = module._isolated_database()
+    await db.connect()
+    async with db.session_factory() as session:
+        call = (await session.execute(select(CallLog).where(CallLog.call_id == "50"))).scalar_one()
+        deal = (await session.execute(select(Deal).where(Deal.number == "BX-30"))).scalar_one()
+        assert call.owner_id == 902
+        assert deal.owner_id == 901
+    await db.disconnect()
+
+    await module.reconcile()
+    report = json.loads(capsys.readouterr().out)
+    assert report["destination"]["fidelity"]["bitrix_calls"]["match"] is True
+
+    await db.connect()
+    async with db.session_factory() as session:
+        call = (await session.execute(select(CallLog).where(CallLog.call_id == "50"))).scalar_one()
+        call.owner_id = 901
+        await session.commit()
+    await db.disconnect()
+
+    await module.reconcile()
+    report = json.loads(capsys.readouterr().out)
+    assert report["destination"]["fidelity"]["bitrix_calls"]["match"] is False
+
+
+@pytest.mark.asyncio
+async def test_call_owner_zero_sentinel_remains_unassigned_in_load_and_reconcile(
+    monkeypatch, tmp_path, capsys
+):
+    module = _module()
+    cache = (tmp_path / "cache").resolve()
+    cache.mkdir()
+    _make_cache(cache)
+    source_call = json.loads((cache / "bx_calls.jsonl").read_text(encoding="utf-8"))
+    source_call["PORTAL_USER_ID"] = "0"
+    _write_jsonl(cache, "bx_calls", [source_call])
+    db_path = (tmp_path / "isolated.sqlite3").resolve()
+    _set_load_environment(monkeypatch, cache, db_path)
+    await _seed_bitrix_owner_account(module, username="bitrix:0", employee_id=902)
+
+    await module.load()
+    capsys.readouterr()
+    await module.load()
+    capsys.readouterr()
+
+    from sqlalchemy import select
+    from modules.sales.models import CallLog
+
+    db = module._isolated_database()
+    await db.connect()
+    async with db.session_factory() as session:
+        call = (await session.execute(select(CallLog).where(CallLog.call_id == "50"))).scalar_one()
+        assert call.owner_id is None
+    await db.disconnect()
+
+    await module.reconcile()
+    report = json.loads(capsys.readouterr().out)
+    assert report["destination"]["fidelity"]["bitrix_calls"]["match"] is True
+
+
 @pytest.mark.parametrize(
     ("call_deal_id", "deal_category"),
     [("0", "0"), ("999", "0"), ("30", "5")],
