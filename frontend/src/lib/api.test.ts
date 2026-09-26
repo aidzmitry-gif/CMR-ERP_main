@@ -30,6 +30,7 @@ import {
   fetchBoardStages,
   fetchBranding,
   fetchCalls,
+  fetchCallsResult,
   fetchCrmStaff,
   fetchChats,
   fetchContacts,
@@ -848,6 +849,23 @@ describe("api client — телефония", () => {
   it("fetchCalls → [] при ошибке", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net")));
     expect(await fetchCalls()).toEqual([]);
+  });
+
+  it("fetchCallsResult фильтрует по контрагенту и сохраняет безопасную ссылку на CRM-клиента", async () => {
+    const row = { id: 8, call_id: "synthetic-8", direction: "in", phone_e164: null, owner: "Тест", status: "ended", deal_id: null, counterparty_id: 42, crm_client_id: 17, started_at: "2026-09-01T10:00:00" };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => [row] });
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await fetchCallsResult({ counterparty_id: 42, unlinked: true })).toEqual({ ok: true, rows: [row] });
+    expect(fetchMock).toHaveBeenCalledWith("/api/sales/calls?counterparty_id=42&unlinked=true", expect.objectContaining({ cache: "no-store" }));
+  });
+
+  it("fetchCallsResult fails closed if the server returns another counterparty's call", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => [
+      { id: 8, call_id: "synthetic-8", direction: "in", phone_e164: null, owner: "Тест", status: "ended", deal_id: null, counterparty_id: 43, started_at: "2026-09-01T10:00:00" },
+    ] }));
+
+    expect(await fetchCallsResult({ counterparty_id: 42 })).toEqual({ ok: false, error: "Сервер вернул звонки другого клиента." });
   });
 
   it("callComment/callResult/callLinkDeal/triggerIncomingCall шлют POST с телом на верный путь", async () => {
