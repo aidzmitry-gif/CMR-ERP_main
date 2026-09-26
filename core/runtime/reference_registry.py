@@ -260,7 +260,7 @@ SYSTEM_REFERENCES: tuple[Reference, ...] = (
     ),
     Reference(
         key="core.accounts",
-        title="План счетов",
+        title="Старый технический список счетов",
         department="Финансы",
         owner_schema="public",
         endpoint="/system/refs/accounts",
@@ -284,8 +284,10 @@ SYSTEM_REFERENCES: tuple[Reference, ...] = (
         ),
         permissions=("refs.view", "refs.edit"),
         ai_exposed=True,
-        description="План счетов бухучёта РБ (постановление Минфина №50): синтетика + субсчета "
-        "(иерархия parent_id), датированный ввод/вывод из оборота. Для проводок финмодуля.",
+        description="Совместимый технический справочник core.accounts. Бухгалтерские проводки "
+        "используют отдельный рабочий план счетов юрлица в accounting.account; "
+        "его настройка и типовой каталог находятся в разделе «План счетов Беларуси». "
+        "Записи core.accounts не становятся рабочими счетами автоматически.",
     ),
     Reference(
         key="core.regions",
