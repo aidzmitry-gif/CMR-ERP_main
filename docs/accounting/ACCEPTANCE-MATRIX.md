@@ -76,6 +76,12 @@ current target database or all later source migrations.
   PostgreSQL yielded one success, one conflict and one audit entry. Focused
   backend, frontend, type and lint checks passed. A real browser/user scenario
   and integration into a reproducible release remain open.
+- The complete local Sales DB suite now passes 47/47 after its two legacy
+  assertions stopped expecting invented 1C references. A locally issued
+  document is labelled as issued in ERP; an external 1C reference appears only
+  when one was actually returned. The changed document UI passed 49/49 focused
+  tests plus TypeScript and lint. This does not prove accounting posting,
+  customer notification or deployment.
 
 - On 2026-09-26, a fresh disposable PostgreSQL 16 database passed **2**
   supplier-contract/receipt-history checks at migration `0186` and **4**
