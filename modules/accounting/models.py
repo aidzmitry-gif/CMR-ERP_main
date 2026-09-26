@@ -529,6 +529,75 @@ event.listen(InboundVatEvidenceFile, "before_update", immutable_inbound_vat_evid
 event.listen(InboundVatEvidenceFile, "before_delete", immutable_inbound_vat_evidence_file)
 
 
+class InboundVatCorrectionWorkpaper(Base):
+    """Append-only, review-only source binding for a VAT-only receipt correction."""
+
+    __tablename__ = "inbound_vat_correction_workpaper"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "request_key",
+                         name="uq_inbound_vat_correction_workpaper_request"),
+        UniqueConstraint("organization_id", "id",
+                         name="uq_inbound_vat_correction_workpaper_org_id"),
+        UniqueConstraint("organization_id", "receipt_id", "receipt_version", "tax_period", "revision",
+                         name="uq_inbound_vat_correction_workpaper_revision"),
+        UniqueConstraint("supersedes_id", name="uq_inbound_vat_correction_workpaper_successor"),
+        ForeignKeyConstraint(
+            ["organization_id", "supersedes_id"],
+            ["accounting.inbound_vat_correction_workpaper.organization_id",
+             "accounting.inbound_vat_correction_workpaper.id"],
+            name="fk_inbound_vat_workpaper_supersedes_org",
+        ),
+        ForeignKeyConstraint(
+            ["receipt_id", "receipt_version"],
+            ["procurement.receipt_revision.receipt_id", "procurement.receipt_revision.version"],
+            name="fk_inbound_vat_workpaper_correction_revision",
+        ),
+        ForeignKeyConstraint(
+            ["original_receipt_id", "original_version"],
+            ["procurement.receipt_revision.receipt_id", "procurement.receipt_revision.version"],
+            name="fk_inbound_vat_workpaper_original_revision",
+        ),
+        CheckConstraint(
+            "receipt_version > 0 AND original_version > 0 AND revision > 0",
+            name="inbound_vat_correction_workpaper_positive_versions",
+        ),
+        CheckConstraint(
+            "length(tax_period) = 7",
+            name="inbound_vat_correction_workpaper_tax_period_length",
+        ),
+        {"schema": "accounting"},
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("accounting.organization.id"))
+    receipt_id: Mapped[int] = mapped_column(ForeignKey("procurement.receipt_document.id"))
+    receipt_version: Mapped[int] = mapped_column(Integer)
+    correction_revision_id: Mapped[int] = mapped_column(ForeignKey("procurement.receipt_revision.id"))
+    original_receipt_id: Mapped[int] = mapped_column(ForeignKey("procurement.receipt_document.id"))
+    original_version: Mapped[int] = mapped_column(Integer)
+    original_revision_id: Mapped[int] = mapped_column(ForeignKey("procurement.receipt_revision.id"))
+    source_entry_id: Mapped[int] = mapped_column(ForeignKey("accounting.entry.id"))
+    source_entry_digest: Mapped[str] = mapped_column(String(64))
+    tax_period: Mapped[str] = mapped_column(String(7))
+    revision: Mapped[int] = mapped_column(Integer)
+    supersedes_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    request_key: Mapped[str] = mapped_column(String(36))
+    request_digest: Mapped[str] = mapped_column(String(64))
+    basis_digest: Mapped[str] = mapped_column(String(64))
+    snapshot_digest: Mapped[str] = mapped_column(String(64))
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    reviewer_evidence: Mapped[str] = mapped_column(String(2000))
+    actor: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+def immutable_inbound_vat_correction_workpaper(mapper, connection, target):
+    raise ValueError("Inbound VAT correction workpaper history is immutable")
+
+
+event.listen(InboundVatCorrectionWorkpaper, "before_update", immutable_inbound_vat_correction_workpaper)
+event.listen(InboundVatCorrectionWorkpaper, "before_delete", immutable_inbound_vat_correction_workpaper)
+
+
 class PayrollPopulationReview(Base):
     """Append-only chief attestation of the source roster for one book/month."""
 

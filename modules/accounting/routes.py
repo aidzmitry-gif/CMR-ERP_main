@@ -37,6 +37,7 @@ from modules.accounting import (
     fx_settlement_preview,
     inbound_vat_evidence,
     input_vat,
+    input_vat_correction_workpaper,
     input_vat_register,
     inventory_cost,
     inventory_issues,
@@ -80,6 +81,10 @@ from modules.accounting.foreign_trade_register import (
 from modules.accounting.inbound_vat_evidence import (
     InboundVatEvidenceFileInput,
     InboundVatEvidenceKind,
+)
+from modules.accounting.input_vat_correction_workpaper import (
+    InboundVatCorrectionWorkpaperConfirmInput,
+    InboundVatCorrectionWorkpaperInput,
 )
 from modules.accounting.input_vat_register import (
     InputVatRegisterConfirmInput,
@@ -2079,6 +2084,61 @@ async def download_inbound_vat_evidence_file(org_id: int, file_id: int,
         'X-Content-Type-Options': 'nosniff',
         'Cache-Control': 'private, no-store',
     })
+
+
+@router.post('/organizations/{org_id}/inbound-vat-correction-workpapers/preview')
+async def inbound_vat_correction_workpaper_preview(
+        org_id: int, data: InboundVatCorrectionWorkpaperInput,
+        response: Response, ctx=Depends(member)):
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    try:
+        result = await input_vat_correction_workpaper.preview(ctx[0], org_id, data)
+    except service.AccountingError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    response.headers['Cache-Control'] = 'private, no-store'
+    return result
+
+
+@router.post('/organizations/{org_id}/inbound-vat-correction-workpapers', status_code=201)
+async def create_inbound_vat_correction_workpaper(
+        org_id: int, data: InboundVatCorrectionWorkpaperConfirmInput,
+        response: Response, ctx=Depends(member)):
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    try:
+        result = await input_vat_correction_workpaper.create(ctx[0], org_id, data, ctx[1])
+    except service.AccountingError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    response.headers['Cache-Control'] = 'private, no-store'
+    return result
+
+
+@router.get('/organizations/{org_id}/inbound-vat-correction-workpapers/by-request/{request_key}')
+async def inbound_vat_correction_workpaper_by_request(
+        org_id: int, request_key: UUID, response: Response, ctx=Depends(member)):
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    result = await input_vat_correction_workpaper.by_request(ctx[0], org_id, request_key)
+    response.headers['Cache-Control'] = 'private, no-store'
+    return result
+
+
+@router.get('/organizations/{org_id}/inbound-vat-correction-workpapers')
+async def inbound_vat_correction_workpaper_history(
+        org_id: int, response: Response, receipt_id: int = Query(gt=0),
+        receipt_version: int = Query(gt=0), tax_period: str = Query(),
+        ctx=Depends(member)):
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    try:
+        result = await input_vat_correction_workpaper.history(
+            ctx[0], org_id, receipt_id, receipt_version, tax_period,
+        )
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    response.headers['Cache-Control'] = 'private, no-store'
+    return result
 
 
 @router.get('/organizations/{org_id}/payroll-evidence-files')
