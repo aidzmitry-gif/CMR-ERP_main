@@ -366,14 +366,17 @@ def _verified_binary_snapshot(root: Path) -> tuple[list[dict[str, Any]], dict[st
         raise ExportError("BAD_BINARY_SNAPSHOT") from None
 
 
-def _stage_comment_binary_cache(
+def _stage_supported_binary_cache(
     bitrix_root: Path, binary_root: Path, output: Path,
-) -> tuple[dict[str, dict[str, int | str]], dict[str, int | str], int]:
-    """Seal only deal-comment binaries, while checking all source links."""
+) -> tuple[
+    dict[str, dict[str, int | str]], dict[str, int | str], int,
+    dict[str, int | str] | None,
+]:
+    """Seal deal-comment binaries and source-matched call recordings."""
     links, inventory = _verified_binary_snapshot(binary_root)
-    if any(row.get("source") != "comment" for row in links):
+    if any(row.get("source") not in {"comment", "call"} for row in links):
         raise ExportError("UNSUPPORTED_BINARY_SOURCE")
-    expected: set[tuple[str, str, str, str]] = set()
+    expected_comments: set[tuple[str, str, str, str]] = set()
     for comment in _staged_rows(bitrix_root, "timeline_comments"):
         entity_type = comment.get("ENTITY_TYPE")
         if entity_type not in {"deal", "lead"}:
@@ -390,11 +393,68 @@ def _stage_comment_binary_cache(
                     or _positive_id(file_key, "BAD_COMMENT_FILE_ID")
                     != _positive_id(file_row.get("id"), "BAD_COMMENT_FILE_ID")):
                 raise ExportError("COMMENT_FILE_ID_MISMATCH")
-            expected.add((entity_type, owner_id, comment_id, str(file_key)))
-    actual: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+            expected_comments.add((entity_type, owner_id, comment_id, str(file_key)))
+    actual_comments: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    expected_calls: dict[str, tuple[str, str, str, str, str]] = {}
+    for call in _staged_rows(bitrix_root, "calls"):
+        url = _call_record_url(call.get("CALL_RECORD_URL"), "BAD_CALL_RECORD_URL")
+        record_file_id = _optional_call_file_id(
+            call.get("RECORD_FILE_ID"), "BAD_CALL_FILE_ID"
+        )
+        if url or record_file_id:
+            call_id = _canonical_call_source_id(call.get("ID"), "BAD_CALL_ID")
+            source_call_id = _call_id_field(call.get("CALL_ID"), "BAD_CALL_ID") or call_id
+            entity_type = _optional_call_owner_type(
+                call.get("CRM_ENTITY_TYPE"), "BAD_CALL_OWNER_TYPE"
+            )
+            entity_id = _optional_call_owner_id(
+                call.get("CRM_ENTITY_ID"), "BAD_CALL_OWNER_ID"
+            )
+            portal_user_id = _optional_call_owner_id(
+                call.get("PORTAL_USER_ID"), "BAD_CALL_USER_ID"
+            )
+            if call_id in expected_calls:
+                raise ExportError("DUPLICATE_CALL_ID")
+            expected_calls[call_id] = (
+                source_call_id, record_file_id, entity_type, entity_id, portal_user_id,
+            )
+    actual_calls: dict[str, dict[str, Any]] = {}
     for row in links:
-        if row.get("source") != "comment":
+        source = row.get("source")
+        if source == "call":
+            if set(row) != {
+                "source", "source_id", "call_id", "record_file_id", "entity_type", "entity_id",
+                "portal_user_id", "binary_key",
+            }:
+                raise ExportError("BINARY_CALL_LINK_MISMATCH")
+            call_id = _canonical_call_source_id(
+                row.get("source_id"), "BINARY_CALL_LINK_MISMATCH"
+            )
+            call_identity = (
+                _call_id_field(row.get("call_id"), "BINARY_CALL_LINK_MISMATCH"),
+                _optional_call_file_id(
+                    row.get("record_file_id"), "BINARY_CALL_LINK_MISMATCH"
+                ),
+                _optional_call_owner_type(
+                    row.get("entity_type"), "BINARY_CALL_LINK_MISMATCH"
+                ),
+                _optional_call_owner_id(row.get("entity_id"), "BINARY_CALL_LINK_MISMATCH"),
+                _optional_call_owner_id(
+                    row.get("portal_user_id"), "BINARY_CALL_LINK_MISMATCH"
+                ),
+            )
+            if (call_id in actual_calls or expected_calls.get(call_id) != call_identity
+                    or row.get("binary_key") != "call:" + call_id):
+                raise ExportError("BINARY_CALL_LINK_MISMATCH")
+            key = row["binary_key"]
+            if set(inventory[key]) != {"key", "filename", "bytes", "sha256", "content_type"}:
+                raise ExportError("BINARY_CALL_INVENTORY_MISMATCH")
+            actual_calls[call_id] = row
             continue
+        if expected_calls and set(row) != {
+            "source", "entity_type", "entity_id", "source_id", "file_id", "binary_key",
+        }:
+            raise ExportError("BINARY_COMMENT_LINK_MISMATCH")
         entity_type = row.get("entity_type")
         if entity_type not in {"deal", "lead"}:
             raise ExportError("BINARY_COMMENT_LINK_MISMATCH")
@@ -404,13 +464,25 @@ def _stage_comment_binary_cache(
             _positive_id(row.get("source_id"), "BINARY_COMMENT_LINK_MISMATCH"),
             _positive_id(row.get("file_id"), "BINARY_COMMENT_LINK_MISMATCH"),
         )
-        if (identity in actual or row.get("binary_key") != "disk:" + identity[3]):
+        if (identity in actual_comments or row.get("binary_key") != "disk:" + identity[3]):
             raise ExportError("BINARY_COMMENT_LINK_MISMATCH")
-        actual[identity] = row
-    if set(actual) != expected:
+        actual_comments[identity] = row
+    if set(actual_comments) != expected_comments:
         raise ExportError("BINARY_COMMENT_LINK_MISMATCH")
-    selected_links = [actual[key] for key in sorted(actual) if key[0] == "deal"]
-    selected_keys = sorted({row["binary_key"] for row in selected_links})
+    if set(actual_calls) != set(expected_calls):
+        raise ExportError("BINARY_CALL_LINK_MISMATCH")
+    if expected_calls:
+        for row in inventory.values():
+            if row["key"].startswith("disk:") and set(row) != {
+                "key", "filename", "bytes", "sha256", "content_type", "name",
+            }:
+                raise ExportError("BINARY_COMMENT_INVENTORY_MISMATCH")
+    selected_comment_links = [
+        actual_comments[key] for key in sorted(actual_comments) if key[0] == "deal"
+    ]
+    selected_comment_keys = sorted({row["binary_key"] for row in selected_comment_links})
+    selected_call_links = [actual_calls[key] for key in sorted(actual_calls)]
+    selected_call_keys = sorted({row["binary_key"] for row in selected_call_links})
 
     def write_jsonl(name: str, rows: list[dict[str, Any]]) -> dict[str, int | str]:
         digest = hashlib.sha256()
@@ -426,44 +498,64 @@ def _stage_comment_binary_cache(
         return {"records": count, "bytes": size, "sha256": digest.hexdigest()}
 
     cache = {
-        "bx_comment_binary_links": write_jsonl("bx_comment_binary_links", selected_links),
+        "bx_comment_binary_links": write_jsonl(
+            "bx_comment_binary_links", selected_comment_links
+        ),
         "bx_comment_binary_inventory": write_jsonl(
-            "bx_comment_binary_inventory", [inventory[key] for key in selected_keys]
+            "bx_comment_binary_inventory", [inventory[key] for key in selected_comment_keys]
         ),
     }
-    destination = output / "comment_binary_files"
-    destination.mkdir(exist_ok=False)
-    copied_files: list[tuple[str, int, str]] = []
-    file_bytes = 0
-    for key in selected_keys:
-        item = inventory[key]
-        filename = item["filename"]
-        source = binary_root / "binary_files" / filename
-        target = destination / filename
-        if source.is_symlink() or not source.is_file():
-            raise ExportError("BINARY_SNAPSHOT_CHANGED")
-        digest = hashlib.sha256()
-        size = 0
-        with source.open("rb") as input_stream, target.open("xb") as output_stream:
-            for chunk in iter(lambda: input_stream.read(1024 * 1024), b""):
-                size += len(chunk)
-                if size > 2 * 1024**3:
-                    raise ExportError("BINARY_SNAPSHOT_CHANGED")
-                digest.update(chunk)
-                output_stream.write(chunk)
-        if size != item["bytes"] or digest.hexdigest() != item["sha256"]:
-            raise ExportError("BINARY_SNAPSHOT_CHANGED")
-        copied_files.append((filename, size, digest.hexdigest()))
-        file_bytes += size
-    fingerprint = hashlib.sha256()
-    for filename, size, digest in sorted(copied_files):
-        fingerprint.update(f"{filename}:{size}:{digest}\n".encode("ascii"))
-    files_summary: dict[str, int | str] = {
-        "records": len(selected_keys), "bytes": file_bytes,
-        "sha256": fingerprint.hexdigest(),
-    }
-    lead_refs = sum(1 for key in actual if key[0] == "lead")
-    return cache, files_summary, lead_refs
+
+    def copy_files(keys: list[str], destination: Path) -> dict[str, int | str]:
+        destination.mkdir(exist_ok=False)
+        copied_files: list[tuple[str, int, str]] = []
+        file_bytes = 0
+        for key in keys:
+            item = inventory[key]
+            filename = item["filename"]
+            source = binary_root / "binary_files" / filename
+            target = destination / filename
+            if source.is_symlink() or not source.is_file():
+                raise ExportError("BINARY_SNAPSHOT_CHANGED")
+            digest = hashlib.sha256()
+            size = 0
+            with source.open("rb") as input_stream, target.open("xb") as output_stream:
+                for chunk in iter(lambda: input_stream.read(1024 * 1024), b""):
+                    size += len(chunk)
+                    if size > 2 * 1024**3:
+                        raise ExportError("BINARY_SNAPSHOT_CHANGED")
+                    digest.update(chunk)
+                    output_stream.write(chunk)
+            if size != item["bytes"] or digest.hexdigest() != item["sha256"]:
+                raise ExportError("BINARY_SNAPSHOT_CHANGED")
+            copied_files.append((filename, size, digest.hexdigest()))
+            file_bytes += size
+        fingerprint = hashlib.sha256()
+        for filename, size, digest in sorted(copied_files):
+            fingerprint.update(f"{filename}:{size}:{digest}\n".encode("ascii"))
+        return {
+            "records": len(keys), "bytes": file_bytes,
+            "sha256": fingerprint.hexdigest(),
+        }
+
+    comment_files_summary = copy_files(
+        selected_comment_keys, output / "comment_binary_files"
+    )
+    call_files_summary = None
+    if selected_call_keys:
+        cache.update({
+            "bx_call_binary_links": write_jsonl(
+                "bx_call_binary_links", selected_call_links
+            ),
+            "bx_call_binary_inventory": write_jsonl(
+                "bx_call_binary_inventory", [inventory[key] for key in selected_call_keys]
+            ),
+        })
+        call_files_summary = copy_files(
+            selected_call_keys, output / "call_binary_files"
+        )
+    lead_refs = sum(1 for key in actual_comments if key[0] == "lead")
+    return cache, comment_files_summary, lead_refs, call_files_summary
 
 
 PRIVATE_CACHE_MAP = {
@@ -682,6 +774,7 @@ def stage_import_cache(
         for source_name in sorted(manifest):
             cache_name = PRIVATE_CACHE_MAP.get(source_name)
             seen: set[str] = set()
+            raw_call_ids: list[str] = []
             fingerprint = hashlib.sha256()
             size = 0
             count = 0
@@ -752,6 +845,19 @@ def stage_import_cache(
                         if canonical not in catalog_product_ids:
                             raise ExportError("BAD_PRODUCT_CATALOG_EVIDENCE")
                         identity = canonical
+                    elif source_name == "calls":
+                        identity = _canonical_call_source_id(
+                            row.get("ID"), "BAD_PRIVATE_SOURCE_ID"
+                        )
+                        raw_call_ids.append(identity)
+                        call_record_url = _call_record_url(
+                            row.get("CALL_RECORD_URL"), "BAD_CALL_RECORD_URL"
+                        )
+                        call_record_file_id = _optional_call_file_id(
+                            row.get("RECORD_FILE_ID"), "BAD_CALL_FILE_ID"
+                        )
+                        if call_record_url or call_record_file_id:
+                            recording_refs += 1
                     else:
                         identity_field = ("Ref_Key" if source_name.startswith("Catalog_")
                                           else "deal_id" if source_name == "deal_product_rows"
@@ -760,9 +866,11 @@ def stage_import_cache(
                     if not identity or identity in seen:
                         raise ExportError("BAD_PRIVATE_SOURCE_ID")
                     seen.add(identity)
-                    if source_name == "calls" and (row.get("CALL_RECORD_URL") or row.get("RECORD_FILE_ID")):
-                        recording_refs += 1
-                    line = json.dumps(row, ensure_ascii=False, sort_keys=True,
+                    cached_row = row
+                    if source_name == "calls" and binary_root is not None:
+                        cached_row = dict(row)
+                        cached_row.pop("CALL_RECORD_URL", None)
+                    line = json.dumps(cached_row, ensure_ascii=False, sort_keys=True,
                                       separators=(",", ":")).encode("utf-8") + b"\n"
                     stream.write(line)
                     fingerprint.update(line)
@@ -770,6 +878,8 @@ def stage_import_cache(
             finally:
                 if stream is not None:
                     stream.close()
+            if source_name == "calls":
+                _verify_private_source_keys(root, "calls", raw_call_ids, key_field="ID")
             if count != manifest[source_name]["records"]:
                 raise ExportError("STAGED_DATASET_MISMATCH")
             if cache_name:
@@ -783,14 +893,19 @@ def stage_import_cache(
         blocked["task_mail_unimported"] = task_mail_rows
     if recording_refs:
         blocked["call_recordings"] = recording_refs
-    binary_files_summary = None
+    comment_binary_files_summary = None
+    call_binary_files_summary = None
     if binary_root is not None:
-        binary_cache, binary_files_summary, lead_refs = _stage_comment_binary_cache(
+        binary_cache, comment_binary_files_summary, lead_refs, call_binary_files_summary = (
+            _stage_supported_binary_cache(
             bitrix_root, binary_root, output
+            )
         )
         cache.update(binary_cache)
         if lead_refs:
             blocked["timeline_lead_attachments"] = lead_refs
+        if call_binary_files_summary is not None:
+            blocked["call_recordings"] = recording_refs
     elif timeline_attachment_refs:
         blocked["timeline_attachments"] = timeline_attachment_refs
     for root, _, digest in manifests:
@@ -800,7 +915,11 @@ def stage_import_cache(
         (binary_root / "manifest.json").read_bytes()
     ).hexdigest():
         raise ExportError("PRIVATE_SOURCE_CHANGED")
-    format_name = "CRM-LIVE-001-private-cache-v2" if binary_root is not None else "CRM-LIVE-001-private-cache-v1"
+    format_name = (
+        "CRM-LIVE-001-private-cache-v3" if call_binary_files_summary is not None
+        else "CRM-LIVE-001-private-cache-v2" if binary_root is not None
+        else "CRM-LIVE-001-private-cache-v1"
+    )
     summary = {
         "format": format_name,
         "ready_for_load": not blocked,
@@ -810,7 +929,9 @@ def stage_import_cache(
     }
     if binary_root is not None:
         summary["source_manifests"]["binary"] = binary_manifest_digest
-        summary["comment_binary_files"] = binary_files_summary
+        summary["comment_binary_files"] = comment_binary_files_summary
+    if call_binary_files_summary is not None:
+        summary["call_binary_files"] = call_binary_files_summary
     manifest_body = json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8")
     with (output / "private-source-manifest.json").open("xb") as stream:
         stream.write(manifest_body)
@@ -849,6 +970,23 @@ def _optional_call_owner_type(value: Any, code: str) -> str:
 
 def _optional_call_owner_id(value: Any, code: str) -> str:
     return _optional_call_file_id(value, code)
+
+
+def _canonical_call_source_id(value: Any, code: str) -> str:
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise ExportError(code)
+    raw = str(value)
+    if len(raw) > 20 or not re.fullmatch(r"[1-9][0-9]*", raw):
+        raise ExportError(code)
+    return raw
+
+
+def _call_record_url(value: Any, code: str) -> str:
+    if value is None or value == "":
+        return ""
+    if not isinstance(value, str):
+        raise ExportError(code)
+    return _signed_download_url(value)
 
 
 def _task_attachment_id(value: Any) -> str:
@@ -1035,14 +1173,14 @@ def export_binaries(
             task_refs.append((task_id, _task_attachment_id(value)))
     call_refs: list[tuple[str, str, str, bool, str, str, str]] = []
     unavailable_recordings = 0
-    for row in _staged_rows(metadata, "calls"):
-        call_id = _positive_id(row.get("ID"), "BAD_CALL_ID")
-        url = row.get("CALL_RECORD_URL")
+    call_rows = list(_staged_rows(metadata, "calls"))
+    call_ids = [_canonical_call_source_id(row.get("ID"), "BAD_CALL_ID") for row in call_rows]
+    _verify_private_source_keys(metadata, "calls", call_ids, key_field="ID")
+    for row, call_id in zip(call_rows, call_ids):
+        url = _call_record_url(row.get("CALL_RECORD_URL"), "BAD_CALL_RECORD_URL")
         record_file_id = _optional_call_file_id(
             row.get("RECORD_FILE_ID"), "BAD_CALL_FILE_ID"
         )
-        if url:
-            _signed_download_url(url)
         if url or record_file_id:
             call_refs.append((
                 call_id, _call_id_field(row.get("CALL_ID"), "BAD_CALL_ID"),
@@ -1189,6 +1327,7 @@ def export_binaries(
         links.add(key, {
             "source": "call", "source_id": call_id,
             "call_id": source_call_id or call_id,
+            "record_file_id": record_file_id,
             "entity_type": source_owner_type, "entity_id": source_owner_id,
             "portal_user_id": source_user_id,
             "binary_key": key,

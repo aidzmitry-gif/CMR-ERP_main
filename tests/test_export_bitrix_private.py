@@ -345,7 +345,7 @@ def _binary_metadata(root, *, call_url="https://microchops.bitrix24.by/rest/down
     for name, dataset_rows in rows.items():
         dataset = module.Dataset(root, name)
         for index, row in enumerate(dataset_rows):
-            dataset.add(str(index), row)
+            dataset.add(str(row.get("ID")) if name == "calls" else str(index), row)
         summary[name] = dataset.summary()
     (root / "manifest.json").write_text(json.dumps(summary), encoding="utf-8")
 
@@ -694,7 +694,7 @@ def test_call_refresh_rejects_broad_query():
 def _private_stage_sources(bitrix_root, onec_root, *, with_products=True,
                            product_envelopes=None, catalog_rows=None,
                            comments=None, tasks=None, task_keys=None,
-                           deal_rows=None):
+                           deal_rows=None, calls=None):
     bitrix_root.mkdir()
     bitrix_summary = {}
     for name in sorted(module.PRIVATE_BITRIX_DATASETS):
@@ -738,6 +738,12 @@ def _private_stage_sources(bitrix_root, onec_root, *, with_products=True,
                     row.get("id") or row.get("ID") or str(index)
                 )
                 dataset.add(str(key), row)
+        elif name == "calls":
+            call_rows = calls if calls is not None else [
+                {"ID": "1", "TITLE": "PRIVATE_SOURCE"},
+            ]
+            for row in call_rows:
+                dataset.add(str(row.get("ID") or ""), row)
         elif name in module.PRIVATE_CACHE_MAP and not name.startswith("Catalog_") and name not in {
             "deals", "deal_product_rows", "product_catalog_evidence",
         }:
@@ -753,6 +759,283 @@ def _private_stage_sources(bitrix_root, onec_root, *, with_products=True,
         dataset.add("ref-1", {"Ref_Key": "ref-1", "Description": "PRIVATE_1C"})
         onec_summary[name] = dataset.summary()
     (onec_root / "manifest.json").write_text(json.dumps(onec_summary), encoding="utf-8")
+
+
+CALL_RECORD_URL = (
+    "https://microchops.bitrix24.by/rest/download.json?token=SOURCE_SIGNED_TOKEN"
+)
+
+
+def _call_binary_stage_inputs(tmp_path, *, source_call_overrides=None, comments=None):
+    tmp_path = tmp_path.resolve()
+    comments = comments or []
+    call = {
+        "ID": "10", "CALL_ID": "call-10", "RECORD_FILE_ID": "42",
+        "CALL_RECORD_URL": CALL_RECORD_URL, "CRM_ENTITY_TYPE": "CONTACT",
+        "CRM_ENTITY_ID": "11", "PORTAL_USER_ID": "5",
+    }
+    source_call = {**call, **(source_call_overrides or {})}
+    bitrix_root, onec_root = tmp_path / "bitrix", tmp_path / "onec"
+    _private_stage_sources(
+        bitrix_root, onec_root, with_products=False, comments=comments, calls=[source_call]
+    )
+    metadata = tmp_path / "binary_metadata"
+    _binary_metadata(
+        metadata, call_url=CALL_RECORD_URL, source_call_id="call-10",
+        call_record_file_id=42, call_owner_type="CONTACT", call_owner_id="11",
+        call_user_id="5", comments=comments, deals=[{"ID": "11"}], tasks=[],
+    )
+
+    class SameCallIdentity(BinarySession):
+        def post(self, url, *, json, timeout, allow_redirects):
+            if url.endswith("/voximplant.statistic.get.json"):
+                return Response({"result": [{
+                    "ID": "10", "CALL_ID": "call-10", "RECORD_FILE_ID": 42,
+                    "CRM_ENTITY_TYPE": "CONTACT", "CRM_ENTITY_ID": "11",
+                    "PORTAL_USER_ID": "5",
+                    "CALL_RECORD_URL": (
+                        "https://microchops.bitrix24.by/rest/download.json?token=FRESH_CALL"
+                    ),
+                }]})
+            return super().post(url, json=json, timeout=timeout,
+                                allow_redirects=allow_redirects)
+
+    binaries = (tmp_path / "binaries").resolve()
+    module.export_binaries(WEBHOOK, metadata, binaries, session=SameCallIdentity())
+    return bitrix_root, onec_root, binaries
+
+
+def _read_binary_dataset(root, name):
+    return [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted((root / name).glob("*.json"))
+    ]
+
+
+def _replace_binary_dataset(root, name, rows):
+    folder = root / name
+    for path in folder.iterdir():
+        path.unlink()
+    folder.rmdir()
+    dataset = module.Dataset(root, name)
+    for index, row in enumerate(rows):
+        dataset.add(str(index), row)
+    return dataset.summary()
+
+
+def _rewrite_binary_snapshot(root, *, links=None, inventory=None):
+    manifest_path = root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if links is not None:
+        manifest["binary_links"] = _replace_binary_dataset(root, "binary_links", links)
+    if inventory is not None:
+        manifest["binary_inventory"] = _replace_binary_dataset(
+            root, "binary_inventory", inventory
+        )
+    inventory_rows = _read_binary_dataset(root, "binary_inventory")
+    retained = {row["filename"] for row in inventory_rows}
+    files = root / "binary_files"
+    for path in files.iterdir():
+        if path.name not in retained:
+            path.unlink()
+    fingerprint = module.hashlib.sha256()
+    total_bytes = 0
+    actual_files = sorted(files.iterdir(), key=lambda path: path.name)
+    for path in actual_files:
+        body = path.read_bytes()
+        digest = module.hashlib.sha256(body).hexdigest()
+        total_bytes += len(body)
+        fingerprint.update(f"{path.name}:{len(body)}:{digest}\n".encode("ascii"))
+    manifest["binary_files"] = {
+        "records": len(actual_files), "bytes": total_bytes,
+        "sha256": fingerprint.hexdigest(),
+    }
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def test_private_stage_seals_call_binary_as_blocked_v3_without_signed_urls(tmp_path):
+    tmp_path = tmp_path.resolve()
+    bitrix_root, onec_root, binaries = _call_binary_stage_inputs(tmp_path)
+    output = tmp_path / "cache"
+
+    summary = module.stage_import_cache(bitrix_root, onec_root, output, binaries)
+
+    assert summary["format"] == "CRM-LIVE-001-private-cache-v3"
+    assert summary["ready_for_load"] is False
+    assert summary["blocked_source_groups"]["call_recordings"] == 1
+    assert summary["call_binary_files"]["records"] == 1
+    links = [json.loads(line) for line in (output / "bx_call_binary_links.jsonl")
+             .read_text(encoding="utf-8").splitlines()]
+    assert links == [{
+        "source": "call", "source_id": "10", "call_id": "call-10",
+        "record_file_id": "42",
+        "entity_type": "CONTACT", "entity_id": "11", "portal_user_id": "5",
+        "binary_key": "call:10",
+    }]
+    inventory = [json.loads(line) for line in (output / "bx_call_binary_inventory.jsonl")
+                 .read_text(encoding="utf-8").splitlines()]
+    assert len(inventory) == 1
+    assert inventory[0]["key"] == links[0]["binary_key"]
+    copied = output / "call_binary_files" / inventory[0]["filename"]
+    assert copied.read_bytes() == b"DATA"
+    call_rows = [json.loads(line) for line in (output / "bx_calls.jsonl")
+                 .read_text(encoding="utf-8").splitlines()]
+    assert "CALL_RECORD_URL" not in call_rows[0]
+    sealed_text = "".join(
+        path.read_text(encoding="utf-8")
+        for path in [
+            output / "bx_calls.jsonl", output / "bx_call_binary_links.jsonl",
+            output / "bx_call_binary_inventory.jsonl", output / "private-source-manifest.json",
+        ]
+    )
+    assert "SOURCE_SIGNED_TOKEN" not in sealed_text
+    assert "FRESH_CALL" not in sealed_text
+    from scripts import import_month
+    with pytest.raises(RuntimeError, match="PRIVATE_CACHE_NOT_LOADABLE"):
+        import_month._verify_private_cache(output)
+
+
+def test_private_stage_rejects_missing_call_binary_link(tmp_path):
+    tmp_path = tmp_path.resolve()
+    bitrix_root, onec_root, binaries = _call_binary_stage_inputs(tmp_path)
+    _rewrite_binary_snapshot(binaries, links=[], inventory=[])
+
+    with pytest.raises(module.ExportError, match="BINARY_CALL_LINK_MISMATCH"):
+        module.stage_import_cache(bitrix_root, onec_root, tmp_path / "cache", binaries)
+
+
+def test_private_stage_rejects_unlinked_call_binary_inventory(tmp_path):
+    tmp_path = tmp_path.resolve()
+    bitrix_root, onec_root, binaries = _call_binary_stage_inputs(tmp_path)
+    _rewrite_binary_snapshot(binaries, links=[])
+
+    with pytest.raises(module.ExportError, match="UNLINKED_BINARY_INVENTORY"):
+        module.stage_import_cache(bitrix_root, onec_root, tmp_path / "cache", binaries)
+
+
+@pytest.mark.parametrize(("field", "changed"), [
+    ("ID", "11"), ("CALL_ID", "call-drift"),
+    ("RECORD_FILE_ID", "43"),
+    ("CRM_ENTITY_TYPE", "DEAL"), ("CRM_ENTITY_ID", "12"),
+    ("PORTAL_USER_ID", "6"),
+])
+def test_private_stage_rejects_call_source_identity_drift(tmp_path, field, changed):
+    tmp_path = tmp_path.resolve()
+    bitrix_root, onec_root, binaries = _call_binary_stage_inputs(
+        tmp_path, source_call_overrides={field: changed}
+    )
+
+    with pytest.raises(module.ExportError, match="BINARY_CALL_LINK_MISMATCH"):
+        module.stage_import_cache(bitrix_root, onec_root, tmp_path / "cache", binaries)
+
+
+@pytest.mark.parametrize("link_change", [
+    {"source": "task"},
+    {"download_url": "https://microchops.bitrix24.by/file?token=UNSUPPORTED"},
+])
+def test_private_stage_rejects_unsupported_call_binary_link_sidecars(tmp_path, link_change):
+    tmp_path = tmp_path.resolve()
+    bitrix_root, onec_root, binaries = _call_binary_stage_inputs(tmp_path)
+    links = _read_binary_dataset(binaries, "binary_links")
+    links[0] = {**links[0], **link_change}
+    _rewrite_binary_snapshot(binaries, links=links)
+
+    error = "UNSUPPORTED_BINARY_SOURCE" if link_change.get("source") == "task" \
+        else "BINARY_CALL_LINK_MISMATCH"
+    with pytest.raises(module.ExportError, match=error):
+        module.stage_import_cache(bitrix_root, onec_root, tmp_path / "cache", binaries)
+
+
+def test_private_stage_rejects_duplicate_call_binary_links(tmp_path):
+    tmp_path = tmp_path.resolve()
+    bitrix_root, onec_root, binaries = _call_binary_stage_inputs(tmp_path)
+    links = _read_binary_dataset(binaries, "binary_links")
+    links.append(dict(links[0]))
+    _rewrite_binary_snapshot(binaries, links=links)
+
+    with pytest.raises(module.ExportError, match="BINARY_CALL_LINK_MISMATCH"):
+        module.stage_import_cache(bitrix_root, onec_root, tmp_path / "cache", binaries)
+
+
+def test_private_stage_rejects_call_inventory_url_sidecar(tmp_path):
+    tmp_path = tmp_path.resolve()
+    bitrix_root, onec_root, binaries = _call_binary_stage_inputs(tmp_path)
+    inventory = _read_binary_dataset(binaries, "binary_inventory")
+    inventory[0]["download_url"] = (
+        "https://microchops.bitrix24.by/file?token=UNSUPPORTED"
+    )
+    _rewrite_binary_snapshot(binaries, inventory=inventory)
+
+    with pytest.raises(module.ExportError, match="BINARY_CALL_INVENTORY_MISMATCH"):
+        module.stage_import_cache(bitrix_root, onec_root, tmp_path / "cache", binaries)
+
+
+def test_private_stage_rejects_url_in_comment_link_for_v3_cache(tmp_path):
+    tmp_path = tmp_path.resolve()
+    comments = [{
+        "ID": "7", "ENTITY_TYPE": "deal", "ENTITY_ID": "11",
+        "FILES": {"3": {"id": 3}},
+    }]
+    bitrix_root, onec_root, binaries = _call_binary_stage_inputs(
+        tmp_path, comments=comments
+    )
+    links = _read_binary_dataset(binaries, "binary_links")
+    comment = next(row for row in links if row["source"] == "comment")
+    comment["download_url"] = "https://microchops.bitrix24.by/file?token=UNSUPPORTED"
+    _rewrite_binary_snapshot(binaries, links=links)
+
+    with pytest.raises(module.ExportError, match="BINARY_COMMENT_LINK_MISMATCH"):
+        module.stage_import_cache(bitrix_root, onec_root, tmp_path / "cache", binaries)
+
+
+def test_private_stage_rejects_url_in_comment_inventory_for_v3_cache(tmp_path):
+    tmp_path = tmp_path.resolve()
+    comments = [{
+        "ID": "7", "ENTITY_TYPE": "deal", "ENTITY_ID": "11",
+        "FILES": {"3": {"id": 3}},
+    }]
+    bitrix_root, onec_root, binaries = _call_binary_stage_inputs(
+        tmp_path, comments=comments
+    )
+    inventory = _read_binary_dataset(binaries, "binary_inventory")
+    comment = next(row for row in inventory if row["key"] == "disk:3")
+    comment["CALL_RECORD_URL"] = CALL_RECORD_URL
+    _rewrite_binary_snapshot(binaries, inventory=inventory)
+
+    with pytest.raises(module.ExportError, match="BINARY_COMMENT_INVENTORY_MISMATCH"):
+        module.stage_import_cache(bitrix_root, onec_root, tmp_path / "cache", binaries)
+
+
+@pytest.mark.parametrize(("field", "error"), [
+    ("CALL_RECORD_URL", "BAD_CALL_RECORD_URL"),
+    ("RECORD_FILE_ID", "BAD_CALL_FILE_ID"),
+])
+@pytest.mark.parametrize("bad", [False, 0, [], {}])
+def test_private_stage_rejects_falsy_invalid_call_recording_fields(
+    tmp_path, field, error, bad
+):
+    tmp_path = tmp_path.resolve()
+    bitrix_root, onec_root = tmp_path / "bitrix", tmp_path / "onec"
+    _private_stage_sources(bitrix_root, onec_root, with_products=False,
+                           calls=[{"ID": "10", field: bad}])
+    output = tmp_path / "cache"
+    with pytest.raises(module.ExportError, match=error):
+        module.stage_import_cache(bitrix_root, onec_root, output)
+    assert not (output / "private-source-manifest.json").exists()
+
+
+@pytest.mark.parametrize("changed_id", ["010", "11"])
+def test_private_stage_rejects_resealed_call_id_unbound_from_source_filename(
+    tmp_path, changed_id
+):
+    tmp_path = tmp_path.resolve()
+    bitrix_root, onec_root, binaries = _call_binary_stage_inputs(tmp_path)
+    row = next(module._staged_rows(bitrix_root, "calls"))
+    row["ID"] = changed_id
+    raw = json.dumps(row, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    _replace_private_source_row_bytes(bitrix_root, "calls", raw)
+    with pytest.raises(module.ExportError, match="BAD_PRIVATE_SOURCE_ID"):
+        module.stage_import_cache(bitrix_root, onec_root, tmp_path / "cache", binaries)
 
 
 def test_private_stage_seals_product_evidence_and_allows_supported_rows(tmp_path, capsys):
@@ -1379,7 +1662,7 @@ def test_private_stage_rechecks_metadata_manifest_after_binary_phase(tmp_path, m
     )
     binaries = (tmp_path / "binaries").resolve()
     module.export_binaries(WEBHOOK, metadata, binaries, session=BinarySession())
-    original = module._stage_comment_binary_cache
+    original = module._stage_supported_binary_cache
 
     def source_changes_after_metadata_staging(bitrix, binary, output):
         path = next((bitrix / "timeline_comments").glob("*.json"))
@@ -1397,7 +1680,7 @@ def test_private_stage_rechecks_metadata_manifest_after_binary_phase(tmp_path, m
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         return original(bitrix, binary, output)
 
-    monkeypatch.setattr(module, "_stage_comment_binary_cache",
+    monkeypatch.setattr(module, "_stage_supported_binary_cache",
                         source_changes_after_metadata_staging)
     output = tmp_path / "cache"
     with pytest.raises(module.ExportError, match="PRIVATE_SOURCE_CHANGED"):
