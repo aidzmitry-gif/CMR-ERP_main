@@ -147,6 +147,51 @@ it("registers a supplier contract in the chosen company and saves its ID in the 
   expect(receiptCommand!.document).toMatchObject({ supplier_id: 19, contract_id: 50, contract: "SC-50", contract_basis: null });
 });
 
+it("retries an uncertain supplier contract revocation without changing its command", async () => {
+  const contract = { id: 50, organization_id: 7, supplier_id: 19, number: "SC-50",
+    title: "Поставка", signed_on: "2026-01-01", expires_on: null, evidence: "Оригинал" };
+  const commands: string[] = [];
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("purchase-ownership")) return { ok: true, json: async () => [] };
+    if (url.includes("supplier-options")) return { ok: true, json: async () => ({
+      organization_id: 7, items: [{ id: 19, name: "Поставщик", unp: "190000001" }], truncated: false,
+    }) };
+    if (url.endsWith("supplier-contracts/50/revoke") && init?.method === "POST") {
+      commands.push(String(init.body));
+      if (commands.length === 1) throw new Error("Связь прервана");
+      const command = JSON.parse(commands[1]);
+      return { ok: true, json: async () => ({ ...contract, is_active: false,
+        deactivation_key: command.key, deactivation_reason: command.reason,
+        deactivated_by: "buyer", deactivated_at: "2026-09-25T10:00:00Z" }) };
+    }
+    if (url.includes("supplier-contracts")) return { ok: true, json: async () => ({
+      organization_id: 7, supplier_id: 19, items: [contract],
+    }) };
+    return { ok: true, json: async () => [] };
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  await screen.findByText("Показано 0 из 0 накладных выбранного юрлица за все даты.");
+  fireEvent.change(screen.getByLabelText("Поиск поставщика накладной"), { target: { value: "Поставщик" } });
+  await screen.findByRole("option", { name: "Поставщик · 190000001" });
+  fireEvent.change(screen.getByLabelText("Поставщик накладной из справочника"), { target: { value: "19" } });
+  await screen.findByRole("option", { name: "SC-50 · Поставка · ID 50" });
+  fireEvent.change(screen.getByLabelText("Договор поставщика из справочника"), { target: { value: "50" } });
+  fireEvent.change(screen.getByLabelText("Причина отзыва договора"), { target: { value: "Договор заменён" } });
+  fireEvent.click(screen.getByRole("button", { name: "Отозвать выбранный договор" }));
+  expect(await screen.findByRole("button", { name: "Повторить отзыв договора с тем же ключом" })).toBeEnabled();
+  expect(screen.getByLabelText("Договор поставщика из справочника")).toHaveValue("50");
+  fireEvent.click(screen.getByRole("button", { name: "Повторить отзыв договора с тем же ключом" }));
+  expect(await screen.findByText(/Договор № SC-50 отозван/)).toBeInTheDocument();
+  expect(commands).toHaveLength(2);
+  expect(commands[1]).toBe(commands[0]);
+  expect(JSON.parse(commands[0])).toMatchObject({ reason: "Договор заменён" });
+  expect(screen.getByLabelText("Договор поставщика из справочника")).toHaveValue("");
+  expect(screen.queryByRole("option", { name: "SC-50 · Поставка · ID 50" })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Основание покупки без зарегистрированного договора")).toHaveValue("");
+  expect(fetcher.mock.calls.filter(([url, init]) => url.includes("receipt-documents") && init?.method === "POST")).toHaveLength(0);
+});
+
 it("warns before replacing an unsaved new receipt", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => [] })));
   const confirm = vi.fn(() => false);

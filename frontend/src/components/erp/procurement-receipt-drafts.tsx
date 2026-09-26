@@ -14,6 +14,7 @@ type Document = ReturnType<typeof blank>;
 type SupplierContract = { id: number; organization_id: number; supplier_id: number; number: string; title: string; signed_on: string; expires_on: string | null; evidence: string };
 type Receipt = { id: number; key?: string; version: number; status?: string; posting?: { entry_id: number; version: number } | null; revisions: { version: number; request_key?: string | null; actor: string; created_at: string; document: Document }[] };
 type PendingSave = { org: string; receiptId: number | null; version: number; key: string; document: Document; closeAfterSave: boolean };
+type PendingContractRevoke = { org: string; supplierId: number; contractId: number; key: string; reason: string };
 type OwnedOrder = { kind: string; source_id: number; snapshot: { number: string; supplier: string } };
 const fields = [["invoice_reference", "Номер первичной накладной"], ["document_date", "Дата первичной накладной"], ["operation_date", "Дата поступления"], ["contract", "Договор накладной"], ["warehouse", "Склад накладной"], ["explanation", "Содержание накладной"]] as const;
 const itemFields = [["lot", "Партия"], ["quantity", "Количество"], ["net_amount", "Стоимость без НДС"], ["vat_rate", "Ставка НДС %"], ["vat_amount", "Сумма НДС"], ["vat_basis", "Основание НДС"]] as const;
@@ -60,6 +61,8 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   const [contracts, setContracts] = useState<SupplierContract[]>([]), [contractError, setContractError] = useState("");
   const [newContract, setNewContract] = useState({ number: "", title: "", signed_on: "", expires_on: "", evidence: "" });
   const [contractBusy, setContractBusy] = useState(false);
+  const [contractRevokeReason, setContractRevokeReason] = useState("");
+  const [contractRevokeUncertain, setContractRevokeUncertain] = useState(false);
   const [skuSearch, setSkuSearch] = useState("");
   const [skuOptions, setSkuOptions] = useState<ProcurementSkuOption[]>([]);
   const [skuError, setSkuError] = useState("");
@@ -69,6 +72,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   const [error, setError] = useState(""), [notice, setNotice] = useState(""), [reload, setReload] = useState(0);
   const [loadedKey, setLoadedKey] = useState("");
   const pending = useRef<PendingSave | null>(null), active = useRef(true);
+  const pendingContractRevoke = useRef<PendingContractRevoke | null>(null);
   const contractFetchVersion = useRef(0), supplierContext = useRef("");
   supplierContext.current = `${org}:${document.supplier_id ?? ""}`;
   const initialOpened = useRef(false);
@@ -77,7 +81,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   const listKey = `${path}/${reload}`;
   const listLoaded = loadedKey === listKey;
   const dirty = JSON.stringify(document) !== JSON.stringify(selected ? selected.revisions.at(-1)!.document : blank());
-  const confirmDiscard = useUnsavedDocumentGuard(dirty || busy || uncertain, onPendingChange);
+  const confirmDiscard = useUnsavedDocumentGuard(dirty || busy || uncertain || contractBusy || contractRevokeUncertain, onPendingChange);
   const search = query.trim().toLocaleLowerCase("ru");
   const visible = rows.filter((row) => {
     const source = row.revisions.at(-1)!.document;
@@ -212,7 +216,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
     void submit(pending.current);
   }
   async function registerContract() {
-    if (!document.supplier_id || contractBusy || uncertain || !newContract.number.trim()
+    if (!document.supplier_id || contractBusy || contractRevokeUncertain || uncertain || !newContract.number.trim()
       || !newContract.title.trim() || !newContract.signed_on || !newContract.evidence.trim()) return;
     const supplierId = document.supplier_id, context = `${org}:${supplierId}`;
     ++contractFetchVersion.current;
@@ -240,6 +244,52 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
     } catch (cause) { if (active.current && supplierContext.current === context) setContractError(cause instanceof Error ? cause.message : "Не удалось зарегистрировать договор."); }
     finally { if (active.current) setContractBusy(false); }
   }
+  async function submitContractRevoke(command: PendingContractRevoke) {
+    setContractBusy(true); setContractError("");
+    try {
+      const response = await fetch(`/api/procurement/organizations/${command.org}/supplier-contracts/${command.contractId}/revoke`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: command.key, reason: command.reason }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw Object.assign(new Error(typeof result.detail === "string" ? result.detail : "Не удалось отозвать договор."), { status: response.status });
+      if (result.id !== command.contractId || result.organization_id !== Number(command.org)
+        || result.supplier_id !== command.supplierId || result.is_active !== false
+        || result.deactivation_key !== command.key || result.deactivation_reason !== command.reason
+        || !result.deactivated_by || !result.deactivated_at)
+        throw new Error("Сервер не подтвердил отзыв выбранного договора. Повторите тот же запрос.");
+      if (!active.current) return;
+      pendingContractRevoke.current = null;
+      setContractRevokeUncertain(false);
+      ++contractFetchVersion.current;
+      if (supplierContext.current === `${command.org}:${command.supplierId}`) {
+        setContracts(current => current.filter(row => row.id !== command.contractId));
+        setDocument(current => current.supplier_id === command.supplierId && current.contract_id === command.contractId
+          ? { ...current, contract_id: null, contract: "", contract_basis: null } : current);
+        setContractRevokeReason("");
+        setNotice(`Договор № ${result.number} отозван. Выберите действующий договор или укажите основание покупки без договора и сохраните накладную.`);
+      }
+    } catch (cause) {
+      if (!active.current || supplierContext.current !== `${command.org}:${command.supplierId}`) return;
+      const status = (cause as Error & { status?: number }).status;
+      if (status === undefined || status >= 500) {
+        setContractRevokeUncertain(true);
+        setContractError(`${(cause as Error).message} Результат отзыва неизвестен; повторите запрос с тем же ключом.`);
+      } else {
+        pendingContractRevoke.current = null;
+        setContractRevokeUncertain(false);
+        setContractError((cause as Error).message);
+      }
+    } finally { if (active.current) setContractBusy(false); }
+  }
+  function revokeContract() {
+    if (!document.supplier_id || !document.contract_id || !contracts.some(row => row.id === document.contract_id)
+      || contractBusy || uncertain || contractRevokeUncertain || !contractRevokeReason.trim()) return;
+    const command = { org, supplierId: document.supplier_id, contractId: document.contract_id,
+      key: crypto.randomUUID(), reason: contractRevokeReason.trim() };
+    pendingContractRevoke.current = command;
+    void submitContractRevoke(command);
+  }
   if (initialLoading) return <section className="space-y-3 rounded-xl border border-line bg-surface p-4"><p role="status">Загрузка накладной из ссылки…</p>{error && <><p role="alert">{error}</p><Button onClick={() => setReload(value => value + 1)}>Повторить загрузку накладной</Button></>}</section>;
   return <section className="space-y-4 rounded-xl border border-line bg-surface p-4">
     <h2 className="font-semibold">Реестр первичных накладных</h2>
@@ -262,7 +312,8 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       })}</ul>}
       {listLoaded && !visible.length && <p className="text-sm text-muted">Накладных по выбранному фильтру нет.</p>}
       {selected?.posting && <p role="status">Проведена · проводка № {selected.posting.entry_id}. Первичные данные доступны для просмотра.</p>}
-      {editorOpen && <fieldset disabled={Boolean(selected?.posting) || uncertain} className="space-y-3">
+      {contractRevokeUncertain && <Button variant="secondary" disabled={contractBusy || pendingContractRevoke.current?.org !== org} onClick={() => { if (pendingContractRevoke.current) void submitContractRevoke(pendingContractRevoke.current); }}>Повторить отзыв договора с тем же ключом</Button>}
+      {editorOpen && <fieldset disabled={Boolean(selected?.posting) || uncertain || contractBusy || contractRevokeUncertain} className="space-y-3">
       <div className="grid gap-3 md:grid-cols-3">{fields.map(([field, label]) => <label key={field}>{label}<Input type={field.endsWith("date") ? "date" : "text"} disabled={field === "contract" && Boolean(document.contract_id)} value={document[field]} onChange={(e) => setDocument({ ...document, [field]: e.target.value })} /></label>)}</div>
       <div className="grid gap-3 md:grid-cols-2"><label>Поиск поставщика<Input aria-label="Поиск поставщика накладной" disabled={contractBusy} maxLength={100} value={supplierSearch} onChange={(e) => { setSupplierSearch(e.target.value); setSupplierOptions([]); setSupplierError(""); setContracts([]); setDocument((current) => ({ ...current, supplier: "", supplier_id: null, supplier_unp: null, contract: "", contract_id: null, contract_basis: null })); }} /></label><label>Поставщик накладной из справочника<Select aria-label="Поставщик накладной из справочника" disabled={contractBusy} value={document.supplier_id ?? ""} onChange={(e) => {
         const supplier = supplierOptions.find((option) => String(option.id) === e.target.value);
@@ -278,6 +329,11 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
         {!document.contract_id && <label>Основание покупки без зарегистрированного договора<Input aria-label="Основание покупки без зарегистрированного договора" maxLength={500} value={document.contract_basis ?? ""} onChange={(e) => setDocument({ ...document, contract: document.contract || (e.target.value ? "Без договора" : ""), contract_basis: e.target.value || null })} /></label>}
         <p className="text-sm text-muted">Если договор не зарегистрирован, укажите основание исключения. Исторический текст накладной не сопоставляется автоматически.</p>
         {contractError && <p role="alert">Справочник договоров: {contractError}</p>}
+        {document.contract_id && contracts.some(row => row.id === document.contract_id) && <div className="space-y-2 rounded border border-line p-2">
+          <label>Причина отзыва договора<Input aria-label="Причина отзыва договора" maxLength={500} disabled={contractBusy} value={contractRevokeReason} onChange={e => setContractRevokeReason(e.target.value)} /></label>
+          <Button variant="secondary" disabled={contractBusy || !contractRevokeReason.trim()} onClick={revokeContract}>Отозвать выбранный договор</Button>
+          <p className="text-sm text-muted">Договор исчезнет из выбора для новых накладных. Сохранённые версии накладных и их проводки останутся неизменными.</p>
+        </div>}
         <details><summary>Зарегистрировать договор поставщика</summary><div className="grid gap-2 md:grid-cols-2">
           <label>Номер нового договора<Input aria-label="Номер нового договора" maxLength={200} value={newContract.number} onChange={e => setNewContract({ ...newContract, number: e.target.value })} /></label>
           <label>Название нового договора<Input aria-label="Название нового договора" maxLength={255} value={newContract.title} onChange={e => setNewContract({ ...newContract, title: e.target.value })} /></label>

@@ -1,4 +1,5 @@
 from datetime import date
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import func, select
@@ -98,6 +99,23 @@ async def test_supplier_contract_selection_is_company_supplier_and_date_scoped(c
         **facts, "contract": "SUPPLIER-2", "contract_id": wrong_supplier.id,
     }})
     assert response.status_code == 409, response.text
+
+    revoke_path = path + f"/{contract_id}/revoke"
+    revoke = {"key": str(uuid4()), "reason": "The signed original was withdrawn"}
+    first = await client.post(revoke_path, json=revoke)
+    assert first.status_code == 200, first.text
+    assert first.json()["is_active"] is False
+    assert first.json()["deactivated_by"] == "tester"
+    assert first.json()["deactivation_reason"] == revoke["reason"]
+    assert first.json()["deactivated_at"]
+    assert (await client.post(revoke_path, json=revoke)).json()["deactivation_key"] == revoke["key"]
+    assert (await client.post(revoke_path, json={**revoke, "key": str(uuid4())})).status_code == 409
+    assert (await client.get(path, params={"supplier_id": 1})).json()["items"] == []
+    assert (await client.post(receipt_path, json={"key": "revoked-contract", "document": facts})).status_code == 409
+    replacement = await client.post(path, json={**command, "evidence": "Corrected signed original"})
+    assert replacement.status_code == 201, replacement.text
+    assert replacement.json()["id"] != contract_id
+    assert accepted.json()["revisions"][0]["document"]["contract_id"] == contract_id
 
 
 async def test_receipt_sku_selection_freezes_snapshot_and_rejects_catalog_drift(client, db, book):

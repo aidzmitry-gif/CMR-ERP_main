@@ -68,6 +68,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0183_receipt_edit_request_key.py",
     "0184_organization_warehouse_directory.py",
     "0185_supplier_contract_directory.py",
+    "0186_supplier_contract_revocation.py",
 )
 
 
@@ -1090,12 +1091,31 @@ async def test_supplier_contract_catalog_postgres_guards(pg_factory, pg_book):
         "TRUNCATE procurement.supplier_contract",
     ):
         async with pg_factory() as session:
-            with pytest.raises(DBAPIError, match="append-only"):
+            with pytest.raises(DBAPIError, match="(append-only|revoked once)"):
                 await session.execute(text(statement))
             await session.rollback()
     async with pg_factory() as session:
         assert await session.scalar(text("SELECT number FROM procurement.supplier_contract WHERE id=:id"),
                                     {"id": contract_id}) == "PG-CONTRACT"
+        await session.execute(text("""
+            UPDATE procurement.supplier_contract
+            SET is_active=false, deactivated_by='tester', deactivated_at=now(),
+                deactivation_reason='Synthetic correction',
+                deactivation_key='11111111-1111-4111-8111-111111111111'
+            WHERE id=:id
+        """), {"id": contract_id})
+        await session.commit()
+    async with pg_factory() as session:
+        session.add(SupplierContract(organization_id=pg_book[0], supplier_id=1,
+                                     number="PG-CONTRACT", title="Replacement signed contract",
+                                     signed_on=date(2026, 1, 1),
+                                     evidence="Corrected signed original", created_by="tester"))
+        await session.commit()
+    async with pg_factory() as session:
+        with pytest.raises(DBAPIError, match="revoked once"):
+            await session.execute(text("UPDATE procurement.supplier_contract SET deactivation_reason='Changed' WHERE id=:id"),
+                                  {"id": contract_id})
+        await session.rollback()
 
 
 async def test_concurrent_replay_one_entry(pg_factory, pg_book, posting):
