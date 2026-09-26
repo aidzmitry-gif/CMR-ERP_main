@@ -533,3 +533,141 @@ async def test_manual_settlement_document_uses_exact_register_revision_and_keeps
     sales_saved = await client.post(
         path, json={"key": str(uuid4()), "posting": sales_payload})
     assert sales_saved.status_code == 201, sales_saved.text
+
+
+async def test_manual_employee_snapshot_uses_current_employment_and_preserves_replay(
+        client, db, book, posting):
+    from datetime import date
+
+    from modules.accounting.models import Account, Organization
+    from modules.accounting.payroll_employment import PayrollEmploymentInput
+    from modules.accounting.payroll_employment import create as create_binding
+    from modules.accounting.schemas import PostingInput
+    from modules.hr.models import Employee
+
+    async def bind(org_id, employee_id, state="active", contract_ref="SYN-EMP-1",
+                   effective_from="2026-01-01"):
+        return await create_binding(db, org_id, PayrollEmploymentInput.model_validate({
+            "request_key": str(uuid4()), "employee_id": employee_id,
+            "contract_ref": contract_ref, "effective_from": effective_from,
+            "state": state, "source_document": "synthetic-employment-contract",
+            "evidence": "Synthetic binding evidence for accounting acceptance",
+        }), "tester")
+
+    def dimensions(binding):
+        return {
+            "employee": binding["employee_name"],
+            "employee_id": str(binding["employee_id"]),
+            "employment_binding_id": str(binding["binding_id"]),
+            "employee_contract_ref": binding["contract_ref"],
+            "employee_binding_revision": str(binding["revision"]),
+            "employee_binding_digest": binding["digest"],
+            "department": binding["department"],
+        }
+
+    account = Account(organization_id=book[0], code="42", title="Synthetic employee cost",
+                      category="asset", valid_from=date(2026, 1, 1),
+                      required_dimensions=["employee", "department"],
+                      currency_tracking=True, quantity_tracking=False, cash=False,
+                      normative_ref="synthetic")
+    db.add(account)
+    employee = Employee(full_name="Synthetic employment employee", department="Production")
+    other = Organization(name="Synthetic other employer", unp="123456789")
+    db.add_all([employee, other])
+    await db.flush()
+    active = await bind(book[0], employee.id)
+    foreign = await bind(other.id, employee.id)
+    future = await bind(book[0], employee.id, contract_ref="SYN-EMP-FUTURE",
+                        effective_from="2026-10-01")
+    employee_id = employee.id
+    await db.commit()
+
+    prefix = f"/accounting/organizations/{book[0]}"
+    path = prefix + "/manual-documents"
+    listed = await client.get(
+        f"{prefix}/manual-employees?on=2026-09-01&q=SYNTHETIC EMPLOYMENT")
+    assert listed.status_code == 200 and listed.headers["cache-control"] == "private, no-store"
+    assert listed.json()["items"] == [{**dimensions(active), "department": "Production"}]
+    assert (await client.get(f"{prefix}/manual-employees?on=2026-09-01")).json()["items"] == []
+
+    future_posting = posting("MANUAL-EMP-FUTURE", debit="42").model_dump(mode="json")
+    future_posting["lines"][0]["dimensions"] = dimensions(future)
+    assert (await client.post(prefix + "/preview", json=future_posting)).status_code == 422
+
+    free_text = posting("MANUAL-EMP-FREE", debit="42").model_dump(mode="json")
+    free_text["lines"][0]["dimensions"] = {
+        "employee": "Synthetic employment employee", "department": "Production",
+    }
+    rejected_free_text = await client.post(prefix + "/preview", json=free_text)
+    assert rejected_free_text.status_code == 422
+    assert "complete current employment snapshot" in rejected_free_text.text
+    assert (await client.post(path, json={"key": str(uuid4()), "posting": free_text})).status_code == 422
+    assert (await client.post(prefix + "/entries", json=free_text)).status_code == 422
+
+    non_string = posting("MANUAL-EMP-NON-STRING", debit="42").model_dump(mode="json")
+    non_string["lines"][0]["dimensions"] = dimensions(active)
+    non_string["lines"][0]["dimensions"]["employee_id"] = active["employee_id"]
+    assert (await client.post(prefix + "/preview", json=non_string)).status_code == 422
+
+    oversized = posting("MANUAL-EMP-OVERSIZED", debit="42").model_dump(mode="json")
+    oversized["lines"][0]["dimensions"] = dimensions(active)
+    oversized["lines"][0]["dimensions"]["employment_binding_id"] = "9" * 200
+    oversized_result = await client.post(prefix + "/preview", json=oversized)
+    assert oversized_result.status_code == 422
+    assert "invalid employment snapshot key" in oversized_result.text
+
+    forged = posting("MANUAL-EMP-FORGED", debit="42").model_dump(mode="json")
+    forged["lines"][0]["dimensions"] = dimensions(active)
+    forged["lines"][0]["dimensions"]["employee_binding_digest"] = "0" * 64
+    assert (await client.post(prefix + "/preview", json=forged)).status_code == 422
+    wrong_department = posting("MANUAL-EMP-DEPARTMENT", debit="42").model_dump(mode="json")
+    wrong_department["lines"][0]["dimensions"] = dimensions(active)
+    wrong_department["lines"][0]["dimensions"]["department"] = "Finance"
+    assert (await client.post(prefix + "/preview", json=wrong_department)).status_code == 422
+
+    foreign_posting = posting("MANUAL-EMP-FOREIGN", debit="42").model_dump(mode="json")
+    foreign_posting["lines"][0]["dimensions"] = dimensions(foreign)
+    assert (await client.post(prefix + "/preview", json=foreign_posting)).status_code == 422
+    assert (await client.post(path, json={"key": str(uuid4()), "posting": foreign_posting})).status_code == 422
+    assert (await client.post(prefix + "/entries", json=foreign_posting)).status_code == 422
+
+    current_posting = posting("MANUAL-EMP-REVISION", debit="42").model_dump(mode="json")
+    current_posting["lines"][0]["dimensions"] = dimensions(active)
+    saved = await client.post(path, json={"key": str(uuid4()), "posting": current_posting})
+    assert saved.status_code == 201, saved.text
+    document_id = saved.json()["id"]
+
+    await db.refresh(employee)
+    employee.department = "Assembly"
+    await db.flush()
+    revised_binding = await bind(book[0], employee_id)
+    await db.commit()
+    stale_post = await client.post(f"{path}/{document_id}/post", json={
+        "key": str(uuid4()), "expected_version": 1,
+        "digest": service.digest(PostingInput.model_validate(current_posting)),
+    })
+    assert stale_post.status_code == 422 and "select the current employee again" in stale_post.text
+    current_posting["lines"][0]["dimensions"] = dimensions(revised_binding)
+    edited = await client.put(f"{path}/{document_id}", json={
+        "key": str(uuid4()), "expected_version": 1, "posting": current_posting,
+    })
+    assert edited.status_code == 200 and edited.json()["version"] == 2
+    post_command = {"key": str(uuid4()), "expected_version": 2,
+                    "digest": service.digest(PostingInput.model_validate(current_posting))}
+    confirmed = await client.post(f"{path}/{document_id}/post", json=post_command)
+    assert confirmed.status_code == 200, confirmed.text
+
+    ended = await bind(book[0], employee_id, state="ended")
+    await db.commit()
+    ended_posting = posting("MANUAL-EMP-ENDED", debit="42").model_dump(mode="json")
+    ended_posting["lines"][0]["dimensions"] = dimensions(ended)
+    assert (await client.post(prefix + "/preview", json=ended_posting)).status_code == 422
+    assert (await client.post(path, json={"key": str(uuid4()), "posting": ended_posting})).status_code == 422
+    assert (await client.post(prefix + "/entries", json=ended_posting)).status_code == 422
+
+    replay_preview = await client.post(prefix + "/preview", json=current_posting)
+    assert replay_preview.status_code == 200, replay_preview.text
+    replay = await client.post(prefix + "/entries", json=current_posting)
+    assert replay.status_code == 201 and replay.json()["id"] == confirmed.json()["entry_id"]
+    posted_replay = await client.post(f"{path}/{document_id}/post", json=post_command)
+    assert posted_replay.status_code == 200 and posted_replay.json()["entry_id"] == confirmed.json()["entry_id"]

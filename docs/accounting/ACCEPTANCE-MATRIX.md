@@ -112,6 +112,17 @@ current target database or all later source migrations.
   replays its original snapshot. Focused API/UI checks and a disposable
   PostgreSQL 16 replay check passed. Remaining manual analytics, release
   integration and real accountant acceptance keep G03D open.
+- The fourth local G03D slice binds manual `employee` analytics to the exact
+  active payroll-employment register revision for the selected organization
+  and operation date. The saved snapshot contains the employee, employment
+  binding, contract, revision, digest and required department. Free text and
+  foreign, future, ended, stale or forged bindings fail before preview, save
+  or post; an already posted entry retains exact historical replay. An
+  independent review also added a pre-SQL PostgreSQL INTEGER bound after an
+  oversized binding ID reproduced an overflow. Focused backend 19/19,
+  frontend 41/41, disposable PostgreSQL 16 1/1, TypeScript, ESLint, Ruff and
+  diff checks passed. Other manual analytics, release integration and real
+  accountant acceptance keep G03D open.
 - CRM deal Save and Close now requires a response with the exact deal ID,
   submitted editor fields and a valid new edit token. The PATCH response is
   generated from the saved deal; two concurrent edits on disposable

@@ -12,6 +12,8 @@ from sqlalchemy import select
 from modules.accounting import service
 from modules.accounting.contract_snapshot import CONTRACT_KEYS, verified_contract_snapshot
 from modules.accounting.counterparty_snapshot import verified_counterparty
+from modules.accounting.employee_snapshot import EMPLOYEE_SNAPSHOT_KEYS
+from modules.accounting.employee_snapshot import verify as verify_employee_snapshot
 from modules.accounting.models import (
     Entry,
     ManualDocument,
@@ -62,6 +64,7 @@ async def verify_analytic_references(session, org_id: int, posting: PostingInput
     checked_counterparties = set()
     checked_skus = set()
     checked_warehouses = set()
+    checked_employees = set()
     checked_contracts = set()
     checked_settlement_documents = set()
     for line in posting.lines:
@@ -84,6 +87,11 @@ async def verify_analytic_references(session, org_id: int, posting: PostingInput
             if snapshot not in checked_warehouses:
                 await verified_warehouse_snapshot(session, org_id, dimensions)
                 checked_warehouses.add(snapshot)
+        if EMPLOYEE_SNAPSHOT_KEYS & dimensions.keys():
+            snapshot = tuple(dimensions.get(key, "") for key in sorted(EMPLOYEE_SNAPSHOT_KEYS | {"department"}))
+            if snapshot not in checked_employees:
+                await verify_employee_snapshot(session, org_id, posting.operation_date, dimensions)
+                checked_employees.add(snapshot)
         if CONTRACT_KEYS & dimensions.keys():
             snapshot = tuple(dimensions.get(key, "") for key in sorted(CONTRACT_KEYS))
             if snapshot not in checked_contracts:

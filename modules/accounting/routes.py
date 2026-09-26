@@ -29,6 +29,7 @@ from modules.accounting import (
     bank_statement_csv,
     closing_controls,
     contract_snapshot,
+    employee_snapshot,
     fixed_assets,
     foreign_trade_register,
     fx_bank_settlement_preview,
@@ -566,6 +567,17 @@ async def preview(org_id: int, data: PostingInput, ctx=Depends(member)):
     return {"digest": service.digest(data), "normative_verified": policy.normative_verified,
             "lines": [{**line.model_dump(mode="json"), "title": accounts[line.account].title}
                       for line in data.lines], "explanation": data.explanation}
+
+
+@router.get("/organizations/{org_id}/manual-employees")
+async def manual_employee_options(org_id: int, on: date, response: Response,
+                                  q: str = Query(default="", max_length=100), ctx=Depends(member)):
+    response.headers["Cache-Control"] = "private, no-store"
+    try:
+        items = await employee_snapshot.options(ctx[0], org_id, on, q)
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"organization_id": org_id, "on": on.isoformat(), "items": items}
 
 
 @router.get("/organizations/{org_id}/manual-documents")

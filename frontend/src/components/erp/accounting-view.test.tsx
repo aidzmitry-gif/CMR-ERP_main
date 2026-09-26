@@ -614,3 +614,48 @@ it("opens expense control with the selected accounting organization", async () =
   fireEvent.change(screen.getByLabelText("Организация"), {target:{value:"2"}});
   await screen.findByText("Расходы книги 2");
 });
+
+it("selects an active employment snapshot and fills the required department", async () => {
+  const original = fetchMock.getMockImplementation()!;
+  const employee = {
+    employee: "Тестовый сотрудник", employee_id: "17", employment_binding_id: "61",
+    employee_contract_ref: "ТРУД-17", employee_binding_revision: "2",
+    employee_binding_digest: "a".repeat(64), department: "Производство",
+  };
+  fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+    if (url.includes("/accounts?")) return respond([
+      { id: 1, code: "42", title: "Расходы", cash: false,
+        required_dimensions: ["employee", "department"] },
+      { id: 2, code: "60", title: "Поставщики", cash: false, required_dimensions: [] },
+    ]);
+    if (url.includes("/manual-employees?on=2026-09-01&q=")) return respond({
+      organization_id: 1, on: "2026-09-01", items: [employee],
+    });
+    return original(url, init);
+  });
+  render(<AccountingView />);
+  await screen.findByText(/включительно: 0\./);
+  openPage("Документы", "Ручная операция");
+  fillManualOperation();
+  fireEvent.change(screen.getByLabelText("Дата хозяйственной операции"), {
+    target: { value: "2026-09-01" },
+  });
+  fireEvent.change(screen.getByLabelText("Счёт 1"), { target: { value: "42" } });
+  fireEvent.change(screen.getByLabelText("Поиск сотрудника строки 1"), {
+    target: { value: "Тестовый" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Найти сотрудника строки 1" }));
+  fireEvent.click(await screen.findByRole("button", {
+    name: "Выбрать Тестовый сотрудник · договор ТРУД-17 · ID 17",
+  }));
+  expect(screen.getByLabelText("Подразделение строки 1")).toHaveValue("Производство");
+  expect(screen.getByLabelText("Подразделение строки 1")).toHaveAttribute("readonly");
+  fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Сохранить", exact: true }));
+  const employeeLookup = fetchMock.mock.calls.find(([url]) =>
+    String(url).includes("/manual-employees?on=2026-09-01&q="));
+  expect(String(employeeLookup?.[0])).toContain("/organizations/1/manual-employees?on=2026-09-01");
+  const saved = fetchMock.mock.calls.find(([url, init]) =>
+    String(url).endsWith("/manual-documents") && init?.body);
+  expect(JSON.parse(String(saved?.[1]?.body)).posting.lines[0].dimensions).toEqual(employee);
+});

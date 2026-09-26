@@ -945,6 +945,74 @@ async def test_payroll_partial_binding_coverage_is_blocked_in_postgres(pg_factor
                 await session.flush()
 
 
+async def test_manual_employee_snapshot_post_and_replay_postgres(pg_factory, pg_book, posting):
+    """Manual employee analytics share the exact binding transaction and retain replay."""
+    from datetime import date
+
+    from modules.accounting import manual_documents
+    from modules.accounting.models import Account
+    from modules.accounting.payroll_employment import PayrollEmploymentInput
+    from modules.accounting.payroll_employment import create as create_binding
+    from modules.accounting.schemas import PostingInput
+    from modules.hr.models import Employee
+
+    org_id = pg_book[0]
+    async with pg_factory() as session:
+        session.add(Account(id=1000, organization_id=org_id, code="42", title="Synthetic employee cost",
+                            category="asset", valid_from=date(2026, 1, 1),
+                            required_dimensions=["employee", "department"],
+                            currency_tracking=True, quantity_tracking=False, cash=False,
+                            normative_ref="synthetic"))
+        employee = Employee(full_name="Synthetic PostgreSQL employee", department="Production")
+        session.add(employee)
+        await session.flush()
+        binding = await create_binding(session, org_id, PayrollEmploymentInput.model_validate({
+            "request_key": str(uuid4()), "employee_id": employee.id,
+            "contract_ref": "SYN-PG-EMP-1", "effective_from": "2026-01-01",
+            "state": "active", "source_document": "synthetic-pg-employment",
+            "evidence": "Synthetic PostgreSQL employment evidence",
+        }), "tester")
+        dimensions = {
+            "employee": binding["employee_name"],
+            "employee_id": str(binding["employee_id"]),
+            "employment_binding_id": str(binding["binding_id"]),
+            "employee_contract_ref": binding["contract_ref"],
+            "employee_binding_revision": str(binding["revision"]),
+            "employee_binding_digest": binding["digest"],
+            "department": binding["department"],
+        }
+        payload = posting("MANUAL-PG-EMPLOYEE", debit="42").model_dump(mode="json")
+        payload["lines"][0]["dimensions"] = dimensions
+        manual_posting = PostingInput.model_validate(payload)
+        created = await manual_documents.create(
+            session, org_id,
+            manual_documents.ManualDocumentCreate(key=uuid4(), posting=manual_posting),
+            "tester", "chief",
+        )
+        command = manual_documents.ManualDocumentPost(
+            key=uuid4(), expected_version=1, digest=service.digest(manual_posting),
+        )
+        posted = await manual_documents.post(
+            session, org_id, created["id"], command, "tester", "chief",
+        )
+        await session.commit()
+
+        employee.department = "Assembly"
+        await create_binding(session, org_id, PayrollEmploymentInput.model_validate({
+            "request_key": str(uuid4()), "employee_id": employee.id,
+            "contract_ref": "SYN-PG-EMP-1", "effective_from": "2026-01-01",
+            "state": "active", "source_document": "synthetic-pg-employment-revision",
+            "evidence": "Synthetic revised PostgreSQL employment evidence",
+        }), "tester")
+        await session.commit()
+
+        replay = await manual_documents.post(
+            session, org_id, created["id"], command, "tester", "chief",
+        )
+        assert posted["entry_id"] == replay["entry_id"]
+        assert replay["digest"] == service.digest(manual_posting)
+
+
 async def test_opening_import_receipt_is_bound_and_immutable_in_postgres(pg_factory, pg_book, posting):
     from decimal import Decimal
 
