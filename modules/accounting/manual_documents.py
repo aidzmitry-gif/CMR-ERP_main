@@ -241,8 +241,11 @@ async def create(session, org_id: int, data: ManualDocumentCreate, actor: str, r
         ManualDocument.create_key == str(data.key),
     ).with_for_update())
     if existing is not None:
-        revision = await latest(session, existing)
-        if existing.version == 1 and revision.digest == checksum and revision.posting == snapshot:
+        revision = await session.scalar(select(ManualDocumentRevision).where(
+            ManualDocumentRevision.document_id == existing.id,
+            ManualDocumentRevision.version == 1,
+        ))
+        if revision is not None and revision.digest == checksum and revision.posting == snapshot:
             return await detail(session, org_id, existing.id)
         raise HTTPException(409, "Manual document creation key identifies different facts")
     posted = await session.scalar(select(Entry.id).where(

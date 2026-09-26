@@ -1343,6 +1343,82 @@ async def test_void_manual_document_receipt_is_immutable_and_blocks_postgres_pos
         await session.rollback()
 
 
+async def test_manual_document_create_and_terminal_races_are_serialized_postgres(
+        pg_factory, pg_book, posting):
+    from fastapi import HTTPException
+    from sqlalchemy import func
+
+    from modules.accounting import manual_documents
+    from modules.accounting.models import Entry
+
+    source = posting("PG-MANUAL-LIFECYCLE-RACE")
+    create_key = uuid4()
+
+    async def create_once():
+        async with pg_factory() as session:
+            result = await manual_documents.create(
+                session, pg_book[0],
+                manual_documents.ManualDocumentCreate(key=create_key, posting=source),
+                "tester", "chief",
+            )
+            await session.commit()
+            return result
+
+    first, replay = await asyncio.gather(create_once(), create_once())
+    assert first["id"] == replay["id"]
+    assert first["version"] == replay["version"] == 1
+    assert first["revisions"] == replay["revisions"]
+    document_id = first["id"]
+
+    async def post_once():
+        async with pg_factory() as session:
+            result = await manual_documents.post(
+                session, pg_book[0], document_id,
+                manual_documents.ManualDocumentPost(
+                    key=uuid4(), expected_version=1, digest=service.digest(source),
+                ),
+                "tester", "chief",
+            )
+            await session.commit()
+            return "posted", result
+
+    async def void_once():
+        async with pg_factory() as session:
+            result = await manual_documents.void_document(
+                session, pg_book[0], document_id,
+                manual_documents.ManualDocumentVoidInput(
+                    key=uuid4(), expected_version=1, reason="Synthetic terminal race",
+                ),
+                "tester",
+            )
+            await session.commit()
+            return "voided", result
+
+    outcomes = await asyncio.gather(post_once(), void_once(), return_exceptions=True)
+    accepted = [item for item in outcomes if isinstance(item, tuple)]
+    rejected = [item for item in outcomes if isinstance(item, HTTPException)]
+    assert len(accepted) == len(rejected) == 1
+    assert rejected[0].status_code == 409
+
+    async with pg_factory() as session:
+        final = await manual_documents.detail(session, pg_book[0], document_id)
+        entry_count = await session.scalar(select(func.count()).select_from(Entry).where(
+            Entry.organization_id == pg_book[0],
+            Entry.source == source.source,
+            Entry.source_version == source.source_version,
+            Entry.operation == "manual",
+        ))
+    if accepted[0][0] == "posted":
+        assert final["status"] == "posted"
+        assert final["entry_id"] == accepted[0][1]["entry_id"]
+        assert entry_count == 1
+    else:
+        assert accepted[0][0] == "voided"
+        assert final["status"] == "voided"
+        assert final["entry_id"] is None
+        assert entry_count == 0
+
+
 async def test_manual_document_counterparty_snapshot_rechecked_on_postgres(pg_factory, pg_book, posting):
     from uuid import uuid4
 

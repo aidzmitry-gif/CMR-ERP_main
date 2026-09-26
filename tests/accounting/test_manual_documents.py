@@ -174,6 +174,11 @@ async def test_manual_document_save_history_close_guard_and_post(client, db, boo
     assert revised.json()["revisions"][1]["posting"]["lines"][0]["amount"] == "120.00"
     assert (await client.put(f"{path}/{document_id}", json=edit)).json()["version"] == 2
     assert (await client.put(f"{path}/{document_id}", json={**edit, "key": str(uuid4())})).status_code == 409
+    replayed_create = await client.post(path, json=create)
+    assert replayed_create.status_code == 201, replayed_create.text
+    assert replayed_create.json()["id"] == document_id
+    assert replayed_create.json()["version"] == 2
+    assert len(replayed_create.json()["revisions"]) == 2
 
     controls = await client.get(prefix + "/periods/2026-09/closing-controls")
     assert controls.status_code == 200, controls.text
@@ -194,6 +199,11 @@ async def test_manual_document_save_history_close_guard_and_post(client, db, boo
     assert confirmed.json()["digest"] == command["digest"]
     assert (await client.post(f"{path}/{document_id}/post", json=command)).json()["entry_id"] == entry_id
     assert (await client.post(f"{path}/{document_id}/post", json={**command, "key": str(uuid4())})).status_code == 409
+    replayed_create = await client.post(path, json=create)
+    assert replayed_create.status_code == 201, replayed_create.text
+    assert replayed_create.json()["status"] == "posted"
+    assert replayed_create.json()["version"] == 2
+    assert replayed_create.json()["entry_id"] == entry_id
     assert (await client.put(f"{path}/{document_id}", json={**edit, "expected_version": 2,
                                                          "key": str(uuid4())})).status_code == 409
     final = (await client.get(f"{path}/{document_id}")).json()

@@ -51,11 +51,19 @@ type Policy = { id: number; effective_from: string; reference: string; normative
 type JournalLine = CurrencyFields & { account: string; title?: string; side: "debit" | "credit"; amount: string; dimensions: Record<string, string>; cash_activity?: string };
 type Posting = { source: string; source_version: number; operation: string; document_date: string; operation_date: string; posting_date: string; policy_id: number; correction_of?: number; rule_version: string; explanation: string; lines: JournalLine[] };
 type Preview = { digest: string; explanation: string; lines: JournalLine[]; normative_verified: boolean };
-type ManualRevision = { version: number; actor: string; created_at: string; digest: string; posting: Posting };
+type ManualRevision = { version: number; request_key?: string; actor: string; created_at: string; digest: string; posting: Posting };
 type ManualDocument = { id: number; organization_id: number; number: string; source: string; posting_date: string; version: number; status: "draft" | "posted" | "voided"; entry_id: number | null; updated_at: string; void?: { reason: string; actor: string; created_at: string } | null; revisions: ManualRevision[] };
 type ManualDocumentList = { organization_id: number; items: Omit<ManualDocument, "revisions">[]; next_before_id: number | null };
 type ManualPostReceipt = { document_id: number; document_version: number; entry_id: number; digest: string };
 type FixedAssetOption = { id: number; organization_id: number; asset_key: string; digest: string; name: string; inventory_number: string };
+type ManualCreateJournal = { organization_id: string; key: string; request_body: string; reviewed_digest: string; close_after_save: boolean };
+type ManualCreateRecovery =
+  | { status: "checking" }
+  | { status: "none" }
+  | { status: "pending"; journal: ManualCreateJournal; raw: string }
+  | { status: "blocked"; reason: string };
+type ManualCreateStoredRecovery = Exclude<ManualCreateRecovery, { status: "checking" }>;
+const manualCreateJournalStorageKey = "accounting.manual-document-create.v1";
 const fixedAssetDimensionKeys = new Set([
   "asset", "asset_register_id", "asset_digest", "asset_name", "asset_inventory_number",
 ]);
@@ -146,7 +154,7 @@ function salesOriginal(org: string, reference: string) {
 }
 
 async function request<T>(path: string, body?: unknown, method?: "PUT"): Promise<T> {
-  const response = await fetch(`/api/accounting${path}`, { method: method ?? (body === undefined ? "GET" : "POST"), headers: body === undefined ? undefined : { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store" });
+  const response = await fetch(`/api/accounting${path}`, { method: method ?? (body === undefined ? "GET" : "POST"), headers: body === undefined ? undefined : { "Content-Type": "application/json" }, body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body), cache: "no-store" });
   let data: unknown;
   try {
     data = await response.json();
@@ -160,6 +168,247 @@ async function request<T>(path: string, body?: unknown, method?: "PUT"): Promise
     throw new Error(detail ?? "Проверьте заполнение полей и права доступа.");
   }
   return data as T;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
+  return Object.keys(value).every((key) => allowed.includes(key));
+}
+
+function normalizedText(value: unknown, maxLength: number, minLength = 0): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized.length >= minLength && normalized.length <= maxLength ? normalized : null;
+}
+
+function normalizedInteger(value: unknown, minimum: number, maximum = Number.MAX_SAFE_INTEGER): number | null {
+  const candidate = typeof value === "number" ? value
+    : typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value.trim()) : NaN;
+  return Number.isSafeInteger(candidate) && candidate >= minimum && candidate <= maximum ? candidate : null;
+}
+
+function normalizedDate(value: unknown): string | null {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value ? value : null;
+}
+
+function normalizedDecimal(value: unknown, maxDigits: number, maxPlaces: number, positive = false): string | null {
+  if (typeof value !== "string") return null;
+  const match = /^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/.exec(value.trim());
+  if (!match) return null;
+  const sign = match[1];
+  const whole = match[2] ?? "0";
+  const fraction = match[3] ?? match[4] ?? "";
+  const exponent = Number(match[5] ?? "0");
+  if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > 100) return null;
+  const coefficient = `${whole}${fraction}`;
+
+  const decimalPosition = whole.length + exponent;
+  const digits = coefficient;
+  const expandedWhole = decimalPosition <= 0 ? "0"
+    : decimalPosition >= digits.length ? `${digits}${"0".repeat(decimalPosition - digits.length)}`
+      : digits.slice(0, decimalPosition);
+  const expandedFraction = decimalPosition <= 0 ? `${"0".repeat(-decimalPosition)}${digits}`
+    : decimalPosition >= digits.length ? "" : digits.slice(decimalPosition);
+  const normalizedWhole = expandedWhole.replace(/^0+(?=\d)/, "");
+  const normalizedFraction = expandedFraction.replace(/0+$/, "");
+  const isZero = /^0+$/.test(normalizedWhole) && !normalizedFraction;
+  const wholeDigits = isZero ? 0 : normalizedWhole.length;
+  if (wholeDigits + normalizedFraction.length > maxDigits || normalizedFraction.length > maxPlaces) return null;
+  if ((sign === "-" && !isZero) || (positive && isZero)) return null;
+  return `${!isZero && sign === "-" ? "-" : ""}${normalizedWhole}${normalizedFraction ? `.${normalizedFraction}` : ""}`;
+}
+
+function normalizeManualPostingSnapshot(value: unknown): Record<string, unknown> | null {
+  const postingKeys = ["source", "source_version", "operation", "document_date", "operation_date",
+    "posting_date", "policy_id", "rule_version", "explanation", "lines", "opening", "correction_of"];
+  const lineKeys = ["account", "side", "amount", "dimensions", "currency", "original_amount", "rate",
+    "rate_scale", "rate_date", "rate_source", "quantity", "cash_activity"];
+  if (!isRecord(value) || !hasOnlyKeys(value, postingKeys) || !Array.isArray(value.lines)
+    || value.lines.length < 1 || value.lines.length > 1000) return null;
+
+  const source = normalizedText(value.source, 160, 1);
+  const sourceVersion = normalizedInteger(value.source_version, 1);
+  const operation = normalizedText(value.operation, 60, 1);
+  const documentDate = normalizedDate(value.document_date);
+  const operationDate = normalizedDate(value.operation_date);
+  const postingDate = normalizedDate(value.posting_date);
+  const policyId = normalizedInteger(value.policy_id, 1);
+  const ruleVersion = normalizedText(value.rule_version, 100, 1);
+  const explanation = normalizedText(value.explanation, 1000, 1);
+  const opening = value.opening === undefined ? false : value.opening;
+  const correctionOf = value.correction_of == null ? null : normalizedInteger(value.correction_of, 1);
+  if (source === null || sourceVersion === null || operation === null || documentDate === null
+    || operationDate === null || postingDate === null || policyId === null || ruleVersion === null
+    || explanation === null || typeof opening !== "boolean"
+    || (value.correction_of != null && correctionOf === null)) return null;
+
+  const lines: Record<string, unknown>[] = [];
+  for (const rawLine of value.lines) {
+    if (!isRecord(rawLine) || !hasOnlyKeys(rawLine, lineKeys)) return null;
+    const account = normalizedText(rawLine.account, 32, 1);
+    const side = normalizedText(rawLine.side, 10, 1);
+    const amount = normalizedDecimal(rawLine.amount, 20, 2);
+    const currency = normalizedText(rawLine.currency === undefined ? "BYN" : rawLine.currency, 3, 3);
+    const rawDimensions = rawLine.dimensions === undefined ? {} : rawLine.dimensions;
+    if (account === null || !/^[0-9]+(?:\.[0-9]+)*$/.test(account)
+      || (side !== "debit" && side !== "credit") || amount === null
+      || currency === null || !/^[A-Z]{3}$/.test(currency) || !isRecord(rawDimensions)) return null;
+
+    const dimensions: Record<string, string> = {};
+    for (const [key, rawValue] of Object.entries(rawDimensions)) {
+      const dimension = normalizedText(rawValue, 200, 1);
+      if (!key || dimension === null) return null;
+      dimensions[key] = dimension;
+    }
+    const optionalDecimal = (field: "original_amount" | "rate" | "quantity", maxDigits: number, maxPlaces: number, positive: boolean) => {
+      const raw = rawLine[field];
+      return raw == null ? null : normalizedDecimal(raw, maxDigits, maxPlaces, positive);
+    };
+    const originalAmount = optionalDecimal("original_amount", 20, 2, false);
+    const rate = optionalDecimal("rate", 24, 6, true);
+    const quantity = optionalDecimal("quantity", 24, 6, true);
+    const rateScale = rawLine.rate_scale == null ? null : normalizedInteger(rawLine.rate_scale, 1, 2_147_483_647);
+    const rateDate = rawLine.rate_date == null ? null : normalizedDate(rawLine.rate_date);
+    const rateSource = rawLine.rate_source == null ? null : normalizedText(rawLine.rate_source, 200);
+    const cashActivity = rawLine.cash_activity == null ? null : normalizedText(rawLine.cash_activity, 20, 1);
+    if ((rawLine.original_amount != null && originalAmount === null)
+      || (rawLine.rate != null && rate === null)
+      || (rawLine.quantity != null && quantity === null)
+      || (rawLine.rate_scale != null && rateScale === null)
+      || (rawLine.rate_date != null && rateDate === null)
+      || (rawLine.rate_source != null && rateSource === null)
+      || (rawLine.cash_activity != null && !["operating", "investing", "financing", "internal"].includes(cashActivity ?? ""))) return null;
+    if (currency === "BYN" && [rawLine.original_amount, rawLine.rate, rawLine.rate_scale,
+      rawLine.rate_date, rawLine.rate_source].some((item) => item != null)) return null;
+    if (currency !== "BYN" && (originalAmount === null || rate === null || rateScale === null
+      || rateDate === null || !rateSource)) return null;
+
+    lines.push({ account, side, amount, dimensions, currency, original_amount: originalAmount,
+      rate, rate_scale: rateScale, rate_date: rateDate, rate_source: rateSource,
+      quantity, cash_activity: cashActivity });
+  }
+  if (operation !== "manual" || opening || ruleVersion !== "manual-v1") return null;
+  return { source, source_version: sourceVersion, operation, document_date: documentDate,
+    operation_date: operationDate, posting_date: postingDate, policy_id: policyId,
+    rule_version: ruleVersion, explanation, lines, opening, correction_of: correctionOf };
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (isRecord(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function parseManualCreateJournal(raw: string): ManualCreateJournal | null {
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!isRecord(value)
+      || Object.keys(value).sort().join(",") !== "close_after_save,key,organization_id,request_body,reviewed_digest"
+      || typeof value.organization_id !== "string"
+      || !/^[1-9]\d*$/.test(value.organization_id)
+      || !Number.isSafeInteger(Number(value.organization_id))
+      || Number(value.organization_id) > 2_147_483_647
+      || typeof value.key !== "string"
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value.key)
+      || typeof value.request_body !== "string"
+      || typeof value.reviewed_digest !== "string"
+      || !/^[a-f0-9]{64}$/.test(value.reviewed_digest)
+      || typeof value.close_after_save !== "boolean") return null;
+    const body: unknown = JSON.parse(value.request_body);
+    if (!isRecord(body) || Object.keys(body).sort().join(",") !== "key,posting"
+      || body.key !== value.key || !normalizeManualPostingSnapshot(body.posting)) return null;
+    return {
+      organization_id: value.organization_id,
+      key: value.key,
+      request_body: value.request_body,
+      reviewed_digest: value.reviewed_digest,
+      close_after_save: value.close_after_save,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readManualCreateRecovery(): ManualCreateStoredRecovery {
+  if (typeof window === "undefined") return { status: "none" };
+  try {
+    const raw = window.sessionStorage.getItem(manualCreateJournalStorageKey);
+    if (raw === null) return { status: "none" };
+    const journal = parseManualCreateJournal(raw);
+    return journal
+      ? { status: "pending", journal, raw }
+      : { status: "blocked", reason: "Журнал ожидающего создания повреждён. Запись сохранена; новую справку создавать нельзя." };
+  } catch {
+    return { status: "blocked", reason: "Не удалось прочитать журнал текущей вкладки. Создание справки заблокировано." };
+  }
+}
+
+function matchesManualCreateResult(value: unknown, journal: ManualCreateJournal): value is ManualDocument {
+  if (!isRecord(value)) return false;
+  const body: unknown = JSON.parse(journal.request_body);
+  const expectedPosting = isRecord(body) ? normalizeManualPostingSnapshot(body.posting) : null;
+  const id = normalizedInteger(value.id, 1, 2_147_483_647);
+  const organizationId = normalizedInteger(value.organization_id, 1, 2_147_483_647);
+  const version = normalizedInteger(value.version, 1, 2_147_483_647);
+  const number = normalizedText(value.number, 100, 1);
+  const source = normalizedText(value.source, 160, 1);
+  const postingDate = normalizedDate(value.posting_date);
+  const updatedAt = typeof value.updated_at === "string" && Number.isFinite(Date.parse(value.updated_at))
+    ? value.updated_at : null;
+  const validStatus = value.status === "draft" || value.status === "posted" || value.status === "voided";
+  const revisions = value.revisions;
+  const entryId = value.entry_id == null ? null : normalizedInteger(value.entry_id, 1, 2_147_483_647);
+  if (expectedPosting === null || id === null || organizationId === null
+    || String(organizationId) !== journal.organization_id || version === null || number === null
+    || source === null || postingDate === null || updatedAt === null || !validStatus
+    || !Array.isArray(revisions) || revisions.length !== version
+    || (value.entry_id != null && entryId === null)) return false;
+
+  const normalizedRevisions: Record<string, unknown>[] = [];
+  for (let index = 0; index < revisions.length; index += 1) {
+    const revision = revisions[index];
+    if (!isRecord(revision) || revision.version !== index + 1
+      || typeof revision.request_key !== "string"
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(revision.request_key)
+      || typeof revision.digest !== "string" || !/^[a-f0-9]{64}$/.test(revision.digest)
+      || normalizedText(revision.actor, 200, 1) === null
+      || typeof revision.created_at !== "string" || !Number.isFinite(Date.parse(revision.created_at))) return false;
+    const posting = normalizeManualPostingSnapshot(revision.posting);
+    if (posting === null) return false;
+    normalizedRevisions.push(posting);
+  }
+  const firstRevision = revisions[0] as Record<string, unknown>;
+  const latestPosting = normalizedRevisions[normalizedRevisions.length - 1];
+  const rawVoid = value.void;
+  const hasValidVoid = isRecord(rawVoid)
+    && normalizedText(rawVoid.reason, 1000, 1) !== null
+    && normalizedText(rawVoid.actor, 200, 1) !== null
+    && typeof rawVoid.created_at === "string" && Number.isFinite(Date.parse(rawVoid.created_at));
+  if (firstRevision.request_key !== journal.key || firstRevision.digest !== journal.reviewed_digest
+    || canonicalJson(normalizedRevisions[0]) !== canonicalJson(expectedPosting)
+    || latestPosting.source !== source || latestPosting.posting_date !== postingDate
+    || (value.status === "draft" && (entryId !== null || rawVoid != null))
+    || (value.status === "posted" && (entryId === null || rawVoid != null))
+    || (value.status === "voided" && (entryId !== null || !hasValidVoid))) return false;
+  return true;
+}
+
+function clearExactManualCreateJournal(raw: string): void {
+  const storage = window.sessionStorage;
+  if (storage.getItem(manualCreateJournalStorageKey) !== raw) {
+    throw new Error("Журнал команды изменился. Сохранённая запись оставлена для сверки.");
+  }
+  storage.removeItem(manualCreateJournalStorageKey);
+  if (storage.getItem(manualCreateJournalStorageKey) !== null) {
+    throw new Error("Не удалось очистить подтверждённую команду из журнала. Запись оставлена для сверки.");
+  }
 }
 
 function manualLineSnapshot(line: JournalLine | undefined): string {
@@ -514,6 +763,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
   const [prepared, setPrepared] = useState<Posting | null>(null);
   const [manualDocument, setManualDocument] = useState<ManualDocument | null>(null);
   const [manualDocuments, setManualDocuments] = useState<ManualDocumentList | null>(null);
+  const [manualCreateRecovery, setManualCreateRecovery] = useState<ManualCreateRecovery>({ status: "checking" });
   const [fixedAssets, setFixedAssets] = useState<FixedAssetOption[]>([]);
   const [fixedAssetsOrg, setFixedAssetsOrg] = useState("");
   const [fixedAssetsError, setFixedAssetsError] = useState("");
@@ -555,6 +805,11 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     }); } }).catch((e: Error) => { if (active) setOrganizationError(e.message); });
     return () => { active = false; };
   }, [organizationRefresh, suggestedOrg]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setManualCreateRecovery(readManualCreateRecovery()), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const refresh = useCallback(async () => {
     const token = ++generation.current;
@@ -627,8 +882,8 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     previewGeneration.current += 1; setPreview(null); setPrepared(null);
     if (tab === "entry") { setManualDirty(true); saveCommand.current = null; postCommand.current = null; }
   }
-  function loadManualDocument(row: ManualDocument) {
-    if (String(row.organization_id) !== org || !row.revisions.length) throw new Error("ERP вернула документ другой организации или без истории.");
+  function loadManualDocument(row: ManualDocument, expectedOrg = org) {
+    if (String(row.organization_id) !== expectedOrg || !row.revisions.length) throw new Error("ERP вернула документ другой организации или без истории.");
     const posting = row.revisions[row.revisions.length - 1].posting;
     if (posting.operation !== "manual") throw new Error("ERP вернула документ другого типа.");
     previewGeneration.current += 1;
@@ -649,6 +904,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     finally { setBusy(false); }
   }
   function newManualDocument() {
+    if (manualCreateRecovery.status !== "none") return;
     if (!confirmDiscard()) return;
     previewGeneration.current += 1; setManualDocument(null); setSource(""); setSourceVersion(1);
     setCorrectionOf(""); setExplanation("");
@@ -697,28 +953,123 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
 
   async function saveManual(closeAfterSave = false) {
     if (!prepared || !preview || !org || (manualDocument && manualDocument.status !== "draft")) return;
+    if (!manualDocument) {
+      const stored = readManualCreateRecovery();
+      if (stored.status !== "none") {
+        setManualCreateRecovery(stored);
+        setError(stored.status === "pending"
+          ? "Есть незавершённая команда создания. Сначала восстановите её." : stored.reason);
+        return;
+      }
+    }
     const posting = prepared;
     const checked = preview;
     const version = manualDocument?.version ?? 0;
     const fingerprint = `${org}/${manualDocument?.id ?? "new"}/${version}/${checked.digest}`;
     if (saveCommand.current?.fingerprint !== fingerprint) saveCommand.current = { fingerprint, key: crypto.randomUUID() };
     const key = saveCommand.current.key;
+    const payload = manualDocument ? { key, expected_version: version, posting } : { key, posting };
+    const requestBody = JSON.stringify(payload);
+    let journalRaw: string | null = null;
+    let journal: ManualCreateJournal | null = null;
+    if (!manualDocument) {
+      journal = { organization_id: org, key, request_body: requestBody,
+        reviewed_digest: checked.digest, close_after_save: closeAfterSave };
+      journalRaw = JSON.stringify(journal);
+      try {
+        const storage = window.sessionStorage;
+        if (storage.getItem(manualCreateJournalStorageKey) !== null) {
+          const existing = readManualCreateRecovery();
+          setManualCreateRecovery(existing);
+          throw new Error(existing.status === "pending"
+            ? "Есть незавершённая команда создания. Сначала восстановите её."
+            : "Журнал создания уже занят или повреждён. Новая справка заблокирована.");
+        }
+        storage.setItem(manualCreateJournalStorageKey, journalRaw);
+        if (storage.getItem(manualCreateJournalStorageKey) !== journalRaw) {
+          throw new Error("Браузер не подтвердил сохранение команды. Запрос не отправлен.");
+        }
+        setManualCreateRecovery({ status: "pending", journal, raw: journalRaw });
+      } catch (reason) {
+        const inspected = readManualCreateRecovery();
+        setManualCreateRecovery(inspected.status === "none"
+          ? { status: "blocked", reason: "Не удалось сохранить команду в журнале текущей вкладки. Запрос не отправлен." }
+          : inspected);
+        setError((reason as Error).message || "Не удалось сохранить команду в журнале текущей вкладки. Запрос не отправлен.");
+        return;
+      }
+    }
     setBusy(true); setError("");
     try {
       const path = `/organizations/${org}/manual-documents${manualDocument ? `/${manualDocument.id}` : ""}`;
-      const payload = manualDocument ? { key, expected_version: version, posting } : { key, posting };
-      const result = await request<ManualDocument>(path, payload, manualDocument ? "PUT" : undefined);
-      if (String(result.organization_id) !== org || (manualDocument && result.id !== manualDocument.id)
-        || result.version !== version + 1 || result.status !== "draft"
-        || result.revisions[result.revisions.length - 1]?.digest !== checked.digest) {
-        throw new Error("ERP не подтвердила сохранение этой версии документа. Форма оставлена открытой для сверки.");
+      const result = await request<unknown>(path, manualDocument ? payload : requestBody, manualDocument ? "PUT" : undefined);
+      if (manualDocument) {
+        if (!isRecord(result) || String(result.organization_id) !== org || result.id !== manualDocument.id
+          || result.version !== version + 1 || result.status !== "draft"
+          || !Array.isArray(result.revisions)
+          || result.revisions[result.revisions.length - 1]?.digest !== checked.digest) {
+          throw new Error("ERP не подтвердила сохранение этой версии документа. Форма оставлена открытой для сверки.");
+        }
+      } else if (!journal || !journalRaw || !matchesManualCreateResult(result, journal)) {
+        throw new Error("ERP не подтвердила организацию, ключ и точный снимок новой справки. Команда оставлена для восстановления.");
       }
-      setManualDocument(result); setManualDirty(false); saveCommand.current = null; postCommand.current = null;
-      setNotice(`${result.number} · версия ${result.version} сохранена${closeAfterSave ? " и закрыта" : ""}.`);
-      if (closeAfterSave) setTab("home");
+      if (!manualDocument && journalRaw) {
+        clearExactManualCreateJournal(journalRaw);
+        setManualCreateRecovery({ status: "none" });
+      }
+      const saved = result as ManualDocument;
+      saveCommand.current = null; postCommand.current = null;
+      if (!manualDocument && (saved.version !== 1 || saved.status !== "draft")) {
+        loadManualDocument(saved, org);
+        setTab("entry");
+        setNotice(`${saved.number} · после создания загружено текущее состояние, версия ${saved.version}.`);
+      } else {
+        setManualDocument(saved); setManualDirty(false);
+        setNotice(`${saved.number} · версия ${saved.version} сохранена${closeAfterSave ? " и закрыта" : ""}.`);
+        if (closeAfterSave) setTab("home");
+      }
       try { await reloadManualDocuments(); } catch { /* saved receipt remains authoritative */ }
     } catch (reason) { setError((reason as Error).message); }
     finally { setBusy(false); }
+  }
+
+  async function retryManualCreate() {
+    if (manualCreateRecovery.status !== "pending") return;
+    const { journal, raw } = manualCreateRecovery;
+    const current = readManualCreateRecovery();
+    if (current.status !== "pending" || current.raw !== raw) {
+      setManualCreateRecovery(current);
+      setError("Журнал ожидающей команды изменился или недоступен. Запрос не отправлен.");
+      return;
+    }
+    setBusy(true); setError("");
+    try {
+      const result = await request<unknown>(
+        `/organizations/${journal.organization_id}/manual-documents`, journal.request_body,
+      );
+      if (!matchesManualCreateResult(result, journal)) {
+        throw new Error("ERP вернула документ, не совпадающий с организацией, ключом, digest и точным снимком. Команда сохранена для сверки.");
+      }
+      clearExactManualCreateJournal(raw);
+      setManualCreateRecovery({ status: "none" });
+      setOrg(journal.organization_id);
+      setError("");
+      saveCommand.current = null; postCommand.current = null;
+      if (journal.close_after_save && result.version === 1 && result.status === "draft") {
+        setManualDocument(null); setManualDirty(false); setTab("home");
+        setNotice(`${result.number} · версия 1 подтверждена, форма закрыта.`);
+      } else {
+        loadManualDocument(result, journal.organization_id);
+        setTab("entry");
+        setNotice(result.version === 1 && result.status === "draft"
+          ? `${result.number} · версия 1 восстановлена из подтверждённой команды.`
+          : `${result.number} · текущее состояние загружено, версия ${result.version}.`);
+      }
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function post(closeAfterPost = false) {
@@ -802,6 +1153,8 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     <header><h1 className="text-2xl font-semibold">Бухгалтерия</h1><p className="mt-1 text-sm text-muted">Проводки и регистры по каждому юридическому лицу. Суммы в BYN.</p></header>
     {organizationError && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-300 bg-surface p-3 text-red-700"><span>{organizationError}</span><Button variant="secondary" onClick={() => { setOrganizationError(""); setOrganizationRefresh((value) => value + 1); }}>Повторить список организаций</Button></div>}
     {error && <div role="alert" className="rounded-xl border border-red-300 bg-surface p-3 text-red-700">{error}</div>}
+    {manualCreateRecovery.status === "pending" && <section role="status" aria-label="Восстановление создания справки" className="space-y-2 rounded-xl border border-amber-300 bg-surface p-3 text-sm"><p className="font-semibold">Результат создания справки неизвестен · организация {manualCreateRecovery.journal.organization_id}</p><p>Создание и сохранение новой справки заблокированы. Повтор отправит сохранённые ключ и тело команды (digest {manualCreateRecovery.journal.reviewed_digest}).</p><Button variant="secondary" disabled={locked} onClick={() => void retryManualCreate()}>Повторить создание справки</Button></section>}
+    {manualCreateRecovery.status === "blocked" && <section role="alert" aria-label="Создание справки заблокировано" className="rounded-xl border border-red-300 bg-surface p-3 text-sm text-red-700">{manualCreateRecovery.reason} Журнал не очищен автоматически.</section>}
     {notice && <p role="status" className="text-money">{notice}</p>}
     <div className="flex flex-wrap gap-4 rounded-xl border border-line bg-surface p-4">
       <label className="min-w-0 basis-64 flex-1 text-sm">Организация<Select className="min-w-0" aria-label="Организация" value={org} disabled={locked} onChange={(e) => { const next = e.target.value; if (next === org || !confirmDiscard()) return; generation.current += 1; setReport(null); setAccountActivity(null); setDetail(null); setPreview(null); setPrepared(null); setManualDocument(null); setManualDocuments(null); setManualDirty(false); setSource(""); setSourceVersion(1); setCorrectionOf(""); setExplanation(""); setNotice(""); setLines([{ account: "", side: "debit", amount: "", dimensions: {} }, { account: "", side: "credit", amount: "", dimensions: {} }]); setOrg(next); }}><option value="">Выберите организацию</option>{organizations.map((o) => <option key={o.id} value={o.id}>{o.name} · {o.unp}</option>)}</Select></label>
@@ -862,15 +1215,15 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
       <section id="accounting-journal" className="rounded-xl border border-line bg-surface p-4"><h2 className="mb-3 font-semibold">Проводки за период</h2>{report.movements.map((m, i) => <div key={i} className="flex flex-wrap items-center justify-between gap-3 border-b border-line py-2 text-sm"><button className="text-accent underline" onClick={() => void openEntry(m.entry_id)}>№ {m.entry_id} · {m.source}</button><span>{m.date} · {m.side === "debit" ? "Дт" : "Кт"} {m.account}</span><span className="tabular-nums">{m.amount} BYN</span></div>)}</section>
     </>}
     {tab === "accounts" && <section className="rounded-xl border border-line bg-surface p-4"><h2 className="font-semibold">Рабочий план счетов</h2><p className="my-2 text-sm text-muted">Действует на {operationDate}. Настройки и версии утверждает главный бухгалтер.</p>{accounts.map((a) => <div key={a.id} className="border-b border-line py-3"><span className="font-semibold">{a.code}</span> · {a.title}<p className="text-xs text-muted">{a.required_dimensions.map((d) => labels[d] || d).join(" · ") || "Без обязательной аналитики"}</p></div>)}{!accounts.length && <p className="py-4 text-muted">Рабочий план счетов ещё не настроен.</p>}</section>}
-    {tab === "entry" && <section className="space-y-4 rounded-xl border border-line bg-surface p-4"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">Бухгалтерская справка {manualDocument?.number ?? "· новый документ"}</h2><Button variant="secondary" disabled={locked} onClick={newManualDocument}>Новая справка</Button></div>
+    {tab === "entry" && <section className="space-y-4 rounded-xl border border-line bg-surface p-4"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">Бухгалтерская справка {manualDocument?.number ?? "· новый документ"}</h2><Button variant="secondary" disabled={locked || manualCreateRecovery.status !== "none"} onClick={newManualDocument}>Новая справка</Button></div>
       <section aria-label="Список бухгалтерских справок" className="rounded-lg border border-line p-3"><h3 className="font-semibold">Реестр справок</h3>{manualDocuments?.items.map((row) => <button key={row.id} className="block py-1 text-left text-accent underline" onClick={() => void openManualDocument(row.id)} disabled={locked}>{row.number} · {row.source} · {row.posting_date} · {row.status === "posted" ? "проведена" : row.status === "voided" ? "аннулирована" : "черновик"}</button>)}{manualDocuments && !manualDocuments.items.length && <p className="text-sm text-muted">Справок пока нет.</p>}{manualDocuments?.next_before_id != null && <Button variant="secondary" disabled={locked} onClick={() => { const cursor = manualDocuments.next_before_id; void request<ManualDocumentList>(`/organizations/${org}/manual-documents?before_id=${cursor}`).then((next) => { if (String(next.organization_id) === org) setManualDocuments({ ...next, items: [...manualDocuments.items, ...next.items] }); }).catch((reason: Error) => setError(reason.message)); }}>Ещё справки</Button>}</section>
       {manualDocument && <p className="text-sm text-muted">{manualDocument.status === "posted" ? "Проведена" : manualDocument.status === "voided" ? "Аннулирована" : "Черновик"} · версия {manualDocument.version} · изменена {manualDocument.updated_at}{manualDocument.entry_id != null && <Button variant="ghost" onClick={() => void openEntry(manualDocument.entry_id!)}>Открыть проводку № {manualDocument.entry_id}</Button>}{manualDocument.status === "posted" && manualDocument.entry_id != null && <Button variant="secondary" disabled={locked} onClick={startManualCorrection}>Создать исправление</Button>}</p>}
-      <fieldset disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} className="space-y-4"><div className="grid gap-3 md:grid-cols-3"><label>Основание<Input aria-label="Основание" value={source} disabled={locked} onChange={(e) => { invalidatePreview(); setSource(e.target.value); }} placeholder="Номер документа" /></label><label>Дата отражения<Input aria-label="Дата операции" type="date" value={operationDate} disabled={locked} onChange={(e) => changeDate("operation", e.target.value)} /></label><label>Содержание<Input aria-label="Содержание" value={explanation} disabled={locked} onChange={(e) => { invalidatePreview(); setExplanation(e.target.value); }} /></label></div>
+      <fieldset disabled={locked || (!manualDocument && manualCreateRecovery.status !== "none") || (manualDocument != null && manualDocument.status !== "draft")} className="space-y-4"><div className="grid gap-3 md:grid-cols-3"><label>Основание<Input aria-label="Основание" value={source} disabled={locked} onChange={(e) => { invalidatePreview(); setSource(e.target.value); }} placeholder="Номер документа" /></label><label>Дата отражения<Input aria-label="Дата операции" type="date" value={operationDate} disabled={locked} onChange={(e) => changeDate("operation", e.target.value)} /></label><label>Содержание<Input aria-label="Содержание" value={explanation} disabled={locked} onChange={(e) => { invalidatePreview(); setExplanation(e.target.value); }} /></label></div>
       <div className="grid gap-3 md:grid-cols-4"><label className="text-sm">Дата документа<Input aria-label="Дата документа" type="date" value={documentDate} disabled={locked} onChange={(e) => { invalidatePreview(); setDocumentDate(e.target.value); }} /></label><label className="text-sm">Дата хозяйственной операции<Input aria-label="Дата хозяйственной операции" type="date" value={economicDate} disabled={locked} onChange={(e) => { invalidatePreview(); setEconomicDate(e.target.value); }} /></label><label className="text-sm">Версия документа<Input aria-label="Версия документа" type="number" min="1" step="1" value={sourceVersion} disabled={locked} onChange={(e) => { invalidatePreview(); setSourceVersion(Number(e.target.value)); }} /></label><label className="text-sm">Исправляет операцию №<Input aria-label="Исправляет операцию" type="number" min="1" step="1" value={correctionOf} disabled={locked} onChange={(e) => { invalidatePreview(); setCorrectionOf(e.target.value); }} placeholder="Если это исправление" /></label></div>
       {correctionOf && <p className="rounded-lg border border-amber-300 p-3 text-sm">Корректирующая справка добавляет проводки к исходной операции. Укажите только сумму и количество разницы; итоговые суммы исходного документа повторно не вводите.</p>}
       {lines.map((line, i) => <fieldset key={i} disabled={locked} className="space-y-2 rounded-lg border border-line p-3"><legend className="text-sm">Строка {i + 1}</legend><div className="grid gap-3 md:grid-cols-3"><Select aria-label={`Сторона ${i + 1}`} value={line.side} onChange={(e) => changeLine(i, { side: e.target.value as "debit" | "credit" })}><option value="debit">Дебет</option><option value="credit">Кредит</option></Select><Select aria-label={`Счёт ${i + 1}`} value={line.account} onChange={(e) => changeLine(i, { account: e.target.value, dimensions: {}, cash_activity: undefined, currency: "BYN", original_amount: undefined, rate: undefined, rate_scale: undefined, rate_date: undefined, rate_source: undefined, quantity: undefined })}><option value="">Выберите счёт</option>{accounts.map((a) => <option key={a.id} value={a.code}>{a.code} · {a.title}</option>)}</Select><Input aria-label={`Сумма ${i + 1}`} inputMode="decimal" value={line.amount} placeholder="0.00 BYN" onChange={(e) => changeLine(i, { amount: e.target.value })} /></div>{accounts.find((a) => a.code === line.account)?.required_dimensions.map((dimension) => dimension === "counterparty" ? <CounterpartyDimensionPicker key={`${org}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => { const next = Object.fromEntries(Object.entries(line.dimensions).filter(([key]) => !key.startsWith("counterparty") && !key.startsWith("contract") && !key.startsWith("settlement_document"))); changeLine(i, { dimensions: { ...next, ...snapshot } }); }} /> : dimension === "contract" ? <ContractDimensionPicker key={`${org}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => { const next = Object.fromEntries(Object.entries(line.dimensions).filter(([key]) => !key.startsWith("settlement_document"))); changeLine(i, { dimensions: { ...next, ...snapshot } }); }} /> : dimension === "settlement_document" ? <SettlementDocumentDimensionPicker key={`${org}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => changeLine(i, { dimensions: { ...line.dimensions, ...snapshot } })} />  : dimension === "asset" ? <FixedAssetDimensionPicker key={org + "/asset/" + i} org={org} index={i} dimensions={line.dimensions} assets={fixedAssets} assetsOrg={fixedAssetsOrg} loading={fixedAssetsLoading} error={fixedAssetsErrorForOrg} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => { const next = Object.fromEntries(Object.entries(line.dimensions).filter(([key]) => !fixedAssetDimensionKeys.has(key))); changeLine(i, { dimensions: { ...next, ...snapshot } }); }} /> : dimension === "sku" ? <SkuDimensionPicker key={`${org}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => changeLine(i, { dimensions: { ...line.dimensions, ...snapshot } })} /> : dimension === "warehouse" ? <WarehouseDimensionPicker key={`${org}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => changeLine(i, { dimensions: { ...line.dimensions, ...snapshot } })} /> : dimension === "order" ? <OrderDimensionPicker key={`${org}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => { const next = Object.fromEntries(Object.entries(line.dimensions).filter(([key]) => key !== "order" && !key.startsWith("order_"))); changeLine(i, { dimensions: { ...next, ...snapshot } }); }} /> : dimension === "employee" ? <EmployeeDimensionPicker key={`${org}/${economicDate}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} onDate={economicDate} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} requiresDepartment={accounts.find((a) => a.code === line.account)?.required_dimensions.includes("department") ?? false} onSelect={(snapshot) => { const next = Object.fromEntries(Object.entries(line.dimensions).filter(([key]) => key !== "employee" && key !== "employment_binding_id" && key !== "department" && !key.startsWith("employee_"))); changeLine(i, { dimensions: { ...next, ...snapshot } }); }} /> : dimension === "department" && accounts.find((a) => a.code === line.account)?.required_dimensions.includes("employee") ? <label key={dimension} className="block text-sm">Подразделение строки {i + 1}<Input aria-label={`Подразделение строки ${i + 1}`} value={line.dimensions.department || ""} readOnly /><span className="text-xs text-muted">Заполняется из действующей привязки сотрудника.</span></label> : <label key={dimension} className="block text-sm">{labels[dimension] || dimension}<Input value={line.dimensions[dimension] || ""} onChange={(e) => changeLine(i, { dimensions: { ...line.dimensions, [dimension]: e.target.value } })} /></label>)}{accounts.find((a) => a.code === line.account)?.cash && <label className="block text-sm">Вид денежного потока<Select value={line.cash_activity || ""} onChange={(e) => changeLine(i, { cash_activity: e.target.value })}><option value="">Выберите вид</option><option value="operating">Текущая деятельность</option><option value="investing">Инвестиционная</option><option value="financing">Финансовая</option><option value="internal">Внутреннее перемещение</option></Select></label>}<AccountingCurrencyFields value={line} currency={accounts.find((a) => a.code === line.account)?.currency_tracking ?? false} quantity={accounts.find((a) => a.code === line.account)?.quantity_tracking ?? false} onChange={(patch) => changeLine(i, patch)} /></fieldset>)}
       <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={locked} onClick={() => { invalidatePreview(); setLines([...lines, { account: "", side: "debit", amount: "", dimensions: {} }]); }}>Добавить строку</Button><Button disabled={locked || !org || !source || !explanation} onClick={() => void prepare()}>Проверить проводки</Button></div>
-      {preview && <div className="rounded-xl border border-accent p-4"><h3 className="font-semibold">Проверенные проводки</h3><p className="my-2">{preview.explanation}</p>{preview.lines.map((line, i) => <p key={i}>{line.side === "debit" ? "Дт" : "Кт"} {line.account} · {line.title} — {line.amount} BYN</p>)}{!preview.normative_verified && <p className="my-2 text-sm text-muted">Нормативная база не подтверждена: закрытие периода будет недоступно.</p>}<div className="mt-3 flex flex-wrap gap-2"><Button disabled={locked} onClick={() => void saveManual()}>Сохранить</Button><Button variant="secondary" disabled={locked} onClick={() => void saveManual(true)}>Сохранить и закрыть</Button><Button disabled={locked || !manualDocument || manualDirty || manualDocument.revisions[manualDocument.revisions.length - 1]?.digest !== preview.digest} onClick={() => void post()}>Подтвердить и провести</Button><Button variant="secondary" disabled={locked || !manualDocument || manualDirty || manualDocument.revisions[manualDocument.revisions.length - 1]?.digest !== preview.digest} onClick={() => void post(true)}>Провести и закрыть</Button></div></div>}
+      {preview && <div className="rounded-xl border border-accent p-4"><h3 className="font-semibold">Проверенные проводки</h3><p className="my-2">{preview.explanation}</p>{preview.lines.map((line, i) => <p key={i}>{line.side === "debit" ? "Дт" : "Кт"} {line.account} · {line.title} — {line.amount} BYN</p>)}{!preview.normative_verified && <p className="my-2 text-sm text-muted">Нормативная база не подтверждена: закрытие периода будет недоступно.</p>}<div className="mt-3 flex flex-wrap gap-2"><Button disabled={locked || (!manualDocument && manualCreateRecovery.status !== "none")} onClick={() => void saveManual()}>Сохранить</Button><Button variant="secondary" disabled={locked || (!manualDocument && manualCreateRecovery.status !== "none")} onClick={() => void saveManual(true)}>Сохранить и закрыть</Button><Button disabled={locked || !manualDocument || manualDirty || manualDocument.revisions[manualDocument.revisions.length - 1]?.digest !== preview.digest} onClick={() => void post()}>Подтвердить и провести</Button><Button variant="secondary" disabled={locked || !manualDocument || manualDirty || manualDocument.revisions[manualDocument.revisions.length - 1]?.digest !== preview.digest} onClick={() => void post(true)}>Провести и закрыть</Button></div></div>}
       </fieldset>
       {manualDocument?.status === "draft" && <div className="flex flex-wrap items-end gap-3 rounded-lg border border-line p-3"><label className="min-w-64 flex-1 text-sm">Причина аннулирования<Input aria-label="Причина аннулирования справки" value={voidReason} disabled={locked} onChange={(event) => { setVoidReason(event.target.value); voidCommand.current = null; }} placeholder="Ошибочный черновик, дубликат…" /></label><Button variant="secondary" disabled={locked || manualDirty || !voidReason.trim()} onClick={() => void voidManualDocument()}>Аннулировать черновик</Button><p className="w-full text-xs text-muted">Проведённую справку аннулировать нельзя; для неё оформляют исправление. История черновика и причина аннулирования сохраняются.</p></div>}
       {manualDocument?.void && <p className="rounded-lg border border-line p-3 text-sm">Аннулирована: {manualDocument.void.reason} · {manualDocument.void.actor} · {manualDocument.void.created_at}</p>}

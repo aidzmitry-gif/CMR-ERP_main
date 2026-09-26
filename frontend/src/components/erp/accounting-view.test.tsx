@@ -20,7 +20,7 @@ const registeredProductionOrder = {
   order_product: "Насос", order_quantity: "3", order_created_at: "2026-09-01T10:00:00",
   order_digest: digest, order_stage_at_ownership: "queue",
 };
-let manualDraft: { id: number; organization_id: number; number: string; source: string; posting_date: string; version: number; status: string; entry_id: number | null; updated_at: string; void?: { reason: string; actor: string; created_at: string }; revisions: { version: number; actor: string; created_at: string; digest: string; posting: Record<string, unknown> }[] } | null;
+let manualDraft: { id: number; organization_id: number; number: string; source: string; posting_date: string; version: number; status: string; entry_id: number | null; updated_at: string; void?: { reason: string; actor: string; created_at: string }; revisions: { version: number; request_key: string; actor: string; created_at: string; digest: string; posting: Record<string, unknown> }[] } | null;
 function openPage(section: string, page: string) {
   fireEvent.click(screen.getByRole("button", { name: section, exact: true }));
   if (section !== page) fireEvent.click(screen.getByRole("button", { name: page, exact: true }));
@@ -33,9 +33,43 @@ function fillManualOperation() {
   fireEvent.change(screen.getByLabelText("Сумма 1"), { target: { value: "100.00" } });
   fireEvent.change(screen.getByLabelText("Сумма 2"), { target: { value: "100.00" } });
 }
+function normalizedManualPosting(posting: Record<string, unknown>): Record<string, unknown> {
+  const clean = (value: unknown) => typeof value === "string" ? value.trim() : value;
+  const decimal = (value: unknown) => {
+    if (typeof value !== "string") return value;
+    const match = /^([+-]?)(\d+)(?:\.(\d*))?$/.exec(value.trim());
+    if (!match) return value.trim();
+    const whole = match[2].replace(/^0+(?=\d)/, "");
+    const fraction = match[3];
+    const negative = match[1] === "-" && /[1-9]/.test(`${whole}${fraction ?? ""}`);
+    return `${negative ? "-" : ""}${whole}${fraction === undefined ? "" : `.${fraction}`}`;
+  };
+  const lines = Array.isArray(posting.lines) ? posting.lines.map((rawLine) => {
+    const line = rawLine as Record<string, unknown>;
+    const dimensions = line.dimensions && typeof line.dimensions === "object"
+      ? Object.fromEntries(Object.entries(line.dimensions as Record<string, string>)
+        .map(([key, value]) => [key, value.trim()])) : {};
+    return {
+      account: clean(line.account), side: clean(line.side), amount: decimal(clean(line.amount)), dimensions,
+      currency: clean(line.currency ?? "BYN"),
+      original_amount: line.original_amount == null ? null : decimal(line.original_amount),
+      rate: line.rate == null ? null : decimal(line.rate), rate_scale: line.rate_scale ?? null, rate_date: line.rate_date ?? null,
+      rate_source: clean(line.rate_source ?? null), quantity: line.quantity == null ? null : decimal(line.quantity),
+      cash_activity: line.cash_activity ?? null,
+    };
+  }) : [];
+  return {
+    source: clean(posting.source), source_version: posting.source_version, operation: clean(posting.operation),
+    document_date: posting.document_date, operation_date: posting.operation_date,
+    posting_date: posting.posting_date, policy_id: posting.policy_id,
+    rule_version: clean(posting.rule_version), explanation: clean(posting.explanation), lines,
+    opening: posting.opening ?? false, correction_of: posting.correction_of ?? null,
+  };
+}
 
 beforeEach(() => {
   manualDraft = null;
+  window.sessionStorage.clear();
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockImplementation((input: string, init?: RequestInit) => {
     if (input.endsWith("/organizations")) return respond([{ id: 1, name: "Тестовая компания", unp: "999999999" }, { id: 2, name: "Вторая компания", unp: "888888888" }]);
@@ -47,13 +81,15 @@ beforeEach(() => {
     if (input.endsWith("/manual-documents")) {
       if (!init?.body) return respond({ organization_id: 1, items: manualDraft ? [{ ...manualDraft, revisions: undefined }] : [], next_before_id: null });
       const body = JSON.parse(String(init.body));
-      manualDraft = { id: 8, organization_id: 1, number: "БС-8", source: body.posting.source, posting_date: body.posting.posting_date, version: 1, status: "draft", entry_id: null, updated_at: "2026-09-26T10:00:00Z", revisions: [{ version: 1, actor: "accountant", created_at: "2026-09-26T10:00:00Z", digest, posting: body.posting }] };
+      const normalizedPosting = normalizedManualPosting(body.posting);
+      manualDraft = { id: 8, organization_id: 1, number: "БС-8", source: String(normalizedPosting.source), posting_date: String(normalizedPosting.posting_date), version: 1, status: "draft", entry_id: null, updated_at: "2026-09-26T10:00:00Z", revisions: [{ version: 1, request_key: body.key, actor: "accountant", created_at: "2026-09-26T10:00:00Z", digest, posting: normalizedPosting }] };
       return respond(manualDraft);
     }
     if (input.endsWith("/manual-documents/8")) {
       if (init?.method === "PUT") {
         const body = JSON.parse(String(init.body));
-        manualDraft = { ...manualDraft!, source: body.posting.source, posting_date: body.posting.posting_date, version: manualDraft!.version + 1, updated_at: "2026-09-26T11:00:00Z", revisions: [...manualDraft!.revisions, { version: manualDraft!.version + 1, actor: "chief", created_at: "2026-09-26T11:00:00Z", digest, posting: body.posting }] };
+        const normalizedPosting = normalizedManualPosting(body.posting);
+        manualDraft = { ...manualDraft!, source: String(normalizedPosting.source), posting_date: String(normalizedPosting.posting_date), version: manualDraft!.version + 1, updated_at: "2026-09-26T11:00:00Z", revisions: [...manualDraft!.revisions, { version: manualDraft!.version + 1, request_key: body.key, actor: "chief", created_at: "2026-09-26T11:00:00Z", digest, posting: normalizedPosting }] };
       }
       return respond(manualDraft);
     }
@@ -76,7 +112,7 @@ beforeEach(() => {
     throw new Error(input);
   });
 });
-afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
+afterEach(() => { window.sessionStorage.clear(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe("AccountingView", () => {
   it("directs ordinary sales through CRM shipment evidence and keeps manual sale separate", async () => {
@@ -261,6 +297,224 @@ describe("AccountingView", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/manual-documents/8/post"))).toBe(true);
     expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith("/entries") && init?.body)).toBe(false);
   });
+  it.each([false, true])("recovers a create after a lost response with the exact command and no duplicate (close=%s)", async (closeAfterSave) => {
+    const original = fetchMock.getMockImplementation()!;
+    const requestBodies: string[] = [];
+    const createdByKey = new Map<string, unknown>();
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/manual-documents") && init?.body) {
+        const rawBody = String(init.body);
+        const body = JSON.parse(rawBody);
+        requestBodies.push(rawBody);
+        if (!createdByKey.has(body.key)) {
+          const response = await original(url, init);
+          createdByKey.set(body.key, await response.json());
+          throw new Error("Connection lost after the server saved the document");
+        }
+        return respond(createdByKey.get(body.key));
+      }
+      return original(url, init);
+    });
+
+    const firstView = render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    openPage("Документы", "Ручная операция");
+    fillManualOperation();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+    fireEvent.click(await screen.findByRole("button", {
+      name: closeAfterSave ? "Сохранить и закрыть" : "Сохранить", exact: true,
+    }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Connection lost after the server saved the document");
+    expect(await screen.findByRole("button", { name: "Повторить создание справки" })).toBeInTheDocument();
+
+    const journalRaw = window.sessionStorage.getItem("accounting.manual-document-create.v1");
+    expect(journalRaw).not.toBeNull();
+    const journal = JSON.parse(journalRaw!);
+    expect(journal.close_after_save).toBe(closeAfterSave);
+    expect(JSON.parse(journal.request_body).key).toBe(journal.key);
+    firstView.unmount();
+
+    render(<AccountingView />);
+    fireEvent.click(await screen.findByRole("button", { name: "Повторить создание справки" }));
+    if (closeAfterSave) {
+      expect(await screen.findByText("БС-8 · версия 1 подтверждена, форма закрыта.")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Основание")).not.toBeInTheDocument();
+    } else {
+      expect(await screen.findByText("БС-8 · версия 1 восстановлена из подтверждённой команды.")).toBeInTheDocument();
+      expect(screen.getByLabelText("Основание")).toHaveValue("Справка 1");
+      expect(screen.getByRole("region", { name: "История справки" })).toBeInTheDocument();
+    }
+    expect(requestBodies).toHaveLength(2);
+    expect(requestBodies[1]).toBe(requestBodies[0]);
+    expect(createdByKey.size).toBe(1);
+    expect(window.sessionStorage.getItem("accounting.manual-document-create.v1")).toBeNull();
+  });
+  it("matches Pydantic decimal, trim, and default normalization while retaining the exact create body", async () => {
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    openPage("Документы", "Ручная операция");
+    fillManualOperation();
+    fireEvent.change(screen.getByLabelText("Основание"), { target: { value: "  Справка с пробелами  " } });
+    fireEvent.change(screen.getByLabelText("Содержание"), { target: { value: "  Текст с пробелами  " } });
+    fireEvent.change(screen.getByLabelText("Сумма 1"), { target: { value: "+001.2000" } });
+    fireEvent.change(screen.getByLabelText("Сумма 2"), { target: { value: "0001.2000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сохранить", exact: true }));
+
+    expect(await screen.findByText("БС-8 · версия 1 сохранена.")).toBeInTheDocument();
+    const create = fetchMock.mock.calls.find(([url, init]) => String(url).endsWith("/manual-documents") && init?.body);
+    const rawPosting = JSON.parse(String(create?.[1]?.body)).posting;
+    expect(rawPosting.source).toBe("  Справка с пробелами  ");
+    expect(rawPosting.explanation).toBe("  Текст с пробелами  ");
+    expect(rawPosting.lines.map((line: { amount: string }) => line.amount)).toEqual(["+001.2000", "0001.2000"]);
+    expect(manualDraft?.revisions[0].posting).toMatchObject({
+      source: "Справка с пробелами", explanation: "Текст с пробелами", opening: false, correction_of: null,
+      lines: [
+        { amount: "1.2000", dimensions: {}, currency: "BYN", original_amount: null, rate: null,
+          rate_scale: null, rate_date: null, rate_source: null, quantity: null, cash_activity: null },
+        { amount: "1.2000", dimensions: {}, currency: "BYN", original_amount: null, rate: null,
+          rate_scale: null, rate_date: null, rate_source: null, quantity: null, cash_activity: null },
+      ],
+    });
+    expect(window.sessionStorage.getItem("accounting.manual-document-create.v1")).toBeNull();
+  });
+  it.each(["posted-v2", "voided-v1"] as const)(
+    "recovers an exact create while presenting the valid current %s state",
+    async (currentState) => {
+      const original = fetchMock.getMockImplementation()!;
+      const createdByKey = new Map<string, Record<string, unknown>>();
+      fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (url.endsWith("/manual-documents") && init?.body) {
+          const body = JSON.parse(String(init.body));
+          if (!createdByKey.has(body.key)) {
+            const response = await original(url, init);
+            createdByKey.set(body.key, await response.json() as Record<string, unknown>);
+            throw new Error("Connection lost after the server saved the document");
+          }
+          return respond(createdByKey.get(body.key));
+        }
+        return original(url, init);
+      });
+
+      render(<AccountingView />);
+      await screen.findByText(/включительно: 0\./);
+      openPage("Документы", "Ручная операция");
+      fillManualOperation();
+      fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Сохранить", exact: true }));
+      expect(await screen.findByRole("button", { name: "Повторить создание справки" })).toBeInTheDocument();
+
+      const journal = JSON.parse(window.sessionStorage.getItem("accounting.manual-document-create.v1")!);
+      const saved = createdByKey.get(journal.key)!;
+      if (currentState === "posted-v2") {
+        const nextPosting = { ...(saved.revisions as Record<string, unknown>[])[0].posting as Record<string, unknown>,
+          source: "Актуальный источник", explanation: "Текущая версия" };
+        saved.version = 2;
+        saved.status = "posted";
+        saved.entry_id = 6;
+        saved.source = nextPosting.source;
+        saved.updated_at = "2026-09-26T11:00:00Z";
+        saved.revisions = [...saved.revisions as Record<string, unknown>[], {
+          version: 2, request_key: "00000000-0000-0000-0000-000000000002", actor: "chief",
+          created_at: "2026-09-26T11:00:00Z", digest: "b".repeat(64), posting: nextPosting,
+        }];
+      } else {
+        saved.status = "voided";
+        saved.entry_id = null;
+        saved.void = { reason: "Дубликат", actor: "accountant", created_at: "2026-09-26T11:00:00Z" };
+      }
+
+      fireEvent.click(await screen.findByRole("button", { name: "Повторить создание справки" }));
+      const version = currentState === "posted-v2" ? 2 : 1;
+      expect(await screen.findByText(`БС-8 · текущее состояние загружено, версия ${version}.`)).toBeInTheDocument();
+      const status = currentState === "posted-v2" ? "Проведена · версия 2" : "Аннулирована · версия 1";
+      expect(screen.getByText((_, element) => element?.tagName === "P"
+        && (element.textContent?.startsWith(status) ?? false))).toBeInTheDocument();
+      expect(screen.getByLabelText("Основание")).toBeDisabled();
+      expect(window.sessionStorage.getItem("accounting.manual-document-create.v1")).toBeNull();
+    },
+  );
+  it("fails closed without POST when session storage rejects the create journal", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(window, "sessionStorage")!;
+    const originalStorage = window.sessionStorage;
+    const failingStorage = new Proxy(originalStorage, {
+      get(target, property) {
+        if (property === "setItem") return (key: string, value: string) => {
+          if (key === "accounting.manual-document-create.v1") {
+            throw new DOMException("Storage is unavailable", "SecurityError");
+          }
+          return target.setItem(key, value);
+        };
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    Object.defineProperty(window, "sessionStorage", { configurable: true, value: failingStorage });
+    try {
+      render(<AccountingView />);
+      await screen.findByText(/включительно: 0\./);
+      openPage("Документы", "Ручная операция");
+      fillManualOperation();
+      fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Сохранить", exact: true }));
+
+      expect(await screen.findByText("Storage is unavailable", { selector: "div[role='alert']" })).toBeInTheDocument();
+      expect(screen.getByRole("alert", { name: "Создание справки заблокировано" }))
+        .toHaveTextContent("Не удалось сохранить команду в журнале текущей вкладки");
+      expect(screen.getByRole("button", { name: "Новая справка" })).toBeDisabled();
+      expect(window.sessionStorage.getItem("accounting.manual-document-create.v1")).toBeNull();
+      expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith("/manual-documents") && !!init?.body)).toBe(false);
+    } finally {
+      Object.defineProperty(window, "sessionStorage", descriptor);
+    }
+  });
+  it.each(["request key", "posting snapshot"] as const)(
+    "keeps the create command pending when the response has a mismatched %s",
+    async (mismatch) => {
+      const original = fetchMock.getMockImplementation()!;
+      fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (url.endsWith("/manual-documents") && init?.body) {
+          const response = await original(url, init);
+          const result = await response.json() as {
+            revisions: { request_key: string; posting: Record<string, unknown> }[];
+          };
+          const [revision] = result.revisions;
+          return respond({ ...result, revisions: [{
+            ...revision,
+            request_key: mismatch === "request key" ? "00000000-0000-0000-0000-000000000000" : revision.request_key,
+            posting: mismatch === "posting snapshot" ? { ...revision.posting, explanation: "Изменённый ответ" } : revision.posting,
+          }] });
+        }
+        return original(url, init);
+      });
+
+      render(<AccountingView />);
+      await screen.findByText(/включительно: 0\./);
+      openPage("Документы", "Ручная операция");
+      fillManualOperation();
+      fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Сохранить", exact: true }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("ERP не подтвердила организацию, ключ и точный снимок новой справки");
+      expect(await screen.findByRole("button", { name: "Повторить создание справки" })).toBeInTheDocument();
+      const raw = window.sessionStorage.getItem("accounting.manual-document-create.v1");
+      expect(raw).not.toBeNull();
+      expect(JSON.parse(raw!).key).toBe(JSON.parse(JSON.parse(raw!).request_body).key);
+    },
+  );
+  it("blocks new manual document creation when the session journal is malformed", async () => {
+    window.sessionStorage.setItem("accounting.manual-document-create.v1", "{not-json");
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    openPage("Документы", "Ручная операция");
+
+    expect(await screen.findByText(/Журнал ожидающего создания повреждён/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Новая справка" })).toBeDisabled();
+    expect(screen.getByLabelText("Основание")).toBeDisabled();
+    expect(window.sessionStorage.getItem("accounting.manual-document-create.v1")).toBe("{not-json");
+    expect(fetchMock.mock.calls.some(([url, init]) =>
+      String(url).endsWith("/manual-documents") && !!init?.body)).toBe(false);
+  });
   it("closes a manual operation only after a matching server receipt", async () => {
     const original = fetchMock.getMockImplementation()!;
     let finish!: (value: unknown) => void;
@@ -324,12 +578,15 @@ describe("AccountingView", () => {
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
       if (url.endsWith("/manual-documents") && init?.body) {
         const body = JSON.parse(String(init.body));
-        if (body.posting.correction_of === 6) return respond({
-          id: 9, organization_id: 1, number: "БС-9", source: body.posting.source,
-          posting_date: body.posting.posting_date, version: 1, status: "draft", entry_id: null,
-          updated_at: "2026-09-26T13:00:00Z", revisions: [{ version: 1, actor: "chief",
-            created_at: "2026-09-26T13:00:00Z", digest, posting: body.posting }],
+        if (body.posting.correction_of === 6) {
+          const posting = normalizedManualPosting(body.posting);
+          return respond({
+          id: 9, organization_id: 1, number: "БС-9", source: String(posting.source),
+          posting_date: String(posting.posting_date), version: 1, status: "draft", entry_id: null,
+          updated_at: "2026-09-26T13:00:00Z", revisions: [{ version: 1, request_key: body.key, actor: "chief",
+            created_at: "2026-09-26T13:00:00Z", digest, posting }],
         });
+        }
       }
       return original(url, init);
     });
