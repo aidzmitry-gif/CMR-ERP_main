@@ -1,7 +1,8 @@
 from datetime import date
+from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from modules.accounting import models, service
 
@@ -106,3 +107,89 @@ async def test_input_vat_register_never_marks_credit_line_eligible(client, db, b
     }
     response = await client.post(f"/accounting/organizations/{book[0]}/input-vat-register/preview", json=body)
     assert response.status_code == 422 and "credit" in response.json()["detail"].lower()
+
+
+async def test_input_vat_register_signed_amounts_net_credit_reversals(client, db, book, posting):
+    db.add(models.Account(organization_id=book[0], code="18.1", title="Input VAT", category="asset",
+                          valid_from=date(2026, 1, 1), required_dimensions=[], currency_tracking=False,
+                          quantity_tracking=False, cash=False, normative_ref="Synthetic"))
+    await db.commit()
+
+    debit_entry = await service.post(db, book[0], posting("vat-register-debit", "18.1", "60", amount="20"), "tester")
+    credit_entry = await service.post(db, book[0], posting("vat-register-credit", "60", "18.1", amount="5"), "tester")
+    debit_line = await db.scalar(select(models.Line).where(
+        models.Line.entry_id == debit_entry.id, models.Line.account_code == "18.1",
+    ))
+    credit_line = await db.scalar(select(models.Line).where(
+        models.Line.entry_id == credit_entry.id, models.Line.account_code == "18.1",
+    ))
+    entry_count = await db.scalar(select(func.count(models.Entry.id)).where(
+        models.Entry.organization_id == book[0],
+    ))
+
+    registered = {}
+    for entry, line, reference in (
+        (debit_entry, debit_line, "INV-DEBIT"),
+        (credit_entry, credit_line, "INV-REVERSAL"),
+    ):
+        body = {
+            "request_key": str(uuid4()), "entry_id": entry.id, "line_id": line.id,
+            "expected_entry_digest": entry.digest, "tax_period": "2026-09",
+            "invoice_reference": reference, "deduction_status": "not_eligible",
+            "eschf_status": "pending",
+            "right_basis": "Документы проверены для учёта входного НДС",
+            "evidence": "Первичный документ и основание сверены бухгалтером",
+        }
+        preview = await client.post(
+            f"/accounting/organizations/{book[0]}/input-vat-register/preview", json=body,
+        )
+        assert preview.status_code == 200, preview.text
+        confirm = await client.post(
+            f"/accounting/organizations/{book[0]}/input-vat-register/confirm",
+            headers={"X-Expected-Principal": "tester"},
+            json={**body, "digest": preview.json()["digest"]},
+        )
+        assert confirm.status_code == 201, confirm.text
+        result = confirm.json()
+        assert result["posted"] is False
+        assert result["amount"] == format(line.amount, ".2f")
+        assert result["side"] == line.side
+        assert result["signed_amount"] == ("20.00" if line.side == "debit" else "-5.00")
+        assert result["deduction_status"] == "not_eligible"
+        registered[line.id] = (body, preview.json()["digest"], result)
+
+    credit_body, credit_digest, credit_result = registered[credit_line.id]
+    replay = await client.post(
+        f"/accounting/organizations/{book[0]}/input-vat-register/confirm",
+        headers={"X-Expected-Principal": "tester"},
+        json={**credit_body, "digest": credit_digest},
+    )
+    assert replay.status_code == 201
+    assert replay.json()["id"] == credit_result["id"]
+    assert replay.json()["request_key"] == credit_body["request_key"]
+
+    response = await client.get(
+        f"/accounting/organizations/{book[0]}/input-vat-register",
+        params={"start": "2026-09-01", "end": "2026-09-30"},
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    by_line = {row["line_id"]: row for row in result["rows"]}
+    assert by_line[debit_line.id]["amount"] == "20.00"
+    assert by_line[debit_line.id]["signed_amount"] == "20.00"
+    assert by_line[debit_line.id]["side"] == "debit"
+    assert by_line[credit_line.id]["amount"] == "5.00"
+    assert by_line[credit_line.id]["signed_amount"] == "-5.00"
+    assert by_line[credit_line.id]["side"] == "credit"
+    assert result["totals_by_status"] == {"not_eligible": "15.00"}
+    stored_rows = (await db.scalars(select(models.InputVatRegisterEntry).where(
+        models.InputVatRegisterEntry.organization_id == book[0],
+    ))).all()
+    stored_by_line = {row.line_id: row for row in stored_rows}
+    assert stored_by_line[debit_line.id].amount == Decimal("20.00")
+    assert stored_by_line[debit_line.id].side == "debit"
+    assert stored_by_line[credit_line.id].amount == Decimal("5.00")
+    assert stored_by_line[credit_line.id].side == "credit"
+    assert await db.scalar(select(func.count(models.Entry.id)).where(
+        models.Entry.organization_id == book[0],
+    )) == entry_count

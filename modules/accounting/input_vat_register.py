@@ -66,6 +66,14 @@ def _digest(value: dict) -> str:
     ).encode()).hexdigest()
 
 
+def _signed_amount(amount: Decimal, side: str) -> Decimal:
+    if side == "debit":
+        return amount
+    if side == "credit":
+        return amount.copy_negate()
+    raise service.AccountingError("Input-VAT register side must be debit or credit")
+
+
 def serialize_row(row: InputVatRegisterEntry) -> dict:
     return {
         "id": row.id,
@@ -79,6 +87,7 @@ def serialize_row(row: InputVatRegisterEntry) -> dict:
         "posting_date": row.posting_date,
         "tax_period": row.tax_period,
         "amount": format(row.amount, ".2f"),
+        "signed_amount": format(_signed_amount(row.amount, row.side), ".2f"),
         "currency": row.currency,
         "side": row.side,
         "invoice_reference": row.invoice_reference,
@@ -228,7 +237,10 @@ async def register_rows(session, org_id: int, start: date, end: date) -> dict:
     ).order_by(InputVatRegisterEntry.posting_date, InputVatRegisterEntry.id))).all()
     totals: dict[str, Decimal] = {}
     for row in rows:
-        totals[row.deduction_status] = totals.get(row.deduction_status, Decimal("0")) + row.amount
+        totals[row.deduction_status] = (
+            totals.get(row.deduction_status, Decimal("0"))
+            + _signed_amount(row.amount, row.side)
+        )
     return {
         "organization_id": org_id,
         "start": start,
