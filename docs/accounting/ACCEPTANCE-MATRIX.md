@@ -148,6 +148,18 @@ current target database or all later source migrations.
   snapshot modules but remains an explicit exception to the preferred core
   gateway boundary. `lot` still lacks a stable versioned registry; release
   integration and real accountant acceptance keep G03D open.
+- The seventh local G03D slice starts a new linked correction document from a
+  posted manual accounting document while preserving the original document and
+  number. It reuses the source identity, increments the source version and
+  records `correction_of`; current dates and the effective policy are checked
+  again. Independent review found that copying a full replacement amount would
+  double-count it in the additive ledger, so the accepted UI now clears amount,
+  quantity and FX calculation fields and requires an explicit adjustment
+  difference. The entry card labels original and adjustment postings without
+  presenting the latter as a replacement. The regression proves 100 + 20 =
+  120 in the trial balance. Focused backend 14/14, frontend 44/44, TypeScript,
+  ESLint, Ruff and diff checks passed. The accountant still determines the
+  adjustment amount and direction; no universal automatic reversal was added.
 - CRM deal Save and Close now requires a response with the exact deal ID,
   submitted editor fields and a valid new edit token. The PATCH response is
   generated from the saved deal; two concurrent edits on disposable

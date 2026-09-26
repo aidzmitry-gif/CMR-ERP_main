@@ -206,6 +206,53 @@ async def test_manual_document_save_history_close_guard_and_post(client, db, boo
     assert entry["lines"][0]["amount"] == "120.00"
 
 
+async def test_posted_manual_document_is_corrected_by_a_new_linked_document(client, book, posting):
+    prefix = f"/accounting/organizations/{book[0]}"
+    path = prefix + "/manual-documents"
+    original = posting("MANUAL-CORRECTION")
+    saved = await client.post(path, json={
+        "key": str(uuid4()), "posting": original.model_dump(mode="json"),
+    })
+    assert saved.status_code == 201, saved.text
+    document_id = saved.json()["id"]
+    posted = await client.post(f"{path}/{document_id}/post", json={
+        "key": str(uuid4()), "expected_version": 1, "digest": service.digest(original),
+    })
+    assert posted.status_code == 200, posted.text
+    original_entry_id = posted.json()["entry_id"]
+
+    correction = posting(
+        "MANUAL-CORRECTION", source_version=2, correction_of=original_entry_id,
+        amount="20.00", explanation="Additive correction from the linked manual document",
+    )
+    corrected_document = await client.post(path, json={
+        "key": str(uuid4()), "posting": correction.model_dump(mode="json"),
+    })
+    assert corrected_document.status_code == 201, corrected_document.text
+    assert corrected_document.json()["id"] != document_id
+    assert corrected_document.json()["revisions"][0]["posting"]["correction_of"] == original_entry_id
+    corrected_id = corrected_document.json()["id"]
+    corrected_post = await client.post(f"{path}/{corrected_id}/post", json={
+        "key": str(uuid4()), "expected_version": 1, "digest": service.digest(correction),
+    })
+    assert corrected_post.status_code == 200, corrected_post.text
+    corrected_entry_id = corrected_post.json()["entry_id"]
+
+    unchanged_original = (await client.get(f"{path}/{document_id}")).json()
+    assert unchanged_original["status"] == "posted"
+    assert unchanged_original["entry_id"] == original_entry_id
+    assert unchanged_original["revisions"][0]["posting"]["lines"][0]["amount"] == "100.00"
+    corrected_entry = (await client.get(f"{prefix}/entries/{corrected_entry_id}")).json()
+    assert corrected_entry["correction_of"] == original_entry_id
+    assert corrected_entry["changes"]["after_lines"][0]["amount"] == "20.00"
+    original_entry = (await client.get(f"{prefix}/entries/{original_entry_id}")).json()
+    assert [item["id"] for item in original_entry["corrections"]] == [corrected_entry_id]
+    report = (await client.get(f"{prefix}/reports?start=2026-09-01&end=2026-09-30")).json()
+    balances = {row["account"]: row for row in report["trial_balance"]}
+    assert balances["41"]["closing"] == "120.00"
+    assert balances["60"]["closing"] == "-120.00"
+
+
 async def test_manual_document_rejects_foreign_operation_and_changed_digest(client, book, posting):
     path = f"/accounting/organizations/{book[0]}/manual-documents"
     source = posting("MANUAL-2")

@@ -197,8 +197,8 @@ describe("AccountingView", () => {
     for (const value of ["2026-08-28", "2026-08-29", "2026-09-01", "2026-09-02T10:11:12+03:00", "manual-v1", "Поставщик A", "Договор 7", "Партия 9", "Количество: 2.000000", "Сумма в валюте: 100.00 USD", "Курс: 3.210000 BYN за 1 USD"]) expect(screen.getByText(value, { exact: true })).toBeInTheDocument();
     expect(screen.getByText("Дата курса: 2026-08-29 · Источник: Учебный источник")).toBeInTheDocument();
     expect(screen.getByText("chief-accountant")).toBeInTheDocument();
-    expect(screen.getByText("Содержание: было «Original posting», стало «Historical snapshot».")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Проводки до и после"));
+    expect(screen.getByText("Содержание: было «Original posting», в исправлении «Historical snapshot».")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Исходная и корректирующая проводки"));
     expect(screen.getByText(/Кт 60 · 300.00 BYN/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Оригинал документа № 27" })).toHaveAttribute("href", "/api/sales/organizations/1/documents/27/original");
     expect(screen.queryByRole("link", { name: "Оригинал документа № 99" })).not.toBeInTheDocument();
@@ -318,6 +318,55 @@ describe("AccountingView", () => {
     expect(screen.getByRole("region", { name: "История справки" })).toHaveTextContent("Содержание: «Поступление материалов» → «Поступление материалов по акту».");
     expect(screen.getByRole("region", { name: "История справки" })).toHaveTextContent("Строка 1: «Дт 41 · 100.00 BYN» → «Дт 41 · 120.00 BYN».");
     expect(screen.getByRole("region", { name: "История справки" })).toHaveTextContent("Строка 2: «Кт 60 · 100.00 BYN» → «Кт 60 · 120.00 BYN».");
+  });
+  it("starts a linked correction from a posted manual document without editing the original", async () => {
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url.endsWith("/manual-documents") && init?.body) {
+        const body = JSON.parse(String(init.body));
+        if (body.posting.correction_of === 6) return respond({
+          id: 9, organization_id: 1, number: "БС-9", source: body.posting.source,
+          posting_date: body.posting.posting_date, version: 1, status: "draft", entry_id: null,
+          updated_at: "2026-09-26T13:00:00Z", revisions: [{ version: 1, actor: "chief",
+            created_at: "2026-09-26T13:00:00Z", digest, posting: body.posting }],
+        });
+      }
+      return original(url, init);
+    });
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    openPage("Документы", "Ручная операция");
+    fillManualOperation();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сохранить", exact: true }));
+    await screen.findByText("БС-8 · версия 1 сохранена.");
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить и провести" }));
+    await screen.findByText("Операция № 6 проведена.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Создать исправление" }));
+    expect(screen.getByText(/Введите только разницу; исходная справка сохранена без изменений/)).toBeInTheDocument();
+    expect(screen.getByText(/Корректирующая справка добавляет проводки/)).toBeInTheDocument();
+    expect(screen.getByText("Бухгалтерская справка · новый документ")).toBeInTheDocument();
+    expect(screen.getByLabelText("Основание")).toHaveValue("Справка 1");
+    expect(screen.getByLabelText("Версия документа")).toHaveValue(2);
+    expect(screen.getByLabelText("Исправляет операцию")).toHaveValue(6);
+    expect(screen.getByLabelText("Сумма 1")).toHaveValue("");
+    expect(screen.getByRole("button", { name: /БС-8 · Справка 1/ })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Содержание"), { target: { value: "Исправленная сумма" } });
+    fireEvent.change(screen.getByLabelText("Сумма 1"), { target: { value: "20.00" } });
+    fireEvent.change(screen.getByLabelText("Сумма 2"), { target: { value: "20.00" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сохранить", exact: true }));
+    expect(await screen.findByText("БС-9 · версия 1 сохранена.")).toBeInTheDocument();
+    const correction = fetchMock.mock.calls.map(([url, init]) => [String(url), init] as const)
+      .find(([url, init]) => url.endsWith("/manual-documents")
+        && init?.body && JSON.parse(String(init.body)).posting.correction_of === 6);
+    expect(correction?.[1]?.method).toBe("POST");
+    expect(JSON.parse(String(correction?.[1]?.body)).posting).toMatchObject({
+      source: "Справка 1", source_version: 2, correction_of: 6, explanation: "Исправленная сумма",
+      lines: [{ amount: "20.00" }, { amount: "20.00" }],
+    });
   });
   it("keeps unsaved manual changes when section navigation is rejected", async () => {
     const confirmation = vi.spyOn(window, "confirm").mockReturnValue(false);
