@@ -11,7 +11,7 @@ import { ProcurementReceiptPosting, type ReceiptAccount } from "./procurement-re
 const item = () => ({ order_id: null as number | null, sku_id: null as number | null, sku_title: null as string | null, sku: "", unit: null as string | null, lot: "", quantity: "", net_amount: "", vat_amount: "", vat_rate: "", vat_basis: "" });
 const blank = () => ({ currency: "BYN", invoice_reference: "", document_date: "", operation_date: "", supplier: "", supplier_id: null as number | null, supplier_unp: null as string | null, contract: "", contract_id: null as number | null, contract_basis: null as string | null, warehouse: "", explanation: "", items: [item()] });
 type Document = ReturnType<typeof blank>;
-type SupplierContract = { id: number; organization_id: number; supplier_id: number; number: string; title: string; signed_on: string; expires_on: string | null; evidence: string };
+type SupplierContract = { id: number; organization_id: number; supplier_id: number; number: string; title: string; signed_on: string; expires_on: string | null; evidence: string; is_active?: boolean; created_by?: string; created_at?: string; deactivated_by?: string | null; deactivated_at?: string | null; deactivation_reason?: string | null };
 type Receipt = { id: number; key?: string; version: number; status?: string; posting?: { entry_id: number; version: number } | null; revisions: { version: number; request_key?: string | null; actor: string; created_at: string; document: Document }[] };
 type PendingSave = { org: string; receiptId: number | null; version: number; key: string; document: Document; closeAfterSave: boolean };
 type PendingContractRevoke = { org: string; supplierId: number; contractId: number; key: string; reason: string };
@@ -59,6 +59,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   const [supplierOptions, setSupplierOptions] = useState<ProcurementSupplierOption[]>([]);
   const [supplierError, setSupplierError] = useState("");
   const [contracts, setContracts] = useState<SupplierContract[]>([]), [contractError, setContractError] = useState("");
+  const [revokedState, setRevokedState] = useState<{ context: string; items: SupplierContract[]; error: string }>({ context: "", items: [], error: "" });
   const [newContract, setNewContract] = useState({ number: "", title: "", signed_on: "", expires_on: "", evidence: "" });
   const [contractBusy, setContractBusy] = useState(false);
   const [contractRevokeReason, setContractRevokeReason] = useState("");
@@ -75,6 +76,8 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   const pendingContractRevoke = useRef<PendingContractRevoke | null>(null);
   const contractFetchVersion = useRef(0), supplierContext = useRef("");
   supplierContext.current = `${org}:${document.supplier_id ?? ""}`;
+  const revokedContracts = revokedState.context === supplierContext.current ? revokedState.items : [];
+  const revokedError = revokedState.context === supplierContext.current ? revokedState.error : "";
   const initialOpened = useRef(false);
   const [initialLoading, setInitialLoading] = useState(initialReceipt !== undefined);
   const path = `/organizations/${org}/receipt-documents`;
@@ -124,6 +127,18 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
         throw new Error("Справочник договоров вернул данные другого юрлица или поставщика.");
       setContracts(data.items); setContractError("");
     }).catch((cause: Error) => { if (current && generation === contractFetchVersion.current) { setContracts([]); setContractError(cause.message); } });
+    void request<{ organization_id: number; supplier_id: number; status: string; items: SupplierContract[]; truncated: boolean }>(
+      `/organizations/${org}/supplier-contracts?supplier_id=${supplierId}&status=revoked`,
+    ).then((data) => {
+      if (!current || generation !== contractFetchVersion.current) return;
+      if (data.organization_id !== Number(org) || data.supplier_id !== supplierId || data.status !== "revoked"
+        || !Array.isArray(data.items) || data.items.some((row) => row.organization_id !== Number(org)
+          || row.supplier_id !== supplierId || row.is_active !== false))
+        throw new Error("История договоров вернула данные другого юрлица или поставщика.");
+      setRevokedState({ context: `${org}:${supplierId}`, items: data.items,
+        error: data.truncated ? "Показаны последние 100 отзывов; постраничный просмотр пока недоступен." : "" });
+    }).catch((cause: Error) => { if (current && generation === contractFetchVersion.current)
+      setRevokedState({ context: `${org}:${supplierId}`, items: [], error: cause.message }); });
     return () => { current = false; };
   }, [org, document.supplier_id]);
   useEffect(() => {
@@ -264,6 +279,9 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       ++contractFetchVersion.current;
       if (supplierContext.current === `${command.org}:${command.supplierId}`) {
         setContracts(current => current.filter(row => row.id !== command.contractId));
+        setRevokedState(current => ({ context: `${command.org}:${command.supplierId}`,
+          items: [result as SupplierContract, ...(current.context === `${command.org}:${command.supplierId}`
+            ? current.items.filter(row => row.id !== command.contractId) : [])], error: "" }));
         setDocument(current => current.supplier_id === command.supplierId && current.contract_id === command.contractId
           ? { ...current, contract_id: null, contract: "", contract_basis: null } : current);
         setContractRevokeReason("");
@@ -334,6 +352,16 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
           <Button variant="secondary" disabled={contractBusy || !contractRevokeReason.trim()} onClick={revokeContract}>Отозвать выбранный договор</Button>
           <p className="text-sm text-muted">Договор исчезнет из выбора для новых накладных. Сохранённые версии накладных и их проводки останутся неизменными.</p>
         </div>}
+        <details><summary>Отозванные договоры поставщика ({revokedContracts.length})</summary>
+          {revokedError && <p role="alert">История договоров: {revokedError}</p>}
+          {!revokedContracts.length && !revokedError && <p>Отозванных договоров нет.</p>}
+          <ul>{revokedContracts.map(row => <li key={row.id} className="border-b border-line py-2">
+            <strong>№ {row.number} · {row.title} · ID {row.id}</strong>
+            <p>Подписан: {row.signed_on}. Основание регистрации: {row.evidence}.</p>
+            <p>Зарегистрировал: {shown(row.created_by)}, {shown(row.created_at)}.</p>
+            <p>Отозвал: {shown(row.deactivated_by)}, {shown(row.deactivated_at)}. Причина: {shown(row.deactivation_reason)}.</p>
+          </li>)}</ul>
+        </details>
         <details><summary>Зарегистрировать договор поставщика</summary><div className="grid gap-2 md:grid-cols-2">
           <label>Номер нового договора<Input aria-label="Номер нового договора" maxLength={200} value={newContract.number} onChange={e => setNewContract({ ...newContract, number: e.target.value })} /></label>
           <label>Название нового договора<Input aria-label="Название нового договора" maxLength={255} value={newContract.title} onChange={e => setNewContract({ ...newContract, title: e.target.value })} /></label>

@@ -111,10 +111,23 @@ async def test_supplier_contract_selection_is_company_supplier_and_date_scoped(c
     assert (await client.post(revoke_path, json=revoke)).json()["deactivation_key"] == revoke["key"]
     assert (await client.post(revoke_path, json={**revoke, "key": str(uuid4())})).status_code == 409
     assert (await client.get(path, params={"supplier_id": 1})).json()["items"] == []
+    history = await client.get(path, params={"supplier_id": 1, "status": "revoked"})
+    assert history.status_code == 200, history.text
+    assert history.json()["status"] == "revoked"
+    assert history.json()["truncated"] is False
+    assert [item["id"] for item in history.json()["items"]] == [contract_id]
+    assert history.json()["items"][0]["deactivation_reason"] == revoke["reason"]
+    assert history.json()["items"][0]["deactivated_by"] == "tester"
+    assert (await client.get(path, params={"supplier_id": 2, "status": "revoked"})).json()["items"] == []
+    assert (await client.get(path, params={"supplier_id": 1, "status": "all"})).status_code == 422
+    assert (await client.get(f"/procurement/organizations/{book[0] + 999}/supplier-contracts",
+                             params={"supplier_id": 1, "status": "revoked"})).status_code == 403
     assert (await client.post(receipt_path, json={"key": "revoked-contract", "document": facts})).status_code == 409
     replacement = await client.post(path, json={**command, "evidence": "Corrected signed original"})
     assert replacement.status_code == 201, replacement.text
     assert replacement.json()["id"] != contract_id
+    assert [item["id"] for item in (await client.get(path, params={"supplier_id": 1})).json()["items"]] == [replacement.json()["id"]]
+    assert [item["id"] for item in (await client.get(path, params={"supplier_id": 1, "status": "revoked"})).json()["items"]] == [contract_id]
     assert accepted.json()["revisions"][0]["document"]["contract_id"] == contract_id
 
 
