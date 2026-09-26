@@ -35,6 +35,7 @@ from modules.accounting import (
     fx_bank_settlement_preview,
     fx_revaluation,
     fx_settlement_preview,
+    inbound_vat_evidence,
     input_vat,
     input_vat_register,
     inventory_cost,
@@ -75,6 +76,10 @@ from modules.accounting.fixed_assets import (
 from modules.accounting.foreign_trade_register import (
     ForeignTradeRegisterConfirmInput,
     ForeignTradeRegisterInput,
+)
+from modules.accounting.inbound_vat_evidence import (
+    InboundVatEvidenceFileInput,
+    InboundVatEvidenceKind,
 )
 from modules.accounting.input_vat_register import (
     InputVatRegisterConfirmInput,
@@ -2012,6 +2017,68 @@ async def create_payroll_evidence_file(org_id: int, data: PayrollEvidenceFileInp
         return await payroll_evidence_files.create(ctx[0], org_id, data, ctx[1])
     except service.AccountingError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@router.post('/organizations/{org_id}/receipt-correction-evidence-files')
+async def create_inbound_vat_evidence_file(org_id: int, data: InboundVatEvidenceFileInput,
+                                          response: Response, ctx=Depends(member)):
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        return await inbound_vat_evidence.create(ctx[0], org_id, data, ctx[1])
+    except service.AccountingError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get('/organizations/{org_id}/receipt-correction-evidence-files')
+async def list_inbound_vat_evidence_files(org_id: int, response: Response,
+                                         receipt_id: int = Query(gt=0),
+                                         receipt_version: int = Query(gt=0),
+                                         kind: InboundVatEvidenceKind = Query(),
+                                         ctx=Depends(member)):
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    response.headers['Cache-Control'] = 'private, no-store'
+    return await inbound_vat_evidence.list_files(
+        ctx[0], org_id, receipt_id, receipt_version, kind,
+    )
+
+
+@router.get('/organizations/{org_id}/receipt-correction-evidence-files/current')
+async def current_inbound_vat_evidence_files(org_id: int, response: Response,
+                                             receipt_id: int = Query(gt=0),
+                                             receipt_version: int = Query(gt=0),
+                                             kind: InboundVatEvidenceKind = Query(),
+                                             ctx=Depends(member)):
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    response.headers['Cache-Control'] = 'private, no-store'
+    return await inbound_vat_evidence.list_files(
+        ctx[0], org_id, receipt_id, receipt_version, kind, current_only=True,
+    )
+
+
+@router.get('/organizations/{org_id}/receipt-correction-evidence-files/{file_id}/download')
+async def download_inbound_vat_evidence_file(org_id: int, file_id: int,
+                                             receipt_id: int = Query(gt=0),
+                                             receipt_version: int = Query(gt=0),
+                                             kind: InboundVatEvidenceKind = Query(),
+                                             ctx=Depends(member)):
+    if ctx[2] not in {"accountant", "chief"}:
+        raise HTTPException(403, "Accountant or chief access required")
+    try:
+        row = await inbound_vat_evidence.file_for(
+            ctx[0], org_id, file_id, receipt_id, receipt_version, kind,
+        )
+    except service.AccountingError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    raw = await run_in_threadpool(inbound_vat_evidence.verify_bytes, row)
+    return Response(raw, media_type=row.content_type, headers={
+        'Content-Disposition': inbound_vat_evidence.download_filename(row),
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'private, no-store',
+    })
 
 
 @router.get('/organizations/{org_id}/payroll-evidence-files')

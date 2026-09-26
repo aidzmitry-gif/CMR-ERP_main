@@ -466,6 +466,69 @@ class PayrollEvidenceFile(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class InboundVatEvidenceFile(Base):
+    """Immutable private file evidence attached to one receipt correction revision."""
+
+    __tablename__ = "inbound_vat_evidence_file"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "request_key", name="uq_inbound_vat_evidence_request"),
+        UniqueConstraint("organization_id", "id", name="uq_inbound_vat_evidence_org_id"),
+        UniqueConstraint("supersedes_id", name="uq_inbound_vat_evidence_successor"),
+        ForeignKeyConstraint(
+            ["organization_id", "supersedes_id"],
+            ["accounting.inbound_vat_evidence_file.organization_id",
+             "accounting.inbound_vat_evidence_file.id"],
+            name="fk_inbound_vat_evidence_supersedes_org",
+        ),
+        ForeignKeyConstraint(
+            ["receipt_id"], ["procurement.receipt_document.id"],
+            name="fk_inbound_vat_evidence_receipt",
+        ),
+        ForeignKeyConstraint(
+            ["receipt_id", "receipt_version"],
+            ["procurement.receipt_revision.receipt_id", "procurement.receipt_revision.version"],
+            name="fk_inbound_vat_evidence_receipt_revision",
+        ),
+        CheckConstraint(
+            "kind IN ('supplier_eschf_xml', 'supporting_document_pdf')",
+            name="inbound_vat_evidence_kind",
+        ),
+        CheckConstraint("receipt_version > 0", name="inbound_vat_evidence_positive_version"),
+        CheckConstraint("length(tax_period) = 7", name="inbound_vat_evidence_tax_period_length"),
+        CheckConstraint("size_bytes > 0 AND size_bytes <= 10485760", name="inbound_vat_evidence_size"),
+        CheckConstraint("length(sha256) = 64", name="inbound_vat_evidence_sha256_length"),
+        {"schema": "accounting"},
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("accounting.organization.id"))
+    receipt_id: Mapped[int] = mapped_column(Integer)
+    receipt_version: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(32))
+    tax_period: Mapped[str] = mapped_column(String(7))
+    reference: Mapped[str] = mapped_column(String(160))
+    filename: Mapped[str] = mapped_column(String(160))
+    content_type: Mapped[str] = mapped_column(String(120))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    storage_filename: Mapped[str] = mapped_column(String(80))
+    evidence: Mapped[str] = mapped_column(String(2000))
+    request_key: Mapped[str] = mapped_column(String(36))
+    supersedes_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    request_digest: Mapped[str] = mapped_column(String(64))
+    digest: Mapped[str] = mapped_column(String(64))
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    actor: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+def immutable_inbound_vat_evidence_file(mapper, connection, target):
+    raise ValueError("Inbound VAT evidence file history is immutable")
+
+
+event.listen(InboundVatEvidenceFile, "before_update", immutable_inbound_vat_evidence_file)
+event.listen(InboundVatEvidenceFile, "before_delete", immutable_inbound_vat_evidence_file)
+
+
 class PayrollPopulationReview(Base):
     """Append-only chief attestation of the source roster for one book/month."""
 
