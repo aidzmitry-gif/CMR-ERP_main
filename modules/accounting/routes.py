@@ -555,6 +555,11 @@ async def create_statutory_requirement(org_id: int, data: StatutoryRequirementIn
 @router.post("/organizations/{org_id}/preview")
 async def preview(org_id: int, data: PostingInput, ctx=Depends(member)):
     accounts, policy = await service.preview_posting(ctx[0], org_id, data)
+    if data.operation == "manual":
+        try:
+            await manual_documents.verify_new_manual_references(ctx[0], org_id, data)
+        except service.AccountingError as exc:
+            raise HTTPException(422, str(exc)) from exc
     return {"digest": service.digest(data), "normative_verified": policy.normative_verified,
             "lines": [{**line.model_dump(mode="json"), "title": accounts[line.account].title}
                       for line in data.lines], "explanation": data.explanation}
@@ -574,22 +579,31 @@ async def manual_document_detail(org_id: int, document_id: int, ctx=Depends(memb
 @router.post("/organizations/{org_id}/manual-documents", status_code=201)
 async def manual_document_create(org_id: int, data: manual_documents.ManualDocumentCreate,
                                  ctx=Depends(member)):
-    return await manual_documents.create(ctx[0], org_id, data, ctx[1], ctx[2])
+    try:
+        return await manual_documents.create(ctx[0], org_id, data, ctx[1], ctx[2])
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.put("/organizations/{org_id}/manual-documents/{document_id}")
 async def manual_document_edit(org_id: int, document_id: int,
                                data: manual_documents.ManualDocumentEdit,
                                ctx=Depends(member)):
-    return await manual_documents.edit(ctx[0], org_id, document_id, data, ctx[1], ctx[2])
+    try:
+        return await manual_documents.edit(ctx[0], org_id, document_id, data, ctx[1], ctx[2])
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.post("/organizations/{org_id}/manual-documents/{document_id}/post")
 async def manual_document_post(org_id: int, document_id: int,
                                data: manual_documents.ManualDocumentPost,
                                ctx=Depends(member), core=Depends(get_core)):
-    return await manual_documents.post(ctx[0], org_id, document_id, data,
-                                       ctx[1], ctx[2], core.services.event_bus)
+    try:
+        return await manual_documents.post(ctx[0], org_id, document_id, data,
+                                           ctx[1], ctx[2], core.services.event_bus)
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.post("/organizations/{org_id}/manual-documents/{document_id}/void")
@@ -603,6 +617,12 @@ async def manual_document_void(org_id: int, document_id: int,
 async def create_entry(org_id: int, data: PostingInput, ctx=Depends(member), core=Depends(get_core)):
     if data.correction_of or data.opening:
         chief(ctx)
+    if data.operation == "manual":
+        try:
+            await service.lock_organization(ctx[0], org_id)
+            await manual_documents.verify_new_manual_references(ctx[0], org_id, data)
+        except service.AccountingError as exc:
+            raise HTTPException(422, str(exc)) from exc
     return serialize(await service.post(ctx[0], org_id, data, ctx[1], core.services.event_bus))
 
 

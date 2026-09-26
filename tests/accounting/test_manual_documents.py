@@ -141,3 +141,52 @@ async def test_unposted_manual_document_can_be_voided_without_erasing_history(cl
     assert controls.json()["documents"]["pending_manual_documents"] == 0
     report = await client.get(prefix + "/reports?start=2026-09-01&end=2026-09-30")
     assert report.status_code == 200 and report.json()["pending_documents"] == 0
+
+
+async def test_manual_counterparty_snapshot_requires_directory_id_and_stays_historical(client, db, book, posting):
+    from core.domain.models import Counterparty
+    from modules.accounting.schemas import PostingInput
+
+    path = f"/accounting/organizations/{book[0]}/manual-documents"
+    payload = posting("MANUAL-MDM").model_dump(mode="json")
+    payload["lines"][1]["dimensions"] = {"counterparty": "supplier1"}
+    free_text = await client.post(path, json={"key": str(uuid4()), "posting": payload})
+    assert free_text.status_code == 422 and "counterparty directory" in free_text.text
+    assert (await client.post(f"/accounting/organizations/{book[0]}/preview", json=payload)).status_code == 422
+    assert (await client.post(f"/accounting/organizations/{book[0]}/entries", json=payload)).status_code == 422
+
+    payload["lines"][1]["dimensions"] = {
+        "counterparty_id": "1", "counterparty": "supplier1",
+        "counterparty_unp": "190000001", "counterparty_revision": "1",
+    }
+    saved = await client.post(path, json={"key": str(uuid4()), "posting": payload})
+    assert saved.status_code == 201, saved.text
+    document_id = saved.json()["id"]
+    counterparty = await db.get(Counterparty, 1)
+    counterparty.name = "Supplier renamed"
+    await db.commit()
+    stale = await client.post(f"{path}/{document_id}/post", json={
+        "key": str(uuid4()), "expected_version": 1,
+        "digest": service.digest(PostingInput.model_validate(payload)),
+    })
+    assert stale.status_code == 422 and "select it again" in stale.text
+    await db.refresh(counterparty)
+    payload["lines"][1]["dimensions"]["counterparty"] = counterparty.name
+    payload["lines"][1]["dimensions"]["counterparty_revision"] = str(counterparty.revision)
+    edited = await client.put(f"{path}/{document_id}", json={
+        "key": str(uuid4()), "expected_version": 1, "posting": payload,
+    })
+    assert edited.status_code == 200 and edited.json()["version"] == 2
+    confirmed = await client.post(f"{path}/{document_id}/post", json={
+        "key": str(uuid4()), "expected_version": 2,
+        "digest": service.digest(PostingInput.model_validate(payload)),
+    })
+    assert confirmed.status_code == 200, confirmed.text
+    counterparty.name = "Supplier renamed again"
+    await db.commit()
+    entry = (await client.get(f"/accounting/organizations/{book[0]}/entries/{confirmed.json()['entry_id']}")).json()
+    assert entry["lines"][1]["dimensions"]["counterparty"] == "Supplier renamed"
+    replay = await client.post(f"/accounting/organizations/{book[0]}/entries", json=payload)
+    assert replay.status_code == 201 and replay.json()["id"] == confirmed.json()["entry_id"]
+    saved_history = (await client.get(f"{path}/{document_id}")).json()["revisions"]
+    assert saved_history[0]["posting"]["lines"][1]["dimensions"]["counterparty"] == "supplier1"

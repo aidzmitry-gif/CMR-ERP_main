@@ -1259,6 +1259,54 @@ async def test_void_manual_document_receipt_is_immutable_and_blocks_postgres_pos
         await session.rollback()
 
 
+async def test_manual_document_counterparty_snapshot_rechecked_on_postgres(pg_factory, pg_book, posting):
+    from uuid import uuid4
+
+    from core.domain.models import Counterparty
+    from modules.accounting import manual_documents
+    from modules.accounting.schemas import PostingInput
+
+    source = posting("PG-MANUAL-MDM").model_dump(mode="json")
+    source["lines"][1]["dimensions"] = {
+        "counterparty_id": "1", "counterparty": "supplier1",
+        "counterparty_unp": "190000001", "counterparty_revision": "1",
+    }
+    first = PostingInput.model_validate(source)
+    async with pg_factory() as session:
+        saved = await manual_documents.create(session, pg_book[0],
+            manual_documents.ManualDocumentCreate(key=uuid4(), posting=first), "tester", "chief")
+        await session.commit()
+    async with pg_factory() as session:
+        row = await session.get(Counterparty, 1)
+        row.name = "Supplier renamed in PG"
+        await session.commit()
+    async with pg_factory() as session:
+        with pytest.raises(service.AccountingError, match="select it again"):
+            await manual_documents.post(session, pg_book[0], saved["id"],
+                manual_documents.ManualDocumentPost(key=uuid4(), expected_version=1,
+                                                    digest=service.digest(first)), "tester", "chief")
+        await session.rollback()
+    async with pg_factory() as session:
+        row = await session.get(Counterparty, 1)
+        source["lines"][1]["dimensions"]["counterparty"] = row.name
+        source["lines"][1]["dimensions"]["counterparty_revision"] = str(row.revision)
+        current = PostingInput.model_validate(source)
+        revised = await manual_documents.edit(session, pg_book[0], saved["id"],
+            manual_documents.ManualDocumentEdit(key=uuid4(), expected_version=1,
+                                                posting=current), "tester", "chief")
+        assert revised["version"] == 2
+        receipt = await manual_documents.post(session, pg_book[0], saved["id"],
+            manual_documents.ManualDocumentPost(key=uuid4(), expected_version=2,
+                                                digest=service.digest(current)), "tester", "chief")
+        await session.commit()
+    async with pg_factory() as session:
+        from modules.accounting.models import Line
+
+        lines = (await session.scalars(select(Line).where(Line.entry_id == receipt["entry_id"]))).all()
+        assert lines[1].dimensions["counterparty_id"] == "1"
+        assert lines[1].dimensions["counterparty"] == "Supplier renamed in PG"
+
+
 async def test_concurrent_replay_one_entry(pg_factory, pg_book, posting):
     async def writer():
         async with pg_factory() as session:

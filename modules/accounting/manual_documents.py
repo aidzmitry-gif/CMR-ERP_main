@@ -10,6 +10,7 @@ from pydantic import Field
 from sqlalchemy import select
 
 from modules.accounting import service
+from modules.accounting.counterparty_snapshot import verified_counterparty
 from modules.accounting.models import (
     Entry,
     ManualDocument,
@@ -47,6 +48,32 @@ def require_manual(posting: PostingInput, role: str):
         raise HTTPException(422, "Only ordinary manual accounting documents may be saved here")
     if posting.correction_of is not None and role != "chief":
         raise HTTPException(403, "Chief accountant access required for a correction")
+
+
+async def verify_analytic_references(session, posting: PostingInput):
+    """New saves cannot carry a free-text or stale counterparty reference."""
+    checked = set()
+    for line in posting.lines:
+        dimensions = line.dimensions
+        if not {"counterparty", "counterparty_id", "counterparty_unp", "counterparty_revision"} & dimensions.keys():
+            continue
+        snapshot = tuple(dimensions.get(key, "") for key in
+                         ("counterparty_id", "counterparty", "counterparty_unp", "counterparty_revision"))
+        if snapshot not in checked:
+            await verified_counterparty(session, dimensions)
+            checked.add(snapshot)
+
+
+async def verify_new_manual_references(session, org_id: int, posting: PostingInput):
+    """Preserve exact historical replay while requiring IDs for new manual facts."""
+    if posting.operation != "manual":
+        return
+    existing = await session.scalar(select(Entry.id).where(
+        Entry.organization_id == org_id, Entry.source == posting.source,
+        Entry.source_version == posting.source_version, Entry.operation == "manual",
+    ))
+    if existing is None:
+        await verify_analytic_references(session, posting)
 
 
 async def invalidate_closing_review(session, org_id: int, affected_date):
@@ -141,6 +168,7 @@ async def create(session, org_id: int, data: ManualDocumentCreate, actor: str, r
     ))
     if posted is not None:
         raise HTTPException(409, "This manual document source is already posted")
+    await verify_analytic_references(session, data.posting)
     await service.preview_posting(session, org_id, data.posting)
     row = ManualDocument(organization_id=org_id, source=data.posting.source,
                          posting_date=data.posting.posting_date, version=1,
@@ -190,6 +218,7 @@ async def edit(session, org_id: int, document_id: int, data: ManualDocumentEdit,
     ))
     if posted is not None:
         raise HTTPException(409, "This manual document source is already posted")
+    await verify_analytic_references(session, data.posting)
     await service.preview_posting(session, org_id, data.posting)
     version = row.version + 1
     session.add(ManualDocumentRevision(document_id=row.id, version=version,
@@ -236,6 +265,7 @@ async def post(session, org_id: int, document_id: int, data: ManualDocumentPost,
     ))
     if posted is not None:
         raise HTTPException(409, "This manual document source was posted by another document")
+    await verify_analytic_references(session, posting)
     entry = await service.post(session, org_id, posting, actor, event_bus)
     row.entry_id = entry.id
     row.post_key = str(data.key)

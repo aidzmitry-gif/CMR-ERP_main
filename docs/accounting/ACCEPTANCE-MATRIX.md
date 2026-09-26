@@ -42,6 +42,13 @@ current target database or all later source migrations.
   A cancelled draft retains its history and leaves the close queue. Focused
   local API tests 13/13, UI tests 31/31 and two disposable PostgreSQL
   revision/atomic-post/cancellation tests passed. This is not part of the fixed `0186` release.
+- A later local source change binds the `counterparty` analytical value of a
+  new manual document to an active MDM ID, UNP and revision. Preview, save and
+  posting reject free text or a stale directory snapshot; exact replay of a
+  previously posted entry remains readable after a rename. This was checked
+  with targeted API, sales regression, UI and disposable PostgreSQL tests. The
+  contract, warehouse and other manual analytical fields still require their
+  own reference binding before this meets the full document standard.
 
 - On 2026-09-26, a fresh disposable PostgreSQL 16 database passed **2**
   supplier-contract/receipt-history checks at migration `0186` and **4**

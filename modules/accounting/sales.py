@@ -1,15 +1,15 @@
 """Pilot BYN goods sale preview; recognition and VAT basis are accountant inputs."""
 import hashlib
 import json
-import re
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 from typing import Annotated
 
 from pydantic import BeforeValidator, Field
 from sqlalchemy import select, text
 
-from core.domain.models import Counterparty, Sku
+from core.domain.models import Sku
 from modules.accounting import inventory_cost, inventory_issues, service
+from modules.accounting.counterparty_snapshot import verified_counterparty
 from modules.accounting.models import Entry, InventorySaleReceipt
 from modules.accounting.schemas import (
     Code,
@@ -73,19 +73,7 @@ def rule_version(document, basis_digest, *, allocation_version=None):
 
 async def verified_buyer(session, document):
     """Authenticate the MDM snapshot for a new accountant-entered sale."""
-    dimensions = document.buyer_dimensions
-    raw_id = dimensions.get("counterparty_id", "")
-    if (not isinstance(raw_id, str) or not re.fullmatch(r"[1-9][0-9]*", raw_id)
-            or len(raw_id) > 10 or int(raw_id) > 2147483647):
-        raise service.AccountingError("Select the buyer from the counterparty directory")
-    buyer = await session.scalar(select(Counterparty).where(Counterparty.id == int(raw_id))
-                                 .with_for_update(read=True).execution_options(populate_existing=True))
-    if (buyer is None or not buyer.is_active or buyer.merged_into_id is not None
-            or dimensions.get("counterparty") != (buyer.legal_name or buyer.name)
-            or dimensions.get("counterparty_unp") != (buyer.unp or "")
-            or dimensions.get("counterparty_revision") != str(buyer.revision)):
-        raise service.AccountingError("Buyer directory record changed; select it again")
-    return buyer
+    return await verified_counterparty(session, document.buyer_dimensions, role="Buyer")
 
 
 async def verified_sku(session, document):

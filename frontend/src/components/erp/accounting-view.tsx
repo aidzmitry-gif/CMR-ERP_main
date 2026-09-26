@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useUnsavedDocumentGuard } from "@/lib/use-unsaved-document-guard";
+import { searchAccountingBuyers, type AccountingBuyer } from "@/lib/accounting-buyers";
 
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
@@ -136,6 +137,42 @@ function describeRevision(before: Posting | undefined, after: Posting): string[]
     .filter((index) => JSON.stringify(before.lines[index] ?? null) !== JSON.stringify(after.lines[index] ?? null))
     .map((index) => `Строка ${index + 1}: «${manualLineSnapshot(before.lines[index])}» → «${manualLineSnapshot(after.lines[index])}».`);
   return [...fields, ...lineChanges];
+}
+
+function CounterpartyDimensionPicker({ org, index, dimensions, disabled, onSelect }: {
+  org: string; index: number; dimensions: Record<string, string>; disabled: boolean;
+  onSelect: (snapshot: Record<string, string>) => void;
+}) {
+  const [term, setTerm] = useState("");
+  const [options, setOptions] = useState<AccountingBuyer[]>([]);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const lookup = useRef(0);
+  useEffect(() => () => { lookup.current += 1; }, []);
+  async function search() {
+    const token = ++lookup.current;
+    setLoading(true); setError(""); setOptions([]);
+    try {
+      const result = await searchAccountingBuyers(org, term);
+      if (token === lookup.current) setOptions(result);
+    } catch (reason) { if (token === lookup.current) setError((reason as Error).message); }
+    finally { if (token === lookup.current) setLoading(false); }
+  }
+  return <div className="space-y-2 text-sm">
+    <p>Контрагент{dimensions.counterparty_id
+      ? `: ${dimensions.counterparty} · УНП ${dimensions.counterparty_unp || "—"} · ID ${dimensions.counterparty_id}`
+      : dimensions.counterparty ? `: «${dimensions.counterparty}» — старая связь не сопоставлена` : ": не выбран"}</p>
+    <div className="flex flex-wrap gap-2"><Input aria-label={`Поиск контрагента строки ${index + 1}`} value={term} disabled={disabled || loading}
+      onChange={(event) => { lookup.current += 1; setTerm(event.target.value); setOptions([]); setLoading(false); }} placeholder="Наименование, УНП или ID" />
+      <Button variant="secondary" disabled={disabled || loading || !term.trim()}
+        onClick={() => void search()}>Найти контрагента строки {index + 1}</Button></div>
+    {error && <p role="alert">{error}</p>}
+    {options.map((item) => <Button key={item.id} variant="ghost" disabled={disabled}
+      onClick={() => { onSelect({ counterparty_id: String(item.id), counterparty: item.name,
+        counterparty_unp: item.unp, counterparty_revision: String(item.revision) }); setOptions([]); }}>
+      Выбрать {item.name} · УНП {item.unp || "—"} · ID {item.id}
+    </Button>)}
+  </div>;
 }
 
 export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?: string; suggestedEntry?: string }) {
@@ -472,7 +509,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
       {manualDocument && <p className="text-sm text-muted">{manualDocument.status === "posted" ? "Проведена" : manualDocument.status === "voided" ? "Аннулирована" : "Черновик"} · версия {manualDocument.version} · изменена {manualDocument.updated_at}{manualDocument.entry_id != null && <Button variant="ghost" onClick={() => void openEntry(manualDocument.entry_id!)}>Открыть проводку № {manualDocument.entry_id}</Button>}</p>}
       <fieldset disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} className="space-y-4"><div className="grid gap-3 md:grid-cols-3"><label>Основание<Input aria-label="Основание" value={source} disabled={locked} onChange={(e) => { invalidatePreview(); setSource(e.target.value); }} placeholder="Номер документа" /></label><label>Дата отражения<Input aria-label="Дата операции" type="date" value={operationDate} disabled={locked} onChange={(e) => changeDate("operation", e.target.value)} /></label><label>Содержание<Input aria-label="Содержание" value={explanation} disabled={locked} onChange={(e) => { invalidatePreview(); setExplanation(e.target.value); }} /></label></div>
       <div className="grid gap-3 md:grid-cols-4"><label className="text-sm">Дата документа<Input aria-label="Дата документа" type="date" value={documentDate} disabled={locked} onChange={(e) => { invalidatePreview(); setDocumentDate(e.target.value); }} /></label><label className="text-sm">Дата хозяйственной операции<Input aria-label="Дата хозяйственной операции" type="date" value={economicDate} disabled={locked} onChange={(e) => { invalidatePreview(); setEconomicDate(e.target.value); }} /></label><label className="text-sm">Версия документа<Input aria-label="Версия документа" type="number" min="1" step="1" value={sourceVersion} disabled={locked} onChange={(e) => { invalidatePreview(); setSourceVersion(Number(e.target.value)); }} /></label><label className="text-sm">Исправляет операцию №<Input aria-label="Исправляет операцию" type="number" min="1" step="1" value={correctionOf} disabled={locked} onChange={(e) => { invalidatePreview(); setCorrectionOf(e.target.value); }} placeholder="Если это исправление" /></label></div>
-      {lines.map((line, i) => <fieldset key={i} disabled={locked} className="space-y-2 rounded-lg border border-line p-3"><legend className="text-sm">Строка {i + 1}</legend><div className="grid gap-3 md:grid-cols-3"><Select aria-label={`Сторона ${i + 1}`} value={line.side} onChange={(e) => changeLine(i, { side: e.target.value as "debit" | "credit" })}><option value="debit">Дебет</option><option value="credit">Кредит</option></Select><Select aria-label={`Счёт ${i + 1}`} value={line.account} onChange={(e) => changeLine(i, { account: e.target.value, dimensions: {}, cash_activity: undefined, currency: "BYN", original_amount: undefined, rate: undefined, rate_scale: undefined, rate_date: undefined, rate_source: undefined, quantity: undefined })}><option value="">Выберите счёт</option>{accounts.map((a) => <option key={a.id} value={a.code}>{a.code} · {a.title}</option>)}</Select><Input aria-label={`Сумма ${i + 1}`} inputMode="decimal" value={line.amount} placeholder="0.00 BYN" onChange={(e) => changeLine(i, { amount: e.target.value })} /></div>{accounts.find((a) => a.code === line.account)?.required_dimensions.map((dimension) => <label key={dimension} className="block text-sm">{labels[dimension] || dimension}<Input value={line.dimensions[dimension] || ""} onChange={(e) => changeLine(i, { dimensions: { ...line.dimensions, [dimension]: e.target.value } })} /></label>)}{accounts.find((a) => a.code === line.account)?.cash && <label className="block text-sm">Вид денежного потока<Select value={line.cash_activity || ""} onChange={(e) => changeLine(i, { cash_activity: e.target.value })}><option value="">Выберите вид</option><option value="operating">Текущая деятельность</option><option value="investing">Инвестиционная</option><option value="financing">Финансовая</option><option value="internal">Внутреннее перемещение</option></Select></label>}<AccountingCurrencyFields value={line} currency={accounts.find((a) => a.code === line.account)?.currency_tracking ?? false} quantity={accounts.find((a) => a.code === line.account)?.quantity_tracking ?? false} onChange={(patch) => changeLine(i, patch)} /></fieldset>)}
+      {lines.map((line, i) => <fieldset key={i} disabled={locked} className="space-y-2 rounded-lg border border-line p-3"><legend className="text-sm">Строка {i + 1}</legend><div className="grid gap-3 md:grid-cols-3"><Select aria-label={`Сторона ${i + 1}`} value={line.side} onChange={(e) => changeLine(i, { side: e.target.value as "debit" | "credit" })}><option value="debit">Дебет</option><option value="credit">Кредит</option></Select><Select aria-label={`Счёт ${i + 1}`} value={line.account} onChange={(e) => changeLine(i, { account: e.target.value, dimensions: {}, cash_activity: undefined, currency: "BYN", original_amount: undefined, rate: undefined, rate_scale: undefined, rate_date: undefined, rate_source: undefined, quantity: undefined })}><option value="">Выберите счёт</option>{accounts.map((a) => <option key={a.id} value={a.code}>{a.code} · {a.title}</option>)}</Select><Input aria-label={`Сумма ${i + 1}`} inputMode="decimal" value={line.amount} placeholder="0.00 BYN" onChange={(e) => changeLine(i, { amount: e.target.value })} /></div>{accounts.find((a) => a.code === line.account)?.required_dimensions.map((dimension) => dimension === "counterparty" ? <CounterpartyDimensionPicker key={`${org}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}`} org={org} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => changeLine(i, { dimensions: { ...line.dimensions, ...snapshot } })} /> : <label key={dimension} className="block text-sm">{labels[dimension] || dimension}<Input value={line.dimensions[dimension] || ""} onChange={(e) => changeLine(i, { dimensions: { ...line.dimensions, [dimension]: e.target.value } })} /></label>)}{accounts.find((a) => a.code === line.account)?.cash && <label className="block text-sm">Вид денежного потока<Select value={line.cash_activity || ""} onChange={(e) => changeLine(i, { cash_activity: e.target.value })}><option value="">Выберите вид</option><option value="operating">Текущая деятельность</option><option value="investing">Инвестиционная</option><option value="financing">Финансовая</option><option value="internal">Внутреннее перемещение</option></Select></label>}<AccountingCurrencyFields value={line} currency={accounts.find((a) => a.code === line.account)?.currency_tracking ?? false} quantity={accounts.find((a) => a.code === line.account)?.quantity_tracking ?? false} onChange={(patch) => changeLine(i, patch)} /></fieldset>)}
       <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={locked} onClick={() => { invalidatePreview(); setLines([...lines, { account: "", side: "debit", amount: "", dimensions: {} }]); }}>Добавить строку</Button><Button disabled={locked || !org || !source || !explanation} onClick={() => void prepare()}>Проверить проводки</Button></div>
       {preview && <div className="rounded-xl border border-accent p-4"><h3 className="font-semibold">Проверенные проводки</h3><p className="my-2">{preview.explanation}</p>{preview.lines.map((line, i) => <p key={i}>{line.side === "debit" ? "Дт" : "Кт"} {line.account} · {line.title} — {line.amount} BYN</p>)}{!preview.normative_verified && <p className="my-2 text-sm text-muted">Нормативная база не подтверждена: закрытие периода будет недоступно.</p>}<div className="mt-3 flex flex-wrap gap-2"><Button disabled={locked} onClick={() => void saveManual()}>Сохранить</Button><Button variant="secondary" disabled={locked} onClick={() => void saveManual(true)}>Сохранить и закрыть</Button><Button disabled={locked || !manualDocument || manualDirty || manualDocument.revisions[manualDocument.revisions.length - 1]?.digest !== preview.digest} onClick={() => void post()}>Подтвердить и провести</Button><Button variant="secondary" disabled={locked || !manualDocument || manualDirty || manualDocument.revisions[manualDocument.revisions.length - 1]?.digest !== preview.digest} onClick={() => void post(true)}>Провести и закрыть</Button></div></div>}
       </fieldset>

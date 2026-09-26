@@ -337,6 +337,34 @@ describe("AccountingView", () => {
     expect(screen.getByLabelText("Основание")).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Аннулировать черновик" })).not.toBeInTheDocument();
   });
+  it("selects a counterparty by MDM ID and saves its historical snapshot", async () => {
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes("/accounts?")) return respond([
+        { id: 1, code: "41", title: "Товары", cash: false, required_dimensions: [] },
+        { id: 2, code: "60", title: "Поставщики", cash: false, required_dimensions: ["counterparty"] },
+      ]);
+      if (url.includes("/sales/buyers?q=")) return respond({ organization_id: 1,
+        items: [{ id: 17, name: "Поставщик А", unp: "190000017", revision: 3 }], truncated: false });
+      return original(url, init);
+    });
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    openPage("Документы", "Ручная операция");
+    fillManualOperation();
+    expect(screen.queryByLabelText("Контрагент")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Поиск контрагента строки 2"), { target: { value: "Поставщик А" } });
+    fireEvent.click(screen.getByRole("button", { name: "Найти контрагента строки 2" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Выбрать Поставщик А · УНП 190000017 · ID 17" }));
+    fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сохранить", exact: true }));
+    expect(await screen.findByText("БС-8 · версия 1 сохранена.")).toBeInTheDocument();
+    const saved = fetchMock.mock.calls.find(([url, init]) => String(url).endsWith("/manual-documents") && init?.body);
+    expect(JSON.parse(String(saved?.[1]?.body)).posting.lines[1].dimensions).toEqual({
+      counterparty_id: "17", counterparty: "Поставщик А", counterparty_unp: "190000017",
+      counterparty_revision: "3",
+    });
+  });
   it("clears the previous organization report on selection change", async () => {
     render(<AccountingView />);
     await screen.findByRole("option", { name: "Тестовая компания · 999999999" });

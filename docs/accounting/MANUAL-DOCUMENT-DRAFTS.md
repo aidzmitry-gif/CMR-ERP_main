@@ -25,6 +25,14 @@ Unposted manual documents dated in or before a closing month block its close.
 The client checks the returned document/version/digest/entry receipt before it
 reports success. Navigation warns about unsaved form changes.
 
+Where an account requires counterparty analytics, the form searches the shared
+MDM directory and saves the selected ID, name, UNP and record revision in the
+posting snapshot. New manual previews/saves/postings reject free-text or stale
+counterparty facts, including the legacy direct-entry route. A previously
+posted entry can still be replayed exactly after the directory changes; its
+saved ledger dimensions and document revisions are not rewritten. Other
+analytical fields are not yet all bound to reference IDs.
+
 An erroneous **unposted** draft can be annulled with a required reason.
 Cancellation creates a separate immutable receipt with author and server time;
 the numbered document and all prior revisions remain readable. The cancelled
