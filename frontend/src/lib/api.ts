@@ -434,6 +434,44 @@ export interface DealInput {
   next_step?: string;
 }
 
+export type LinkedCrmClient = {
+  id: number;
+  name: string;
+  owner_id: number;
+  counterparty_id: number;
+};
+
+/** Resolve a visible MDM counterparty to the owner's CRM relationship before creating a deal. */
+export async function linkCrmClientToCounterparty(
+  counterpartyId: number, requestKey: string, ownerId?: number,
+): Promise<LinkedCrmClient | null> {
+  if (!Number.isSafeInteger(counterpartyId) || counterpartyId <= 0) return null;
+  try {
+    const response = await fetch("/api/sales/clients", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ counterparty_id: counterpartyId, request_key: requestKey,
+        ...(ownerId ? { owner_id: ownerId } : {}) }),
+    });
+    if (!response.ok) return null;
+    const value: unknown = await response.json();
+    if (!value || typeof value !== "object") return null;
+    const client = value as Record<string, unknown>;
+    if (client.source !== "crm" || !Number.isSafeInteger(client.id) || (client.id as number) <= 0
+      || typeof client.name !== "string" || !client.name.trim()
+      || !Number.isSafeInteger(client.owner_id) || (client.owner_id as number) <= 0
+      || client.counterparty_id !== counterpartyId) return null;
+    return {
+      id: client.id as number,
+      name: client.name,
+      owner_id: client.owner_id as number,
+      counterparty_id: counterpartyId,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Минимальная запись CRM-реестра, безопасная для выбора владельца сделки. */
 export interface CrmStaffMember {
   employee_id: number;
@@ -616,25 +654,39 @@ export async function deleteDealItem(itemId: number): Promise<boolean> {
 
 export interface DealTaskView {
   id: number;
-  deal_id: number;
+  deal_id: number | null;
   title: string;
   kind: string;
+  description?: string | null;
+  description_in_bbcode?: boolean | null;
+  source_responsible_id?: string | null;
+  source_status_code?: string | null;
   assignee_id: number | null;
   due_at: string | null;
-  status: string; // open | done | canceled
+  status: string; // open | in_progress | awaiting_control | postponed | done | declined; manual canceled remains possible
   result: string | null;
   overdue: boolean;
+  imported?: boolean;
+  crm_links?: Array<{ ordinal: number; deal_id: number | null }>;
+  hidden_link_count?: number;
 }
 
 /** Задачи сделки (открытые — первыми; overdue — флаг просрочки). */
 export async function fetchDealTasks(dealId: string): Promise<DealTaskView[]> {
-  try {
-    const res = await fetch(`/api/sales/deals/${dealId}/tasks`, { cache: "no-store" });
-    if (!res.ok) return [];
-    return (await res.json()) as DealTaskView[];
-  } catch {
-    return [];
-  }
+  const res = await fetch(`/api/sales/deals/${encodeURIComponent(dealId)}/tasks`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Task list HTTP ${res.status}`);
+  const rows: unknown = await res.json();
+  if (!Array.isArray(rows)) throw new Error("Invalid task list");
+  return rows as DealTaskView[];
+}
+
+/** Общий список CRM, включая задачи без сделки; пустая страница отличается от ошибки. */
+export async function fetchAllCrmTasks(offset: number, limit = 50): Promise<DealTaskView[]> {
+  const res = await fetch(`/api/sales/tasks?limit=${limit}&offset=${offset}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Task list HTTP ${res.status}`);
+  const rows: unknown = await res.json();
+  if (!Array.isArray(rows)) throw new Error("Invalid task list");
+  return rows as DealTaskView[];
 }
 
 /** Поставить задачу по сделке. */

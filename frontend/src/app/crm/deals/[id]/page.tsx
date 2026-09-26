@@ -18,6 +18,7 @@ import { DealMetrics } from "@/components/deal-metrics";
 import { DealItems } from "@/components/deal-items";
 import { DealTasks } from "@/components/deal-tasks";
 import { DealMessages } from "@/components/deal-messages";
+import { DealTimelineComments } from "@/components/deal-timeline-comments";
 import { PriorityBadge } from "@/components/priority-badge";
 import { SourceTag } from "@/components/source-tag";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -161,6 +162,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             <DealClient360 counterpartyId={d.counterparty?.id} roles={roles} />
             <DealContacts dealId={id} />
             <DealMessages dealId={id} />
+            <DealTimelineComments dealId={id} />
             <DealLinkedDeals company={d.company} currentId={id} roles={roles} />
             <DealApprovals dealId={id} />
             <DealActions dealId={id} starred={d.starred} priority={d.priority} />

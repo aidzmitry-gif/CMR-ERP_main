@@ -1,10 +1,12 @@
 """Regression contract for server-enforced per-employee deal visibility."""
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 from core.domain.models import User
-from modules.sales.models import CallLog
+from modules.sales.models import CallLog, CrmTimelineAttachment, CrmTimelineComment
 
 
 def _sales_headers(username: str) -> dict[str, str]:
@@ -18,6 +20,81 @@ async def _create(api, number: str, **extra) -> dict:
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+@pytest.mark.asyncio
+async def test_timeline_comments_follow_deal_visibility(api, session, tmp_path, monkeypatch):
+    from modules.sales import timeline_storage
+
+    monkeypatch.setattr(timeline_storage, "storage_root", lambda: tmp_path)
+    session.add_all([
+        User(username="timeline-owner", full_name="Owner", employee_id=311,
+             department="Продажи", role="sales", status="active", deal_visibility="own"),
+        User(username="timeline-other", full_name="Other", employee_id=312,
+             department="Продажи", role="sales", status="active"),
+    ])
+    await session.commit()
+    own = await _create(api, "COMMENT-VIS-OWN", owner_id=311)
+    other = await _create(api, "COMMENT-VIS-OTHER", owner_id=312)
+    own_comment = CrmTimelineComment(
+        entity_type="deal", deal_id=own["id"], body="own comment",
+        author_display="Owner", created_at=datetime(2025, 1, 1),
+    )
+    other_comment = CrmTimelineComment(
+        entity_type="deal", deal_id=other["id"], body="private comment",
+        author_display="Other", created_at=datetime(2025, 1, 1),
+    )
+    session.add_all([
+        own_comment,
+        other_comment,
+    ])
+    await session.flush()
+    stored = timeline_storage.store_attachment([b"private file"], root=tmp_path)
+    session.add_all([
+        CrmTimelineAttachment(
+            comment_id=own_comment.id, source_ref="test:own:attachment",
+            sha256=stored.sha256, size_bytes=stored.size_bytes, filename="own.txt",
+            content_type="text/plain", storage_path=stored.storage_path,
+        ),
+        CrmTimelineAttachment(
+            comment_id=other_comment.id, source_ref="test:other:attachment",
+            sha256=stored.sha256, size_bytes=stored.size_bytes, filename="other.txt",
+            content_type="text/plain", storage_path=stored.storage_path,
+        ),
+    ])
+    await session.commit()
+    headers = _sales_headers("timeline-owner")
+    own_response = await api.get(f"/sales/deals/{own['id']}/timeline/comments", headers=headers)
+    assert own_response.status_code == 200
+    assert [row["body"] for row in own_response.json()] == ["own comment"]
+    own_attachments = await api.get(
+        f"/sales/deals/{own['id']}/timeline/comments/{own_comment.id}/attachments",
+        headers=headers,
+    )
+    assert own_attachments.status_code == 200 and len(own_attachments.json()) == 1
+    own_download = await api.get(
+        f"/sales/deals/{own['id']}/timeline/comments/{own_comment.id}/attachments/"
+        f"{own_attachments.json()[0]['id']}/download",
+        headers=headers,
+    )
+    assert own_download.status_code == 200 and own_download.content == b"private file"
+    assert (await api.get(
+        f"/sales/deals/{other['id']}/timeline/comments/{other_comment.id}/attachments",
+        headers=headers,
+    )).status_code == 404
+    assert (await api.get(
+        f"/sales/deals/{other['id']}/timeline/comments/{other_comment.id}/attachments/"
+        f"{own_attachments.json()[0]['id']}/download",
+        headers=headers,
+    )).status_code == 404
+    assert (await api.get(f"/sales/deals/{other['id']}/timeline/comments",
+                          headers=headers)).status_code == 404
+    assert (await api.get(f"/sales/deals/{own['id']}/timeline/comments",
+                          headers={"X-User": "timeline-owner", "X-User-Roles": "hr"})).status_code == 403
+    assert (await api.get(
+        f"/sales/deals/{own['id']}/timeline/comments/{own_comment.id}/attachments",
+        headers={"X-User": "timeline-owner", "X-User-Roles": "hr"},
+    )).status_code == 403
 
 
 @pytest.mark.asyncio

@@ -15,6 +15,7 @@ function DealsHeaderActions() {
     <div className="flex flex-wrap items-center gap-2">
       <CompanySwitcher />
       <FiltersMenu />
+      <Link href="/crm/tasks" className="text-sm font-medium text-accent-ink underline">Задачи</Link>
       <Link
         href="/crm/deals/stages"
         title="Стадии"
