@@ -19,6 +19,17 @@ const correctionFlagNames = ["physical_change", "inventory_value_change", "vat_c
 type CorrectionFlag = typeof correctionFlagNames[number];
 type CorrectionReadiness = { organization_id: number; receipt_id: number; current_version: number; correction_of: { receipt_id: number; version: number; entry_id: number }; classification: string[]; physical_change: boolean; inventory_value_change: boolean; vat_change: boolean; primary_document_change: boolean; operation_date_change: boolean; explanation_only: boolean; no_difference: boolean; posting_available: false; wms_movement_available: false; blockers: string[] };
 type CorrectionReadinessState = { context: string; status: "idle" | "loading" | "ready" | "error"; data?: CorrectionReadiness };
+type InboundVatEvidenceKind = "supplier_eschf_xml" | "supporting_document_pdf";
+type InboundVatEvidenceFile = { file_id: number; organization_id: number; receipt_id: number; receipt_version: number; kind: InboundVatEvidenceKind; tax_period: string; reference: string; filename: string; content_type: string; size_bytes: number; sha256: string; evidence: string; request_key: string; supersedes_id: number | null; digest: string; actor: string; created_at: string; is_current: boolean; bytes_verified_at_upload: true; signature_verified: false; document_facts_verified: false; posting_available: false };
+type InboundVatEvidenceState = { context: string; status: "idle" | "loading" | "ready" | "error"; files?: Record<InboundVatEvidenceKind, InboundVatEvidenceFile[]> };
+type InboundVatEvidenceForm = { file: File | null; reference: string; tax_period: string; evidence: string };
+const evidenceKinds: { kind: InboundVatEvidenceKind; title: string; accept: string; mime: string[]; extension: string }[] = [
+  { kind: "supplier_eschf_xml", title: "Электронный счёт-фактура поставщика (XML)", accept: ".xml,application/xml,text/xml", mime: ["application/xml", "text/xml"], extension: ".xml" },
+  { kind: "supporting_document_pdf", title: "Подтверждающий документ (PDF)", accept: ".pdf,application/pdf", mime: ["application/pdf"], extension: ".pdf" },
+];
+const evidenceMaxBytes = 10 * 1024 * 1024;
+const evidenceSha256 = /^[a-f0-9]{64}$/;
+const secureUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 type PendingSave = { org: string; receiptId: number | null; version: number; key: string; document: Document; closeAfterSave: boolean };
 type PendingContractRevoke = { org: string; supplierId: number; contractId: number; key: string; reason: string };
 type OwnedOrder = { kind: string; source_id: number; snapshot: { number: string; supplier: string } };
@@ -212,6 +223,89 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     : typeof data.detail === "string" ? data.detail : "Проверьте реквизиты, даты и суммы накладной."), { status: response.status });
   return data;
 }
+async function accountingRequest<T>(path: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(`/api/accounting${path}`, { cache: "no-store", ...options });
+  let data: unknown;
+  try {
+    data = await response.json();
+    if (!data || typeof data !== "object") throw new Error("Malformed response");
+  } catch {
+    throw new Error("Сервис доказательств НДС вернул некорректный ответ.");
+  }
+  const detail = !Array.isArray(data) && typeof (data as Record<string, unknown>).detail === "string"
+    ? (data as Record<string, unknown>).detail as string : null;
+  if (!response.ok) throw new Error(detail ?? "Не удалось сохранить или загрузить доказательство НДС.");
+  return data as T;
+}
+function evidenceScopePath(org: string, receipt: Receipt, kind: InboundVatEvidenceKind) {
+  return `/organizations/${org}/receipt-correction-evidence-files?receipt_id=${receipt.id}&receipt_version=${receipt.version}&kind=${kind}`;
+}
+function checkedEvidenceFile(value: unknown, org: string, receipt: Receipt, kind: InboundVatEvidenceKind): InboundVatEvidenceFile {
+  const invalid = () => new Error("Список доказательств вернул повреждённые данные или данные другой накладной.");
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw invalid();
+  const row = value as Record<string, unknown>;
+  const required = ["file_id", "organization_id", "receipt_id", "receipt_version", "kind", "tax_period", "reference", "filename", "content_type", "size_bytes", "sha256", "evidence", "request_key", "supersedes_id", "digest", "actor", "created_at", "is_current", "bytes_verified_at_upload", "signature_verified", "document_facts_verified", "posting_available"];
+  const numeric = (n: unknown) => typeof n === "number" && Number.isSafeInteger(n) && n > 0;
+  const type = evidenceKinds.find((item) => item.kind === kind)!;
+  if (!exactKeys(row, required)
+    || row.organization_id !== Number(org) || row.receipt_id !== receipt.id || row.receipt_version !== receipt.version || row.kind !== kind
+    || !numeric(row.file_id) || !numeric(row.organization_id) || !numeric(row.receipt_id) || !numeric(row.receipt_version)
+    || typeof row.tax_period !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(row.tax_period)
+    || typeof row.reference !== "string" || !row.reference.trim() || row.reference.length > 160
+    || typeof row.filename !== "string" || row.filename.length < 1 || row.filename.length > 160 || /[/\\\r\n\0]/.test(row.filename) || !row.filename.toLowerCase().endsWith(type.extension)
+    || typeof row.content_type !== "string" || !type.mime.includes(row.content_type)
+    || typeof row.size_bytes !== "number" || !numeric(row.size_bytes) || row.size_bytes > evidenceMaxBytes
+    || typeof row.sha256 !== "string" || !evidenceSha256.test(row.sha256)
+    || typeof row.evidence !== "string" || row.evidence.trim().length < 10 || row.evidence.length > 2000
+    || typeof row.request_key !== "string" || !secureUuid.test(row.request_key)
+    || !(row.supersedes_id === null || numeric(row.supersedes_id))
+    || typeof row.digest !== "string" || !evidenceSha256.test(row.digest)
+    || typeof row.actor !== "string" || !row.actor.trim()
+    || typeof row.created_at !== "string" || !Number.isFinite(Date.parse(row.created_at))
+    || typeof row.is_current !== "boolean" || row.bytes_verified_at_upload !== true
+    || row.signature_verified !== false || row.document_facts_verified !== false || row.posting_available !== false) throw invalid();
+  return row as InboundVatEvidenceFile;
+}
+function checkedEvidenceList(value: unknown, org: string, receipt: Receipt, kind: InboundVatEvidenceKind): InboundVatEvidenceFile[] {
+  if (!Array.isArray(value)) throw new Error("Список доказательств НДС имеет неверный формат.");
+  const rows = value.map((row) => checkedEvidenceFile(row, org, receipt, kind));
+  const ids = new Set<number>();
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
+    if (ids.has(row.file_id) || row.is_current !== (index === rows.length - 1)
+      || (index === 0 ? row.supersedes_id !== null : row.supersedes_id !== rows[index - 1].file_id))
+      throw new Error("История доказательств НДС нарушена; отображение и замена файлов заблокированы.");
+    ids.add(row.file_id);
+  }
+  return rows;
+}
+function vatOnlyEvidenceAllowed(readiness: CorrectionReadiness | undefined, org: string, receipt: Receipt) {
+  return Boolean(readiness && receipt.correction_of && Number(org) > 0
+    && readiness.organization_id === Number(org) && readiness.receipt_id === receipt.id
+    && readiness.current_version === receipt.version && readiness.posting_available === false
+    && readiness.wms_movement_available === false && readiness.vat_change === true
+    && readiness.physical_change === false && readiness.inventory_value_change === false
+    && readiness.primary_document_change === false && readiness.operation_date_change === false
+    && readiness.classification.length === 1 && readiness.classification[0] === "vat_change");
+}
+function readFileDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Не удалось прочитать выбранный файл."));
+    reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Не удалось прочитать байты выбранного файла."));
+    reader.readAsDataURL(file);
+  });
+}
+async function sha256File(file: File) {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+function checkedEvidenceUploadFile(file: File, kind: InboundVatEvidenceKind) {
+  const type = evidenceKinds.find((item) => item.kind === kind)!;
+  if (!file.size || file.size > evidenceMaxBytes) throw new Error("Файл должен быть больше 0 байт и не превышать 10 МиБ.");
+  if (!file.name.toLowerCase().endsWith(type.extension) || !type.mime.includes(file.type))
+    throw new Error(`Для этого вида доказательства выберите файл ${type.extension} с соответствующим MIME-типом.`);
+}
 function checkedHistoryPage(data: ContractHistoryPage, org: string, supplierId: number) {
   if (data.organization_id !== Number(org) || data.supplier_id !== supplierId || data.status !== "revoked"
     || !Array.isArray(data.items) || data.items.some((row) => row.organization_id !== Number(org)
@@ -241,6 +335,15 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   const [skuError, setSkuError] = useState("");
   const [selected, setSelected] = useState<Receipt | null>(null), [selectedOrg, setSelectedOrg] = useState<string | null>(null), [busy, setBusy] = useState(false);
   const [correctionReadiness, setCorrectionReadiness] = useState<CorrectionReadinessState>({ context: "", status: "idle" });
+  const [inboundVatEvidence, setInboundVatEvidence] = useState<InboundVatEvidenceState>({ context: "", status: "idle" });
+  const [evidenceForms, setEvidenceForms] = useState<Record<InboundVatEvidenceKind, InboundVatEvidenceForm>>({
+    supplier_eschf_xml: { file: null, reference: "", tax_period: "", evidence: "" },
+    supporting_document_pdf: { file: null, reference: "", tax_period: "", evidence: "" },
+  });
+  const [evidenceBusy, setEvidenceBusy] = useState<InboundVatEvidenceKind | null>(null);
+  const [evidenceMessage, setEvidenceMessage] = useState("");
+  const evidenceMessageContext = useRef("");
+  const evidenceUploadEpoch = useRef(0);
   const [uncertain, setUncertain] = useState(false);
   const [recoveryBlocked, setRecoveryBlocked] = useState(false);
   const [editorOpen, setEditorOpen] = useState(true);
@@ -429,6 +532,40 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       });
     return () => { current = false; };
   }, [org, selectedOrg, selected, correctionContext]);
+  useEffect(() => {
+    const receipt = selected;
+    const context = correctionContext;
+    if (!receipt?.correction_of || selectedOrg !== org || correctionReadiness.context !== context
+      || correctionReadiness.status !== "ready") {
+      setInboundVatEvidence({ context, status: "idle" });
+      return;
+    }
+    let current = true;
+    setInboundVatEvidence({ context, status: "loading" });
+    void Promise.all(evidenceKinds.map(async ({ kind }) => {
+      const value = await accountingRequest<unknown>(evidenceScopePath(org, receipt, kind));
+      return [kind, checkedEvidenceList(value, org, receipt, kind)] as const;
+    })).then((entries) => {
+      if (!current || correctionContextRef.current !== context) return;
+      setInboundVatEvidence({ context, status: "ready", files: Object.fromEntries(entries) as Record<InboundVatEvidenceKind, InboundVatEvidenceFile[]> });
+      evidenceMessageContext.current = context;
+      setEvidenceMessage("");
+    }).catch(() => {
+      if (current && correctionContextRef.current === context)
+        setInboundVatEvidence({ context, status: "error" });
+    });
+    return () => { current = false; };
+  }, [org, selectedOrg, selected, correctionContext, correctionReadiness.context, correctionReadiness.status]);
+  useEffect(() => {
+    evidenceUploadEpoch.current += 1;
+    evidenceMessageContext.current = correctionContext;
+    setEvidenceBusy(null);
+    setEvidenceForms({
+      supplier_eschf_xml: { file: null, reference: "", tax_period: "", evidence: "" },
+      supporting_document_pdf: { file: null, reference: "", tax_period: "", evidence: "" },
+    });
+    setEvidenceMessage("");
+  }, [correctionContext, selected]);
   function open(row: Receipt | null) {
     if (pending.current || uncertain) {
       setError("Сначала подтвердите сохранённую попытку той же редакции. Открытие другой накладной сейчас запрещено.");
@@ -595,6 +732,71 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
     pendingContractRevoke.current = command;
     void submitContractRevoke(command);
   }
+  async function uploadInboundVatEvidence(kind: InboundVatEvidenceKind) {
+    const receipt = selected;
+    const context = correctionContext;
+    const readiness = correctionReadinessForSelection.data;
+    const form = evidenceForms[kind];
+    if (!receipt?.correction_of || selectedOrg !== org || !vatOnlyEvidenceAllowed(readiness, org, receipt)
+      || inboundVatEvidence.context !== context || inboundVatEvidence.status !== "ready" || evidenceBusy) return;
+    if (!form.file) { evidenceMessageContext.current = context; setEvidenceMessage("Выберите файл для загрузки."); return; }
+    const uploadEpoch = ++evidenceUploadEpoch.current;
+    const isCurrentUpload = () => correctionContextRef.current === context
+      && evidenceUploadEpoch.current === uploadEpoch;
+    try {
+      checkedEvidenceUploadFile(form.file, kind);
+      if (form.file.name.length > 160) throw new Error("Имя файла не должно превышать 160 символов.");
+      if (!form.reference.trim() || form.reference.trim().length > 160) throw new Error("Укажите ссылку или номер документа длиной до 160 символов.");
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(form.tax_period)) throw new Error("Укажите налоговый период в формате ГГГГ-ММ.");
+      if (form.evidence.trim().length < 10 || form.evidence.trim().length > 2000) throw new Error("Опишите основание загрузки (от 10 до 2000 символов).");
+      const requestKey = crypto.randomUUID();
+      if (!secureUuid.test(requestKey)) throw new Error("Браузер не предоставил безопасный UUID; загрузка заблокирована.");
+      setEvidenceBusy(kind);
+      evidenceMessageContext.current = context;
+      setEvidenceMessage("");
+      const dataUrl = await readFileDataUrl(form.file);
+      if (!dataUrl.startsWith(`data:${form.file.type};base64,`)) throw new Error("Формат выбранного файла не удалось подтвердить.");
+      const expectedSha256 = await sha256File(form.file);
+      if (!isCurrentUpload() || !vatOnlyEvidenceAllowed(correctionReadinessForSelection.data, org, receipt)) return;
+      const previous = inboundVatEvidence.files?.[kind].at(-1) ?? null;
+      const payload = {
+        request_key: requestKey, receipt_id: receipt.id, receipt_version: receipt.version, kind,
+        tax_period: form.tax_period, reference: form.reference.trim(), filename: form.file.name,
+        data_url: dataUrl, evidence: form.evidence.trim(), supersedes_id: previous?.file_id ?? null,
+      };
+      const saved = checkedEvidenceFile(await accountingRequest<unknown>(
+        `/organizations/${org}/receipt-correction-evidence-files`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+      ), org, receipt, kind);
+      if (saved.request_key !== requestKey || saved.receipt_id !== payload.receipt_id
+        || saved.receipt_version !== payload.receipt_version || saved.kind !== kind
+        || saved.tax_period !== payload.tax_period || saved.reference !== payload.reference
+        || saved.filename !== payload.filename || saved.content_type !== form.file.type
+        || saved.size_bytes !== form.file.size || saved.sha256 !== expectedSha256
+        || saved.evidence !== payload.evidence || saved.supersedes_id !== payload.supersedes_id
+        || saved.is_current !== true)
+        throw new Error("Сервис не подтвердил точные реквизиты и SHA-256 загруженного файла.");
+      if (!isCurrentUpload()) return;
+      const priorFiles = inboundVatEvidence.files?.[kind] ?? [];
+      const nextFiles = checkedEvidenceList([
+        ...priorFiles.map((row) => ({ ...row, is_current: false })),
+        saved,
+      ], org, receipt, kind);
+      setInboundVatEvidence((state) => state.context === context && state.status === "ready" && state.files
+        ? { ...state, files: { ...state.files, [kind]: nextFiles } }
+        : state);
+      setEvidenceForms((state) => ({ ...state, [kind]: { file: null, reference: "", tax_period: "", evidence: "" } }));
+      evidenceMessageContext.current = context;
+      setEvidenceMessage("Файл сохранён как доказательство для этой версии исправления. Проверки подписи и фактов не выполнялись.");
+    } catch (cause) {
+      if (isCurrentUpload()) {
+        evidenceMessageContext.current = context;
+        setEvidenceMessage(cause instanceof Error ? cause.message : "Не удалось проверить или сохранить файл доказательства.");
+      }
+    } finally {
+      if (isCurrentUpload()) setEvidenceBusy(null);
+    }
+  }
   if (initialLoading) return <section className="space-y-3 rounded-xl border border-line bg-surface p-4"><p role="status">Загрузка накладной из ссылки…</p>{error && <><p role="alert">{error}</p><Button onClick={() => setReload(value => value + 1)}>Повторить загрузку накладной</Button></>}</section>;
   return <section className="space-y-4 rounded-xl border border-line bg-surface p-4">
     <h2 className="font-semibold">Реестр первичных накладных</h2>
@@ -647,6 +849,63 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
             <ul className="list-disc pl-5">{correctionReadinessForSelection.data.blockers.map((blocker) => <li key={blocker}>{correctionBlockerLabel(blocker)}</li>)}</ul>
           </div>}
         </>}
+      </section>}
+      {selected?.correction_of && correctionReadinessForSelection.status === "ready" && correctionReadinessForSelection.data && <section aria-labelledby="inbound-vat-evidence-heading" className="space-y-3 rounded border border-line p-3">
+        <h3 id="inbound-vat-evidence-heading" className="font-semibold">Документы в подтверждение исправления НДС</h3>
+        <p className="text-sm text-muted">Загруженные файлы привязаны к выбранному юрлицу, накладной и текущей версии исправления. Файл сам по себе не подтверждает подлинность подписи или факты документа и не разрешает проведение либо вычет НДС.</p>
+        {inboundVatEvidence.context === correctionContext && inboundVatEvidence.status === "loading" && <p role="status">Загрузка списка документов по текущей версии…</p>}
+        {inboundVatEvidence.context === correctionContext && inboundVatEvidence.status === "error" && <p role="alert">Не удалось проверить принадлежность и целостность документов. Просмотр и загрузка доказательств заблокированы.</p>}
+        {inboundVatEvidence.context === correctionContext && inboundVatEvidence.status === "ready" && inboundVatEvidence.files && evidenceKinds.map(({ kind, title, accept }) => {
+          const files = inboundVatEvidence.files![kind];
+          const current = files.at(-1) ?? null;
+          const form = evidenceForms[kind];
+          const canUpload = vatOnlyEvidenceAllowed(correctionReadinessForSelection.data, org, selected)
+            && selectedOrg === org && !busy && !uncertain && !evidenceBusy;
+          return <div key={kind} className="space-y-2 rounded border border-line p-3">
+            <h4 className="font-medium">{title}</h4>
+            {!files.length && <p className="text-sm text-muted">Документы этого вида ещё не загружены.</p>}
+            {files.map((file, index) => {
+              const query = new URLSearchParams({ receipt_id: String(selected.id), receipt_version: String(selected.version), kind });
+              return <article key={file.file_id} className="space-y-1 rounded bg-surface p-2 text-sm">
+                <p className="font-medium">{file.is_current ? "Текущий файл" : "История"} · {file.filename}</p>
+                <p>Основание: {file.reference} · налоговый период {file.tax_period} · {file.size_bytes} байт</p>
+                <p className="break-all">SHA-256: {file.sha256}</p>
+                <p>Загрузил: {file.actor} · {file.created_at}</p>
+                <p>{file.is_current ? "Текущая версия документа" : "Заменён последующим файлом"}{file.supersedes_id ? ` · заменяет файл № ${file.supersedes_id}` : ""}</p>
+                <a className="text-accent underline" href={`/api/accounting/organizations/${org}/receipt-correction-evidence-files/${file.file_id}/download?${query.toString()}`}>Открыть файл № {file.file_id}</a>
+                {index < files.length - 1 && <span className="sr-only"> Предыдущая запись истории</span>}
+              </article>;
+            })}
+            {vatOnlyEvidenceAllowed(correctionReadinessForSelection.data, org, selected)
+              ? <div className="space-y-2 border-t border-line pt-3">
+                <p className="text-sm">Загрузка разрешена только для подтверждённого VAT-only изменения. {current ? `Новый файл заменит текущий файл № ${current.file_id}.` : "Это будет первая редакция документа."}</p>
+                <label>Ссылка или номер документа<Input aria-label={`Основание документа: ${kind}`} maxLength={160} disabled={!canUpload} value={form.reference} onChange={(event) => setEvidenceForms((state) => ({ ...state, [kind]: { ...state[kind], reference: event.target.value } }))} /></label>
+                <label>Налоговый период<Input aria-label={`Налоговый период: ${kind}`} type="month" disabled={!canUpload} value={form.tax_period} onChange={(event) => setEvidenceForms((state) => ({ ...state, [kind]: { ...state[kind], tax_period: event.target.value } }))} /></label>
+                <label>Комментарий к загрузке<Input aria-label={`Комментарий к загрузке: ${kind}`} maxLength={2000} disabled={!canUpload} value={form.evidence} onChange={(event) => setEvidenceForms((state) => ({ ...state, [kind]: { ...state[kind], evidence: event.target.value } }))} /></label>
+                <label>Файл (до 10 МиБ)<Input aria-label={`Файл доказательства: ${kind}`} type="file" accept={accept} disabled={!canUpload} onChange={(event) => {
+                  const file = event.target.files?.[0] ?? null;
+                  try {
+                    if (file) checkedEvidenceUploadFile(file, kind);
+                    evidenceMessageContext.current = correctionContext;
+                    setEvidenceMessage("");
+                    setEvidenceForms((state) => ({ ...state, [kind]: { ...state[kind], file } }));
+                  } catch (cause) {
+                    event.target.value = "";
+                    setEvidenceForms((state) => ({ ...state, [kind]: { ...state[kind], file: null } }));
+                    evidenceMessageContext.current = correctionContext;
+                    setEvidenceMessage(cause instanceof Error ? cause.message : "Выбран недопустимый файл.");
+                  }
+                }} /></label>
+                {form.file && <p className="text-sm">{form.file.name} · {form.file.size} байт</p>}
+                <Button variant="secondary" disabled={!canUpload || !form.file || !form.reference.trim() || !form.tax_period || form.evidence.trim().length < 10}
+                  onClick={() => void uploadInboundVatEvidence(kind)}>{evidenceBusy === kind ? "Загрузка…" : current ? "Загрузить новую редакцию" : "Загрузить документ"}</Button>
+              </div>
+              : <p className="text-sm text-muted">Загрузка недоступна: требуется точное VAT-only изменение без изменения количества, себестоимости, первичного документа и даты операции. Проведение и складское движение остаются недоступны.</p>}
+          </div>;
+        })}
+        {correctionReadinessForSelection.data && !vatOnlyEvidenceAllowed(correctionReadinessForSelection.data, org, selected)
+          && <p className="text-sm text-muted">Проведение и вычет НДС остаются недоступны.</p>}
+        {evidenceMessageContext.current === correctionContext && evidenceMessage && <p role="status">{evidenceMessage}</p>}
       </section>}
       {selected?.posting && <p role="status">Проведена · проводка № {selected.posting.entry_id}. Первичные данные доступны для просмотра.</p>}
       {contractRevokeUncertain && <Button variant="secondary" disabled={contractBusy || pendingContractRevoke.current?.org !== org} onClick={() => { if (pendingContractRevoke.current) void submitContractRevoke(pendingContractRevoke.current); }}>Повторить отзыв договора с тем же ключом</Button>}

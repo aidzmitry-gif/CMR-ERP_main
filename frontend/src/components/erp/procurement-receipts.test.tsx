@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createHash } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { ProcurementReceiptDrafts } from "./procurement-receipt-drafts";
@@ -52,6 +53,59 @@ function correctionRow(id = 92, invoiceReference = `CORR-${id}`) {
   return { id, organization_id: 7, version: 1, status: "draft", posting: null,
     correction_of: { receipt_id: 81, version: 3, entry_id: 42 },
     revisions: [{ version: 1, actor: "accountant", created_at: "2026-09-26", document }] };
+}
+
+function vatOnlyCorrectionReadiness(receiptId = 92) {
+  return correctionReadiness(receiptId, { vat_change: true, no_difference: false }, {
+    blockers: ["vat_register_and_eschf_evidence_required", "correction_posting_period_required", "posting_workflow_not_approved"],
+  });
+}
+
+function inboundEvidenceFile(kind: "supplier_eschf_xml" | "supporting_document_pdf" = "supplier_eschf_xml",
+  overrides: Record<string, unknown> = {}) {
+  const pdf = kind === "supporting_document_pdf";
+  return {
+    file_id: 12, organization_id: 7, receipt_id: 92, receipt_version: 1, kind,
+    tax_period: "2026-09", reference: pdf ? "PDF-1" : "ЭСЧФ-1",
+    filename: pdf ? "support.pdf" : "invoice.xml", content_type: pdf ? "application/pdf" : "application/xml",
+    size_bytes: 9, sha256: "a".repeat(64), evidence: "Получено от поставщика",
+    request_key: "11111111-1111-4111-8111-111111111111", supersedes_id: null,
+    digest: "b".repeat(64), actor: "accountant@example.test", created_at: "2026-09-27T10:00:00Z",
+    is_current: true, bytes_verified_at_upload: true, signature_verified: false,
+    document_facts_verified: false, posting_available: false, ...overrides,
+  };
+}
+
+function correctionEvidenceFetcher(options: {
+  readiness?: unknown;
+  rows?: ReturnType<typeof correctionRow>[];
+  xml?: unknown;
+  pdf?: unknown;
+  onPost?: (body: Record<string, unknown>) => unknown;
+} = {}) {
+  return vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("/receipt-correction-evidence-files") && init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      const response = options.onPost?.(body) ?? inboundEvidenceFile(
+        body.kind as "supplier_eschf_xml" | "supporting_document_pdf",
+        { file_id: 14, request_key: body.request_key, receipt_id: body.receipt_id,
+          receipt_version: body.receipt_version, tax_period: body.tax_period, reference: body.reference,
+          filename: body.filename, content_type: body.kind === "supporting_document_pdf" ? "application/pdf" : "application/xml",
+          size_bytes: Number(String(body.data_url).split(",")[1] ? Buffer.from(String(body.data_url).split(",")[1], "base64").length : 0),
+          sha256: createHash("sha256").update(Buffer.from(String(body.data_url).split(",")[1] ?? "", "base64")).digest("hex"),
+          evidence: body.evidence, supersedes_id: body.supersedes_id, is_current: true });
+      return { ok: true, json: async () => response };
+    }
+    if (url.includes("/receipt-correction-evidence-files")) {
+      const kind = url.includes("kind=supporting_document_pdf") ? "supporting_document_pdf" : "supplier_eschf_xml";
+      return { ok: true, json: async () => kind === "supplier_eschf_xml" ? options.xml ?? [] : options.pdf ?? [] };
+    }
+    if (url.includes("correction-readiness")) return { ok: true, json: async () => options.readiness ?? vatOnlyCorrectionReadiness() };
+    if (url.includes("purchase-ownership")) return { ok: true, json: async () => [] };
+    if (url.includes("supplier-contracts")) return { ok: true, json: async () => emptyContracts(url) };
+    if (url.includes("receipt-documents")) return { ok: true, json: async () => options.rows ?? [correctionRow()] };
+    return { ok: true, json: async () => [] };
+  });
 }
 
 function deferred<T>() {
@@ -205,6 +259,260 @@ it("ignores readiness responses made stale by changing the selected correction o
   expect(fetcher.mock.calls.some(([url]) => url.includes("/organizations/8/receipt-documents/93/correction-readiness"))).toBe(false);
   expect(screen.queryByText(/Изменилось количество или склад/)).not.toBeInTheDocument();
   expect(screen.queryByText(/Изменилась ставка/)).not.toBeInTheDocument();
+});
+
+it("shows current and historical evidence for both kinds after exact VAT-only readiness", async () => {
+  const oldXml = inboundEvidenceFile("supplier_eschf_xml", {
+    file_id: 12, filename: "invoice-old.xml", reference: "ЭСЧФ-старый", is_current: false,
+  });
+  const currentXml = inboundEvidenceFile("supplier_eschf_xml", {
+    file_id: 13, filename: "invoice-current.xml", reference: "ЭСЧФ-новый", supersedes_id: 12,
+  });
+  const currentPdf = inboundEvidenceFile("supporting_document_pdf", { file_id: 21, filename: "proof.pdf", reference: "Акт-21" });
+  const fetcher = correctionEvidenceFetcher({ xml: [oldXml, currentXml], pdf: [currentPdf] });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+
+  expect(await screen.findByText(/invoice-old\.xml/)).toBeInTheDocument();
+  expect(screen.getByText(/invoice-current\.xml/)).toBeInTheDocument();
+  expect(screen.getByText(/proof\.pdf/)).toBeInTheDocument();
+  expect(screen.getByText(/ЭСЧФ-старый/)).toBeInTheDocument();
+  expect(screen.getAllByText(/accountant@example\.test/)).toHaveLength(3);
+  expect(screen.getAllByText(new RegExp("a".repeat(64)))).toHaveLength(3);
+  const evidenceCalls = fetcher.mock.calls.filter(([url]) => url.includes("/receipt-correction-evidence-files"));
+  expect(evidenceCalls.map(([url]) => url)).toEqual(expect.arrayContaining([
+    "/api/accounting/organizations/7/receipt-correction-evidence-files?receipt_id=92&receipt_version=1&kind=supplier_eschf_xml",
+    "/api/accounting/organizations/7/receipt-correction-evidence-files?receipt_id=92&receipt_version=1&kind=supporting_document_pdf",
+  ]));
+  expect(screen.getByText(/Файл сам по себе не подтверждает подлинность подписи или факты документа/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Провести/ })).not.toBeInTheDocument();
+});
+
+it.each([
+  ["foreign organization", { organization_id: 8 }],
+  ["different receipt revision", { receipt_version: 2 }],
+])("fails closed when evidence metadata names a %s", async (_label, overrides) => {
+  const fetcher = correctionEvidenceFetcher({ xml: [inboundEvidenceFile("supplier_eschf_xml", overrides)] });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("Просмотр и загрузка доказательств заблокированы");
+  expect(screen.queryByText(/invoice\.xml/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /Открыть файл/ })).not.toBeInTheDocument();
+  expect(fetcher.mock.calls.some(([url, init]) => url.includes("/receipt-correction-evidence-files") && init?.method === "POST")).toBe(false);
+});
+
+it("hides upload controls when VAT readiness includes a physical change or enables posting", async () => {
+  const combined = correctionReadiness(92, { physical_change: true, vat_change: true, no_difference: false }, {
+    blockers: ["physical_receipt_adjustment_required", "vat_register_and_eschf_evidence_required",
+      "correction_posting_period_required", "posting_workflow_not_approved"],
+  });
+  const fetcher = correctionEvidenceFetcher({ readiness: combined });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  expect(await screen.findAllByText(/Загрузка недоступна: требуется точное VAT-only изменение/)).toHaveLength(2);
+  expect(screen.queryByLabelText("Файл доказательства: supplier_eschf_xml")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Провести/ })).not.toBeInTheDocument();
+});
+
+it("sends the current file id as supersedes_id and checks uploaded bytes and receipt metadata", async () => {
+  const current = inboundEvidenceFile("supplier_eschf_xml", { file_id: 12 });
+  let posted: Record<string, unknown> | null = null;
+  const fetcher = correctionEvidenceFetcher({
+    xml: [current],
+    onPost: (body) => {
+      posted = body;
+      const raw = Buffer.from(String(body.data_url).split(",")[1], "base64");
+      return inboundEvidenceFile("supplier_eschf_xml", {
+        file_id: 13, receipt_id: body.receipt_id, receipt_version: body.receipt_version,
+        request_key: body.request_key, tax_period: body.tax_period, reference: body.reference,
+        filename: body.filename, size_bytes: raw.length, sha256: createHash("sha256").update(raw).digest("hex"),
+        evidence: body.evidence, supersedes_id: body.supersedes_id,
+      });
+    },
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  await screen.findByText(/invoice\.xml/);
+  fireEvent.change(screen.getByLabelText("Основание документа: supplier_eschf_xml"), { target: { value: "ЭСЧФ-2026-09" } });
+  fireEvent.change(screen.getByLabelText("Налоговый период: supplier_eschf_xml"), { target: { value: "2026-09" } });
+  fireEvent.change(screen.getByLabelText("Комментарий к загрузке: supplier_eschf_xml"), { target: { value: "Исправленный счёт-фактура поставщика" } });
+  const file = new File(["<Invoice/>"], "invoice-new.xml", { type: "application/xml" });
+  fireEvent.change(screen.getByLabelText("Файл доказательства: supplier_eschf_xml"), { target: { files: [file] } });
+  fireEvent.click(screen.getByRole("button", { name: "Загрузить новую редакцию" }));
+
+  expect(await screen.findByText(/Файл сохранён как доказательство для этой версии исправления/)).toBeInTheDocument();
+  expect(posted).toMatchObject({ receipt_id: 92, receipt_version: 1, kind: "supplier_eschf_xml", supersedes_id: 12 });
+  expect(posted?.request_key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(screen.getByText(/Текущий файл · invoice-new\.xml/)).toBeInTheDocument();
+  expect(screen.getByText(/invoice\.xml/)).toHaveTextContent("История");
+});
+
+it.each([
+  ["oversized file", new File([new Uint8Array(10 * 1024 * 1024 + 1)], "too-large.xml", { type: "application/xml" }), /не превышать 10 МиБ/],
+  ["mismatched MIME type", new File(["<Invoice/>"], "wrong.xml", { type: "text/plain" }), /соответствующим MIME-типом/],
+])("rejects %s before sending it to the evidence API", async (_label, file, message) => {
+  const fetcher = correctionEvidenceFetcher();
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  await screen.findByLabelText("Файл доказательства: supplier_eschf_xml");
+  fireEvent.change(screen.getByLabelText("Файл доказательства: supplier_eschf_xml"), { target: { files: [file] } });
+
+  expect(await screen.findByText(message)).toBeInTheDocument();
+  expect(fetcher.mock.calls.some(([url, init]) => url.includes("/receipt-correction-evidence-files") && init?.method === "POST")).toBe(false);
+});
+
+it("ignores an evidence list response after the selected correction changes", async () => {
+  const staleXml = deferred<unknown>();
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.includes("/receipt-correction-evidence-files")) {
+      if (url.includes("receipt_id=92") && url.includes("supplier_eschf_xml")) return { ok: true, json: () => staleXml.promise };
+      return { ok: true, json: async () => [] };
+    }
+    if (url.includes("correction-readiness")) {
+      const receiptId = url.includes("/93/") ? 93 : 92;
+      return { ok: true, json: async () => vatOnlyCorrectionReadiness(receiptId) };
+    }
+    if (url.includes("purchase-ownership")) return { ok: true, json: async () => [] };
+    if (url.includes("supplier-contracts")) return { ok: true, json: async () => emptyContracts(url) };
+    if (url.includes("receipt-documents")) return { ok: true, json: async () => [correctionRow(92), correctionRow(93)] };
+    return { ok: true, json: async () => [] };
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => url.includes("receipt_id=92") && url.includes("supplier_eschf_xml"))).toBe(true));
+  fireEvent.click(screen.getByRole("button", { name: /CORR-93/ }));
+  expect(await screen.findAllByText("Документы этого вида ещё не загружены.")).toHaveLength(2);
+  await act(async () => {
+    staleXml.resolve([inboundEvidenceFile()]);
+    await staleXml.promise;
+  });
+  expect(screen.queryByText(/invoice\.xml/)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /CORR-93/ })).toBeInTheDocument();
+});
+
+it("ignores an old upload response after selecting A, then B, then A again", async () => {
+  const oldUpload = deferred<unknown>();
+  let posted: Record<string, unknown> | null = null;
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("/receipt-correction-evidence-files") && init?.method === "POST") {
+      posted = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return { ok: true, json: () => oldUpload.promise };
+    }
+    if (url.includes("/receipt-correction-evidence-files")) return { ok: true, json: async () => [] };
+    if (url.includes("correction-readiness")) {
+      const receiptId = url.includes("/93/") ? 93 : 92;
+      return { ok: true, json: async () => vatOnlyCorrectionReadiness(receiptId) };
+    }
+    if (url.includes("purchase-ownership")) return { ok: true, json: async () => [] };
+    if (url.includes("supplier-contracts")) return { ok: true, json: async () => emptyContracts(url) };
+    if (url.includes("receipt-documents")) return { ok: true, json: async () => [correctionRow(92), correctionRow(93)] };
+    return { ok: true, json: async () => [] };
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  await screen.findByLabelText("Файл доказательства: supplier_eschf_xml");
+  fireEvent.change(screen.getByLabelText("Основание документа: supplier_eschf_xml"), { target: { value: "ЭСЧФ-A" } });
+  fireEvent.change(screen.getByLabelText("Налоговый период: supplier_eschf_xml"), { target: { value: "2026-09" } });
+  fireEvent.change(screen.getByLabelText("Комментарий к загрузке: supplier_eschf_xml"), { target: { value: "Старая загрузка для проверки гонки" } });
+  const file = new File(["<Invoice>A</Invoice>"], "old-a.xml", { type: "application/xml" });
+  fireEvent.change(screen.getByLabelText("Файл доказательства: supplier_eschf_xml"), { target: { files: [file] } });
+  const uploadButton = screen.getAllByRole("button", { name: "Загрузить документ" })
+    .find((button) => !button.hasAttribute("disabled"));
+  expect(uploadButton).toBeDefined();
+  fireEvent.click(uploadButton!);
+  await waitFor(() => expect(posted).not.toBeNull());
+
+  fireEvent.click(screen.getByRole("button", { name: /CORR-93/ }));
+  await screen.findAllByText("Документы этого вида ещё не загружены.");
+  fireEvent.click(screen.getByRole("button", { name: /CORR-92/ }));
+  await screen.findAllByText("Документы этого вида ещё не загружены.");
+
+  const body = posted!;
+  const raw = Buffer.from(String(body.data_url).split(",")[1], "base64");
+  await act(async () => {
+    oldUpload.resolve(inboundEvidenceFile("supplier_eschf_xml", {
+      file_id: 44, receipt_id: body.receipt_id, receipt_version: body.receipt_version,
+      request_key: body.request_key, tax_period: body.tax_period, reference: body.reference,
+      filename: body.filename, size_bytes: raw.length,
+      sha256: createHash("sha256").update(raw).digest("hex"), evidence: body.evidence,
+    }));
+    await oldUpload.promise;
+  });
+  expect(screen.queryByText(/old-a\.xml/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Файл сохранён как доказательство/)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /CORR-92/ })).toBeInTheDocument();
+});
+
+it("ignores an old upload response after refreshing and reopening the same receipt revision", async () => {
+  const oldUpload = deferred<unknown>();
+  let posted: Record<string, unknown> | null = null;
+  let listIncludesSaved = false;
+  const first = inboundEvidenceFile("supplier_eschf_xml", { file_id: 12 });
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("/receipt-correction-evidence-files") && init?.method === "POST") {
+      posted = JSON.parse(String(init.body)) as Record<string, unknown>;
+      listIncludesSaved = true;
+      return { ok: true, json: () => oldUpload.promise };
+    }
+    if (url.includes("/receipt-correction-evidence-files")) {
+      if (url.includes("kind=supporting_document_pdf")) return { ok: true, json: async () => [] };
+      if (!listIncludesSaved) return { ok: true, json: async () => [first] };
+      const body = posted!;
+      const raw = Buffer.from(String(body.data_url).split(",")[1], "base64");
+      return { ok: true, json: async () => [
+        { ...first, is_current: false },
+        inboundEvidenceFile("supplier_eschf_xml", {
+          file_id: 13, request_key: body.request_key, tax_period: body.tax_period,
+          reference: body.reference, filename: body.filename, size_bytes: raw.length,
+          sha256: createHash("sha256").update(raw).digest("hex"), evidence: body.evidence,
+          supersedes_id: 12,
+        }),
+      ] };
+    }
+    if (url.includes("correction-readiness")) return { ok: true, json: async () => vatOnlyCorrectionReadiness() };
+    if (url.includes("purchase-ownership")) return { ok: true, json: async () => [] };
+    if (url.includes("supplier-contracts")) return { ok: true, json: async () => emptyContracts(url) };
+    if (url.includes("receipt-documents")) return { ok: true, json: async () => [correctionRow()] };
+    return { ok: true, json: async () => [] };
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  await screen.findByText(/invoice\.xml/);
+  fireEvent.change(screen.getByLabelText("Основание документа: supplier_eschf_xml"), { target: { value: "ЭСЧФ-новый" } });
+  fireEvent.change(screen.getByLabelText("Налоговый период: supplier_eschf_xml"), { target: { value: "2026-09" } });
+  fireEvent.change(screen.getByLabelText("Комментарий к загрузке: supplier_eschf_xml"), { target: { value: "Проверка повторного открытия накладной" } });
+  const file = new File(["<Invoice>new</Invoice>"], "invoice-new.xml", { type: "application/xml" });
+  fireEvent.change(screen.getByLabelText("Файл доказательства: supplier_eschf_xml"), { target: { files: [file] } });
+  fireEvent.click(screen.getByRole("button", { name: "Загрузить новую редакцию" }));
+  await waitFor(() => expect(posted).not.toBeNull());
+
+  fireEvent.click(screen.getByRole("button", { name: "Обновить реестр" }));
+  await waitFor(() => expect(fetcher.mock.calls.filter(([url]) => url.includes("receipt-documents")).length).toBeGreaterThan(1));
+  fireEvent.click(screen.getByRole("button", { name: /CORR-92/ }));
+  expect(await screen.findByText(/Текущий файл · invoice-new\.xml/)).toBeInTheDocument();
+
+  const body = posted!;
+  const raw = Buffer.from(String(body.data_url).split(",")[1], "base64");
+  await act(async () => {
+    oldUpload.resolve(inboundEvidenceFile("supplier_eschf_xml", {
+      file_id: 13, request_key: body.request_key, tax_period: body.tax_period,
+      reference: body.reference, filename: body.filename, size_bytes: raw.length,
+      sha256: createHash("sha256").update(raw).digest("hex"), evidence: body.evidence,
+      supersedes_id: 12,
+    }));
+    await oldUpload.promise;
+  });
+  expect(screen.getAllByText(/invoice-new\.xml/)).toHaveLength(1);
+  expect(screen.queryByText(/Файл сохранён как доказательство/)).not.toBeInTheDocument();
 });
 
 it("requires a selected supplier and saves its directory snapshot in a new receipt", async () => {
