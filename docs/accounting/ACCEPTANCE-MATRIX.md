@@ -160,6 +160,21 @@ current target database or all later source migrations.
   120 in the trial balance. Focused backend 14/14, frontend 44/44, TypeScript,
   ESLint, Ruff and diff checks passed. The accountant still determines the
   adjustment amount and direction; no universal automatic reversal was added.
+- The eighth local G03D slice makes procurement-receipt Save and Close
+  recoverable after a lost response or page reload. Before sending, the UI
+  stores the exact organization, receipt ID, expected version, UUID, normalized
+  document and close intent in a per-organization session journal. A retry uses
+  the same command; a later client error cannot erase an earlier unknown result.
+  The form closes only after the server returns the same organization, receipt,
+  version, key and normalized revision. Corrupt journals, a missing edited
+  receipt and mismatched server content remain fail-closed, so an edit cannot
+  silently become a create. Posting and WMS intake also remain blocked until
+  the exact save receipt is confirmed. Focused UI checks passed 21/21, backend checks
+  22/22 and a disposable PostgreSQL 16 exact create/edit replay check 1/1;
+  TypeScript, ESLint, Ruff and diff checks passed. This journal covers reload
+  recovery in the current browser session. Linked correction of an already
+  posted procurement receipt, the full manual-document PostgreSQL lifecycle,
+  release integration and real user acceptance remain open.
 - CRM deal Save and Close now requires a response with the exact deal ID,
   submitted editor fields and a valid new edit token. The PATCH response is
   generated from the saved deal; two concurrent edits on disposable

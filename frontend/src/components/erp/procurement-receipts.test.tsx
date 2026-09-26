@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { ProcurementReceiptDrafts } from "./procurement-receipt-drafts";
 import { ProcurementReceipts } from "./procurement-receipts";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); sessionStorage.clear(); });
 
 async function selectReceiptSku() {
   fireEvent.change(screen.getByLabelText("Поиск номенклатуры накладной"), { target: { value: "AKB" } });
@@ -20,6 +20,17 @@ function explainUnregisteredContract() {
 function emptyContracts(url: string) {
   return { organization_id: 7, supplier_id: 19,
     status: url.includes("status=revoked") ? "revoked" : "active", items: [], truncated: false };
+}
+
+function durableReceiptDocument(invoiceReference = "INV-DURABLE") {
+  return {
+    currency: "BYN", invoice_reference: invoiceReference, document_date: "2026-09-24",
+    operation_date: "2026-09-24", supplier: "Поставщик", supplier_id: 19,
+    supplier_unp: "190000001", contract: "Без договора", contract_basis: "Поставка без договора",
+    warehouse: "Основной склад", explanation: "Товар", items: [{ order_id: null, sku_id: 31,
+      sku_title: "Аккумулятор", sku: "AKB", unit: "шт", lot: "LOT-1", quantity: "2.000001",
+      net_amount: "100.01", vat_rate: "20", vat_amount: "20.00", vat_basis: "ОСН" }],
+  };
 }
 
 it("requires an explicit legal entity before opening supplier invoices", async () => {
@@ -80,7 +91,7 @@ it("requires a selected supplier and saves its directory snapshot in a new recei
     }) };
     if (init?.method === "POST") {
       submitted = JSON.parse(String(init.body));
-      return { ok: true, json: async () => ({ id: 41, key: submitted!.key, version: 1, status: "draft", posting: null,
+      return { ok: true, json: async () => ({ id: 41, organization_id: 7, key: submitted!.key, version: 1, status: "draft", posting: null,
         revisions: [{ version: 1, actor: "buyer", created_at: "2026-09-24", document: submitted!.document }] }) };
     }
     return { ok: true, json: async () => [] };
@@ -101,11 +112,16 @@ it("requires a selected supplier and saves its directory snapshot in a new recei
   expect(screen.getByRole("alert")).toHaveTextContent("Выберите номенклатуру каждой строки накладной из справочника");
   expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   await selectReceiptSku();
+  fireEvent.change(screen.getByLabelText("Количество черновика 1"), { target: { value: "02.000001" } });
+  fireEvent.change(screen.getByLabelText("Стоимость без НДС черновика 1"), { target: { value: "+0100.01" } });
+  fireEvent.change(screen.getByLabelText("Ставка НДС % черновика 1"), { target: { value: "020" } });
+  fireEvent.change(screen.getByLabelText("Сумма НДС черновика 1"), { target: { value: "020.00" } });
   fireEvent.click(screen.getByRole("button", { name: "Сохранить первичную накладную" }));
   await waitFor(() => expect(submitted).not.toBeNull());
   expect(submitted!.document).toMatchObject({ supplier: "Поставщик из каталога", supplier_id: 19,
     supplier_unp: "190000001", contract_basis: "Поставка по счёту без зарегистрированного договора",
-    items: [{ sku_id: 31, sku: "AKB", sku_title: "Аккумулятор", unit: "шт" }] });
+    items: [{ sku_id: 31, sku: "AKB", sku_title: "Аккумулятор", unit: "шт",
+      quantity: "2.000001", net_amount: "100.01", vat_rate: "20", vat_amount: "20.00" }] });
   expect(await screen.findByText("Накладная № 41: сохранена версия 1.")).toBeInTheDocument();
   expect(screen.getByLabelText("Номер первичной накладной")).toBeInTheDocument();
 });
@@ -127,7 +143,7 @@ it("registers a supplier contract in the chosen company and saves its ID in the 
     if (url.includes("supplier-contracts")) return { ok: true, json: async () => ({ organization_id: 7, supplier_id: 19, items: [] }) };
     if (init?.method === "POST") {
       receiptCommand = JSON.parse(String(init.body));
-      return { ok: true, json: async () => ({ id: 41, key: receiptCommand!.key, version: 1, status: "draft", posting: null,
+      return { ok: true, json: async () => ({ id: 41, organization_id: 7, key: receiptCommand!.key, version: 1, status: "draft", posting: null,
         revisions: [{ version: 1, actor: "buyer", created_at: "2026-09-25", document: receiptCommand!.document }] }) };
     }
     return { ok: true, json: async () => [] };
@@ -149,7 +165,8 @@ it("registers a supplier contract in the chosen company and saves its ID in the 
   await selectReceiptSku();
   fireEvent.click(screen.getByRole("button", { name: "Сохранить первичную накладную" }));
   await waitFor(() => expect(receiptCommand).not.toBeNull());
-  expect(receiptCommand!.document).toMatchObject({ supplier_id: 19, contract_id: 50, contract: "SC-50", contract_basis: null });
+  expect(receiptCommand!.document).toMatchObject({ supplier_id: 19, contract_id: 50, contract: "SC-50" });
+  expect(receiptCommand!.document).not.toHaveProperty("contract_basis");
 });
 
 it("retries an uncertain supplier contract revocation without changing its command", async () => {
@@ -293,7 +310,7 @@ it("closes a new receipt only after the server confirms its saved version", asyn
     if (init?.method === "POST") {
       const saved = JSON.parse(String(init.body));
       await savePending;
-      const row = { id: 41, key: saved.key, version: 1, status: "draft", posting: null,
+      const row = { id: 41, organization_id: 7, key: saved.key, version: 1, status: "draft", posting: null,
         revisions: [{ version: 1, actor: "buyer", created_at: "2026-09-24", document: saved.document }] };
       rows = [row];
       return { ok: true, json: async () => row };
@@ -320,11 +337,7 @@ it("closes a new receipt only after the server confirms its saved version", asyn
 });
 
 it("keeps an edited receipt open after the server rejects Save and Close", async () => {
-  const original = {
-    currency: "BYN", invoice_reference: "INV-OLD", document_date: "2026-09-24",
-    operation_date: "2026-09-24", supplier: "Поставщик", supplier_id: 19,
-    supplier_unp: "190000001", contract: "", contract_basis: "Поставка без договора", warehouse: "", explanation: "", items: [],
-  };
+  const original = durableReceiptDocument("INV-OLD");
   const row = { id: 41, version: 1, status: "draft", posting: null,
     revisions: [{ version: 1, actor: "buyer", created_at: "2026-09-24", document: original }] };
   vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => init?.method === "PUT"
@@ -340,11 +353,7 @@ it("keeps an edited receipt open after the server rejects Save and Close", async
 });
 
 it("retries an uncertain receipt edit with the same key and closes only after confirmation", async () => {
-  const original = {
-    currency: "BYN", invoice_reference: "INV-OLD", document_date: "2026-09-24",
-    operation_date: "2026-09-24", supplier: "Поставщик", supplier_id: 19,
-    supplier_unp: "190000001", contract: "", contract_basis: "Поставка без договора", warehouse: "", explanation: "", items: [],
-  };
+  const original = durableReceiptDocument("INV-OLD");
   const row = { id: 41, version: 1, status: "draft", posting: null,
     revisions: [{ version: 1, actor: "buyer", created_at: "2026-09-24", document: original }] };
   const commands: string[] = [];
@@ -353,9 +362,10 @@ it("retries an uncertain receipt edit with the same key and closes only after co
       const body = String(init.body);
       commands.push(body);
       const command = JSON.parse(body);
-      const saved = { ...row, version: 2, revisions: [...row.revisions,
+      const saved = { ...row, organization_id: 7, version: 2, revisions: [...row.revisions,
         { version: 2, request_key: command.key, actor: "buyer", created_at: "2026-09-25", document: command.document }] };
       if (commands.length === 1) throw new Error("Network response lost");
+      if (commands.length === 2) return { ok: false, status: 403, json: async () => ({ detail: "Access recheck failed" }) };
       return { ok: true, json: async () => saved };
     }
     return { ok: true, json: async () => url.includes("purchase-ownership") ? [] : url.includes("supplier-contracts") ? emptyContracts(url) : [row] };
@@ -370,22 +380,142 @@ it("retries an uncertain receipt edit with the same key and closes only after co
   expect(screen.getByLabelText("Номер первичной накладной")).toBeDisabled();
   expect(screen.queryByText(/форма закрыта/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Повторить подтверждение той же редакции" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Предыдущий исход остаётся неизвестным");
+  expect(screen.getByLabelText("Номер первичной накладной")).toBeDisabled();
+  expect(sessionStorage.getItem("procurement-receipt-save:v1:7")).toContain("INV-EDIT");
+  fireEvent.click(screen.getByRole("button", { name: "Повторить подтверждение той же редакции" }));
   expect(await screen.findByText("Накладная № 41: сохранена версия 2, форма закрыта.")).toBeInTheDocument();
   expect(screen.queryByLabelText("Номер первичной накладной")).not.toBeInTheDocument();
+  expect(commands).toHaveLength(3);
+  expect(commands[1]).toBe(commands[0]);
+  expect(commands[2]).toBe(commands[0]);
+  expect(JSON.parse(commands[0])).toMatchObject({ expected_version: 1, document: { invoice_reference: "INV-EDIT" } });
+});
+
+it.each(["organization", "document"])("keeps the form and durable command when a successful response tampers with %s", async (part) => {
+  const original = durableReceiptDocument("INV-OLD");
+  const row = { id: 41, version: 1, status: "draft", posting: null,
+    revisions: [{ version: 1, actor: "buyer", created_at: "2026-09-24", document: original }] };
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === "PUT") {
+      const command = JSON.parse(String(init.body));
+      const returnedDocument = part === "document" ? { ...command.document, invoice_reference: "FORGED" } : command.document;
+      return { ok: true, json: async () => ({ ...row, organization_id: part === "organization" ? 8 : 7, version: 2,
+        revisions: [...row.revisions, { version: 2, request_key: command.key, actor: "buyer", created_at: "2026-09-25", document: returnedDocument }] }) };
+    }
+    return { ok: true, json: async () => url.includes("purchase-ownership") ? [] : url.includes("supplier-contracts") ? emptyContracts(url) : [row] };
+  }));
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /INV-OLD/ }));
+  fireEvent.change(screen.getByLabelText("Номер первичной накладной"), { target: { value: "INV-EDIT" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Сервер не подтвердил сохранённую версию этой накладной");
+  expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("INV-EDIT");
+  expect(screen.getByLabelText("Номер первичной накладной")).toBeDisabled();
+  expect(sessionStorage.getItem("procurement-receipt-save:v1:7")).toContain("INV-EDIT");
+});
+
+it("restores an unknown receipt edit after reload and retries the exact durable command", async () => {
+  const original = durableReceiptDocument("INV-OLD");
+  const row = { id: 41, version: 1, status: "draft", posting: null,
+    revisions: [{ version: 1, actor: "buyer", created_at: "2026-09-24", document: original }] };
+  const commands: string[] = [];
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === "PUT") {
+      const body = String(init.body); commands.push(body);
+      if (commands.length === 1) throw new Error("Network response lost");
+      const command = JSON.parse(body);
+      return { ok: true, json: async () => ({ ...row, organization_id: 7, version: 2,
+        revisions: [...row.revisions, { version: 2, request_key: command.key, actor: "buyer", created_at: "2026-09-25", document: command.document }] }) };
+    }
+    return { ok: true, json: async () => url.includes("purchase-ownership") ? [] : url.includes("supplier-contracts") ? emptyContracts(url) : [row] };
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const first = render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /INV-OLD/ }));
+  fireEvent.change(screen.getByLabelText("Номер первичной накладной"), { target: { value: "INV-RELOAD" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Результат сохранения неизвестен");
+  const durable = sessionStorage.getItem("procurement-receipt-save:v1:7");
+  expect(durable).toContain("INV-RELOAD");
+  first.unmount();
+
+  render(<ProcurementReceiptDrafts org="7" initialReceipt="41" />);
+  expect(await screen.findByText("Восстановлена неподтверждённая попытка сохранения. Повтор использует тот же ключ и те же реквизиты.")).toBeInTheDocument();
+  expect(screen.queryByText("Загрузка накладной из ссылки…")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("INV-RELOAD");
+  fireEvent.click(screen.getByRole("button", { name: "Повторить подтверждение той же редакции" }));
+  expect(await screen.findByText("Накладная № 41: сохранена версия 2, форма закрыта.")).toBeInTheDocument();
   expect(commands).toHaveLength(2);
   expect(commands[1]).toBe(commands[0]);
-  expect(JSON.parse(commands[0])).toMatchObject({ expected_version: 1, document: { invoice_reference: "INV-EDIT" } });
+  expect(sessionStorage.getItem("procurement-receipt-save:v1:7")).toBeNull();
+});
+
+it.each([
+  { caseName: "invalid JSON", journal: "{" },
+  { caseName: "invalid document scalar", journal: JSON.stringify({ org: "7", receiptId: 41, version: 1,
+    key: "receipt-corrupt", closeAfterSave: true, document: { ...durableReceiptDocument(), supplier: {} } }) },
+])("keeps a corrupt receipt journal fail-closed with an initial link: $caseName", async ({ journal }) => {
+  const document = durableReceiptDocument("INV-41");
+  const row = { id: 41, version: 1, status: "draft", posting: null,
+    revisions: [{ version: 1, actor: "buyer", created_at: "2026-09-24", document }] };
+  sessionStorage.setItem("procurement-receipt-save:v1:7", journal);
+  const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () =>
+    url.includes("purchase-ownership") ? [] : url.includes("supplier-contracts") ? emptyContracts(url) : [row] }));
+  vi.stubGlobal("fetch", fetcher);
+
+  render(<ProcurementReceiptDrafts org="7" initialReceipt="41" />);
+  expect(await screen.findByText("Показано 1 из 1 накладных выбранного юрлица за все даты.")).toBeInTheDocument();
+  expect(screen.getByRole("alert")).toHaveTextContent("Журнал сохранения накладной повреждён");
+  expect(screen.queryByText("Загрузка накладной из ссылки…")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Номер первичной накладной")).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Повторить подтверждение той же редакции" })).toBeDisabled();
+  expect(sessionStorage.getItem("procurement-receipt-save:v1:7")).toBe(journal);
+  expect(fetcher.mock.calls.some(([, init]) => init?.method === "PUT" || init?.method === "POST")).toBe(false);
+});
+
+it("does not turn a restored edit into a create when its source receipt is absent", async () => {
+  const journal = JSON.stringify({ org: "7", receiptId: 41, version: 1, key: "receipt-missing-source",
+    closeAfterSave: true, document: durableReceiptDocument("INV-MISSING") });
+  sessionStorage.setItem("procurement-receipt-save:v1:7", journal);
+  const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () =>
+    url.includes("supplier-contracts") ? emptyContracts(url) : [] }));
+  vi.stubGlobal("fetch", fetcher);
+
+  render(<ProcurementReceiptDrafts org="7" />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Редактируемая накладная не найдена");
+  expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("INV-MISSING");
+  expect(screen.getByLabelText("Номер первичной накладной")).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Повторить подтверждение той же редакции" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Новая первичная накладная" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Сначала подтвердите сохранённую попытку");
+  expect(sessionStorage.getItem("procurement-receipt-save:v1:7")).toBe(journal);
+  expect(fetcher.mock.calls.some(([, init]) => init?.method === "PUT" || init?.method === "POST")).toBe(false);
+});
+
+it("blocks posting and warehouse intake until a restored edit gets its exact save receipt", async () => {
+  const document = durableReceiptDocument("INV-ALREADY-VISIBLE");
+  const journal = JSON.stringify({ org: "7", receiptId: 41, version: 1, key: "receipt-awaiting-ack",
+    closeAfterSave: false, document });
+  const row = { id: 41, version: 2, status: "draft", posting: null,
+    revisions: [{ version: 2, request_key: "receipt-awaiting-ack", actor: "buyer", created_at: "2026-09-25", document }] };
+  sessionStorage.setItem("procurement-receipt-save:v1:7", journal);
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, json: async () =>
+    url.includes("purchase-ownership") ? [] : url.includes("supplier-contracts") ? emptyContracts(url) : [row] })));
+
+  render(<ProcurementReceiptDrafts org="7" policyId={1} date="2026-09-25" />);
+  expect(await screen.findByText("Сначала подтвердите исход сохранения этой редакции. Проведение и складская приёмка заблокированы.")).toBeInTheDocument();
+  expect(screen.queryByText(/Проводки по сохранённой версии/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Подготовить складскую приёмку" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Повторить подтверждение той же редакции" })).toBeEnabled();
+  expect(sessionStorage.getItem("procurement-receipt-save:v1:7")).toBe(journal);
 });
 
 it.each([
   { caseName: "another receipt", returnedId: 42, returnedVersion: 2 },
   { caseName: "the old version", returnedId: 41, returnedVersion: 1 },
 ])("does not close when a successful HTTP response names $caseName", async ({ returnedId, returnedVersion }) => {
-  const original = {
-    currency: "BYN", invoice_reference: "INV-OLD", document_date: "2026-09-24",
-    operation_date: "2026-09-24", supplier: "Поставщик", supplier_id: 19,
-    supplier_unp: "190000001", contract: "", contract_basis: "Поставка без договора", warehouse: "", explanation: "", items: [],
-  };
+  const original = durableReceiptDocument("INV-OLD");
   const row = { id: 41, version: 1, status: "draft", posting: null,
     revisions: [{ version: 1, actor: "buyer", created_at: "2026-09-24", document: original }] };
   vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => init?.method === "PUT"

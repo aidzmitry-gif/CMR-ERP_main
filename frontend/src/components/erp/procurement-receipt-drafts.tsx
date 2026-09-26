@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
-import { fetchProcurementSkus, fetchProcurementSuppliers, type ProcurementSkuOption, type ProcurementSupplierOption } from "@/lib/procurement-machine";
+import { canonical, fetchProcurementSkus, fetchProcurementSuppliers, type ProcurementSkuOption, type ProcurementSupplierOption } from "@/lib/procurement-machine";
 import { useUnsavedDocumentGuard } from "@/lib/use-unsaved-document-guard";
 import { ProcurementReceiptPosting, type ReceiptAccount } from "./procurement-receipt-posting";
 
@@ -14,7 +14,7 @@ type Document = ReturnType<typeof blank>;
 type SupplierContract = { id: number; organization_id: number; supplier_id: number; number: string; title: string; signed_on: string; expires_on: string | null; evidence: string; is_active?: boolean; created_by?: string; created_at?: string; deactivated_by?: string | null; deactivated_at?: string | null; deactivation_reason?: string | null };
 type ContractHistoryPage = { organization_id: number; supplier_id: number; status: string; items: SupplierContract[]; truncated: boolean; next_before_at: string | null; next_before_id: number | null };
 type ContractHistoryCursor = { at: string; id: number };
-type Receipt = { id: number; key?: string; version: number; status?: string; posting?: { entry_id: number; version: number } | null; revisions: { version: number; request_key?: string | null; actor: string; created_at: string; document: Document }[] };
+type Receipt = { id: number; organization_id?: number; key?: string; version: number; status?: string; posting?: { entry_id: number; version: number } | null; revisions: { version: number; request_key?: string | null; actor: string; created_at: string; document: Document }[] };
 type PendingSave = { org: string; receiptId: number | null; version: number; key: string; document: Document; closeAfterSave: boolean };
 type PendingContractRevoke = { org: string; supplierId: number; contractId: number; key: string; reason: string };
 type OwnedOrder = { kind: string; source_id: number; snapshot: { number: string; supplier: string } };
@@ -22,6 +22,105 @@ const fields = [["invoice_reference", "Номер первичной накла�
 const itemFields = [["lot", "Партия"], ["quantity", "Количество"], ["net_amount", "Стоимость без НДС"], ["vat_rate", "Ставка НДС %"], ["vat_amount", "Сумма НДС"], ["vat_basis", "Основание НДС"]] as const;
 const itemHistoryFields = [["order_id", "Заказ поставщику"], ["order_line_id", "Строка заказа"], ["sku_id", "ID номенклатуры"], ["sku_title", "Название номенклатуры"], ["sku", "Код номенклатуры"], ["unit", "Единица измерения"], ...itemFields] as const;
 const shown = (value: unknown) => value === null || value === undefined || value === "" ? "—" : String(value);
+const saveJournalKey = (org: string) => `procurement-receipt-save:v1:${org}`;
+const exactKeys = (value: Record<string, unknown>, required: string[], optional: string[] = []) => {
+  const actual = Object.keys(value).sort();
+  return actual.length >= required.length && required.every((key) => key in value)
+    && actual.every((key) => required.includes(key) || optional.includes(key));
+};
+const positiveIdOrNull = (value: unknown) => value === null
+  || typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+function validSavedDocument(value: unknown): value is Document {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const document = value as Record<string, unknown>;
+  const required = ["currency", "invoice_reference", "document_date", "operation_date", "supplier", "supplier_id",
+    "supplier_unp", "contract", "warehouse", "explanation", "items"];
+  if (!exactKeys(document, required, ["contract_id", "contract_basis"])
+    || !["currency", "invoice_reference", "document_date", "operation_date", "supplier", "contract", "warehouse", "explanation"]
+      .every((key) => typeof document[key] === "string")
+    || !positiveIdOrNull(document.supplier_id)
+    || !(document.supplier_unp === null || typeof document.supplier_unp === "string")
+    || !(document.contract_id === undefined || positiveIdOrNull(document.contract_id) && document.contract_id !== null)
+    || !(document.contract_basis === undefined || typeof document.contract_basis === "string")
+    || !Array.isArray(document.items) || document.items.length < 1 || document.items.length > 300) return false;
+  const lineRequired = ["order_id", "sku_id", "sku_title", "sku", "unit", "lot", "quantity", "net_amount", "vat_rate", "vat_amount", "vat_basis"];
+  return document.items.every((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const line = value as Record<string, unknown>;
+    return exactKeys(line, lineRequired, ["order_line_id"])
+      && positiveIdOrNull(line.order_id) && positiveIdOrNull(line.sku_id)
+      && (line.order_line_id === undefined || positiveIdOrNull(line.order_line_id) && line.order_line_id !== null)
+      && (line.sku_title === null || typeof line.sku_title === "string")
+      && (line.unit === null || typeof line.unit === "string")
+      && ["sku", "lot", "quantity", "net_amount", "vat_rate", "vat_amount", "vat_basis"]
+        .every((key) => typeof line[key] === "string");
+  });
+}
+function expectedSavedDocument(document: Document) {
+  const decimal = (value: unknown, scale: number, positive = false) => {
+    if (typeof value !== "string") throw new Error("Суммы и количество должны быть точными строками.");
+    const text = value.trim();
+    if (!text) return text;
+    const match = /^\+?(?:(\d+)(?:\.(\d*))?|\.(\d+))$/.exec(text);
+    if (!match) throw new Error("Используйте обычную десятичную запись без знака минус и экспоненты.");
+    const fraction = match[2] ?? match[3] ?? "";
+    if (fraction.length > scale) throw new Error(`Допустимо не более ${scale} знаков после запятой.`);
+    const whole = (match[1] ?? "0").replace(/^0+(?=\d)/, "");
+    if (positive && !/[1-9]/.test(whole + fraction)) throw new Error("Количество должно быть больше нуля.");
+    return fraction ? `${whole}.${fraction}` : whole;
+  };
+  const trim = (value: unknown): unknown => {
+    if (typeof value === "string") return value.trim();
+    if (Array.isArray(value)) return value.map(trim);
+    if (value && typeof value === "object") return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, child]) => [key, trim(child)]),
+    );
+    return value;
+  };
+  const saved = trim(structuredClone(document)) as Record<string, unknown>;
+  if (saved.contract_id === null) delete saved.contract_id;
+  if (saved.contract_basis === null) delete saved.contract_basis;
+  saved.items = (saved.items as Record<string, unknown>[]).map((line) => {
+    const copy: Record<string, unknown> = { ...line,
+      quantity: decimal(line.quantity, 6, true),
+      net_amount: decimal(line.net_amount, 2),
+      vat_rate: decimal(line.vat_rate, 2),
+      vat_amount: decimal(line.vat_amount, 2) };
+    if (copy.order_line_id === null) delete copy.order_line_id;
+    return copy;
+  });
+  return saved;
+}
+function readPendingSave(org: string): PendingSave | null {
+  const raw = sessionStorage.getItem(saveJournalKey(org));
+  if (raw === null) return null;
+  let value: unknown;
+  try { value = JSON.parse(raw); }
+  catch { throw new Error("Журнал сохранения накладной повреждён. Новые отправки заблокированы до проверки реестра."); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Журнал сохранения накладной повреждён. Новые отправки заблокированы до проверки реестра.");
+  const row = value as Record<string, unknown>;
+  if (Object.keys(row).sort().join(",") !== ["closeAfterSave", "document", "key", "org", "receiptId", "version"].sort().join(",")
+    || row.org !== org || (row.receiptId !== null && (typeof row.receiptId !== "number" || !Number.isSafeInteger(row.receiptId) || row.receiptId < 1))
+    || typeof row.version !== "number" || !Number.isSafeInteger(row.version) || row.version < 0 || typeof row.key !== "string" || !row.key
+    || (row.receiptId === null ? row.version !== 0 : row.version < 1)
+    || typeof row.closeAfterSave !== "boolean" || !validSavedDocument(row.document)
+    || canonical(expectedSavedDocument(row.document)) !== canonical(row.document)) {
+    throw new Error("Журнал сохранения накладной повреждён. Новые отправки заблокированы до проверки реестра.");
+  }
+  return value as PendingSave;
+}
+function storePendingSave(command: PendingSave) {
+  const raw = JSON.stringify(command);
+  sessionStorage.setItem(saveJournalKey(command.org), raw);
+  if (sessionStorage.getItem(saveJournalKey(command.org)) !== raw) throw new Error("Не удалось надёжно сохранить запрос накладной. Отправка не выполнена.");
+}
+function clearPendingSave(command: PendingSave) {
+  const key = saveJournalKey(command.org);
+  const raw = sessionStorage.getItem(key);
+  try {
+    if (raw !== null && canonical(JSON.parse(raw)) === canonical(command)) sessionStorage.removeItem(key);
+  } catch { /* Keep unreadable evidence for explicit recovery. */ }
+}
 const supplierSnapshot = (document: Document) => `${shown(document.supplier)} · УНП ${shown(document.supplier_unp)} · ${document.supplier_id ? `ID ${document.supplier_id}` : "без связи со справочником"}`;
 function revisionChanges(previous: Document, current: Document) {
   const changes: { label: string; before: string; after: string }[] = [];
@@ -81,10 +180,11 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   const [skuError, setSkuError] = useState("");
   const [selected, setSelected] = useState<Receipt | null>(null), [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
+  const [recoveryBlocked, setRecoveryBlocked] = useState(false);
   const [editorOpen, setEditorOpen] = useState(true);
   const [error, setError] = useState(""), [notice, setNotice] = useState(""), [reload, setReload] = useState(0);
   const [loadedKey, setLoadedKey] = useState("");
-  const pending = useRef<PendingSave | null>(null), active = useRef(true);
+  const pending = useRef<PendingSave | null>(null), unknownSave = useRef(false), corruptJournal = useRef(false), active = useRef(true);
   const pendingContractRevoke = useRef<PendingContractRevoke | null>(null);
   const contractFetchVersion = useRef(0), supplierContext = useRef("");
   supplierContext.current = `${org}:${document.supplier_id ?? ""}`;
@@ -108,6 +208,26 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
         .some((value) => value.toLocaleLowerCase("ru").includes(search)));
   });
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
+  useEffect(() => {
+    try {
+      const saved = readPendingSave(org);
+      if (!saved) return;
+      pending.current = saved;
+      unknownSave.current = true;
+      setDocument(structuredClone(saved.document));
+      setEditorOpen(true);
+      setUncertain(true);
+      setRecoveryBlocked(saved.receiptId !== null);
+      setInitialLoading(false);
+      setNotice("Восстановлена неподтверждённая попытка сохранения. Повтор использует тот же ключ и те же реквизиты.");
+    } catch (cause) {
+      corruptJournal.current = true;
+      setUncertain(true);
+      setRecoveryBlocked(true);
+      setInitialLoading(false);
+      setError(cause instanceof Error ? cause.message : "Не удалось прочитать журнал сохранения накладной.");
+    }
+  }, [org]);
   useEffect(() => {
     if (!supplierSearch.trim()) return;
     let current = true;
@@ -184,7 +304,24 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
     void request<Receipt[]>(path).then((data) => { if (current) {
       setRows(data);
       setLoadedKey(listKey);
-      if (initialReceipt !== undefined && !initialOpened.current) {
+      const saved = pending.current;
+      if (corruptJournal.current) {
+        setInitialLoading(false);
+        setUncertain(true);
+        setRecoveryBlocked(true);
+      }
+      else if (saved?.org === org) {
+        const row = saved.receiptId === null ? null : data.find((item) => item.id === saved.receiptId) ?? null;
+        setSelected(row);
+        setDocument(structuredClone(saved.document));
+        setEditorOpen(true);
+        setUncertain(true);
+        const missing = saved.receiptId !== null && row === null;
+        setRecoveryBlocked(missing);
+        setInitialLoading(false);
+        if (missing) setError("Редактируемая накладная не найдена в текущем реестре. Повтор сохранения остаётся заблокирован до восстановления источника.");
+      }
+      else if (initialReceipt !== undefined && !initialOpened.current) {
         initialOpened.current = true;
         setInitialLoading(false);
         const row = data.find(row => String(row.id) === initialReceipt);
@@ -197,8 +334,12 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       }
     } }).catch((e: Error) => { if (current) setError(e.message); });
     return () => { current = false; };
-  }, [path, listKey, initialReceipt]);
+  }, [path, listKey, initialReceipt, org]);
   function open(row: Receipt | null) {
+    if (pending.current || uncertain) {
+      setError("Сначала подтвердите сохранённую попытку той же редакции. Открытие другой накладной сейчас запрещено.");
+      return;
+    }
     if (!confirmDiscard()) return;
     setContracts([]); setContractError("");
     setSelected(row); setDocument(row ? structuredClone(row.revisions.at(-1)!.document) : blank());
@@ -213,12 +354,19 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
     if (!document.contract_id && !document.contract_basis?.trim()) {
       setError("Выберите договор из справочника или укажите основание покупки без зарегистрированного договора."); return;
     }
-    if (document.items.some(row => !row.sku_id || !row.sku_title || !row.unit)) {
+    if (!document.items.length || document.items.some(row => !row.sku_id || !row.sku_title || !row.unit)) {
       setError("Выберите номенклатуру каждой строки накладной из справочника."); return;
     }
+    let savedDocument: Document;
+    try { savedDocument = expectedSavedDocument(document) as Document; }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Проверьте точность сумм и количества."); return; }
     const command: PendingSave = { org, receiptId: selected?.id ?? null, version: selected?.version ?? 0,
-      key: crypto.randomUUID(), document: structuredClone(document), closeAfterSave };
+      key: crypto.randomUUID(), document: savedDocument, closeAfterSave };
+    try { storePendingSave(command); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось сохранить запрос накладной."); return; }
     pending.current = command;
+    unknownSave.current = false;
+    setRecoveryBlocked(false);
     void submit(command);
   }
   async function submit(command: PendingSave) {
@@ -232,15 +380,18 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
           : { key: command.key, document: command.document }),
       });
       const revision = row?.revisions?.at(-1);
-      if (!Number.isSafeInteger(row?.id) || row.id < 1 || !Number.isSafeInteger(row.version)
+      if (!Number.isSafeInteger(row?.id) || row.id < 1 || row.organization_id !== Number(command.org)
+        || !Number.isSafeInteger(row.version) || row.status !== "draft" || row.posting !== null
         || row.version !== command.version + 1
         || revision?.version !== row.version || !revision.document
+        || canonical(revision.document) !== canonical(expectedSavedDocument(command.document))
         || (command.receiptId ? row.id !== command.receiptId || revision.request_key !== command.key
           : row.key !== command.key)) {
         throw new Error("Сервер не подтвердил сохранённую версию этой накладной. Форма оставлена открытой.");
       }
       if (!active.current) return;
-      pending.current = null; setUncertain(false);
+      clearPendingSave(command);
+      pending.current = null; unknownSave.current = false; setUncertain(false); setRecoveryBlocked(false);
       setSelected(command.closeAfterSave ? null : row);
       setDocument(command.closeAfterSave ? blank() : structuredClone(revision.document));
       setEditorOpen(!command.closeAfterSave);
@@ -249,16 +400,21 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
     } catch (e) { if (active.current) {
       const status = (e as Error & { status?: number }).status;
       if (status === undefined || status >= 500) {
+        unknownSave.current = true;
         setUncertain(true);
         setError(`${(e as Error).message} Результат сохранения неизвестен. Повторите подтверждение той же редакции.`);
+      } else if (unknownSave.current) {
+        setUncertain(true);
+        setError(`${(e as Error).message} Предыдущий исход остаётся неизвестным; исходный ключ и форма сохранены, новый документ создавать нельзя.`);
       } else {
-        pending.current = null; setUncertain(false); setError((e as Error).message);
+        clearPendingSave(command);
+        pending.current = null; unknownSave.current = false; setUncertain(false); setRecoveryBlocked(false); setError((e as Error).message);
       }
     } }
     finally { if (active.current) setBusy(false); }
   }
   function retryPending() {
-    if (busy || !pending.current || pending.current.org !== org) return;
+    if (busy || recoveryBlocked || !pending.current || pending.current.org !== org) return;
     void submit(pending.current);
   }
   async function registerContract() {
@@ -348,7 +504,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {orderError && <p role="alert">{orderError}</p>}
     <fieldset disabled={busy} className="space-y-3">
-      {uncertain && <div className="rounded border border-accent p-3"><p>Форма сохранена до сверки результата. Повтор отправит те же реквизиты и ключ операции.</p><Button onClick={retryPending}>Повторить подтверждение той же редакции</Button></div>}
+      {uncertain && <div className="rounded border border-accent p-3"><p>Форма сохранена до сверки результата. Повтор отправит те же реквизиты и ключ операции.</p><Button disabled={recoveryBlocked || !pending.current} onClick={retryPending}>Повторить подтверждение той же редакции</Button></div>}
       <div className="flex gap-2"><Button variant="secondary" onClick={() => open(null)}>Новая первичная накладная</Button><Button variant="secondary" onClick={() => setReload((v) => v + 1)}>Обновить реестр</Button></div>
       <div className="grid gap-3 md:grid-cols-2"><label>Поиск по номеру, поставщику или дате<Input aria-label="Поиск накладных" value={query} onChange={(e) => setQuery(e.target.value)} /></label><label>Статус накладной<Select aria-label="Статус накладной" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="all">Все</option><option value="draft">Черновики</option><option value="posted">Проведённые</option></Select></label></div>
       {!listLoaded && !error && <p role="status">Загрузка реестра накладных…</p>}
@@ -423,13 +579,13 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       <div className="flex gap-2"><Button variant="secondary" disabled={document.items.length >= 300} onClick={() => setDocument({ ...document, items: [...document.items, item()] })}>Добавить строку накладной</Button><Button onClick={() => void save()}>{selected ? `Сохранить исправление версии ${selected.version}` : "Сохранить первичную накладную"}</Button><Button variant="secondary" onClick={() => void save(true)}>Сохранить и закрыть</Button></div>
       </fieldset>}
     </fieldset>
-    {selected && !selected.posting && (dirty ? <p>Сохраните изменения накладной перед расчётом проводок.</p> : !document.supplier_id ? <p>Сопоставьте поставщика со справочником перед проведением.</p> : document.items.some(row => !row.sku_id) ? <p>Сопоставьте все товары накладной со справочником перед проведением.</p> : <ProcurementReceiptPosting key={`${selected.id}/${selected.version}/${date}/${policyId}`} blocked={busy} org={org} receiptId={selected.id} version={selected.version} items={document.items} accounts={accounts} policyId={policyId} date={date} onBusy={(value) => { if (active.current) setBusy(value); }} onPosted={(entryId) => {
+    {selected && !selected.posting && (uncertain ? <p>Сначала подтвердите исход сохранения этой редакции. Проведение и складская приёмка заблокированы.</p> : dirty ? <p>Сохраните изменения накладной перед расчётом проводок.</p> : !document.supplier_id ? <p>Сопоставьте поставщика со справочником перед проведением.</p> : document.items.some(row => !row.sku_id) ? <p>Сопоставьте все товары накладной со справочником перед проведением.</p> : <ProcurementReceiptPosting key={`${selected.id}/${selected.version}/${date}/${policyId}`} blocked={busy} org={org} receiptId={selected.id} version={selected.version} items={document.items} accounts={accounts} policyId={policyId} date={date} onBusy={(value) => { if (active.current) setBusy(value); }} onPosted={(entryId) => {
       if (!active.current) return;
       setSelected((current) => current?.id === selected.id ? { ...current, status: "posted", posting: { entry_id: entryId, version: selected.version } } : current);
       setRows((current) => current.map((row) => row.id === selected.id ? { ...row, status: "posted", posting: { entry_id: entryId, version: selected.version } } : row));
       setReload((value) => value + 1); onPosted?.();
     }} />)}
-    {selected && !dirty && document.supplier_id && document.items.every(row => row.sku_id) && <Link className="text-accent underline" href={`/erp/wms/receipts/from-primary?org=${org}&receipt=${selected.id}&version=${selected.version}`}>Подготовить складскую приёмку</Link>}
+    {selected && !uncertain && !dirty && document.supplier_id && document.items.every(row => row.sku_id) && <Link className="text-accent underline" href={`/erp/wms/receipts/from-primary?org=${org}&receipt=${selected.id}&version=${selected.version}`}>Подготовить складскую приёмку</Link>}
     {selected && <details><summary>История накладной № {selected.id}</summary>{selected.revisions.map((row, index) => {
       const changes = index ? revisionChanges(selected.revisions[index - 1].document, row.document) : [];
       return <article key={row.version} className="border-b border-line py-3">

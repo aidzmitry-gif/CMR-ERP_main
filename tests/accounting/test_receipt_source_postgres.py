@@ -6,10 +6,53 @@ from sqlalchemy import func, select, text, update
 
 from modules.accounting import service
 from modules.accounting.models import AccessGrant, Entry, Period
-from modules.procurement.receipt_documents import ReceiptDocument, ReceiptPosting, ReceiptRevision
+from modules.procurement.receipt_documents import (
+    ReceiptContent,
+    ReceiptDocument,
+    ReceiptPosting,
+    ReceiptRevision,
+)
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
-from tests.accounting.test_procurement_receipt_drafts import document, source_options
+from tests.accounting.test_procurement_receipt_drafts import (
+    document,
+    ensure_receipt_catalog_sku,
+    source_options,
+)
 from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
+
+
+async def test_receipt_save_replays_exact_create_and_edit_postgres(issuance_pg, pg_book):
+    api, factory = issuance_pg
+    api.headers["X-User"] = "tester"
+    api.headers["X-User-Roles"] = "director"
+    async with factory() as session:
+        await ensure_receipt_catalog_sku(session)
+        await session.commit()
+
+    path = f"/procurement/organizations/{pg_book[0]}/receipt-documents"
+    create = {"key": "pg-durable-create", "document": document()}
+    first = await api.post(path, json=create)
+    replay = await api.post(path, json=create)
+    assert first.status_code == replay.status_code == 201, first.text
+    assert replay.json() == first.json()
+    assert first.json()["organization_id"] == pg_book[0]
+
+    changed = {**document(), "invoice_reference": "INV1 corrected after unknown response"}
+    edit = {"key": "pg-durable-edit", "expected_version": 1, "document": changed}
+    edit_path = path + f"/{first.json()['id']}"
+    second = await api.put(edit_path, json=edit)
+    edit_replay = await api.put(edit_path, json=edit)
+    assert second.status_code == edit_replay.status_code == 200, second.text
+    assert edit_replay.json() == second.json()
+    assert second.json()["organization_id"] == pg_book[0]
+    assert second.json()["version"] == 2
+    assert second.json()["revisions"][-1]["request_key"] == edit["key"]
+    assert second.json()["revisions"][-1]["document"] == ReceiptContent.model_validate(changed).model_dump(mode="json")
+    assert (await api.put(edit_path, json={**edit, "document": document()})).status_code == 409
+
+    async with factory() as session:
+        assert await session.scalar(select(func.count()).select_from(ReceiptDocument)) == 1
+        assert await session.scalar(select(func.count()).select_from(ReceiptRevision)) == 2
 
 
 async def test_finance_reads_posted_primary_without_procurement_access(issuance_pg, pg_book):
