@@ -21,6 +21,10 @@ from modules.accounting.models import (
     Period,
 )
 from modules.accounting.schemas import Input, PostingInput
+from modules.accounting.settlement_document_snapshot import (
+    SETTLEMENT_DOCUMENT_KEYS,
+    verified_settlement_document_snapshot,
+)
 from modules.accounting.sku_snapshot import verified_sku_snapshot
 from modules.accounting.warehouse_snapshot import verified_warehouse_snapshot
 
@@ -59,6 +63,7 @@ async def verify_analytic_references(session, org_id: int, posting: PostingInput
     checked_skus = set()
     checked_warehouses = set()
     checked_contracts = set()
+    checked_settlement_documents = set()
     for line in posting.lines:
         dimensions = line.dimensions
         if {"counterparty", "counterparty_id", "counterparty_unp", "counterparty_revision"} & dimensions.keys():
@@ -84,6 +89,12 @@ async def verify_analytic_references(session, org_id: int, posting: PostingInput
             if snapshot not in checked_contracts:
                 await verified_contract_snapshot(session, org_id, dimensions)
                 checked_contracts.add(snapshot)
+        if SETTLEMENT_DOCUMENT_KEYS & dimensions.keys():
+            snapshot = tuple(dimensions.get(key, "")
+                             for key in sorted(SETTLEMENT_DOCUMENT_KEYS | CONTRACT_KEYS))
+            if snapshot not in checked_settlement_documents:
+                await verified_settlement_document_snapshot(session, org_id, dimensions)
+                checked_settlement_documents.add(snapshot)
 
 
 async def verify_new_manual_references(session, org_id: int, posting: PostingInput):

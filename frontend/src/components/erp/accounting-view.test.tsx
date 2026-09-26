@@ -401,6 +401,51 @@ describe("AccountingView", () => {
       contract_id: "51", contract_title: "Поставка оборудования", contract_version: "1",
     });
   });
+  it("selects a settlement document pinned to its exact register revision", async () => {
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes("/accounts?")) return respond([
+        { id: 1, code: "41", title: "Товары", cash: false, required_dimensions: [] },
+        { id: 2, code: "60", title: "Поставщики", cash: false,
+          required_dimensions: ["counterparty", "contract", "settlement_document"] },
+      ]);
+      if (url.includes("/sales/buyers?q=")) return respond({ organization_id: 1,
+        items: [{ id: 17, name: "Поставщик А", unp: "190000017", revision: 3 }], truncated: false });
+      if (url.includes("/contracts?counterparty_id=17&q=")) return respond({ organization_id: 1,
+        counterparty_id: 17, items: [{ source: "procurement", id: 51, number: "Д-51",
+          title: "Поставка оборудования", version: 1 }], truncated: false });
+      if (url.includes("/settlement-documents?counterparty_id=17&q=")) return respond({
+        organization_id: 1, counterparty_id: 17, items: [{ source: "procurement", id: 61,
+          number: "ТН-61", version: 2, reference: "procurement:receipt:61:2" }], truncated: false,
+      });
+      return original(url, init);
+    });
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    openPage("Документы", "Ручная операция");
+    fillManualOperation();
+    expect(screen.getByLabelText("Поиск документа расчётов строки 2")).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Поиск контрагента строки 2"), { target: { value: "Поставщик А" } });
+    fireEvent.click(screen.getByRole("button", { name: "Найти контрагента строки 2" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Выбрать Поставщик А · УНП 190000017 · ID 17" }));
+    fireEvent.change(screen.getByLabelText("Поиск договора строки 2"), { target: { value: "Д-51" } });
+    fireEvent.click(screen.getByRole("button", { name: "Найти договор строки 2" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Выбрать Д-51 · Поставка оборудования · закупки · ID 51" }));
+    fireEvent.change(screen.getByLabelText("Поиск документа расчётов строки 2"), { target: { value: "ТН-61" } });
+    fireEvent.click(screen.getByRole("button", { name: "Найти документ расчётов строки 2" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Выбрать ТН-61 · закупки · ID 61 · версия 2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сохранить", exact: true }));
+    const saved = fetchMock.mock.calls.find(([url, init]) => String(url).endsWith("/manual-documents") && init?.body);
+    expect(JSON.parse(String(saved?.[1]?.body)).posting.lines[1].dimensions).toEqual({
+      counterparty_id: "17", counterparty: "Поставщик А", counterparty_unp: "190000017",
+      counterparty_revision: "3", contract: "Д-51", contract_source: "procurement",
+      contract_id: "51", contract_title: "Поставка оборудования", contract_version: "1",
+      settlement_document: "procurement:receipt:61:2", settlement_document_source: "procurement",
+      settlement_document_id: "61", settlement_document_number: "ТН-61",
+      settlement_document_version: "2",
+    });
+  });
   it("selects an accounting item by MDM SKU ID and saves its historical snapshot", async () => {
     const original = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {

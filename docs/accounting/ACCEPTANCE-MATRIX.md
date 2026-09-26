@@ -102,6 +102,16 @@ current target database or all later source migrations.
   and client validator 37/37, and disposable PostgreSQL 1/1; TypeScript,
   ESLint and Ruff passed. Settlement-document and remaining manual analytics,
   release integration and real accountant acceptance remain open.
+- The third local G03D slice replaces free-text manual `settlement_document`
+  analytics with the exact current procurement receipt revision or immutable
+  issued sales invoice selected for the same organization and counterparty.
+  Supplier receipts are also checked against the chosen supplier contract;
+  sales invoices are checked against their prepared invoice/contract package.
+  A later receipt revision blocks an unposted manual document until the
+  accountant selects it again, while an already posted entry preserves and
+  replays its original snapshot. Focused API/UI checks and a disposable
+  PostgreSQL 16 replay check passed. Remaining manual analytics, release
+  integration and real accountant acceptance keep G03D open.
 - CRM deal Save and Close now requires a response with the exact deal ID,
   submitted editor fields and a valid new edit token. The PATCH response is
   generated from the saved deal; two concurrent edits on disposable

@@ -393,3 +393,143 @@ async def test_manual_contract_uses_counterparty_scoped_directory_and_keeps_repl
     sales_saved = await client.post(
         path, json={"key": str(uuid4()), "posting": sales_payload})
     assert sales_saved.status_code == 201, sales_saved.text
+
+
+async def test_manual_settlement_document_uses_exact_register_revision_and_keeps_replay(
+        client, db, book, posting):
+    from datetime import date, datetime
+
+    from modules.accounting.schemas import PostingInput
+    from modules.procurement.receipt_documents import ReceiptDocument, ReceiptRevision
+    from modules.procurement.supplier_contracts import SupplierContract
+    from modules.sales.accounting_ownership import DealOwnership
+    from modules.sales.client_document_register import DealClientBinding
+    from modules.sales.models import Deal, DealDocument, DocumentPackage
+
+    supplier_contract = SupplierContract(
+        organization_id=book[0], supplier_id=1, number="SUP-51", title="Поставка оборудования",
+        signed_on=date(2026, 1, 1), evidence="Synthetic registered supplier contract",
+        is_active=True, created_by="tester",
+    )
+    receipt = ReceiptDocument(
+        organization_id=book[0], source_key="settlement-receipt-61", current_version=1,
+        status="draft", created_by="tester",
+    )
+    deal = Deal(number="DEAL-SETTLEMENT-71", title="Synthetic sale", counterparty="supplier1",
+                counterparty_id=1)
+    db.add_all([supplier_contract, receipt, deal])
+    await db.flush()
+    receipt_facts = {
+        "currency": "BYN", "invoice_reference": "ТН-61", "document_date": "2026-09-01",
+        "operation_date": "2026-09-02", "supplier": "supplier1", "supplier_id": 1,
+        "supplier_unp": "190000001", "contract": "SUP-51",
+        "contract_id": supplier_contract.id, "warehouse": "warehouse1",
+        "explanation": "Synthetic primary invoice", "items": [],
+    }
+    db.add_all([
+        ReceiptRevision(receipt_id=receipt.id, version=1, document=receipt_facts, actor="tester"),
+        DealOwnership(deal_id=deal.id, organization_id=book[0], snapshot={"test": True},
+                      evidence="Synthetic ownership", actor="tester"),
+        DealClientBinding(deal_id=deal.id, organization_id=book[0], counterparty_id=1,
+                          snapshot={"client": {"id": 1}}, evidence="Synthetic binding", actor="tester"),
+    ])
+    sales_contract = DealDocument(
+        deal_id=deal.id, kind="contract", number="SALE-C-71", status="posted", version=1,
+        issued_at=datetime(2026, 1, 2), content_sha256="b" * 64,
+        original_html="<p>contract</p>", snapshot_json={"organization_id": book[0]},
+    )
+    sales_invoice = DealDocument(
+        deal_id=deal.id, kind="invoice", number="СФ-71", status="issued", version=3,
+        issued_at=datetime(2026, 9, 2), content_sha256="c" * 64,
+        original_html="<p>invoice</p>", snapshot_json={"organization_id": book[0]},
+    )
+    db.add_all([sales_contract, sales_invoice])
+    await db.flush()
+    db.add(DocumentPackage(
+        deal_id=deal.id, invoice_id=sales_invoice.id, contract_id=sales_contract.id,
+        original_html="<p>package</p>", content_sha256="d" * 64, created_by="tester",
+    ))
+    await db.commit()
+    receipt_id = receipt.id
+    supplier_contract_id = supplier_contract.id
+    sales_contract_id = sales_contract.id
+    sales_invoice_id = sales_invoice.id
+
+    options = await client.get(
+        f"/accounting/organizations/{book[0]}/settlement-documents?counterparty_id=1&q=1")
+    assert options.status_code == 200, options.text
+    assert options.headers["cache-control"] == "private, no-store"
+    assert {(item["source"], item["number"], item["version"]) for item in options.json()["items"]} == {
+        ("procurement", "ТН-61", 1), ("sales", "СФ-71", 3),
+    }
+
+    path = f"/accounting/organizations/{book[0]}/manual-documents"
+    payload = posting("MANUAL-SETTLEMENT").model_dump(mode="json")
+    payload["lines"][1]["dimensions"] = {
+        "counterparty_id": "1", "counterparty": "supplier1",
+        "counterparty_unp": "190000001", "counterparty_revision": "1",
+        "contract": "SUP-51", "contract_source": "procurement",
+        "contract_id": str(supplier_contract_id), "contract_title": "Поставка оборудования",
+        "contract_version": "1", "settlement_document": "ТН-61",
+    }
+    assert (await client.post(path, json={"key": str(uuid4()), "posting": payload})).status_code == 422
+    assert (await client.post(
+        f"/accounting/organizations/{book[0]}/preview", json=payload)).status_code == 422
+    assert (await client.post(
+        f"/accounting/organizations/{book[0]}/entries", json=payload)).status_code == 422
+    payload["lines"][1]["dimensions"].update({
+        "settlement_document": f"procurement:receipt:{receipt_id}:1",
+        "settlement_document_source": "procurement", "settlement_document_id": str(receipt_id),
+        "settlement_document_number": "ТН-61", "settlement_document_version": "1",
+    })
+    saved = await client.post(path, json={"key": str(uuid4()), "posting": payload})
+    assert saved.status_code == 201, saved.text
+    document_id = saved.json()["id"]
+
+    current_receipt = await db.get(ReceiptDocument, receipt_id)
+    current_receipt.current_version = 2
+    db.add(ReceiptRevision(receipt_id=receipt_id, version=2, document={**receipt_facts,
+                                                                      "explanation": "Corrected"},
+                           actor="tester"))
+    await db.commit()
+    stale = await client.post(f"{path}/{document_id}/post", json={
+        "key": str(uuid4()), "expected_version": 1,
+        "digest": service.digest(PostingInput.model_validate(payload)),
+    })
+    assert stale.status_code == 422 and "select it again" in stale.text
+    payload["lines"][1]["dimensions"].update({
+        "settlement_document": f"procurement:receipt:{receipt_id}:2",
+        "settlement_document_version": "2",
+    })
+    edited = await client.put(f"{path}/{document_id}", json={
+        "key": str(uuid4()), "expected_version": 1, "posting": payload,
+    })
+    assert edited.status_code == 200 and edited.json()["version"] == 2
+    confirmed = await client.post(f"{path}/{document_id}/post", json={
+        "key": str(uuid4()), "expected_version": 2,
+        "digest": service.digest(PostingInput.model_validate(payload)),
+    })
+    assert confirmed.status_code == 200, confirmed.text
+
+    current_receipt = await db.get(ReceiptDocument, receipt_id)
+    current_receipt.current_version = 3
+    db.add(ReceiptRevision(receipt_id=receipt_id, version=3, document={**receipt_facts,
+                                                                      "explanation": "Later"},
+                           actor="tester"))
+    await db.commit()
+    replay = await client.post(f"/accounting/organizations/{book[0]}/entries", json=payload)
+    assert replay.status_code == 201 and replay.json()["id"] == confirmed.json()["entry_id"]
+
+    sales_payload = posting("MANUAL-SALES-SETTLEMENT").model_dump(mode="json")
+    sales_payload["lines"][1]["dimensions"] = {
+        "counterparty_id": "1", "counterparty": "supplier1",
+        "counterparty_unp": "190000001", "counterparty_revision": "1",
+        "contract": "SALE-C-71", "contract_source": "sales",
+        "contract_id": str(sales_contract_id), "contract_title": "Договор продажи",
+        "contract_version": "1", "settlement_document": f"sales:document:{sales_invoice_id}",
+        "settlement_document_source": "sales", "settlement_document_id": str(sales_invoice_id),
+        "settlement_document_number": "СФ-71", "settlement_document_version": "3",
+    }
+    sales_saved = await client.post(
+        path, json={"key": str(uuid4()), "posting": sales_payload})
+    assert sales_saved.status_code == 201, sales_saved.text

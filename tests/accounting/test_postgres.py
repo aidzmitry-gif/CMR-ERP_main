@@ -1509,6 +1509,96 @@ async def test_manual_document_contract_snapshot_rechecked_and_replayed_on_postg
         await session.rollback()
 
 
+async def test_manual_settlement_revision_rechecked_and_replayed_on_postgres(
+        pg_factory, pg_book, posting):
+    from datetime import date
+    from uuid import uuid4
+
+    from modules.accounting import manual_documents
+    from modules.accounting.schemas import PostingInput
+    from modules.procurement.receipt_documents import ReceiptDocument, ReceiptRevision
+    from modules.procurement.supplier_contracts import SupplierContract
+
+    async with pg_factory() as session:
+        contract = SupplierContract(
+            organization_id=pg_book[0], supplier_id=1, number="PG-SETTLEMENT-CONTRACT",
+            title="Settlement contract", signed_on=date(2026, 1, 1),
+            evidence="Synthetic settlement contract", is_active=True, created_by="tester",
+        )
+        header = ReceiptDocument(
+            organization_id=pg_book[0], source_key="pg-manual-settlement", current_version=1,
+            status="draft", created_by="tester",
+        )
+        session.add_all([contract, header])
+        await session.flush()
+        contract_id, receipt_id = contract.id, header.id
+        facts = {
+            "currency": "BYN", "invoice_reference": "PG-ТН-61",
+            "document_date": "2026-09-01", "operation_date": "2026-09-02",
+            "supplier": "supplier1", "supplier_id": 1, "supplier_unp": "190000001",
+            "contract": "PG-SETTLEMENT-CONTRACT", "contract_id": contract_id,
+            "warehouse": "warehouse1", "explanation": "Synthetic receipt", "items": [],
+        }
+        session.add(ReceiptRevision(
+            receipt_id=receipt_id, version=1, document=facts, actor="tester"))
+        await session.commit()
+    source = posting("PG-MANUAL-SETTLEMENT").model_dump(mode="json")
+    source["lines"][1]["dimensions"] = {
+        "counterparty_id": "1", "counterparty": "supplier1",
+        "counterparty_unp": "190000001", "counterparty_revision": "1",
+        "contract": "PG-SETTLEMENT-CONTRACT", "contract_source": "procurement",
+        "contract_id": str(contract_id), "contract_title": "Settlement contract",
+        "contract_version": "1", "settlement_document": f"procurement:receipt:{receipt_id}:1",
+        "settlement_document_source": "procurement", "settlement_document_id": str(receipt_id),
+        "settlement_document_number": "PG-ТН-61", "settlement_document_version": "1",
+    }
+    first = PostingInput.model_validate(source)
+    async with pg_factory() as session:
+        saved = await manual_documents.create(
+            session, pg_book[0], manual_documents.ManualDocumentCreate(
+                key=uuid4(), posting=first), "tester", "chief")
+        await session.commit()
+    async with pg_factory() as session:
+        header = await session.get(ReceiptDocument, receipt_id)
+        header.current_version = 2
+        session.add(ReceiptRevision(
+            receipt_id=receipt_id, version=2, document={**facts, "explanation": "Corrected"},
+            actor="tester"))
+        await session.commit()
+    async with pg_factory() as session:
+        with pytest.raises(service.AccountingError, match="select it again"):
+            await manual_documents.post(
+                session, pg_book[0], saved["id"], manual_documents.ManualDocumentPost(
+                    key=uuid4(), expected_version=1, digest=service.digest(first)),
+                "tester", "chief")
+        await session.rollback()
+    source["lines"][1]["dimensions"].update({
+        "settlement_document": f"procurement:receipt:{receipt_id}:2",
+        "settlement_document_version": "2",
+    })
+    current = PostingInput.model_validate(source)
+    async with pg_factory() as session:
+        revised = await manual_documents.edit(
+            session, pg_book[0], saved["id"], manual_documents.ManualDocumentEdit(
+                key=uuid4(), expected_version=1, posting=current), "tester", "chief")
+        receipt = await manual_documents.post(
+            session, pg_book[0], saved["id"], manual_documents.ManualDocumentPost(
+                key=uuid4(), expected_version=revised["version"], digest=service.digest(current)),
+            "tester", "chief")
+        await session.commit()
+    async with pg_factory() as session:
+        header = await session.get(ReceiptDocument, receipt_id)
+        header.current_version = 3
+        session.add(ReceiptRevision(
+            receipt_id=receipt_id, version=3, document={**facts, "explanation": "Later"},
+            actor="tester"))
+        await session.commit()
+    async with pg_factory() as session:
+        replay = await service.post(session, pg_book[0], current, "tester")
+        assert replay.id == receipt["entry_id"]
+        await session.rollback()
+
+
 async def test_concurrent_replay_one_entry(pg_factory, pg_book, posting):
     async def writer():
         async with pg_factory() as session:

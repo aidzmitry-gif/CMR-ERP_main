@@ -37,7 +37,7 @@ from modules.sales.invoice_cancellation import InvoiceCancellationReceipt, Sales
 from modules.sales.invoice_issuance import InvoiceIssuanceReceipt
 from modules.sales.invoice_reconciliation import InvoiceMoneyReconciliation
 from modules.sales.invoice_settlements import InvoiceSettlement
-from modules.sales.models import Deal, DealDocument, DealItem, Stage
+from modules.sales.models import Deal, DealDocument, DealItem, DocumentPackage, Stage
 from modules.wms.models import WarehouseDirectory
 
 if sys.platform == "win32":
@@ -56,7 +56,8 @@ async def db():
     tables += [PurchaseOrder.__table__, PurchaseRequest.__table__, Supplier.__table__, supplier_contracts.SupplierContract.__table__, ownership.PurchaseOwnership.__table__, ownership.OrderRequestLink.__table__]
     tables += [PurchaseOrderLine.__table__]
     tables += [expected_reservations.ExpectedReservation.__table__, expected_reservations.ExpectedReservationEvent.__table__, expected_reservations.PhysicalReceiptAcceptance.__table__, expected_reservations.ExpectedConversionRequest.__table__]
-    tables += [Stage.__table__, Deal.__table__, DealItem.__table__, DealDocument.__table__, DealOwnership.__table__]
+    tables += [Stage.__table__, Deal.__table__, DealItem.__table__, DealDocument.__table__,
+               DocumentPackage.__table__, DealOwnership.__table__]
     tables += [DealLossRequest.__table__]
     tables += [InvoiceSettlement.__table__]
     tables += [InvoiceIssuanceReceipt.__table__]

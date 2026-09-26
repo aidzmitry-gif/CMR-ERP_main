@@ -56,6 +56,7 @@ from modules.accounting import (
     sales,
     seller_profiles,
     service,
+    settlement_document_snapshot,
     settlement_offsets,
     shipment_drafts,
     specific_zero_value_issue,
@@ -1434,6 +1435,27 @@ async def contract_options(org_id: int, response: Response,
     if counterparty is None:
         raise HTTPException(409, "Select an active counterparty from the directory")
     items, truncated = await contract_snapshot.options(
+        ctx[0], org_id, counterparty_id, term)
+    return {"organization_id": org_id, "counterparty_id": counterparty_id,
+            "items": items, "truncated": truncated}
+
+
+@router.get("/organizations/{org_id}/settlement-documents")
+async def settlement_document_options(org_id: int, response: Response,
+                                      counterparty_id: int = Query(gt=0),
+                                      q: str = Query("", max_length=100), ctx=Depends(member)):
+    """Search saved procurement receipts and issued sales invoices for a counterparty."""
+    response.headers["Cache-Control"] = "private, no-store"
+    term = q.strip()
+    if not term:
+        return {"organization_id": org_id, "counterparty_id": counterparty_id,
+                "items": [], "truncated": False}
+    counterparty = await ctx[0].scalar(select(Counterparty.id).where(
+        Counterparty.id == counterparty_id, Counterparty.is_active.is_(True),
+        Counterparty.merged_into_id.is_(None)))
+    if counterparty is None:
+        raise HTTPException(409, "Select an active counterparty from the directory")
+    items, truncated = await settlement_document_snapshot.options(
         ctx[0], org_id, counterparty_id, term)
     return {"organization_id": org_id, "counterparty_id": counterparty_id,
             "items": items, "truncated": truncated}
