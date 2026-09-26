@@ -93,42 +93,70 @@ def test_originate_params():
 
 # --- Резолв продавца по номеру (A.2) ----------------------------------------------
 async def test_resolve_owner_by_active_deal(session):
-    from core.domain.models import Contact, Counterparty
+    from core.domain.models import Counterparty, User
     from modules.sales.calls import resolve_owner
-    from modules.sales.models import Deal
+    from modules.sales.models import CrmClient, CrmClientContact, Deal
 
     cp = Counterparty(name="ООО Резолв", unp="190000777")
     session.add(cp)
     await session.flush()
-    session.add(Contact(counterparty_id=cp.id, full_name="Клиент", phone="+375291112233", is_primary=True))
-    deal = Deal(number="RSLV-1", title="t", counterparty="ООО Резолв", owner="Иванов И.И.", stage="new")
+    employee = User(username="resolve-owner", full_name="Иванов И.И.", employee_id=661,
+                    department="Продажи", role="sales", status="active")
+    session.add(employee)
+    client = CrmClient(name="ООО Резолв", name_key="resolve-client", unp=cp.unp,
+                       owner_id=employee.employee_id, counterparty_id=cp.id,
+                       request_key="resolve-client", request_hash="a" * 64, created_by="test")
+    session.add(client)
+    await session.flush()
+    session.add(CrmClientContact(crm_client_id=client.id, full_name="Клиент",
+                                 phone="+375291112233", is_primary=True,
+                                 contact_key="resolve-contact", request_key="resolve-contact",
+                                 request_hash="b" * 64))
+    deal = Deal(number="RSLV-1", title="t", counterparty="untrusted text",
+                crm_client_id=client.id, owner="Untrusted owner text", owner_id=employee.employee_id,
+                stage="new")
     session.add(deal)
     await session.commit()
 
     res = await resolve_owner(session, "+375291112233")
     assert res["owner"] == "Иванов И.И."
+    assert res["owner_id"] == employee.employee_id
     assert res["counterparty_id"] == cp.id
-    assert res["contact_id"] is not None
+    assert res["contact_id"] is None  # CRM contact IDs never alias shared Contact IDs
     assert res["deal_id"] == deal.id
 
 
 async def test_resolve_owner_closed_deal_no_deal_id(session):
-    """Только закрытые сделки — owner для screen-pop есть, deal_id нет (история → КП)."""
-    from core.domain.models import Contact, Counterparty
+    """With no active deal, screen-pop uses the confirmed CRM client owner."""
+    from core.domain.models import Counterparty, User
     from modules.sales.calls import resolve_owner
-    from modules.sales.models import Deal
+    from modules.sales.models import CrmClient, CrmClientContact, Deal
 
     cp = Counterparty(name="ООО Закрыт", unp="190000778")
     session.add(cp)
     await session.flush()
-    session.add(Contact(counterparty_id=cp.id, full_name="К", phone="+375291112244", is_primary=True))
-    session.add(
-        Deal(number="CLS-1", title="t", counterparty="ООО Закрыт", owner="Петров П.П.", stage="won")
-    )
+    client_owner = User(username="closed-client-owner", full_name="Петров П.П.", employee_id=671,
+                        department="Продажи", role="sales", status="active")
+    old_deal_owner = User(username="closed-deal-owner", full_name="Другой владелец", employee_id=672,
+                          department="Продажи", role="sales", status="active")
+    session.add_all([client_owner, old_deal_owner])
+    client = CrmClient(name="ООО Закрыт", name_key="closed-client", unp=cp.unp,
+                       owner_id=client_owner.employee_id, counterparty_id=cp.id,
+                       request_key="closed-client", request_hash="c" * 64, created_by="test")
+    session.add(client)
+    await session.flush()
+    session.add(CrmClientContact(crm_client_id=client.id, full_name="К",
+                                 phone="+375291112244", is_primary=True,
+                                 contact_key="closed-contact", request_key="closed-contact",
+                                 request_hash="d" * 64))
+    session.add(Deal(number="CLS-1", title="t", counterparty="ООО Закрыт",
+                     crm_client_id=client.id, owner="Другой владелец",
+                     owner_id=old_deal_owner.employee_id, stage="won"))
     await session.commit()
 
     res = await resolve_owner(session, "+375291112244")
     assert res["owner"] == "Петров П.П."
+    assert res["owner_id"] == client_owner.employee_id
     assert res["counterparty_id"] == cp.id
     assert res["deal_id"] is None
 
@@ -171,15 +199,28 @@ def _ctx(session):
 async def test_incoming_logs_resolves_and_pushes(session):
     from sqlalchemy import select
 
-    from core.domain.models import Contact, Counterparty, OutboxEvent
+    from core.domain.models import Counterparty, OutboxEvent, User
     from modules.sales import calls as calls_mod
-    from modules.sales.models import CallLog, Deal
+    from modules.sales.models import CallLog, CrmClient, CrmClientContact, Deal
 
     cp = Counterparty(name="ООО Пуш", unp="190000888")
     session.add(cp)
     await session.flush()
-    session.add(Contact(counterparty_id=cp.id, full_name="К", phone="+375291110000", is_primary=True))
-    session.add(Deal(number="PUSH-1", title="t", counterparty="ООО Пуш", owner="Сидоров С.С.", stage="prop"))
+    owner = User(username="push-call-owner", full_name="Сидоров С.С.", employee_id=681,
+                 department="Продажи", role="sales", status="active")
+    session.add(owner)
+    client = CrmClient(name="ООО Пуш", name_key="push-client", unp=cp.unp,
+                       owner_id=owner.employee_id, counterparty_id=cp.id,
+                       request_key="push-client", request_hash="e" * 64, created_by="test")
+    session.add(client)
+    await session.flush()
+    session.add(CrmClientContact(crm_client_id=client.id, full_name="К",
+                                 phone="+375291110000", is_primary=True,
+                                 contact_key="push-contact", request_key="push-contact",
+                                 request_hash="f" * 64))
+    session.add(Deal(number="PUSH-1", title="t", counterparty="untrusted text",
+                     crm_client_id=client.id, owner="Untrusted owner text",
+                     owner_id=owner.employee_id, stage="prop"))
     await session.commit()
 
     # продавец подписан на поток своих звонков
@@ -363,14 +404,27 @@ async def test_calls_journal_and_actions(session, api):
 
 async def test_list_calls_filter_by_deal_id(session, api):
     """Лента карточки сделки: GET /sales/calls?deal_id=…"""
-    from core.domain.models import Contact, Counterparty
-    from modules.sales.models import Deal
+    from core.domain.models import Counterparty, User
+    from modules.sales.models import CrmClient, CrmClientContact, Deal
 
     cp = Counterparty(name="ООО Фильтр", unp="190000779")
     session.add(cp)
     await session.flush()
-    session.add(Contact(counterparty_id=cp.id, full_name="К", phone="+375291230111", is_primary=True))
-    deal = Deal(number="FLT-1", title="t", counterparty="ООО Фильтр", owner="Орлов О.О.", stage="prop")
+    owner = User(username="call-filter-owner", full_name="Орлов О.О.", employee_id=691,
+                 department="Продажи", role="sales", status="active")
+    session.add(owner)
+    client = CrmClient(name="ООО Фильтр", name_key="call-filter-client", unp=cp.unp,
+                       owner_id=owner.employee_id, counterparty_id=cp.id,
+                       request_key="call-filter-client", request_hash="a" * 64, created_by="test")
+    session.add(client)
+    await session.flush()
+    session.add(CrmClientContact(crm_client_id=client.id, full_name="К",
+                                 phone="+375291230111", is_primary=True,
+                                 contact_key="call-filter-contact", request_key="call-filter-contact",
+                                 request_hash="b" * 64))
+    deal = Deal(number="FLT-1", title="t", counterparty="untrusted text",
+                crm_client_id=client.id, owner="Untrusted owner text",
+                owner_id=owner.employee_id, stage="prop")
     session.add(deal)
     await session.commit()
 
