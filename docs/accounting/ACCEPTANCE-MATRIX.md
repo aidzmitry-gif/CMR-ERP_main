@@ -14,6 +14,9 @@ below are 13 separate operational acceptance groups**; none is recorded as
 accepted for production use or retirement of 1C. A passed local test is
 evidence for a group, not its acceptance. G09 additionally requires two
 consecutive accepted month closes, a quarterly cycle and a trial annual run.
+The bounded test-and-fix workflow is recorded in
+[Luna test/fix rules](LUNA-TEST-FIX-RULES.md); its test counts are not operational
+acceptance counts.
 
 Current source branch: `agent/crm-acc-prod009`; `alembic heads` on 2026-09-26
 reports the single development source head `0188`. The fixed first-release candidate
@@ -43,6 +46,13 @@ current target database or all later source migrations.
 
 ## Current local evidence
 
+- The read-only legacy finance reconciliation now pairs duplicate payment
+  references by exact BYN amount and reports mismatched amounts and malformed
+  1C source rows separately. Its screen shows both categories without converting
+  returned money strings through JavaScript floats. The finance suite passed
+  75/75 and the focused finance screen passed 25/25 locally. The current 1C
+  payment adapter is still unavailable, so this does not accept the bank or
+  opening-balance groups above.
 - Development slices `0187` and `0188` add numbered, versioned manual accounting documents
   and an immutable cancellation receipt for erroneous unposted drafts.
   The [draft workflow](MANUAL-DOCUMENT-DRAFTS.md) records author and server time

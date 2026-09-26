@@ -447,6 +447,8 @@ describe("FinanceView", () => {
       matched: [{ ref: "П-1", amount: "100.00", counterparty_ref: "192766048" }],
       only_in_erp: [{ ref: "П-2", amount: "50.00", counterparty_ref: null }],
       only_in_1c: [{ ref: null, amount: "75.00", counterparty_ref: null }],
+      amount_mismatch: [{ ref: "П-3", erp_amount: "300.00", one_c_amount: "301.00", counterparty_ref: null }],
+      invalid_source_rows: [{ ref: "П-4", counterparty_ref: null, reason: "invalid_amount" }],
     };
     render(<FinanceView />);
     await screen.findByText("Касса (ДДС-lite)");
@@ -457,6 +459,10 @@ describe("FinanceView", () => {
     expect(screen.getByText(/Совпало · 1/)).toBeInTheDocument();
     expect(screen.getByText(/Только в ERP · 1/)).toBeInTheDocument();
     expect(screen.getByText(/Только в 1С · 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Расхождение сумм · 1/)).toBeInTheDocument();
+    expect(screen.getByText(/П-3: ERP 300.00 BYN, 1С 301.00 BYN/)).toBeInTheDocument();
+    expect(screen.getByText(/Ошибки данных 1С · 1/)).toBeInTheDocument();
+    expect(screen.getByText(/П-4: некорректная сумма/)).toBeInTheDocument();
   });
 
   it("вкладка «Сверка 1С» показывает причину отсутствия проверенного источника", async () => {

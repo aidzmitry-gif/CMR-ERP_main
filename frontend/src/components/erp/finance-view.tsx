@@ -133,6 +133,8 @@ interface ReconResp {
   matched: { ref: string; amount: string; counterparty_ref: string | null }[];
   only_in_erp: { ref: string; amount: string; counterparty_ref: string | null }[];
   only_in_1c: { ref: string | null; amount: string; counterparty_ref: string | null }[];
+  amount_mismatch?: { ref: string; erp_amount: string; one_c_amount: string; counterparty_ref: string | null }[];
+  invalid_source_rows?: { ref: string | null; counterparty_ref: string | null; reason: string }[];
 }
 
 // ──────────────────────────── Подсобки ────────────────────────────
@@ -1453,7 +1455,7 @@ function ReconcileTab() {
                   )}
                 </td>
                 <td className="px-4 py-2.5 text-right tabular-nums text-ink">
-                  {formatByn(parseFloat(r.amount))}
+                  {r.amount} BYN
                 </td>
               </tr>
             ))}
@@ -1471,6 +1473,24 @@ function ReconcileTab() {
         <Section title="Совпало" rows={data.matched} tone="ok" />
         <Section title="Только в ERP" rows={data.only_in_erp} tone="warn" />
         <Section title="Только в 1С" rows={data.only_in_1c} tone="warn" />
+      </div>
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <div className="rounded-xl bg-surface p-4 shadow-card">
+          <h3 className="text-sm font-semibold text-amber-600">Расхождение сумм · {data.amount_mismatch?.length ?? 0}</h3>
+          {(data.amount_mismatch ?? []).map((row, index) => (
+            <p key={`${row.ref}-${index}`} className="mt-2 text-sm text-ink">
+              {row.ref}: ERP {row.erp_amount} BYN, 1С {row.one_c_amount} BYN
+            </p>
+          ))}
+        </div>
+        <div className="rounded-xl bg-surface p-4 shadow-card">
+          <h3 className="text-sm font-semibold text-amber-600">Ошибки данных 1С · {data.invalid_source_rows?.length ?? 0}</h3>
+          {(data.invalid_source_rows ?? []).map((row, index) => (
+            <p key={`${row.ref}-${index}`} className="mt-2 text-sm text-ink">
+              {row.ref ?? "Без номера"}: {row.reason === "invalid_amount" ? "некорректная сумма" : row.reason === "invalid_identity" ? "некорректные реквизиты" : "некорректная строка"}
+            </p>
+          ))}
+        </div>
       </div>
     </>
   );
