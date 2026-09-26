@@ -10,7 +10,9 @@ assigns a stable `БС-{id}` number; **Сохранить и закрыть** al
 workspace only after the server confirms the exact saved version. The register
 opens each document by number. Every save adds an immutable revision with the
 actor, server time, complete posting snapshot and digest. The card displays
-changed fields and the preserved earlier versions. An edited or failed save
+changed fields and each line's old/new account, side, BYN amount, original currency,
+quantity, rate, cash activity and analytics alongside preserved earlier
+versions. An edited or failed save
 keeps the form open. Concurrent edits use `expected_version` and return 409 to
 the stale editor; a command UUID allows safe retry of the same save.
 

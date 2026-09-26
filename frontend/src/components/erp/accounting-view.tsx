@@ -114,11 +114,28 @@ async function request<T>(path: string, body?: unknown, method?: "PUT"): Promise
   return data as T;
 }
 
+function manualLineSnapshot(line: JournalLine | undefined): string {
+  if (!line) return "—";
+  const dimensions = Object.entries(line.dimensions ?? {}).sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${labels[key] ?? key}: ${value}`).join(", ");
+  return `${line.side === "debit" ? "Дт" : "Кт"} ${line.account} · ${line.amount} BYN`
+    + (line.quantity == null ? "" : ` · количество ${line.quantity}`)
+    + (line.original_amount == null ? "" : ` · валюта ${line.original_amount} ${line.currency ?? "BYN"}`)
+    + (line.rate == null ? "" : ` · курс ${line.rate} за ${line.rate_scale ?? 1} на ${line.rate_date ?? "—"} (${line.rate_source ?? "—"})`)
+    + (line.cash_activity ? ` · ДДС ${line.cash_activity}` : "")
+    + (dimensions ? ` · ${dimensions}` : "");
+}
+
 function describeRevision(before: Posting | undefined, after: Posting): string[] {
   if (!before) return ["Создан документ и сохранены проводки."];
-  const names: Partial<Record<keyof Posting, string>> = { source: "Основание", source_version: "Версия основания", document_date: "Дата документа", operation_date: "Дата операции", posting_date: "Дата отражения", policy_id: "Учётная политика", correction_of: "Исправляемая операция", explanation: "Содержание", lines: "Проводки и аналитика" };
-  return (Object.keys(names) as (keyof Posting)[]).filter((key) => JSON.stringify(before[key] ?? null) !== JSON.stringify(after[key] ?? null))
-    .map((key) => key === "lines" ? "Изменены проводки и аналитика." : `${names[key]}: «${String(before[key] ?? "—")}» → «${String(after[key] ?? "—")}».`);
+  const names: Partial<Record<keyof Posting, string>> = { source: "Основание", source_version: "Версия основания", document_date: "Дата документа", operation_date: "Дата операции", posting_date: "Дата отражения", policy_id: "Учётная политика", correction_of: "Исправляемая операция", explanation: "Содержание" };
+  const fields = (Object.keys(names) as (keyof Posting)[])
+    .filter((key) => JSON.stringify(before[key] ?? null) !== JSON.stringify(after[key] ?? null))
+    .map((key) => `${names[key]}: «${String(before[key] ?? "—")}» → «${String(after[key] ?? "—")}».`);
+  const lineChanges = Array.from({ length: Math.max(before.lines.length, after.lines.length) }, (_, index) => index)
+    .filter((index) => JSON.stringify(before.lines[index] ?? null) !== JSON.stringify(after.lines[index] ?? null))
+    .map((index) => `Строка ${index + 1}: «${manualLineSnapshot(before.lines[index])}» → «${manualLineSnapshot(after.lines[index])}».`);
+  return [...fields, ...lineChanges];
 }
 
 export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?: string; suggestedEntry?: string }) {

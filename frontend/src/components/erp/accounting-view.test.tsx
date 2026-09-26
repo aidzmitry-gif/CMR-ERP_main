@@ -301,11 +301,15 @@ describe("AccountingView", () => {
     fireEvent.click(await screen.findByRole("button", { name: /БС-8 · Справка 1/ }));
     expect(await screen.findByRole("region", { name: "История справки" })).toHaveTextContent("accountant · 2026-09-26T10:00:00Z");
     fireEvent.change(screen.getByLabelText("Содержание"), { target: { value: "Поступление материалов по акту" } });
+    fireEvent.change(screen.getByLabelText("Сумма 1"), { target: { value: "120.00" } });
+    fireEvent.change(screen.getByLabelText("Сумма 2"), { target: { value: "120.00" } });
     fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
     fireEvent.click(await screen.findByRole("button", { name: "Сохранить", exact: true }));
     expect(await screen.findByText("БС-8 · версия 2 сохранена.")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "История справки" })).toHaveTextContent("chief · 2026-09-26T11:00:00Z");
     expect(screen.getByRole("region", { name: "История справки" })).toHaveTextContent("Содержание: «Поступление материалов» → «Поступление материалов по акту».");
+    expect(screen.getByRole("region", { name: "История справки" })).toHaveTextContent("Строка 1: «Дт 41 · 100.00 BYN» → «Дт 41 · 120.00 BYN».");
+    expect(screen.getByRole("region", { name: "История справки" })).toHaveTextContent("Строка 2: «Кт 60 · 100.00 BYN» → «Кт 60 · 120.00 BYN».");
   });
   it("keeps unsaved manual changes when section navigation is rejected", async () => {
     const confirmation = vi.spyOn(window, "confirm").mockReturnValue(false);
