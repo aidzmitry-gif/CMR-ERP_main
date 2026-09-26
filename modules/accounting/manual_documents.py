@@ -21,6 +21,7 @@ from modules.accounting.models import (
 )
 from modules.accounting.schemas import Input, PostingInput
 from modules.accounting.sku_snapshot import verified_sku_snapshot
+from modules.accounting.warehouse_snapshot import verified_warehouse_snapshot
 
 
 class ManualDocumentCreate(Input):
@@ -51,10 +52,11 @@ def require_manual(posting: PostingInput, role: str):
         raise HTTPException(403, "Chief accountant access required for a correction")
 
 
-async def verify_analytic_references(session, posting: PostingInput):
+async def verify_analytic_references(session, org_id: int, posting: PostingInput):
     """New saves cannot carry free-text or stale directory references."""
     checked_counterparties = set()
     checked_skus = set()
+    checked_warehouses = set()
     for line in posting.lines:
         dimensions = line.dimensions
         if {"counterparty", "counterparty_id", "counterparty_unp", "counterparty_revision"} & dimensions.keys():
@@ -69,6 +71,12 @@ async def verify_analytic_references(session, posting: PostingInput):
             if snapshot not in checked_skus:
                 await verified_sku_snapshot(session, dimensions)
                 checked_skus.add(snapshot)
+        if {"warehouse", "warehouse_id", "warehouse_title"} & dimensions.keys():
+            snapshot = tuple(dimensions.get(key, "") for key in
+                             ("warehouse_id", "warehouse", "warehouse_title"))
+            if snapshot not in checked_warehouses:
+                await verified_warehouse_snapshot(session, org_id, dimensions)
+                checked_warehouses.add(snapshot)
 
 
 async def verify_new_manual_references(session, org_id: int, posting: PostingInput):
@@ -80,7 +88,7 @@ async def verify_new_manual_references(session, org_id: int, posting: PostingInp
         Entry.source_version == posting.source_version, Entry.operation == "manual",
     ))
     if existing is None:
-        await verify_analytic_references(session, posting)
+        await verify_analytic_references(session, org_id, posting)
 
 
 async def invalidate_closing_review(session, org_id: int, affected_date):
@@ -175,7 +183,7 @@ async def create(session, org_id: int, data: ManualDocumentCreate, actor: str, r
     ))
     if posted is not None:
         raise HTTPException(409, "This manual document source is already posted")
-    await verify_analytic_references(session, data.posting)
+    await verify_analytic_references(session, org_id, data.posting)
     await service.preview_posting(session, org_id, data.posting)
     row = ManualDocument(organization_id=org_id, source=data.posting.source,
                          posting_date=data.posting.posting_date, version=1,
@@ -225,7 +233,7 @@ async def edit(session, org_id: int, document_id: int, data: ManualDocumentEdit,
     ))
     if posted is not None:
         raise HTTPException(409, "This manual document source is already posted")
-    await verify_analytic_references(session, data.posting)
+    await verify_analytic_references(session, org_id, data.posting)
     await service.preview_posting(session, org_id, data.posting)
     version = row.version + 1
     session.add(ManualDocumentRevision(document_id=row.id, version=version,
@@ -272,7 +280,7 @@ async def post(session, org_id: int, document_id: int, data: ManualDocumentPost,
     ))
     if posted is not None:
         raise HTTPException(409, "This manual document source was posted by another document")
-    await verify_analytic_references(session, posting)
+    await verify_analytic_references(session, org_id, posting)
     entry = await service.post(session, org_id, posting, actor, event_bus)
     row.entry_id = entry.id
     row.post_key = str(data.key)

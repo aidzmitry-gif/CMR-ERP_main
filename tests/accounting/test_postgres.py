@@ -1362,6 +1362,57 @@ async def test_manual_document_sku_snapshot_rechecked_on_postgres(pg_factory, pg
         assert lines[0].dimensions["sku_title"] == "Motor updated in PG"
 
 
+async def test_manual_document_warehouse_snapshot_rechecked_on_postgres(pg_factory, pg_book, posting):
+    from uuid import uuid4
+
+    from modules.accounting import manual_documents
+    from modules.accounting.schemas import PostingInput
+    from modules.wms.models import WarehouseDirectory
+
+    async with pg_factory() as session:
+        row = WarehouseDirectory(organization_id=pg_book[0], name="PG-MAIN",
+                                 title="Main store", is_active=True, created_by="tester")
+        session.add(row)
+        await session.commit()
+        warehouse_id = row.id
+    source = posting("PG-MANUAL-WAREHOUSE").model_dump(mode="json")
+    source["lines"][0]["dimensions"] = {
+        "warehouse_id": str(warehouse_id), "warehouse": "PG-MAIN", "warehouse_title": "Main store",
+    }
+    first = PostingInput.model_validate(source)
+    async with pg_factory() as session:
+        saved = await manual_documents.create(session, pg_book[0],
+            manual_documents.ManualDocumentCreate(key=uuid4(), posting=first), "tester", "chief")
+        await session.commit()
+    async with pg_factory() as session:
+        row = await session.get(WarehouseDirectory, warehouse_id)
+        row.title = "Main store updated"
+        await session.commit()
+    async with pg_factory() as session:
+        with pytest.raises(service.AccountingError, match="select it again"):
+            await manual_documents.post(session, pg_book[0], saved["id"],
+                manual_documents.ManualDocumentPost(key=uuid4(), expected_version=1,
+                                                    digest=service.digest(first)), "tester", "chief")
+        await session.rollback()
+    async with pg_factory() as session:
+        source["lines"][0]["dimensions"]["warehouse_title"] = "Main store updated"
+        current = PostingInput.model_validate(source)
+        revised = await manual_documents.edit(session, pg_book[0], saved["id"],
+            manual_documents.ManualDocumentEdit(key=uuid4(), expected_version=1,
+                                                posting=current), "tester", "chief")
+        assert revised["version"] == 2
+        receipt = await manual_documents.post(session, pg_book[0], saved["id"],
+            manual_documents.ManualDocumentPost(key=uuid4(), expected_version=2,
+                                                digest=service.digest(current)), "tester", "chief")
+        await session.commit()
+    async with pg_factory() as session:
+        from modules.accounting.models import Line
+
+        lines = (await session.scalars(select(Line).where(Line.entry_id == receipt["entry_id"]))).all()
+        assert lines[0].dimensions["warehouse_id"] == str(warehouse_id)
+        assert lines[0].dimensions["warehouse_title"] == "Main store updated"
+
+
 async def test_concurrent_replay_one_entry(pg_factory, pg_book, posting):
     async def writer():
         async with pg_factory() as session:

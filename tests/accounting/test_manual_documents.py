@@ -236,3 +236,69 @@ async def test_manual_sku_snapshot_requires_directory_id_and_stays_historical(cl
     assert entry["lines"][0]["dimensions"]["sku_title"] == "Motor updated"
     replay = await client.post(f"/accounting/organizations/{book[0]}/entries", json=payload)
     assert replay.status_code == 201 and replay.json()["id"] == confirmed.json()["entry_id"]
+
+
+async def test_manual_warehouse_snapshot_is_company_scoped_and_historical(client, db, book, posting):
+    from modules.accounting.models import Organization
+    from modules.accounting.schemas import PostingInput
+    from modules.wms.models import WarehouseDirectory
+
+    other = Organization(name="Other warehouse owner", unp="888888888")
+    db.add(other)
+    await db.flush()
+    own = WarehouseDirectory(organization_id=book[0], name="MAIN", title="Main store",
+                             is_active=True, created_by="tester")
+    foreign = WarehouseDirectory(organization_id=other.id, name="OTHER", title="Other store",
+                                 is_active=True, created_by="tester")
+    inactive = WarehouseDirectory(organization_id=book[0], name="OLD", title="Old store",
+                                  is_active=False, created_by="tester")
+    db.add_all([own, foreign, inactive])
+    await db.commit()
+    own_id, foreign_id, other_id = own.id, foreign.id, other.id
+    options = await client.get(f"/accounting/organizations/{book[0]}/inventory/warehouses?q=store")
+    assert options.status_code == 200
+    assert options.json()["items"] == [{"id": own_id, "name": "MAIN", "title": "Main store"}]
+    assert options.headers["cache-control"] == "private, no-store"
+    assert (await client.get(f"/accounting/organizations/{other_id}/inventory/warehouses?q=store")).status_code == 403
+
+    path = f"/accounting/organizations/{book[0]}/manual-documents"
+    payload = posting("MANUAL-WAREHOUSE").model_dump(mode="json")
+    payload["lines"][0]["dimensions"] = {"warehouse": "MAIN"}
+    assert (await client.post(path, json={"key": str(uuid4()), "posting": payload})).status_code == 422
+    assert (await client.post(f"/accounting/organizations/{book[0]}/preview", json=payload)).status_code == 422
+    assert (await client.post(f"/accounting/organizations/{book[0]}/entries", json=payload)).status_code == 422
+    payload["lines"][0]["dimensions"] = {
+        "warehouse_id": str(foreign_id), "warehouse": "OTHER", "warehouse_title": "Other store",
+    }
+    assert (await client.post(path, json={"key": str(uuid4()), "posting": payload})).status_code == 422
+    payload["lines"][0]["dimensions"] = {
+        "warehouse_id": str(own_id), "warehouse": "MAIN", "warehouse_title": "Main store",
+    }
+    saved = await client.post(path, json={"key": str(uuid4()), "posting": payload})
+    assert saved.status_code == 201, saved.text
+    document_id = saved.json()["id"]
+    await db.refresh(own)
+    own.title = "Main store updated"
+    await db.commit()
+    stale = await client.post(f"{path}/{document_id}/post", json={
+        "key": str(uuid4()), "expected_version": 1,
+        "digest": service.digest(PostingInput.model_validate(payload)),
+    })
+    assert stale.status_code == 422 and "select it again" in stale.text
+    await db.refresh(own)
+    payload["lines"][0]["dimensions"]["warehouse_title"] = own.title
+    edited = await client.put(f"{path}/{document_id}", json={
+        "key": str(uuid4()), "expected_version": 1, "posting": payload,
+    })
+    assert edited.status_code == 200 and edited.json()["version"] == 2
+    confirmed = await client.post(f"{path}/{document_id}/post", json={
+        "key": str(uuid4()), "expected_version": 2,
+        "digest": service.digest(PostingInput.model_validate(payload)),
+    })
+    assert confirmed.status_code == 200, confirmed.text
+    own.title = "Main store renamed again"
+    await db.commit()
+    entry = (await client.get(f"/accounting/organizations/{book[0]}/entries/{confirmed.json()['entry_id']}")).json()
+    assert entry["lines"][0]["dimensions"]["warehouse_title"] == "Main store updated"
+    replay = await client.post(f"/accounting/organizations/{book[0]}/entries", json=payload)
+    assert replay.status_code == 201 and replay.json()["id"] == confirmed.json()["entry_id"]

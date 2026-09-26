@@ -392,6 +392,48 @@ describe("AccountingView", () => {
       sku_id: "71", sku: "ITEM-71", sku_title: "Мотор", sku_unit: "шт",
     });
   });
+  it("selects a company warehouse by ID and saves its historical snapshot", async () => {
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes("/accounts?")) return respond([
+        { id: 1, code: "41", title: "Товары", cash: false, required_dimensions: ["warehouse"] },
+        { id: 2, code: "60", title: "Поставщики", cash: false, required_dimensions: [] },
+      ]);
+      if (url.includes("/inventory/warehouses?q=")) return respond({ organization_id: 1,
+        items: [{ id: 19, name: "MAIN", title: "Главный склад" }] });
+      return original(url, init);
+    });
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    openPage("Документы", "Ручная операция");
+    fillManualOperation();
+    expect(screen.queryByLabelText("Склад")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Поиск склада строки 1"), { target: { value: "Главный" } });
+    fireEvent.click(screen.getByRole("button", { name: "Найти склад строки 1" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Выбрать MAIN · Главный склад · ID 19" }));
+    fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сохранить", exact: true }));
+    expect(await screen.findByText("БС-8 · версия 1 сохранена.")).toBeInTheDocument();
+    const saved = fetchMock.mock.calls.find(([url, init]) => String(url).endsWith("/manual-documents") && init?.body);
+    expect(JSON.parse(String(saved?.[1]?.body)).posting.lines[0].dimensions).toEqual({
+      warehouse_id: "19", warehouse: "MAIN", warehouse_title: "Главный склад",
+    });
+  });
+  it("keeps separate reference selectors when one account requires all three analytics", async () => {
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url.includes("/accounts?")
+      ? respond([{ id: 1, code: "41", title: "Товары", cash: false,
+        required_dimensions: ["counterparty", "sku", "warehouse"] },
+      { id: 2, code: "60", title: "Поставщики", cash: false, required_dimensions: [] }])
+      : original(url, init));
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    openPage("Документы", "Ручная операция");
+    fillManualOperation();
+    expect(screen.getByLabelText("Поиск контрагента строки 1")).toBeInTheDocument();
+    expect(screen.getByLabelText("Поиск номенклатуры строки 1")).toBeInTheDocument();
+    expect(screen.getByLabelText("Поиск склада строки 1")).toBeInTheDocument();
+  });
   it("clears the previous organization report on selection change", async () => {
     render(<AccountingView />);
     await screen.findByRole("option", { name: "Тестовая компания · 999999999" });

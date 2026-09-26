@@ -38,6 +38,7 @@ from modules.sales.invoice_issuance import InvoiceIssuanceReceipt
 from modules.sales.invoice_reconciliation import InvoiceMoneyReconciliation
 from modules.sales.invoice_settlements import InvoiceSettlement
 from modules.sales.models import Deal, DealDocument, DealItem, Stage
+from modules.wms.models import WarehouseDirectory
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -46,7 +47,7 @@ if sys.platform == "win32":
 @pytest_asyncio.fixture
 async def db():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", execution_options={
-        "schema_translate_map": {"accounting": None, "procurement": None, "sales": None, "logistics": None, "finance": None, "hr": None},
+        "schema_translate_map": {"accounting": None, "procurement": None, "sales": None, "logistics": None, "finance": None, "hr": None, "wms": None},
     })
     tables = [Currency.__table__, Employee.__table__,
               *[t for t in Base.metadata.sorted_tables if t.schema == "accounting"]]
@@ -63,6 +64,7 @@ async def db():
     tables += [SalesFulfillmentReview.__table__, InvoiceCancellationReceipt.__table__]
     tables += [Counterparty.__table__, DealClientBinding.__table__]
     tables += [Sku.__table__]
+    tables += [WarehouseDirectory.__table__]
     tables += [User.__table__, IdentityInvitationRequest.__table__]
     tables += [BankAccount.__table__, Payment.__table__, PaymentAllocation.__table__, BankTransaction.__table__]
     tables += [logistics_models.ImportShipment.__table__]

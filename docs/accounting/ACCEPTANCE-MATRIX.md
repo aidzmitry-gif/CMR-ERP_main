@@ -53,7 +53,14 @@ current target database or all later source migrations.
   SKU ID, code, title and unit. Free text and stale snapshots fail before new
   preview, save or post; a completed entry keeps its historical description.
   Focused API 6/6, UI 33/33, TypeScript, Ruff and disposable PostgreSQL 1/1
-  checks passed. Contract, warehouse and remaining manual analytics are open.
+  checks passed. At that point, contract, warehouse and remaining manual analytics
+  were still open.
+- A further local source change binds manual `warehouse` analytics to an active
+  organization-owned WMS directory ID, code and title. Preview, save, post and
+  the legacy direct manual route reject free text, cross-company IDs and stale
+  descriptions; exact replay keeps posted history. Focused API 7/7, UI 35/35,
+  TypeScript, ESLint, Ruff and disposable PostgreSQL 1/1 passed. Contracts and
+  other manual analytics remain open.
 
 - On 2026-09-26, a fresh disposable PostgreSQL 16 database passed **2**
   supplier-contract/receipt-history checks at migration `0186` and **4**

@@ -183,6 +183,7 @@ from modules.accounting.settlement_offsets import (
 )
 from modules.accounting.shipment_document_draft import build as build_shipment_document_draft
 from modules.accounting.shipment_preview import ShipmentConfirmInput, ShipmentPlanInput
+from modules.wms.models import WarehouseDirectory
 
 router = APIRouter(tags=["Бухгалтерия"])
 
@@ -1365,6 +1366,27 @@ async def inventory_sku_options(org_id: int, response: Response, q: str = Query(
             .order_by(Sku.code, Sku.id).limit(51))).all()
     return {"organization_id": org_id, "items": [
         {"id": row.id, "code": row.code, "title": row.title, "unit": row.unit}
+        for row in rows[:50]], "truncated": len(rows) > 50}
+
+
+@router.get("/organizations/{org_id}/inventory/warehouses")
+async def inventory_warehouse_options(org_id: int, response: Response,
+                                      q: str = Query("", max_length=100), ctx=Depends(member)):
+    """Search physical warehouses for a member of this accounting book."""
+    response.headers["Cache-Control"] = "private, no-store"
+    term = q.strip()
+    if not term:
+        return {"organization_id": org_id, "items": [], "truncated": False}
+    filters = [WarehouseDirectory.name.icontains(term, autoescape=True),
+               WarehouseDirectory.title.icontains(term, autoescape=True)]
+    if term.isascii() and term.isdecimal() and int(term) <= 2147483647:
+        filters.append(WarehouseDirectory.id == int(term))
+    rows = (await ctx[0].scalars(select(WarehouseDirectory).where(
+        WarehouseDirectory.organization_id == org_id,
+        WarehouseDirectory.is_active.is_(True), or_(*filters),
+    ).order_by(WarehouseDirectory.name, WarehouseDirectory.id).limit(51))).all()
+    return {"organization_id": org_id, "items": [
+        {"id": row.id, "name": row.name, "title": row.title}
         for row in rows[:50]], "truncated": len(rows) > 50}
 
 

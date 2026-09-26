@@ -39,6 +39,12 @@ postings reject a free-text code or stale SKU snapshot, including the legacy
 direct-entry route. A posted entry retains its historical SKU description after
 the directory changes and can be replayed exactly.
 
+Where an account requires `warehouse`, the form searches active warehouses of
+the selected organization and saves the warehouse ID, code and title. New
+manual previews, saves and postings reject free text, a warehouse from another
+organization or a stale warehouse snapshot. The exact posted entry keeps its
+historical warehouse description after a directory change.
+
 An erroneous **unposted** draft can be annulled with a required reason.
 Cancellation creates a separate immutable receipt with author and server time;
 the numbered document and all prior revisions remain readable. The cancelled
