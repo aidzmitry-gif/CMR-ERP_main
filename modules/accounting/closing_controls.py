@@ -24,6 +24,7 @@ from modules.accounting.models import (
     LateCostReceipt,
     Line,
     ManualDocument,
+    ManualDocumentVoid,
     OutputVatRegisterEntry,
     PayrollAccrualReceipt,
     PayrollEvidenceFile,
@@ -98,6 +99,7 @@ async def snapshot(session, org_id: int, month: str, *, include_private_payroll:
         ManualDocument.organization_id == org_id,
         ManualDocument.posting_date <= last,
         ManualDocument.entry_id.is_(None),
+        ~select(ManualDocumentVoid.id).where(ManualDocumentVoid.document_id == ManualDocument.id).exists(),
     )) or 0
 
     from modules.accounting.bank_import import pending_count

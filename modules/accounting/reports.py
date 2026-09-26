@@ -8,7 +8,15 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
-from modules.accounting.models import Entry, Inbox, Line, ManualDocument, Period, SourceControl
+from modules.accounting.models import (
+    Entry,
+    Inbox,
+    Line,
+    ManualDocument,
+    ManualDocumentVoid,
+    Period,
+    SourceControl,
+)
 from modules.accounting.service import AccountingError, lock_organization
 
 
@@ -134,6 +142,7 @@ async def report(session, org_id, start, end):
     manual_pending = (await session.scalars(select(ManualDocument.id).where(
         ManualDocument.organization_id == org_id, ManualDocument.posting_date <= end,
         ManualDocument.entry_id.is_(None),
+        ~select(ManualDocumentVoid.id).where(ManualDocumentVoid.document_id == ManualDocument.id).exists(),
     ))).all()
     from modules.accounting.bank_import import pending_count
 

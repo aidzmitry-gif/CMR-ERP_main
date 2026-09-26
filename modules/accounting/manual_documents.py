@@ -14,6 +14,7 @@ from modules.accounting.models import (
     Entry,
     ManualDocument,
     ManualDocumentRevision,
+    ManualDocumentVoid,
     Organization,
     Period,
 )
@@ -33,6 +34,12 @@ class ManualDocumentPost(Input):
     key: UUID
     expected_version: int = Field(gt=0, strict=True)
     digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ManualDocumentVoidInput(Input):
+    key: UUID
+    expected_version: int = Field(gt=0, strict=True)
+    reason: str = Field(min_length=1, max_length=1000)
 
 
 def require_manual(posting: PostingInput, role: str):
@@ -70,13 +77,15 @@ def revision_result(row: ManualDocumentRevision):
             "digest": row.digest, "posting": row.posting}
 
 
-def document_result(row: ManualDocument, revisions: list[ManualDocumentRevision]):
+def document_result(row: ManualDocument, revisions: list[ManualDocumentRevision], void: ManualDocumentVoid | None):
     return {"id": row.id, "organization_id": row.organization_id,
             "number": f"БС-{row.id}", "source": row.source,
             "posting_date": row.posting_date, "version": row.version,
-            "status": "posted" if row.entry_id is not None else "draft",
+            "status": "posted" if row.entry_id is not None else "voided" if void else "draft",
             "entry_id": row.entry_id, "created_at": row.created_at,
             "updated_at": row.updated_at,
+            "void": ({"reason": void.reason, "actor": void.actor,
+                      "created_at": void.created_at} if void else None),
             "revisions": [revision_result(item) for item in revisions]}
 
 
@@ -91,7 +100,8 @@ async def detail(session, org_id: int, document_id: int):
     ).order_by(ManualDocumentRevision.version))).all()
     if len(revisions) != row.version:
         raise service.AccountingError("Manual document revision history is incomplete")
-    return document_result(row, revisions)
+    void = await session.scalar(select(ManualDocumentVoid).where(ManualDocumentVoid.document_id == row.id))
+    return document_result(row, revisions, void)
 
 
 async def list_documents(session, org_id: int, before_id: int | None = None):
@@ -99,10 +109,13 @@ async def list_documents(session, org_id: int, before_id: int | None = None):
     if before_id is not None:
         query = query.where(ManualDocument.id < before_id)
     rows = (await session.scalars(query.order_by(ManualDocument.id.desc()).limit(101))).all()
+    void_ids = set((await session.scalars(select(ManualDocumentVoid.document_id).where(
+        ManualDocumentVoid.document_id.in_([row.id for row in rows]),
+    ))).all()) if rows else set()
     return {"organization_id": org_id,
             "items": [{"id": row.id, "number": f"БС-{row.id}", "source": row.source,
                        "posting_date": row.posting_date, "version": row.version,
-                       "status": "posted" if row.entry_id is not None else "draft",
+                       "status": "posted" if row.entry_id is not None else "voided" if row.id in void_ids else "draft",
                        "entry_id": row.entry_id, "updated_at": row.updated_at}
                       for row in rows[:100]],
             "next_before_id": rows[99].id if len(rows) > 100 else None}
@@ -167,6 +180,8 @@ async def edit(session, org_id: int, document_id: int, data: ManualDocumentEdit,
         raise HTTPException(409, "Manual document edit key identifies another revision")
     if row.entry_id is not None:
         raise HTTPException(409, "Posted manual document cannot be edited")
+    if await session.scalar(select(ManualDocumentVoid.id).where(ManualDocumentVoid.document_id == row.id)):
+        raise HTTPException(409, "Cancelled manual document cannot be edited")
     if row.version != data.expected_version:
         raise HTTPException(409, "Manual document changed; reload its latest revision")
     posted = await session.scalar(select(Entry.id).where(
@@ -213,6 +228,8 @@ async def post(session, org_id: int, document_id: int, data: ManualDocumentPost,
             return {"document_id": row.id, "document_version": row.version,
                     "entry_id": row.entry_id, "digest": data.digest}
         raise HTTPException(409, "Manual document was already posted with another command")
+    if await session.scalar(select(ManualDocumentVoid.id).where(ManualDocumentVoid.document_id == row.id)):
+        raise HTTPException(409, "Cancelled manual document cannot be posted")
     posted = await session.scalar(select(Entry.id).where(
         Entry.organization_id == org_id, Entry.source == posting.source,
         Entry.source_version == posting.source_version, Entry.operation == "manual",
@@ -230,3 +247,33 @@ async def post(session, org_id: int, document_id: int, data: ManualDocumentPost,
                    "entry_id": entry.id, "digest": data.digest})
     return {"document_id": row.id, "document_version": row.version,
             "entry_id": entry.id, "digest": data.digest}
+
+
+async def void_document(session, org_id: int, document_id: int,
+                        data: ManualDocumentVoidInput, actor: str):
+    await service.lock_organization(session, org_id)
+    row = await session.scalar(select(ManualDocument).where(
+        ManualDocument.organization_id == org_id, ManualDocument.id == document_id,
+    ).with_for_update())
+    if row is None:
+        raise HTTPException(404, "Manual accounting document not found in this organization")
+    reason = data.reason.strip()
+    if not reason:
+        raise HTTPException(422, "Cancellation reason is required")
+    previous = await session.scalar(select(ManualDocumentVoid).where(ManualDocumentVoid.document_id == row.id))
+    if previous is not None:
+        if (previous.request_key == str(data.key) and row.version == data.expected_version
+                and previous.reason == reason):
+            return await detail(session, org_id, row.id)
+        raise HTTPException(409, "Manual document was already cancelled")
+    if row.entry_id is not None:
+        raise HTTPException(409, "Posted manual document cannot be cancelled")
+    if row.version != data.expected_version:
+        raise HTTPException(409, "Manual document changed; review the latest revision")
+    session.add(ManualDocumentVoid(organization_id=org_id, document_id=row.id,
+                                   request_key=str(data.key), reason=reason, actor=actor))
+    await session.flush()
+    await invalidate_closing_review(session, org_id, row.posting_date)
+    service.audit(session, org_id, actor, "manual_document_voided",
+                  {"document_id": row.id, "version": row.version, "reason": reason})
+    return await detail(session, org_id, row.id)

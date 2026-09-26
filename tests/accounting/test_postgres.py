@@ -70,6 +70,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0185_supplier_contract_directory.py",
     "0186_supplier_contract_revocation.py",
     "0187_manual_document_drafts.py",
+    "0188_manual_document_void.py",
 )
 
 
@@ -1184,6 +1185,8 @@ async def test_manual_document_revision_and_post_are_atomic_postgres(pg_factory,
             await session.execute(text("UPDATE accounting.manual_document_revision SET actor='forged' WHERE document_id=:id"),
                                   {"id": document_id})
         await session.rollback()
+
+
     async with pg_factory() as session:
         with pytest.raises(DBAPIError, match="(revision|immutable|append-only)"):
             await session.execute(text("UPDATE accounting.manual_document SET source='forged' WHERE id=:id"),
@@ -1206,6 +1209,53 @@ async def test_manual_document_revision_and_post_are_atomic_postgres(pg_factory,
         with pytest.raises(DBAPIError, match="(immutable|posted state)"):
             await session.execute(text("UPDATE accounting.manual_document SET source='forged' WHERE id=:id"),
                                   {"id": document_id})
+        await session.rollback()
+
+
+async def test_void_manual_document_receipt_is_immutable_and_blocks_postgres_post(pg_factory, pg_book, posting):
+    from uuid import uuid4
+
+    from fastapi import HTTPException
+    from sqlalchemy.exc import DBAPIError
+
+    from modules.accounting import manual_documents
+
+    source = posting("PG-VOID-MANUAL")
+    async with pg_factory() as session:
+        created = await manual_documents.create(session, pg_book[0],
+            manual_documents.ManualDocumentCreate(key=uuid4(), posting=source), "tester", "chief")
+        document_id = created["id"]
+        voided = await manual_documents.void_document(session, pg_book[0], document_id,
+            manual_documents.ManualDocumentVoidInput(key=uuid4(), expected_version=1,
+                                                      reason="Duplicate"), "tester")
+        assert voided["status"] == "voided"
+        await session.commit()
+    async with pg_factory() as session:
+        with pytest.raises(HTTPException) as rejected:
+            await manual_documents.post(session, pg_book[0], document_id,
+                manual_documents.ManualDocumentPost(key=uuid4(), expected_version=1,
+                                                    digest=service.digest(source)), "tester", "chief")
+        assert rejected.value.status_code == 409
+        await session.rollback()
+    async with pg_factory() as session:
+        with pytest.raises(DBAPIError, match="(immutable|cancellation)"):
+            await session.execute(text("DELETE FROM accounting.manual_document_void WHERE document_id=:id"),
+                                  {"id": document_id})
+        await session.rollback()
+    async with pg_factory() as session:
+        with pytest.raises(DBAPIError, match="(immutable|cancellation)"):
+            await session.execute(text("UPDATE accounting.manual_document_void SET reason='forged' WHERE document_id=:id"),
+                                  {"id": document_id})
+        await session.rollback()
+    async with pg_factory() as session:
+        independent_entry = await service.post(session, pg_book[0], source, "tester")
+        await session.commit()
+    async with pg_factory() as session:
+        with pytest.raises(DBAPIError, match="(cancelled|Cancelled)"):
+            await session.execute(text("""UPDATE accounting.manual_document
+                SET entry_id=:entry, post_key=:key, post_digest=:digest WHERE id=:id"""),
+                {"entry": independent_entry.id, "key": str(uuid4()),
+                 "digest": service.digest(source), "id": document_id})
         await session.rollback()
 
 

@@ -592,6 +592,13 @@ async def manual_document_post(org_id: int, document_id: int,
                                        ctx[1], ctx[2], core.services.event_bus)
 
 
+@router.post("/organizations/{org_id}/manual-documents/{document_id}/void")
+async def manual_document_void(org_id: int, document_id: int,
+                               data: manual_documents.ManualDocumentVoidInput,
+                               ctx=Depends(member)):
+    return await manual_documents.void_document(ctx[0], org_id, document_id, data, ctx[1])
+
+
 @router.post("/organizations/{org_id}/entries", status_code=201)
 async def create_entry(org_id: int, data: PostingInput, ctx=Depends(member), core=Depends(get_core)):
     if data.correction_of or data.opening:

@@ -45,7 +45,7 @@ type JournalLine = CurrencyFields & { account: string; title?: string; side: "de
 type Posting = { source: string; source_version: number; operation: string; document_date: string; operation_date: string; posting_date: string; policy_id: number; correction_of?: number; rule_version: string; explanation: string; lines: JournalLine[] };
 type Preview = { digest: string; explanation: string; lines: JournalLine[]; normative_verified: boolean };
 type ManualRevision = { version: number; actor: string; created_at: string; digest: string; posting: Posting };
-type ManualDocument = { id: number; organization_id: number; number: string; source: string; posting_date: string; version: number; status: "draft" | "posted"; entry_id: number | null; updated_at: string; revisions: ManualRevision[] };
+type ManualDocument = { id: number; organization_id: number; number: string; source: string; posting_date: string; version: number; status: "draft" | "posted" | "voided"; entry_id: number | null; updated_at: string; void?: { reason: string; actor: string; created_at: string } | null; revisions: ManualRevision[] };
 type ManualDocumentList = { organization_id: number; items: Omit<ManualDocument, "revisions">[]; next_before_id: number | null };
 type ManualPostReceipt = { document_id: number; document_version: number; entry_id: number; digest: string };
 type Trial = ExportTrial;
@@ -148,6 +148,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
   const [manualDocument, setManualDocument] = useState<ManualDocument | null>(null);
   const [manualDocuments, setManualDocuments] = useState<ManualDocumentList | null>(null);
   const [manualDirty, setManualDirty] = useState(false);
+  const [voidReason, setVoidReason] = useState("");
   const [operationDate, setOperationDate] = useState(today);
   const [documentDate, setDocumentDate] = useState(today);
   const [economicDate, setEconomicDate] = useState(today);
@@ -164,6 +165,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
   const manualListGeneration = useRef(0);
   const saveCommand = useRef<{ fingerprint: string; key: string } | null>(null);
   const postCommand = useRef<{ fingerprint: string; key: string } | null>(null);
+  const voidCommand = useRef<{ fingerprint: string; key: string } | null>(null);
   const confirmDiscard = useUnsavedDocumentGuard(tab === "entry" && manualDirty);
 
   useEffect(() => {
@@ -242,7 +244,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     setExplanation(posting.explanation); setDocumentDate(posting.document_date);
     setEconomicDate(posting.operation_date); setOperationDate(posting.posting_date);
     setLines(posting.lines); setPreview(null); setPrepared(null); setManualDirty(false);
-    saveCommand.current = null; postCommand.current = null;
+    setVoidReason(""); saveCommand.current = null; postCommand.current = null; voidCommand.current = null;
   }
   async function openManualDocument(id: number) {
     if (!confirmDiscard()) return;
@@ -259,7 +261,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     setCorrectionOf(""); setExplanation("");
     setLines([{ account: "", side: "debit", amount: "", dimensions: {} }, { account: "", side: "credit", amount: "", dimensions: {} }]);
     setPreview(null); setPrepared(null); setManualDirty(false); setError("");
-    saveCommand.current = null; postCommand.current = null;
+    setVoidReason(""); saveCommand.current = null; postCommand.current = null; voidCommand.current = null;
   }
   function changeDate(kind: "start" | "end" | "operation", value: string) {
     generation.current += 1; invalidatePreview(); setReport(null); setAccountActivity(null); setDetail(null); setNotice("");
@@ -282,7 +284,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
   }
 
   async function saveManual(closeAfterSave = false) {
-    if (!prepared || !preview || !org || manualDocument?.status === "posted") return;
+    if (!prepared || !preview || !org || (manualDocument && manualDocument.status !== "draft")) return;
     const posting = prepared;
     const checked = preview;
     const version = manualDocument?.version ?? 0;
@@ -338,6 +340,32 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
       }
     }
     catch (e) { if (token === generation.current) setError((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  async function voidManualDocument() {
+    if (!manualDocument || manualDocument.status !== "draft" || manualDirty || !voidReason.trim()) return;
+    const documentId = manualDocument.id;
+    const documentVersion = manualDocument.version;
+    const reason = voidReason.trim();
+    const fingerprint = `${org}/${documentId}/${documentVersion}/${reason}`;
+    if (voidCommand.current?.fingerprint !== fingerprint) voidCommand.current = { fingerprint, key: crypto.randomUUID() };
+    setBusy(true); setError("");
+    try {
+      const result = await request<ManualDocument>(`/organizations/${org}/manual-documents/${documentId}/void`, {
+        key: voidCommand.current.key, expected_version: documentVersion, reason,
+      });
+      if (String(result.organization_id) !== org || result.id !== documentId
+        || result.version !== documentVersion || result.status !== "voided"
+        || result.void?.reason !== reason) {
+        throw new Error("ERP не подтвердила аннулирование этой справки. Сверьте её статус в реестре.");
+      }
+      setManualDocument(result); setManualDirty(false); setPreview(null); setPrepared(null);
+      setNotice(`${result.number} аннулирована. Причина и автор сохранены в истории.`);
+      voidCommand.current = null;
+      try { await reloadManualDocuments(); } catch { /* void receipt remains authoritative */ }
+      await refresh();
+    } catch (reason) { setError((reason as Error).message); }
     finally { setBusy(false); }
   }
 
@@ -423,14 +451,16 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     </>}
     {tab === "accounts" && <section className="rounded-xl border border-line bg-surface p-4"><h2 className="font-semibold">Рабочий план счетов</h2><p className="my-2 text-sm text-muted">Действует на {operationDate}. Настройки и версии утверждает главный бухгалтер.</p>{accounts.map((a) => <div key={a.id} className="border-b border-line py-3"><span className="font-semibold">{a.code}</span> · {a.title}<p className="text-xs text-muted">{a.required_dimensions.map((d) => labels[d] || d).join(" · ") || "Без обязательной аналитики"}</p></div>)}{!accounts.length && <p className="py-4 text-muted">Рабочий план счетов ещё не настроен.</p>}</section>}
     {tab === "entry" && <section className="space-y-4 rounded-xl border border-line bg-surface p-4"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">Бухгалтерская справка {manualDocument?.number ?? "· новый документ"}</h2><Button variant="secondary" disabled={locked} onClick={newManualDocument}>Новая справка</Button></div>
-      <section aria-label="Список бухгалтерских справок" className="rounded-lg border border-line p-3"><h3 className="font-semibold">Реестр справок</h3>{manualDocuments?.items.map((row) => <button key={row.id} className="block py-1 text-left text-accent underline" onClick={() => void openManualDocument(row.id)} disabled={locked}>{row.number} · {row.source} · {row.posting_date} · {row.status === "posted" ? "проведена" : "черновик"}</button>)}{manualDocuments && !manualDocuments.items.length && <p className="text-sm text-muted">Справок пока нет.</p>}{manualDocuments?.next_before_id != null && <Button variant="secondary" disabled={locked} onClick={() => { const cursor = manualDocuments.next_before_id; void request<ManualDocumentList>(`/organizations/${org}/manual-documents?before_id=${cursor}`).then((next) => { if (String(next.organization_id) === org) setManualDocuments({ ...next, items: [...manualDocuments.items, ...next.items] }); }).catch((reason: Error) => setError(reason.message)); }}>Ещё справки</Button>}</section>
-      {manualDocument && <p className="text-sm text-muted">{manualDocument.status === "posted" ? "Проведена" : "Черновик"} · версия {manualDocument.version} · изменена {manualDocument.updated_at}{manualDocument.entry_id != null && <Button variant="ghost" onClick={() => void openEntry(manualDocument.entry_id!)}>Открыть проводку № {manualDocument.entry_id}</Button>}</p>}
-      <fieldset disabled={locked || manualDocument?.status === "posted"} className="space-y-4"><div className="grid gap-3 md:grid-cols-3"><label>Основание<Input aria-label="Основание" value={source} disabled={locked} onChange={(e) => { invalidatePreview(); setSource(e.target.value); }} placeholder="Номер документа" /></label><label>Дата отражения<Input aria-label="Дата операции" type="date" value={operationDate} disabled={locked} onChange={(e) => changeDate("operation", e.target.value)} /></label><label>Содержание<Input aria-label="Содержание" value={explanation} disabled={locked} onChange={(e) => { invalidatePreview(); setExplanation(e.target.value); }} /></label></div>
+      <section aria-label="Список бухгалтерских справок" className="rounded-lg border border-line p-3"><h3 className="font-semibold">Реестр справок</h3>{manualDocuments?.items.map((row) => <button key={row.id} className="block py-1 text-left text-accent underline" onClick={() => void openManualDocument(row.id)} disabled={locked}>{row.number} · {row.source} · {row.posting_date} · {row.status === "posted" ? "проведена" : row.status === "voided" ? "аннулирована" : "черновик"}</button>)}{manualDocuments && !manualDocuments.items.length && <p className="text-sm text-muted">Справок пока нет.</p>}{manualDocuments?.next_before_id != null && <Button variant="secondary" disabled={locked} onClick={() => { const cursor = manualDocuments.next_before_id; void request<ManualDocumentList>(`/organizations/${org}/manual-documents?before_id=${cursor}`).then((next) => { if (String(next.organization_id) === org) setManualDocuments({ ...next, items: [...manualDocuments.items, ...next.items] }); }).catch((reason: Error) => setError(reason.message)); }}>Ещё справки</Button>}</section>
+      {manualDocument && <p className="text-sm text-muted">{manualDocument.status === "posted" ? "Проведена" : manualDocument.status === "voided" ? "Аннулирована" : "Черновик"} · версия {manualDocument.version} · изменена {manualDocument.updated_at}{manualDocument.entry_id != null && <Button variant="ghost" onClick={() => void openEntry(manualDocument.entry_id!)}>Открыть проводку № {manualDocument.entry_id}</Button>}</p>}
+      <fieldset disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} className="space-y-4"><div className="grid gap-3 md:grid-cols-3"><label>Основание<Input aria-label="Основание" value={source} disabled={locked} onChange={(e) => { invalidatePreview(); setSource(e.target.value); }} placeholder="Номер документа" /></label><label>Дата отражения<Input aria-label="Дата операции" type="date" value={operationDate} disabled={locked} onChange={(e) => changeDate("operation", e.target.value)} /></label><label>Содержание<Input aria-label="Содержание" value={explanation} disabled={locked} onChange={(e) => { invalidatePreview(); setExplanation(e.target.value); }} /></label></div>
       <div className="grid gap-3 md:grid-cols-4"><label className="text-sm">Дата документа<Input aria-label="Дата документа" type="date" value={documentDate} disabled={locked} onChange={(e) => { invalidatePreview(); setDocumentDate(e.target.value); }} /></label><label className="text-sm">Дата хозяйственной операции<Input aria-label="Дата хозяйственной операции" type="date" value={economicDate} disabled={locked} onChange={(e) => { invalidatePreview(); setEconomicDate(e.target.value); }} /></label><label className="text-sm">Версия документа<Input aria-label="Версия документа" type="number" min="1" step="1" value={sourceVersion} disabled={locked} onChange={(e) => { invalidatePreview(); setSourceVersion(Number(e.target.value)); }} /></label><label className="text-sm">Исправляет операцию №<Input aria-label="Исправляет операцию" type="number" min="1" step="1" value={correctionOf} disabled={locked} onChange={(e) => { invalidatePreview(); setCorrectionOf(e.target.value); }} placeholder="Если это исправление" /></label></div>
       {lines.map((line, i) => <fieldset key={i} disabled={locked} className="space-y-2 rounded-lg border border-line p-3"><legend className="text-sm">Строка {i + 1}</legend><div className="grid gap-3 md:grid-cols-3"><Select aria-label={`Сторона ${i + 1}`} value={line.side} onChange={(e) => changeLine(i, { side: e.target.value as "debit" | "credit" })}><option value="debit">Дебет</option><option value="credit">Кредит</option></Select><Select aria-label={`Счёт ${i + 1}`} value={line.account} onChange={(e) => changeLine(i, { account: e.target.value, dimensions: {}, cash_activity: undefined, currency: "BYN", original_amount: undefined, rate: undefined, rate_scale: undefined, rate_date: undefined, rate_source: undefined, quantity: undefined })}><option value="">Выберите счёт</option>{accounts.map((a) => <option key={a.id} value={a.code}>{a.code} · {a.title}</option>)}</Select><Input aria-label={`Сумма ${i + 1}`} inputMode="decimal" value={line.amount} placeholder="0.00 BYN" onChange={(e) => changeLine(i, { amount: e.target.value })} /></div>{accounts.find((a) => a.code === line.account)?.required_dimensions.map((dimension) => <label key={dimension} className="block text-sm">{labels[dimension] || dimension}<Input value={line.dimensions[dimension] || ""} onChange={(e) => changeLine(i, { dimensions: { ...line.dimensions, [dimension]: e.target.value } })} /></label>)}{accounts.find((a) => a.code === line.account)?.cash && <label className="block text-sm">Вид денежного потока<Select value={line.cash_activity || ""} onChange={(e) => changeLine(i, { cash_activity: e.target.value })}><option value="">Выберите вид</option><option value="operating">Текущая деятельность</option><option value="investing">Инвестиционная</option><option value="financing">Финансовая</option><option value="internal">Внутреннее перемещение</option></Select></label>}<AccountingCurrencyFields value={line} currency={accounts.find((a) => a.code === line.account)?.currency_tracking ?? false} quantity={accounts.find((a) => a.code === line.account)?.quantity_tracking ?? false} onChange={(patch) => changeLine(i, patch)} /></fieldset>)}
       <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={locked} onClick={() => { invalidatePreview(); setLines([...lines, { account: "", side: "debit", amount: "", dimensions: {} }]); }}>Добавить строку</Button><Button disabled={locked || !org || !source || !explanation} onClick={() => void prepare()}>Проверить проводки</Button></div>
       {preview && <div className="rounded-xl border border-accent p-4"><h3 className="font-semibold">Проверенные проводки</h3><p className="my-2">{preview.explanation}</p>{preview.lines.map((line, i) => <p key={i}>{line.side === "debit" ? "Дт" : "Кт"} {line.account} · {line.title} — {line.amount} BYN</p>)}{!preview.normative_verified && <p className="my-2 text-sm text-muted">Нормативная база не подтверждена: закрытие периода будет недоступно.</p>}<div className="mt-3 flex flex-wrap gap-2"><Button disabled={locked} onClick={() => void saveManual()}>Сохранить</Button><Button variant="secondary" disabled={locked} onClick={() => void saveManual(true)}>Сохранить и закрыть</Button><Button disabled={locked || !manualDocument || manualDirty || manualDocument.revisions[manualDocument.revisions.length - 1]?.digest !== preview.digest} onClick={() => void post()}>Подтвердить и провести</Button><Button variant="secondary" disabled={locked || !manualDocument || manualDirty || manualDocument.revisions[manualDocument.revisions.length - 1]?.digest !== preview.digest} onClick={() => void post(true)}>Провести и закрыть</Button></div></div>}
       </fieldset>
+      {manualDocument?.status === "draft" && <div className="flex flex-wrap items-end gap-3 rounded-lg border border-line p-3"><label className="min-w-64 flex-1 text-sm">Причина аннулирования<Input aria-label="Причина аннулирования справки" value={voidReason} disabled={locked} onChange={(event) => { setVoidReason(event.target.value); voidCommand.current = null; }} placeholder="Ошибочный черновик, дубликат…" /></label><Button variant="secondary" disabled={locked || manualDirty || !voidReason.trim()} onClick={() => void voidManualDocument()}>Аннулировать черновик</Button><p className="w-full text-xs text-muted">Проведённую справку аннулировать нельзя; для неё оформляют исправление. История черновика и причина аннулирования сохраняются.</p></div>}
+      {manualDocument?.void && <p className="rounded-lg border border-line p-3 text-sm">Аннулирована: {manualDocument.void.reason} · {manualDocument.void.actor} · {manualDocument.void.created_at}</p>}
       {!!manualDocument?.revisions.length && <section aria-label="История справки" className="space-y-3 rounded-lg border border-line p-3"><h3 className="font-semibold">История изменений</h3>{manualDocument.revisions.map((revision, index) => <div key={revision.version} className="border-t border-line pt-2 text-sm"><p className="font-medium">Версия {revision.version} · {revision.actor} · {revision.created_at}</p>{describeRevision(manualDocument.revisions[index - 1]?.posting, revision.posting).map((change, changeIndex) => <p key={changeIndex}>{change}</p>)}</div>)}</section>}
     </section>}
     {detail && <section aria-label="Карточка проводки" className="min-w-0 break-words rounded-xl border border-accent bg-surface p-4">

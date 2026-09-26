@@ -224,6 +224,24 @@ class ManualDocumentRevision(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class ManualDocumentVoid(Base):
+    """Append-only cancellation receipt for an unposted manual document."""
+
+    __tablename__ = "manual_document_void"
+    __table_args__ = (
+        UniqueConstraint("document_id", name="uq_manual_document_void_document"),
+        UniqueConstraint("organization_id", "request_key", name="uq_manual_document_void_key"),
+        {"schema": "accounting"},
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("accounting.organization.id"))
+    document_id: Mapped[int] = mapped_column(ForeignKey("accounting.manual_document.id"))
+    request_key: Mapped[str] = mapped_column(String(36))
+    reason: Mapped[str] = mapped_column(String(1000))
+    actor: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Line(Base):
     __tablename__ = "line"
     __table_args__ = (
@@ -1470,7 +1488,7 @@ def immutable(mapper, connection, target):
     raise ValueError("Accounting history is immutable; append a new version or correction")
 
 
-for _model in (Account, CatalogAdoption, Policy, Entry, ManualDocumentRevision, Line, Audit, SourceBinding, SellerProfile,
+for _model in (Account, CatalogAdoption, Policy, Entry, ManualDocumentRevision, ManualDocumentVoid, Line, Audit, SourceBinding, SellerProfile,
                PayrollEmploymentBinding, PayrollRuleSet, PayrollEvidenceFile,
                PayrollPopulationReview, PayrollApplicabilityReview, PayrollWorkpaperReview,
                FinancialCloseReceipt, FinancialReopenReceipt, FinancialReopenItem,

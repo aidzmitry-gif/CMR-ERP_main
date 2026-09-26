@@ -20,6 +20,7 @@ from modules.accounting.models import (
     Inbox,
     Line,
     ManualDocument,
+    ManualDocumentVoid,
     OpeningImportReceipt,
     Organization,
     Period,
@@ -464,6 +465,7 @@ async def validate_close_period(session, org_id, month, data):
         ManualDocument.organization_id == org_id,
         ManualDocument.posting_date <= month_end,
         ManualDocument.entry_id.is_(None),
+        ~select(ManualDocumentVoid.id).where(ManualDocumentVoid.document_id == ManualDocument.id).exists(),
     ).limit(1))
     if manual_draft is not None:
         raise AccountingError("Unposted manual accounting documents prevent closing")

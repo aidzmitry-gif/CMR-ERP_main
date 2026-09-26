@@ -13,7 +13,7 @@ const report = { organization_id: 1, status: "preliminary", pending_documents: 0
 const fetchMock = vi.fn();
 const respond = (data: unknown, ok = true) => Promise.resolve({ ok, json: async () => data });
 const digest = "a".repeat(64);
-let manualDraft: { id: number; organization_id: number; number: string; source: string; posting_date: string; version: number; status: string; entry_id: number | null; updated_at: string; revisions: { version: number; actor: string; created_at: string; digest: string; posting: Record<string, unknown> }[] } | null;
+let manualDraft: { id: number; organization_id: number; number: string; source: string; posting_date: string; version: number; status: string; entry_id: number | null; updated_at: string; void?: { reason: string; actor: string; created_at: string }; revisions: { version: number; actor: string; created_at: string; digest: string; posting: Record<string, unknown> }[] } | null;
 function openPage(section: string, page: string) {
   fireEvent.click(screen.getByRole("button", { name: section, exact: true }));
   if (section !== page) fireEvent.click(screen.getByRole("button", { name: page, exact: true }));
@@ -52,6 +52,11 @@ beforeEach(() => {
     if (input.endsWith("/manual-documents/8/post")) {
       manualDraft = { ...manualDraft!, status: "posted", entry_id: 6 };
       return respond({ document_id: 8, document_version: manualDraft.version, entry_id: 6, digest });
+    }
+    if (input.endsWith("/manual-documents/8/void")) {
+      const body = JSON.parse(String(init?.body));
+      manualDraft = { ...manualDraft!, status: "voided", void: { reason: body.reason, actor: "accountant", created_at: "2026-09-26T12:00:00Z" } };
+      return respond(manualDraft);
     }
     if (input.endsWith("/entries")) {
       const body = JSON.parse(String(init?.body));
@@ -312,6 +317,21 @@ describe("AccountingView", () => {
     expect(confirmation).toHaveBeenCalled();
     expect(screen.getByLabelText("Основание")).toHaveValue("Не сохранено");
     confirmation.mockRestore();
+  });
+  it("voids an erroneous draft with a recorded reason and leaves it read-only", async () => {
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    openPage("Документы", "Ручная операция");
+    fillManualOperation();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сохранить", exact: true }));
+    await screen.findByText("БС-8 · версия 1 сохранена.");
+    fireEvent.change(screen.getByLabelText("Причина аннулирования справки"), { target: { value: "Дубликат" } });
+    fireEvent.click(screen.getByRole("button", { name: "Аннулировать черновик" }));
+    expect(await screen.findByText("БС-8 аннулирована. Причина и автор сохранены в истории.")).toBeInTheDocument();
+    expect(screen.getByText(/Аннулирована: Дубликат · accountant/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Основание")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Аннулировать черновик" })).not.toBeInTheDocument();
   });
   it("clears the previous organization report on selection change", async () => {
     render(<AccountingView />);

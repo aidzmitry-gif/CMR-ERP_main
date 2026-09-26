@@ -109,3 +109,35 @@ async def test_manual_document_cannot_bind_another_documents_posting(client, boo
         "posting": first_posting.model_dump(mode="json"),
     })
     assert edit.status_code == 409
+
+
+async def test_unposted_manual_document_can_be_voided_without_erasing_history(client, book, posting):
+    prefix = f"/accounting/organizations/{book[0]}"
+    path = prefix + "/manual-documents"
+    draft = await client.post(path, json={"key": str(uuid4()),
+                                          "posting": posting("MANUAL-VOID").model_dump(mode="json")})
+    assert draft.status_code == 201, draft.text
+    document_id = draft.json()["id"]
+    command = {"key": str(uuid4()), "expected_version": 1, "reason": " Duplicate draft "}
+    voided = await client.post(f"{path}/{document_id}/void", json=command)
+    assert voided.status_code == 200, voided.text
+    assert voided.json()["status"] == "voided"
+    assert voided.json()["void"]["reason"] == "Duplicate draft"
+    assert voided.json()["void"]["actor"] == "tester"
+    assert voided.json()["revisions"][0]["posting"]["source"] == "MANUAL-VOID"
+    assert (await client.post(f"{path}/{document_id}/void", json=command)).json()["status"] == "voided"
+    assert (await client.post(f"{path}/{document_id}/void", json={**command, "key": str(uuid4())})).status_code == 409
+    assert (await client.put(f"{path}/{document_id}", json={
+        "key": str(uuid4()), "expected_version": 1,
+        "posting": posting("MANUAL-VOID").model_dump(mode="json"),
+    })).status_code == 409
+    assert (await client.post(f"{path}/{document_id}/post", json={
+        "key": str(uuid4()), "expected_version": 1,
+        "digest": service.digest(posting("MANUAL-VOID")),
+    })).status_code == 409
+    assert (await client.get(path)).json()["items"][0]["status"] == "voided"
+    controls = await client.get(prefix + "/periods/2026-09/closing-controls")
+    assert controls.status_code == 200
+    assert controls.json()["documents"]["pending_manual_documents"] == 0
+    report = await client.get(prefix + "/reports?start=2026-09-01&end=2026-09-30")
+    assert report.status_code == 200 and report.json()["pending_documents"] == 0

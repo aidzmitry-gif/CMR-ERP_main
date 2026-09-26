@@ -1,6 +1,6 @@
 # Бухгалтерская справка: черновик и проведение
 
-Development source head `0187` adds a saved document before an immutable manual
+Development source heads `0187` and `0188` add a saved document before an immutable manual
 ledger posting. It is separate from the fixed first-release candidate at `0186`.
 
 The accountant selects the legal entity and opens **Документы → Ручная операция**.
@@ -22,6 +22,12 @@ cannot be edited; later correction uses a new linked accounting operation.
 Unposted manual documents dated in or before a closing month block its close.
 The client checks the returned document/version/digest/entry receipt before it
 reports success. Navigation warns about unsaved form changes.
+
+An erroneous **unposted** draft can be annulled with a required reason.
+Cancellation creates a separate immutable receipt with author and server time;
+the numbered document and all prior revisions remain readable. The cancelled
+draft no longer blocks month close and cannot be edited or posted. A posted
+document cannot be annulled here and requires a linked correction instead.
 
 This workflow proves software behavior, not an approved Belarusian accounting
 policy or correctness of real source documents. It needs an accountant's pilot

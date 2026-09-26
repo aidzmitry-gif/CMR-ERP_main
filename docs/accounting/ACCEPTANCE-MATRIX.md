@@ -7,7 +7,7 @@ the accountant's close.  It is therefore an operating checklist, not a claim
 that 1C can already be retired.
 
 Current source branch: `agent/crm-acc-prod009`; `alembic heads` on 2026-09-26
-reports the single development source head `0187`. The fixed first-release candidate
+reports the single development source head `0188`. The fixed first-release candidate
 remains at `0186`; this later manual-document change is not part of that release.
 Two focused tests on a disposable local
 PostgreSQL 16 database passed for the supplier-contract revocation migration
@@ -34,12 +34,14 @@ current target database or all later source migrations.
 
 ## Current local evidence
 
-- Development slice `0187` adds numbered, versioned manual accounting documents.
+- Development slices `0187` and `0188` add numbered, versioned manual accounting documents
+  and an immutable cancellation receipt for erroneous unposted drafts.
   The [draft workflow](MANUAL-DOCUMENT-DRAFTS.md) records author and server time
   per save, exposes a register and changes in the accountant UI, blocks close
   while a draft remains unposted, and posts only an exact saved revision.
-  Focused local API tests 12/12, UI tests 30/30 and one disposable PostgreSQL
-  revision/atomic-post test passed. This is not part of the fixed `0186` release.
+  A cancelled draft retains its history and leaves the close queue. Focused
+  local API tests 13/13, UI tests 31/31 and two disposable PostgreSQL
+  revision/atomic-post/cancellation tests passed. This is not part of the fixed `0186` release.
 
 - On 2026-09-26, a fresh disposable PostgreSQL 16 database passed **2**
   supplier-contract/receipt-history checks at migration `0186` and **4**
