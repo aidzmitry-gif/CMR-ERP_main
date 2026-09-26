@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useUnsavedDocumentGuard } from "@/lib/use-unsaved-document-guard";
 
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
@@ -43,7 +44,10 @@ type Policy = { id: number; effective_from: string; reference: string; normative
 type JournalLine = CurrencyFields & { account: string; title?: string; side: "debit" | "credit"; amount: string; dimensions: Record<string, string>; cash_activity?: string };
 type Posting = { source: string; source_version: number; operation: string; document_date: string; operation_date: string; posting_date: string; policy_id: number; correction_of?: number; rule_version: string; explanation: string; lines: JournalLine[] };
 type Preview = { digest: string; explanation: string; lines: JournalLine[]; normative_verified: boolean };
-type PostedEntryReceipt = { id: number; organization_id: number; source: string; source_version: number; operation: string; policy_id: number; posting_date: string; digest: string };
+type ManualRevision = { version: number; actor: string; created_at: string; digest: string; posting: Posting };
+type ManualDocument = { id: number; organization_id: number; number: string; source: string; posting_date: string; version: number; status: "draft" | "posted"; entry_id: number | null; updated_at: string; revisions: ManualRevision[] };
+type ManualDocumentList = { organization_id: number; items: Omit<ManualDocument, "revisions">[]; next_before_id: number | null };
+type ManualPostReceipt = { document_id: number; document_version: number; entry_id: number; digest: string };
 type Trial = ExportTrial;
 type Movement = AccountMovement;
 type Report = { from: string; to: string; organization_id: number; status: string; pending_documents: number; review_items?: { code: string; count: number; message: string }[]; trial_balance: Trial[]; movements: Movement[]; opening_movements: Movement[]; balance: Record<string, string>; pnl: { income: string; expenses: string; profit: string }; cashflow: Record<string, string> };
@@ -93,8 +97,8 @@ function salesOriginal(org: string, reference: string) {
   return match && org ? <a className="text-accent underline" href={`/api/sales/organizations/${encodeURIComponent(org)}/documents/${match[1]}/original`} target="_blank" rel="noreferrer">Оригинал документа № {match[1]}</a> : null;
 }
 
-async function request<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(`/api/accounting${path}`, { method: body === undefined ? "GET" : "POST", headers: body === undefined ? undefined : { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store" });
+async function request<T>(path: string, body?: unknown, method?: "PUT"): Promise<T> {
+  const response = await fetch(`/api/accounting${path}`, { method: method ?? (body === undefined ? "GET" : "POST"), headers: body === undefined ? undefined : { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store" });
   let data: unknown;
   try {
     data = await response.json();
@@ -110,12 +114,11 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
   return data as T;
 }
 
-function confirmedManualEntry(value: PostedEntryReceipt, organization: string, posting: Posting, preview: Preview): boolean {
-  return Number.isSafeInteger(value?.id) && value.id > 0
-    && String(value.organization_id) === organization
-    && value.source === posting.source && value.source_version === posting.source_version
-    && value.operation === posting.operation && value.policy_id === posting.policy_id
-    && value.posting_date === posting.posting_date && value.digest === preview.digest;
+function describeRevision(before: Posting | undefined, after: Posting): string[] {
+  if (!before) return ["Создан документ и сохранены проводки."];
+  const names: Partial<Record<keyof Posting, string>> = { source: "Основание", source_version: "Версия основания", document_date: "Дата документа", operation_date: "Дата операции", posting_date: "Дата отражения", policy_id: "Учётная политика", correction_of: "Исправляемая операция", explanation: "Содержание", lines: "Проводки и аналитика" };
+  return (Object.keys(names) as (keyof Posting)[]).filter((key) => JSON.stringify(before[key] ?? null) !== JSON.stringify(after[key] ?? null))
+    .map((key) => key === "lines" ? "Изменены проводки и аналитика." : `${names[key]}: «${String(before[key] ?? "—")}» → «${String(after[key] ?? "—")}».`);
 }
 
 export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?: string; suggestedEntry?: string }) {
@@ -142,6 +145,9 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
   const [detail, setDetail] = useState<EntryDetail | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [prepared, setPrepared] = useState<Posting | null>(null);
+  const [manualDocument, setManualDocument] = useState<ManualDocument | null>(null);
+  const [manualDocuments, setManualDocuments] = useState<ManualDocumentList | null>(null);
+  const [manualDirty, setManualDirty] = useState(false);
   const [operationDate, setOperationDate] = useState(today);
   const [documentDate, setDocumentDate] = useState(today);
   const [economicDate, setEconomicDate] = useState(today);
@@ -155,6 +161,10 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
   const previewGeneration = useRef(0);
   const appliedSuggestedOrg = useRef<string | undefined>(undefined);
   const openedSuggestedEntry = useRef("");
+  const manualListGeneration = useRef(0);
+  const saveCommand = useRef<{ fingerprint: string; key: string } | null>(null);
+  const postCommand = useRef<{ fingerprint: string; key: string } | null>(null);
+  const confirmDiscard = useUnsavedDocumentGuard(tab === "entry" && manualDirty);
 
   useEffect(() => {
     let active = true;
@@ -205,7 +215,52 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
       .then((result) => { if (token === generation.current && entryToken === entryGeneration.current) setDetail(result); })
       .catch((reason: Error) => { if (token === generation.current && entryToken === entryGeneration.current) setError(reason.message); });
   }, [org, suggestedOrg, suggestedEntry]);
-  function invalidatePreview() { previewGeneration.current += 1; setPreview(null); setPrepared(null); }
+  useEffect(() => {
+    const token = ++manualListGeneration.current;
+    if (!org || tab !== "entry") return;
+    void request<ManualDocumentList>(`/organizations/${org}/manual-documents`)
+      .then((result) => { if (token === manualListGeneration.current) setManualDocuments(result); })
+      .catch((reason: Error) => { if (token === manualListGeneration.current) setError(reason.message); });
+    return () => { manualListGeneration.current += 1; };
+  }, [org, tab]);
+  async function reloadManualDocuments() {
+    if (!org) return;
+    const result = await request<ManualDocumentList>(`/organizations/${org}/manual-documents`);
+    if (String(result.organization_id) === org) setManualDocuments(result);
+  }
+  function invalidatePreview() {
+    previewGeneration.current += 1; setPreview(null); setPrepared(null);
+    if (tab === "entry") { setManualDirty(true); saveCommand.current = null; postCommand.current = null; }
+  }
+  function loadManualDocument(row: ManualDocument) {
+    if (String(row.organization_id) !== org || !row.revisions.length) throw new Error("ERP вернула документ другой организации или без истории.");
+    const posting = row.revisions[row.revisions.length - 1].posting;
+    if (posting.operation !== "manual") throw new Error("ERP вернула документ другого типа.");
+    previewGeneration.current += 1;
+    setManualDocument(row); setSource(posting.source); setSourceVersion(posting.source_version);
+    setCorrectionOf(posting.correction_of == null ? "" : String(posting.correction_of));
+    setExplanation(posting.explanation); setDocumentDate(posting.document_date);
+    setEconomicDate(posting.operation_date); setOperationDate(posting.posting_date);
+    setLines(posting.lines); setPreview(null); setPrepared(null); setManualDirty(false);
+    saveCommand.current = null; postCommand.current = null;
+  }
+  async function openManualDocument(id: number) {
+    if (!confirmDiscard()) return;
+    setBusy(true); setError("");
+    try {
+      const result = await request<ManualDocument>(`/organizations/${org}/manual-documents/${id}`);
+      loadManualDocument(result);
+    } catch (reason) { setError((reason as Error).message); }
+    finally { setBusy(false); }
+  }
+  function newManualDocument() {
+    if (!confirmDiscard()) return;
+    previewGeneration.current += 1; setManualDocument(null); setSource(""); setSourceVersion(1);
+    setCorrectionOf(""); setExplanation("");
+    setLines([{ account: "", side: "debit", amount: "", dimensions: {} }, { account: "", side: "credit", amount: "", dimensions: {} }]);
+    setPreview(null); setPrepared(null); setManualDirty(false); setError("");
+    saveCommand.current = null; postCommand.current = null;
+  }
   function changeDate(kind: "start" | "end" | "operation", value: string) {
     generation.current += 1; invalidatePreview(); setReport(null); setAccountActivity(null); setDetail(null); setNotice("");
     if (kind === "start") setStart(value);
@@ -226,25 +281,60 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     finally { if (token === generation.current) setBusy(false); }
   }
 
-  async function post(closeAfterPost = false) {
-    if (!prepared || !preview) return;
-    const token = generation.current;
+  async function saveManual(closeAfterSave = false) {
+    if (!prepared || !preview || !org || manualDocument?.status === "posted") return;
     const posting = prepared;
     const checked = preview;
+    const version = manualDocument?.version ?? 0;
+    const fingerprint = `${org}/${manualDocument?.id ?? "new"}/${version}/${checked.digest}`;
+    if (saveCommand.current?.fingerprint !== fingerprint) saveCommand.current = { fingerprint, key: crypto.randomUUID() };
+    const key = saveCommand.current.key;
     setBusy(true); setError("");
     try {
-      const result = await request<PostedEntryReceipt>(`/organizations/${org}/entries`, posting);
-      if (!confirmedManualEntry(result, org, posting, checked)) {
+      const path = `/organizations/${org}/manual-documents${manualDocument ? `/${manualDocument.id}` : ""}`;
+      const payload = manualDocument ? { key, expected_version: version, posting } : { key, posting };
+      const result = await request<ManualDocument>(path, payload, manualDocument ? "PUT" : undefined);
+      if (String(result.organization_id) !== org || (manualDocument && result.id !== manualDocument.id)
+        || result.version !== version + 1 || result.status !== "draft"
+        || result.revisions[result.revisions.length - 1]?.digest !== checked.digest) {
+        throw new Error("ERP не подтвердила сохранение этой версии документа. Форма оставлена открытой для сверки.");
+      }
+      setManualDocument(result); setManualDirty(false); saveCommand.current = null; postCommand.current = null;
+      setNotice(`${result.number} · версия ${result.version} сохранена${closeAfterSave ? " и закрыта" : ""}.`);
+      if (closeAfterSave) setTab("home");
+      try { await reloadManualDocuments(); } catch { /* saved receipt remains authoritative */ }
+    } catch (reason) { setError((reason as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  async function post(closeAfterPost = false) {
+    if (!prepared || !preview || !manualDocument || manualDocument.status !== "draft") return;
+    const token = generation.current;
+    const checked = preview;
+    const documentId = manualDocument.id;
+    const documentVersion = manualDocument.version;
+    const fingerprint = `${org}/${documentId}/${documentVersion}/${checked.digest}`;
+    if (postCommand.current?.fingerprint !== fingerprint) postCommand.current = { fingerprint, key: crypto.randomUUID() };
+    const key = postCommand.current.key;
+    if (manualDirty || manualDocument.revisions[manualDocument.revisions.length - 1]?.digest !== checked.digest) {
+      setError("Сначала сохраните проверенную версию справки, затем подтвердите проведение."); return;
+    }
+    setBusy(true); setError("");
+    try {
+      const result = await request<ManualPostReceipt>(`/organizations/${org}/manual-documents/${documentId}/post`, { key, expected_version: documentVersion, digest: checked.digest });
+      if (result.document_id !== documentId || result.document_version !== documentVersion
+        || !Number.isSafeInteger(result.entry_id) || result.entry_id <= 0 || result.digest !== checked.digest) {
         throw new Error("ERP не подтвердила проведение этой операции. Форма и проверенный пакет оставлены открытыми для сверки.");
       }
       if (token === generation.current) {
+        setManualDocument({ ...manualDocument, status: "posted", entry_id: result.entry_id });
+        setManualDirty(false); postCommand.current = null;
         await refresh();
         if (closeAfterPost) {
-          setSource(""); setSourceVersion(1); setCorrectionOf(""); setExplanation("");
-          setLines([{ account: "", side: "debit", amount: "", dimensions: {} }, { account: "", side: "credit", amount: "", dimensions: {} }]);
           setTab("reports");
         }
-        setNotice(`Операция № ${result.id} проведена${closeAfterPost ? ", форма закрыта" : ""}.`);
+        setNotice(`Операция № ${result.entry_id} проведена${closeAfterPost ? ", форма закрыта" : ""}.`);
+        try { await reloadManualDocuments(); } catch { /* posting receipt remains authoritative */ }
       }
     }
     catch (e) { if (token === generation.current) setError((e as Error).message); }
@@ -260,6 +350,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
   }
 
   function openWorkspace(destination: AccountingDestination) {
+    if (!confirmDiscard()) return;
     if (["setup", "periods", "inbox", "import"].includes(destination)) { setControlSection(destination); setTab("controls"); }
     else setTab(destination);
   }
@@ -273,17 +364,17 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     {error && <div role="alert" className="rounded-xl border border-red-300 bg-surface p-3 text-red-700">{error}</div>}
     {notice && <p role="status" className="text-money">{notice}</p>}
     <div className="flex flex-wrap gap-4 rounded-xl border border-line bg-surface p-4">
-      <label className="min-w-0 basis-64 flex-1 text-sm">Организация<Select className="min-w-0" aria-label="Организация" value={org} disabled={locked} onChange={(e) => { const next = e.target.value; if (next === org) return; generation.current += 1; setReport(null); setAccountActivity(null); setDetail(null); setPreview(null); setPrepared(null); setNotice(""); setLines([{ account: "", side: "debit", amount: "", dimensions: {} }, { account: "", side: "credit", amount: "", dimensions: {} }]); setOrg(next); }}><option value="">Выберите организацию</option>{organizations.map((o) => <option key={o.id} value={o.id}>{o.name} · {o.unp}</option>)}</Select></label>
+      <label className="min-w-0 basis-64 flex-1 text-sm">Организация<Select className="min-w-0" aria-label="Организация" value={org} disabled={locked} onChange={(e) => { const next = e.target.value; if (next === org || !confirmDiscard()) return; generation.current += 1; setReport(null); setAccountActivity(null); setDetail(null); setPreview(null); setPrepared(null); setManualDocument(null); setManualDocuments(null); setManualDirty(false); setSource(""); setSourceVersion(1); setCorrectionOf(""); setExplanation(""); setNotice(""); setLines([{ account: "", side: "debit", amount: "", dimensions: {} }, { account: "", side: "credit", amount: "", dimensions: {} }]); setOrg(next); }}><option value="">Выберите организацию</option>{organizations.map((o) => <option key={o.id} value={o.id}>{o.name} · {o.unp}</option>)}</Select></label>
       <label className="text-sm">С<Input aria-label="Начало периода" type="date" value={start} disabled={locked} onChange={(e) => changeDate("start", e.target.value)} /></label>
       <label className="text-sm">По<Input aria-label="Конец периода" type="date" value={end} disabled={locked} onChange={(e) => changeDate("end", e.target.value)} /></label>
       <Button variant="secondary" disabled={locked || !org} onClick={() => void refresh()}>Обновить</Button>
     </div>
     {!organizations.length && !organizationError && !error && <p className="rounded-xl border border-line p-5 text-muted">Нет доступных книг. Руководитель создаёт организацию и назначает доступ бухгалтеру.</p>}
     <nav aria-label="Разделы бухгалтерии" className="flex flex-wrap gap-2">{accountingSections.map((section) =>
-      <Button key={section.id} disabled={locked} aria-pressed={currentSection.id === section.id} variant={currentSection.id === section.id ? "primary" : "secondary"} onClick={() => { if (section.id === "closing") setControlSection("periods"); setTab(section.pages[0].id); }}>{section.label}</Button>
+      <Button key={section.id} disabled={locked} aria-pressed={currentSection.id === section.id} variant={currentSection.id === section.id ? "primary" : "secondary"} onClick={() => { if (section.pages[0].id !== tab && !confirmDiscard()) return; if (section.id === "closing") setControlSection("periods"); setTab(section.pages[0].id); }}>{section.label}</Button>
     )}</nav>
     {currentSection.pages.length > 1 && <nav aria-label={`Страницы раздела ${currentSection.label}`} className="flex flex-wrap gap-2 rounded-xl border border-line bg-surface p-3">{currentSection.pages.map((page) =>
-      <Button key={page.id} disabled={locked} aria-pressed={tab === page.id} variant={tab === page.id ? "primary" : "secondary"} onClick={() => setTab(page.id)}>{page.label}</Button>
+      <Button key={page.id} disabled={locked} aria-pressed={tab === page.id} variant={tab === page.id ? "primary" : "secondary"} onClick={() => { if (page.id === tab || confirmDiscard()) setTab(page.id); }}>{page.label}</Button>
     )}</nav>}
     {tab === "expenses" && <ExpenseControl org={org} onEntry={(id) => void openEntry(id)} />}
     {tab === "crm-sales" && <section aria-label="Продажи из CRM" className="space-y-3 rounded-xl border border-line bg-surface p-4"><h2 className="font-semibold">Продажа через сделку и отгрузку</h2><p>Счёт и резерв создаются в CRM, товар отгружается со склада по акту. Проводки выручки, НДС и себестоимости бухгалтер готовит по этому акту в очереди документов. Повторно вводить продажу здесь не нужно.</p><div className="flex flex-wrap gap-3"><Link className="text-accent underline" href="/crm/deals">Открыть сделки CRM</Link><Button variant="secondary" disabled={!org} onClick={() => { setControlSection("inbox"); setTab("controls"); }}>Отгрузки, ожидающие проводок</Button></div></section>}
@@ -331,11 +422,16 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
       <section id="accounting-journal" className="rounded-xl border border-line bg-surface p-4"><h2 className="mb-3 font-semibold">Проводки за период</h2>{report.movements.map((m, i) => <div key={i} className="flex flex-wrap items-center justify-between gap-3 border-b border-line py-2 text-sm"><button className="text-accent underline" onClick={() => void openEntry(m.entry_id)}>№ {m.entry_id} · {m.source}</button><span>{m.date} · {m.side === "debit" ? "Дт" : "Кт"} {m.account}</span><span className="tabular-nums">{m.amount} BYN</span></div>)}</section>
     </>}
     {tab === "accounts" && <section className="rounded-xl border border-line bg-surface p-4"><h2 className="font-semibold">Рабочий план счетов</h2><p className="my-2 text-sm text-muted">Действует на {operationDate}. Настройки и версии утверждает главный бухгалтер.</p>{accounts.map((a) => <div key={a.id} className="border-b border-line py-3"><span className="font-semibold">{a.code}</span> · {a.title}<p className="text-xs text-muted">{a.required_dimensions.map((d) => labels[d] || d).join(" · ") || "Без обязательной аналитики"}</p></div>)}{!accounts.length && <p className="py-4 text-muted">Рабочий план счетов ещё не настроен.</p>}</section>}
-    {tab === "entry" && <section className="space-y-4 rounded-xl border border-line bg-surface p-4"><h2 className="font-semibold">Бухгалтерская справка</h2><div className="grid gap-3 md:grid-cols-3"><label>Основание<Input aria-label="Основание" value={source} disabled={locked} onChange={(e) => { invalidatePreview(); setSource(e.target.value); }} placeholder="Номер документа" /></label><label>Дата отражения<Input aria-label="Дата операции" type="date" value={operationDate} disabled={locked} onChange={(e) => changeDate("operation", e.target.value)} /></label><label>Содержание<Input aria-label="Содержание" value={explanation} disabled={locked} onChange={(e) => { invalidatePreview(); setExplanation(e.target.value); }} /></label></div>
+    {tab === "entry" && <section className="space-y-4 rounded-xl border border-line bg-surface p-4"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">Бухгалтерская справка {manualDocument?.number ?? "· новый документ"}</h2><Button variant="secondary" disabled={locked} onClick={newManualDocument}>Новая справка</Button></div>
+      <section aria-label="Список бухгалтерских справок" className="rounded-lg border border-line p-3"><h3 className="font-semibold">Реестр справок</h3>{manualDocuments?.items.map((row) => <button key={row.id} className="block py-1 text-left text-accent underline" onClick={() => void openManualDocument(row.id)} disabled={locked}>{row.number} · {row.source} · {row.posting_date} · {row.status === "posted" ? "проведена" : "черновик"}</button>)}{manualDocuments && !manualDocuments.items.length && <p className="text-sm text-muted">Справок пока нет.</p>}{manualDocuments?.next_before_id != null && <Button variant="secondary" disabled={locked} onClick={() => { const cursor = manualDocuments.next_before_id; void request<ManualDocumentList>(`/organizations/${org}/manual-documents?before_id=${cursor}`).then((next) => { if (String(next.organization_id) === org) setManualDocuments({ ...next, items: [...manualDocuments.items, ...next.items] }); }).catch((reason: Error) => setError(reason.message)); }}>Ещё справки</Button>}</section>
+      {manualDocument && <p className="text-sm text-muted">{manualDocument.status === "posted" ? "Проведена" : "Черновик"} · версия {manualDocument.version} · изменена {manualDocument.updated_at}{manualDocument.entry_id != null && <Button variant="ghost" onClick={() => void openEntry(manualDocument.entry_id!)}>Открыть проводку № {manualDocument.entry_id}</Button>}</p>}
+      <fieldset disabled={locked || manualDocument?.status === "posted"} className="space-y-4"><div className="grid gap-3 md:grid-cols-3"><label>Основание<Input aria-label="Основание" value={source} disabled={locked} onChange={(e) => { invalidatePreview(); setSource(e.target.value); }} placeholder="Номер документа" /></label><label>Дата отражения<Input aria-label="Дата операции" type="date" value={operationDate} disabled={locked} onChange={(e) => changeDate("operation", e.target.value)} /></label><label>Содержание<Input aria-label="Содержание" value={explanation} disabled={locked} onChange={(e) => { invalidatePreview(); setExplanation(e.target.value); }} /></label></div>
       <div className="grid gap-3 md:grid-cols-4"><label className="text-sm">Дата документа<Input aria-label="Дата документа" type="date" value={documentDate} disabled={locked} onChange={(e) => { invalidatePreview(); setDocumentDate(e.target.value); }} /></label><label className="text-sm">Дата хозяйственной операции<Input aria-label="Дата хозяйственной операции" type="date" value={economicDate} disabled={locked} onChange={(e) => { invalidatePreview(); setEconomicDate(e.target.value); }} /></label><label className="text-sm">Версия документа<Input aria-label="Версия документа" type="number" min="1" step="1" value={sourceVersion} disabled={locked} onChange={(e) => { invalidatePreview(); setSourceVersion(Number(e.target.value)); }} /></label><label className="text-sm">Исправляет операцию №<Input aria-label="Исправляет операцию" type="number" min="1" step="1" value={correctionOf} disabled={locked} onChange={(e) => { invalidatePreview(); setCorrectionOf(e.target.value); }} placeholder="Если это исправление" /></label></div>
       {lines.map((line, i) => <fieldset key={i} disabled={locked} className="space-y-2 rounded-lg border border-line p-3"><legend className="text-sm">Строка {i + 1}</legend><div className="grid gap-3 md:grid-cols-3"><Select aria-label={`Сторона ${i + 1}`} value={line.side} onChange={(e) => changeLine(i, { side: e.target.value as "debit" | "credit" })}><option value="debit">Дебет</option><option value="credit">Кредит</option></Select><Select aria-label={`Счёт ${i + 1}`} value={line.account} onChange={(e) => changeLine(i, { account: e.target.value, dimensions: {}, cash_activity: undefined, currency: "BYN", original_amount: undefined, rate: undefined, rate_scale: undefined, rate_date: undefined, rate_source: undefined, quantity: undefined })}><option value="">Выберите счёт</option>{accounts.map((a) => <option key={a.id} value={a.code}>{a.code} · {a.title}</option>)}</Select><Input aria-label={`Сумма ${i + 1}`} inputMode="decimal" value={line.amount} placeholder="0.00 BYN" onChange={(e) => changeLine(i, { amount: e.target.value })} /></div>{accounts.find((a) => a.code === line.account)?.required_dimensions.map((dimension) => <label key={dimension} className="block text-sm">{labels[dimension] || dimension}<Input value={line.dimensions[dimension] || ""} onChange={(e) => changeLine(i, { dimensions: { ...line.dimensions, [dimension]: e.target.value } })} /></label>)}{accounts.find((a) => a.code === line.account)?.cash && <label className="block text-sm">Вид денежного потока<Select value={line.cash_activity || ""} onChange={(e) => changeLine(i, { cash_activity: e.target.value })}><option value="">Выберите вид</option><option value="operating">Текущая деятельность</option><option value="investing">Инвестиционная</option><option value="financing">Финансовая</option><option value="internal">Внутреннее перемещение</option></Select></label>}<AccountingCurrencyFields value={line} currency={accounts.find((a) => a.code === line.account)?.currency_tracking ?? false} quantity={accounts.find((a) => a.code === line.account)?.quantity_tracking ?? false} onChange={(patch) => changeLine(i, patch)} /></fieldset>)}
       <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={locked} onClick={() => { invalidatePreview(); setLines([...lines, { account: "", side: "debit", amount: "", dimensions: {} }]); }}>Добавить строку</Button><Button disabled={locked || !org || !source || !explanation} onClick={() => void prepare()}>Проверить проводки</Button></div>
-      {preview && <div className="rounded-xl border border-accent p-4"><h3 className="font-semibold">Проверенные проводки</h3><p className="my-2">{preview.explanation}</p>{preview.lines.map((line, i) => <p key={i}>{line.side === "debit" ? "Дт" : "Кт"} {line.account} · {line.title} — {line.amount} BYN</p>)}{!preview.normative_verified && <p className="my-2 text-sm text-muted">Нормативная база не подтверждена: закрытие периода будет недоступно.</p>}<div className="mt-3 flex flex-wrap gap-2"><Button disabled={locked} onClick={() => void post()}>Подтвердить и провести</Button><Button variant="secondary" disabled={locked} onClick={() => void post(true)}>Провести и закрыть</Button></div></div>}
+      {preview && <div className="rounded-xl border border-accent p-4"><h3 className="font-semibold">Проверенные проводки</h3><p className="my-2">{preview.explanation}</p>{preview.lines.map((line, i) => <p key={i}>{line.side === "debit" ? "Дт" : "Кт"} {line.account} · {line.title} — {line.amount} BYN</p>)}{!preview.normative_verified && <p className="my-2 text-sm text-muted">Нормативная база не подтверждена: закрытие периода будет недоступно.</p>}<div className="mt-3 flex flex-wrap gap-2"><Button disabled={locked} onClick={() => void saveManual()}>Сохранить</Button><Button variant="secondary" disabled={locked} onClick={() => void saveManual(true)}>Сохранить и закрыть</Button><Button disabled={locked || !manualDocument || manualDirty || manualDocument.revisions[manualDocument.revisions.length - 1]?.digest !== preview.digest} onClick={() => void post()}>Подтвердить и провести</Button><Button variant="secondary" disabled={locked || !manualDocument || manualDirty || manualDocument.revisions[manualDocument.revisions.length - 1]?.digest !== preview.digest} onClick={() => void post(true)}>Провести и закрыть</Button></div></div>}
+      </fieldset>
+      {!!manualDocument?.revisions.length && <section aria-label="История справки" className="space-y-3 rounded-lg border border-line p-3"><h3 className="font-semibold">История изменений</h3>{manualDocument.revisions.map((revision, index) => <div key={revision.version} className="border-t border-line pt-2 text-sm"><p className="font-medium">Версия {revision.version} · {revision.actor} · {revision.created_at}</p>{describeRevision(manualDocument.revisions[index - 1]?.posting, revision.posting).map((change, changeIndex) => <p key={changeIndex}>{change}</p>)}</div>)}</section>}
     </section>}
     {detail && <section aria-label="Карточка проводки" className="min-w-0 break-words rounded-xl border border-accent bg-surface p-4">
       <div className="flex flex-wrap justify-between gap-2"><h2 className="font-semibold">Операция № {detail.id}</h2><Button variant="ghost" onClick={() => { entryGeneration.current += 1; setDetail(null); }}>Закрыть карточку</Button></div>

@@ -23,6 +23,7 @@ from modules.accounting.models import (
     InventoryIssueReceipt,
     LateCostReceipt,
     Line,
+    ManualDocument,
     OutputVatRegisterEntry,
     PayrollAccrualReceipt,
     PayrollEvidenceFile,
@@ -92,6 +93,11 @@ async def snapshot(session, org_id: int, month: str, *, include_private_payroll:
     )) or 0
     pending_sources = await session.scalar(select(func.count(SourceControl.id)).where(
         SourceControl.organization_id == org_id, SourceControl.month <= month, SourceControl.entry_id.is_(None),
+    )) or 0
+    pending_manual = await session.scalar(select(func.count(ManualDocument.id)).where(
+        ManualDocument.organization_id == org_id,
+        ManualDocument.posting_date <= last,
+        ManualDocument.entry_id.is_(None),
     )) or 0
 
     from modules.accounting.bank_import import pending_count
@@ -442,6 +448,9 @@ async def snapshot(session, org_id: int, month: str, *, include_private_payroll:
     if pending_sources:
         blockers.append({"code": "unposted_source_controls", "count": int(pending_sources),
                          "message": "Есть первичные источники без бухгалтерской проводки."})
+    if pending_manual:
+        blockers.append({"code": "unposted_manual_documents", "count": int(pending_manual),
+                         "message": "Есть сохранённые бухгалтерские справки без проводки."})
     if pending_bank:
         blockers.append({"code": "unposted_bank_imports", "count": int(pending_bank),
                          "message": "Есть закреплённые за юрлицом банковские строки без проводки (включая строки без даты)."})
@@ -557,7 +566,8 @@ async def snapshot(session, org_id: int, month: str, *, include_private_payroll:
         "close_blocked_by_policy": policy is None or not policy.normative_verified,
         "blockers": blockers,
         "review_items": review,
-        "documents": {"pending_inbox": int(pending_inbox), "pending_source_controls": int(pending_sources)},
+        "documents": {"pending_inbox": int(pending_inbox), "pending_source_controls": int(pending_sources),
+                      "pending_manual_documents": int(pending_manual)},
         "vat": {"input_lines": len(input_lines), "input_registered": len(input_registered),
                 "input_unregistered": len(input_lines) - len(input_registered),
                 "input_unresolved": int(input_unresolved),

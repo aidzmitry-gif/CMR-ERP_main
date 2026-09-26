@@ -1,0 +1,29 @@
+# Бухгалтерская справка: черновик и проведение
+
+Development source head `0187` adds a saved document before an immutable manual
+ledger posting. It is separate from the fixed first-release candidate at `0186`.
+
+The accountant selects the legal entity and opens **Документы → Ручная операция**.
+After entering the source reference, three dates, explanation, accounts, amounts
+and required analytics, **Проверить проводки** calculates the package. **Сохранить**
+assigns a stable `БС-{id}` number; **Сохранить и закрыть** also returns to the
+workspace only after the server confirms the exact saved version. The register
+opens each document by number. Every save adds an immutable revision with the
+actor, server time, complete posting snapshot and digest. The card displays
+changed fields and the preserved earlier versions. An edited or failed save
+keeps the form open. Concurrent edits use `expected_version` and return 409 to
+the stale editor; a command UUID allows safe retry of the same save.
+
+**Подтвердить и провести** accepts only the reviewed digest of the latest saved
+revision. The server writes the entry and binds it to the document in one
+transaction. A retry with the same command returns the same receipt; another
+document cannot claim the same already posted source/version. Posted documents
+cannot be edited; later correction uses a new linked accounting operation.
+Unposted manual documents dated in or before a closing month block its close.
+The client checks the returned document/version/digest/entry receipt before it
+reports success. Navigation warns about unsaved form changes.
+
+This workflow proves software behavior, not an approved Belarusian accounting
+policy or correctness of real source documents. It needs an accountant's pilot
+review, target database migration rehearsal and the shared release gate before
+production use.

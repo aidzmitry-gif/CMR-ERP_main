@@ -19,6 +19,7 @@ from modules.accounting.models import (
     FinancialReopenItem,
     Inbox,
     Line,
+    ManualDocument,
     OpeningImportReceipt,
     Organization,
     Period,
@@ -456,6 +457,16 @@ async def validate_close_period(session, org_id, month, data):
     ).limit(1))
     if primary:
         raise AccountingError("Unposted primary documents prevent closing")
+    period_start = date.fromisoformat(month + "-01")
+    month_end = date(period_start.year, period_start.month,
+                     monthrange(period_start.year, period_start.month)[1])
+    manual_draft = await session.scalar(select(ManualDocument.id).where(
+        ManualDocument.organization_id == org_id,
+        ManualDocument.posting_date <= month_end,
+        ManualDocument.entry_id.is_(None),
+    ).limit(1))
+    if manual_draft is not None:
+        raise AccountingError("Unposted manual accounting documents prevent closing")
     from modules.accounting.production_cost_posting import validate_overhead_for_close
     from modules.accounting.production_output_transfer import validate_output_transfers_for_close
 

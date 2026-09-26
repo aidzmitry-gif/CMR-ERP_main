@@ -13,6 +13,7 @@ from sqlalchemy import (
     FetchedValue,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     Numeric,
     String,
@@ -175,6 +176,49 @@ class Entry(Base):
     explanation: Mapped[str] = mapped_column(String(1000))
     opening: Mapped[bool] = mapped_column(Boolean)
     correction_of: Mapped[int | None] = mapped_column(ForeignKey("accounting.entry.id"))
+    digest: Mapped[str] = mapped_column(String(64))
+    actor: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ManualDocument(Base):
+    """Mutable pointer to immutable revisions of a manual accounting document."""
+
+    __tablename__ = "manual_document"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "create_key", name="uq_manual_document_create_key"),
+        CheckConstraint("version >= 1", name="manual_document_version_positive"),
+        Index("ix_manual_document_org_date", "organization_id", "posting_date"),
+        {"schema": "accounting"},
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("accounting.organization.id"))
+    source: Mapped[str] = mapped_column(String(160))
+    posting_date: Mapped[date] = mapped_column(Date)
+    version: Mapped[int] = mapped_column(Integer)
+    create_key: Mapped[str] = mapped_column(String(36))
+    entry_id: Mapped[int | None] = mapped_column(ForeignKey("accounting.entry.id"), unique=True)
+    post_key: Mapped[str | None] = mapped_column(String(36))
+    post_digest: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ManualDocumentRevision(Base):
+    """Immutable edit history; document number and posting facts are frozen."""
+
+    __tablename__ = "manual_document_revision"
+    __table_args__ = (
+        UniqueConstraint("document_id", "version", name="uq_manual_document_revision_version"),
+        UniqueConstraint("document_id", "request_key", name="uq_manual_document_revision_key"),
+        CheckConstraint("version >= 1", name="manual_document_revision_version_positive"),
+        {"schema": "accounting"},
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("accounting.manual_document.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    request_key: Mapped[str] = mapped_column(String(36))
+    posting: Mapped[dict] = mapped_column(JSON)
     digest: Mapped[str] = mapped_column(String(64))
     actor: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -1426,7 +1470,7 @@ def immutable(mapper, connection, target):
     raise ValueError("Accounting history is immutable; append a new version or correction")
 
 
-for _model in (Account, CatalogAdoption, Policy, Entry, Line, Audit, SourceBinding, SellerProfile,
+for _model in (Account, CatalogAdoption, Policy, Entry, ManualDocumentRevision, Line, Audit, SourceBinding, SellerProfile,
                PayrollEmploymentBinding, PayrollRuleSet, PayrollEvidenceFile,
                PayrollPopulationReview, PayrollApplicabilityReview, PayrollWorkpaperReview,
                FinancialCloseReceipt, FinancialReopenReceipt, FinancialReopenItem,

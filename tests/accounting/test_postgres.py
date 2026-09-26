@@ -69,6 +69,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0184_organization_warehouse_directory.py",
     "0185_supplier_contract_directory.py",
     "0186_supplier_contract_revocation.py",
+    "0187_manual_document_drafts.py",
 )
 
 
@@ -1146,6 +1147,66 @@ async def test_revoked_contract_history_cursor_postgres(pg_factory, pg_book):
                                     before_at=timestamp, before_id=ids[2], ctx=(session, None))
         assert [row["id"] for row in page["items"]] == [ids[1], ids[0]]
         assert page["truncated"] is False
+
+
+async def test_manual_document_revision_and_post_are_atomic_postgres(pg_factory, pg_book, posting):
+    from uuid import uuid4
+
+    from fastapi import HTTPException
+    from sqlalchemy.exc import DBAPIError
+
+    from modules.accounting import manual_documents
+
+    first = posting("PG-MANUAL")
+    async with pg_factory() as session:
+        created = await manual_documents.create(session, pg_book[0],
+            manual_documents.ManualDocumentCreate(key=uuid4(), posting=first), "tester", "chief")
+        document_id = created["id"]
+        await session.commit()
+
+    async def editor(amount):
+        async with pg_factory() as session:
+            result = await manual_documents.edit(session, pg_book[0], document_id,
+                manual_documents.ManualDocumentEdit(key=uuid4(), expected_version=1,
+                    posting=posting("PG-MANUAL", amount=amount)), "tester", "chief")
+            await session.commit()
+            return result
+
+    outcomes = await asyncio.gather(editor("110.00"), editor("120.00"), return_exceptions=True)
+    accepted = [item for item in outcomes if isinstance(item, dict)]
+    rejected = [item for item in outcomes if isinstance(item, HTTPException)]
+    assert len(accepted) == len(rejected) == 1
+    assert rejected[0].status_code == 409
+    assert accepted[0]["version"] == 2 and len(accepted[0]["revisions"]) == 2
+
+    async with pg_factory() as session:
+        with pytest.raises(DBAPIError, match="(immutable|append-only)"):
+            await session.execute(text("UPDATE accounting.manual_document_revision SET actor='forged' WHERE document_id=:id"),
+                                  {"id": document_id})
+        await session.rollback()
+    async with pg_factory() as session:
+        with pytest.raises(DBAPIError, match="(revision|immutable|append-only)"):
+            await session.execute(text("UPDATE accounting.manual_document SET source='forged' WHERE id=:id"),
+                                  {"id": document_id})
+        await session.rollback()
+
+    accepted_posting = accepted[0]["revisions"][-1]["posting"]
+    from modules.accounting.schemas import PostingInput
+    reviewed = PostingInput.model_validate(accepted_posting)
+    async with pg_factory() as session:
+        receipt = await manual_documents.post(session, pg_book[0], document_id,
+            manual_documents.ManualDocumentPost(key=uuid4(), expected_version=2,
+                                                digest=service.digest(reviewed)),
+            "tester", "chief")
+        await session.commit()
+    async with pg_factory() as session:
+        final = await manual_documents.detail(session, pg_book[0], document_id)
+        assert final["entry_id"] == receipt["entry_id"]
+        assert final["revisions"][0]["posting"]["lines"][0]["amount"] == "100.00"
+        with pytest.raises(DBAPIError, match="(immutable|posted state)"):
+            await session.execute(text("UPDATE accounting.manual_document SET source='forged' WHERE id=:id"),
+                                  {"id": document_id})
+        await session.rollback()
 
 
 async def test_concurrent_replay_one_entry(pg_factory, pg_book, posting):

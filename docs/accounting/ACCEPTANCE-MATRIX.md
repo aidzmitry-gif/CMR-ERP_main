@@ -7,7 +7,9 @@ the accountant's close.  It is therefore an operating checklist, not a claim
 that 1C can already be retired.
 
 Current source branch: `agent/crm-acc-prod009`; `alembic heads` on 2026-09-26
-reports the single source head `0186`. Two focused tests on a disposable local
+reports the single development source head `0187`. The fixed first-release candidate
+remains at `0186`; this later manual-document change is not part of that release.
+Two focused tests on a disposable local
 PostgreSQL 16 database passed for the supplier-contract revocation migration
 and procurement receipt history; the temporary container was removed. The earlier local synthetic PostgreSQL
 [checkpoint](POSTGRES-ACCEPTANCE-2026-09-23.md) covers an empty-base upgrade
@@ -18,7 +20,7 @@ current target database or all later source migrations.
 | --- | --- | --- |
 | Separate books for each legal entity; account policy, rights and mandatory analytics | `accounting.organization`, policies, access grants and versioned accounts; [API checks](../../tests/accounting/test_api.py) and [accountant workspace](../../frontend/src/components/erp/accounting-view.tsx) | Accountant adopts the verified catalogue and policy for every legal entity; current statutory source must be confirmed. |
 | Balanced, immutable posting packages; preview before posting; correction rather than edit | [posting service](../../modules/accounting/service.py), immutable receipts and [entry transaction checks](../../tests/accounting/test_entry_transaction_postgres.py) | Run the full current package on an owned PostgreSQL copy and have the accountant approve pilot postings. |
-| Source documents, unposted queue, explicit manual confirmation and close blocking | [inbox controls](../../frontend/src/components/erp/accounting-controls.tsx), [close guard](../../modules/accounting/service.py), [API proof](../../tests/accounting/test_api.py) | Load real documents and resolve every period-related queue item. |
+| Source documents, unposted queue, explicit manual confirmation and close blocking | [inbox controls](../../frontend/src/components/erp/accounting-controls.tsx), [versioned manual documents](../../modules/accounting/manual_documents.py), [close guard](../../modules/accounting/service.py), [API proof](../../tests/accounting/test_manual_documents.py) | Load real documents and resolve every period-related queue item. The development-only manual document workflow needs integration and accountant acceptance before release. |
 | OSV, account activity, ledger drill-down, P&L, cash flow and balance without synthetic capital | [reports](../../modules/accounting/reports.py), [account activity UI](../../frontend/src/components/erp/accounting-account-activity.tsx), [view tests](../../frontend/src/components/erp/accounting-view.test.tsx) | Reconcile reports with bank, stock, settlements and the accountant's matched OSV pair. |
 | Purchases, purchase orders, procurement plan and supplier primary receipts | [procurement navigation](../../frontend/src/components/erp/procurement-nav.tsx), [all-date source-document register](../../frontend/src/components/erp/procurement-receipt-drafts.tsx), [read-only unlinked posting queue](../../frontend/src/components/erp/procurement-unlinked-purchases.tsx), [purchase receipt posting](../../frontend/src/components/erp/procurement-posted-receipt.tsx), [sales/procurement trace](SALES-PROCUREMENT-RESERVATION-TRACE.md) | Use real supplier documents and match stock, VAT and landed-cost results. The source register contains procurement-owned primary receipts of the selected legal entity. The separate queue exposes `inventory_purchase` postings with no same-entity saved primary receipt link; these entries are not supplier invoices, and their origin still requires explicit reconciliation. |
 | Invoice reservation, shipment, TN/TTN scenario, paid-invoice cancellation only after refund, and client document trace | [trace contract](SALES-PROCUREMENT-RESERVATION-TRACE.md), [TN/TTN readiness](tn-ttn-readiness.md), targeted sales/procurement PostgreSQL scenario tests | Approve the applicable form, numbering, signatories and external delivery process; issue documents only after that approval. |
@@ -31,6 +33,13 @@ current target database or all later source migrations.
 | Replacement of 1C | All rows above are necessary local groundwork | Two successive accepted monthly closes, quarterly cycle, trial annual reporting, documented reconciliation of every variance, and an authorized production release. |
 
 ## Current local evidence
+
+- Development slice `0187` adds numbered, versioned manual accounting documents.
+  The [draft workflow](MANUAL-DOCUMENT-DRAFTS.md) records author and server time
+  per save, exposes a register and changes in the accountant UI, blocks close
+  while a draft remains unposted, and posts only an exact saved revision.
+  Focused local API tests 12/12, UI tests 30/30 and one disposable PostgreSQL
+  revision/atomic-post test passed. This is not part of the fixed `0186` release.
 
 - On 2026-09-26, a fresh disposable PostgreSQL 16 database passed **2**
   supplier-contract/receipt-history checks at migration `0186` and **4**

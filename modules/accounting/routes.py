@@ -37,6 +37,7 @@ from modules.accounting import (
     input_vat_register,
     inventory_cost,
     inventory_issues,
+    manual_documents,
     opening_import,
     output_vat_register,
     payroll_applicability_review,
@@ -557,6 +558,38 @@ async def preview(org_id: int, data: PostingInput, ctx=Depends(member)):
     return {"digest": service.digest(data), "normative_verified": policy.normative_verified,
             "lines": [{**line.model_dump(mode="json"), "title": accounts[line.account].title}
                       for line in data.lines], "explanation": data.explanation}
+
+
+@router.get("/organizations/{org_id}/manual-documents")
+async def manual_document_list(org_id: int, before_id: int | None = Query(default=None, gt=0),
+                               ctx=Depends(member)):
+    return await manual_documents.list_documents(ctx[0], org_id, before_id)
+
+
+@router.get("/organizations/{org_id}/manual-documents/{document_id}")
+async def manual_document_detail(org_id: int, document_id: int, ctx=Depends(member)):
+    return await manual_documents.detail(ctx[0], org_id, document_id)
+
+
+@router.post("/organizations/{org_id}/manual-documents", status_code=201)
+async def manual_document_create(org_id: int, data: manual_documents.ManualDocumentCreate,
+                                 ctx=Depends(member)):
+    return await manual_documents.create(ctx[0], org_id, data, ctx[1], ctx[2])
+
+
+@router.put("/organizations/{org_id}/manual-documents/{document_id}")
+async def manual_document_edit(org_id: int, document_id: int,
+                               data: manual_documents.ManualDocumentEdit,
+                               ctx=Depends(member)):
+    return await manual_documents.edit(ctx[0], org_id, document_id, data, ctx[1], ctx[2])
+
+
+@router.post("/organizations/{org_id}/manual-documents/{document_id}/post")
+async def manual_document_post(org_id: int, document_id: int,
+                               data: manual_documents.ManualDocumentPost,
+                               ctx=Depends(member), core=Depends(get_core)):
+    return await manual_documents.post(ctx[0], org_id, document_id, data,
+                                       ctx[1], ctx[2], core.services.event_bus)
 
 
 @router.post("/organizations/{org_id}/entries", status_code=201)

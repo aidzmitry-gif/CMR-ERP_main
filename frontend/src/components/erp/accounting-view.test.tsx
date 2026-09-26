@@ -12,6 +12,8 @@ const report = { organization_id: 1, status: "preliminary", pending_documents: 0
   balance: { equity: "1000.00", difference: "0.00" }, pnl: { income: "180.00", expenses: "100.00", profit: "80.00" }, cashflow: { closing: "1080.00" } };
 const fetchMock = vi.fn();
 const respond = (data: unknown, ok = true) => Promise.resolve({ ok, json: async () => data });
+const digest = "a".repeat(64);
+let manualDraft: { id: number; organization_id: number; number: string; source: string; posting_date: string; version: number; status: string; entry_id: number | null; updated_at: string; revisions: { version: number; actor: string; created_at: string; digest: string; posting: Record<string, unknown> }[] } | null;
 function openPage(section: string, page: string) {
   fireEvent.click(screen.getByRole("button", { name: section, exact: true }));
   if (section !== page) fireEvent.click(screen.getByRole("button", { name: page, exact: true }));
@@ -26,13 +28,31 @@ function fillManualOperation() {
 }
 
 beforeEach(() => {
+  manualDraft = null;
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockImplementation((input: string, init?: RequestInit) => {
     if (input.endsWith("/organizations")) return respond([{ id: 1, name: "Тестовая компания", unp: "999999999" }, { id: 2, name: "Вторая компания", unp: "888888888" }]);
     if (input.includes("/accounts?")) return respond([{ id: 1, code: "41", title: "Товары", cash: false, required_dimensions: [] }, { id: 2, code: "60", title: "Поставщики", cash: false, required_dimensions: [] }]);
     if (input.endsWith("/policies")) return respond([{ id: 1, effective_from: "2020-01-01", reference: "Test", normative_verified: false }]);
     if (input.includes("/reports?")) return respond(input.includes("/2/") ? { ...report, organization_id: 2, trial_balance: [], movements: [] } : report);
-    if (input.endsWith("/preview")) { const body = JSON.parse(String(init?.body)); return respond({ digest: "test", explanation: body.explanation, lines: body.lines, normative_verified: false }); }
+    if (input.endsWith("/preview")) { const body = JSON.parse(String(init?.body)); return respond({ digest, explanation: body.explanation, lines: body.lines, normative_verified: false }); }
+    if (input.endsWith("/manual-documents")) {
+      if (!init?.body) return respond({ organization_id: 1, items: manualDraft ? [{ ...manualDraft, revisions: undefined }] : [], next_before_id: null });
+      const body = JSON.parse(String(init.body));
+      manualDraft = { id: 8, organization_id: 1, number: "БС-8", source: body.posting.source, posting_date: body.posting.posting_date, version: 1, status: "draft", entry_id: null, updated_at: "2026-09-26T10:00:00Z", revisions: [{ version: 1, actor: "accountant", created_at: "2026-09-26T10:00:00Z", digest, posting: body.posting }] };
+      return respond(manualDraft);
+    }
+    if (input.endsWith("/manual-documents/8")) {
+      if (init?.method === "PUT") {
+        const body = JSON.parse(String(init.body));
+        manualDraft = { ...manualDraft!, source: body.posting.source, posting_date: body.posting.posting_date, version: manualDraft!.version + 1, updated_at: "2026-09-26T11:00:00Z", revisions: [...manualDraft!.revisions, { version: manualDraft!.version + 1, actor: "chief", created_at: "2026-09-26T11:00:00Z", digest, posting: body.posting }] };
+      }
+      return respond(manualDraft);
+    }
+    if (input.endsWith("/manual-documents/8/post")) {
+      manualDraft = { ...manualDraft!, status: "posted", entry_id: 6 };
+      return respond({ document_id: 8, document_version: manualDraft.version, entry_id: 6, digest });
+    }
     if (input.endsWith("/entries")) {
       const body = JSON.parse(String(init?.body));
       return respond({ id: 6, organization_id: 1, source: body.source,
@@ -208,7 +228,7 @@ describe("AccountingView", () => {
     fireEvent.click(screen.getByText("№ 5 · Поступление 1"));
     expect(await screen.findByText("Контрольное поступление")).toBeInTheDocument();
   });
-  it("requires preview and explicit confirmation before posting", async () => {
+  it("saves a numbered manual document before explicit posting", async () => {
     render(<AccountingView />);
     await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
     await screen.findByText(/включительно: 0\./);
@@ -218,47 +238,80 @@ describe("AccountingView", () => {
     fillManualOperation();
     expect(screen.queryByText("Подтвердить и провести")).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("Проверить проводки"));
+    expect(await screen.findByRole("button", { name: "Подтвердить и провести" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(await screen.findByText("БС-8 · версия 1 сохранена.")).toBeInTheDocument();
     fireEvent.click(await screen.findByText("Подтвердить и провести"));
     expect(await screen.findByText("Операция № 6 проведена.")).toBeInTheDocument();
-    const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/entries"));
-    expect(JSON.parse(call?.[1].body).lines[0].amount).toBe("100.00");
+    const call = fetchMock.mock.calls.find(([url, init]) => String(url).endsWith("/manual-documents") && init?.body);
+    expect(JSON.parse(call?.[1].body).posting.lines[0].amount).toBe("100.00");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/manual-documents/8/post"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith("/entries") && init?.body)).toBe(false);
   });
   it("closes a manual operation only after a matching server receipt", async () => {
     const original = fetchMock.getMockImplementation()!;
     let finish!: (value: unknown) => void;
-    fetchMock.mockImplementation((url: string, init?: RequestInit) => url.endsWith("/entries")
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url.endsWith("/manual-documents/8/post")
       ? new Promise((resolve) => { finish = resolve; }) : original(url, init));
     render(<AccountingView />);
     await screen.findByText(/включительно: 0\./);
     openPage("Документы", "Ручная операция");
     fillManualOperation();
     fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сохранить" }));
+    await screen.findByText("БС-8 · версия 1 сохранена.");
     fireEvent.click(await screen.findByRole("button", { name: "Провести и закрыть" }));
     expect(screen.getByLabelText("Основание")).toHaveValue("Справка 1");
     expect(screen.getByRole("button", { name: "Провести и закрыть" })).toBeDisabled();
-    const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/entries"));
-    const body = JSON.parse(String(call?.[1]?.body));
-    await act(async () => finish({ ok: true, json: async () => ({ id: 6, organization_id: 1,
-      source: body.source, source_version: body.source_version, operation: body.operation,
-      policy_id: body.policy_id, posting_date: body.posting_date, digest: "test" }) }));
+    await act(async () => finish({ ok: true, json: async () => ({ document_id: 8, document_version: 1, entry_id: 6, digest }) }));
     expect(await screen.findByText("Операция № 6 проведена, форма закрыта.")).toBeInTheDocument();
     expect(screen.queryByLabelText("Основание")).not.toBeInTheDocument();
   });
   it("keeps the manual operation open when the response belongs to another book", async () => {
     const original = fetchMock.getMockImplementation()!;
-    fetchMock.mockImplementation((url: string, init?: RequestInit) => url.endsWith("/entries")
-      ? respond({ id: 6, organization_id: 2, source: "Справка 1", source_version: 1,
-        operation: "manual", policy_id: 1, posting_date: new Date().toISOString().slice(0, 10), digest: "test" })
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url.endsWith("/manual-documents/8/post")
+      ? respond({ document_id: 9, document_version: 1, entry_id: 6, digest })
       : original(url, init));
     render(<AccountingView />);
     await screen.findByText(/включительно: 0\./);
     openPage("Документы", "Ручная операция");
     fillManualOperation();
     fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сохранить" }));
+    await screen.findByText("БС-8 · версия 1 сохранена.");
     fireEvent.click(await screen.findByRole("button", { name: "Провести и закрыть" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("ERP не подтвердила проведение этой операции");
     expect(screen.getByLabelText("Основание")).toHaveValue("Справка 1");
     expect(screen.getByRole("button", { name: "Провести и закрыть" })).toBeEnabled();
+  });
+  it("reopens a saved document by number and shows author, time and changed fields", async () => {
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    openPage("Документы", "Ручная операция");
+    fillManualOperation();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сохранить и закрыть" }));
+    expect(await screen.findByText("БС-8 · версия 1 сохранена и закрыта.")).toBeInTheDocument();
+    openPage("Документы", "Ручная операция");
+    fireEvent.click(await screen.findByRole("button", { name: /БС-8 · Справка 1/ }));
+    expect(await screen.findByRole("region", { name: "История справки" })).toHaveTextContent("accountant · 2026-09-26T10:00:00Z");
+    fireEvent.change(screen.getByLabelText("Содержание"), { target: { value: "Поступление материалов по акту" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сохранить", exact: true }));
+    expect(await screen.findByText("БС-8 · версия 2 сохранена.")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "История справки" })).toHaveTextContent("chief · 2026-09-26T11:00:00Z");
+    expect(screen.getByRole("region", { name: "История справки" })).toHaveTextContent("Содержание: «Поступление материалов» → «Поступление материалов по акту».");
+  });
+  it("keeps unsaved manual changes when section navigation is rejected", async () => {
+    const confirmation = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    openPage("Документы", "Ручная операция");
+    fireEvent.change(screen.getByLabelText("Основание"), { target: { value: "Не сохранено" } });
+    fireEvent.click(screen.getByRole("button", { name: "Отчёты", exact: true }));
+    expect(confirmation).toHaveBeenCalled();
+    expect(screen.getByLabelText("Основание")).toHaveValue("Не сохранено");
+    confirmation.mockRestore();
   });
   it("clears the previous organization report on selection change", async () => {
     render(<AccountingView />);
