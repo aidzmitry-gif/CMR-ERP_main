@@ -5,8 +5,8 @@ from datetime import datetime
 
 import pytest
 
-from core.domain.models import User
-from modules.sales.models import CallLog, CrmTimelineAttachment, CrmTimelineComment
+from core.domain.models import Counterparty, User
+from modules.sales.models import CallLog, CrmClient, CrmTimelineAttachment, CrmTimelineComment
 
 
 def _sales_headers(username: str) -> dict[str, str]:
@@ -143,6 +143,55 @@ async def test_calls_follow_deal_scope_and_unlinked_confirmed_owner(api, session
     assert from_visible.status_code == 200, from_visible.text
     linked_deal = await api.get(f"/sales/deals/{from_visible.json()['deal_id']}", headers=headers)
     assert linked_deal.status_code == 200 and linked_deal.json()["owner_id"] == 301
+
+
+@pytest.mark.asyncio
+async def test_call_review_filters_and_client_link_use_distinct_authorized_ids(api, session):
+    session.add_all([
+        User(username="review-owner", full_name="Owner", employee_id=321,
+             department="Продажи", role="sales", status="active", deal_visibility="own"),
+        User(username="review-other", full_name="Other", employee_id=322,
+             department="Продажи", role="sales", status="active", deal_visibility="own"),
+    ])
+    session.add(Counterparty(name="Unrelated master", unp="987654321"))
+    await session.flush()
+    cp = Counterparty(name="Synthetic 1C company", unp="123456789")
+    session.add(cp)
+    await session.flush()
+    own_client = CrmClient(name=cp.name, name_key="review-owner-company", owner_id=321,
+                           counterparty_id=cp.id, request_key="review-owner-key",
+                           request_hash="owner-hash", created_by="test")
+    other_client = CrmClient(name=cp.name, name_key="review-other-company", owner_id=322,
+                             counterparty_id=cp.id, request_key="review-other-key",
+                             request_hash="other-hash", created_by="test")
+    session.add_all([own_client, other_client])
+    await session.commit()
+    assert cp.id != own_client.id
+    deal = await _create(api, "REVIEW-LINKED", owner_id=321)
+    calls = [
+        CallLog(call_id="REVIEW-UNLINKED-OWN", counterparty_id=cp.id, owner_id=321),
+        CallLog(call_id="REVIEW-LINKED-OWN", counterparty_id=cp.id,
+                owner_id=321, deal_id=deal["id"]),
+        CallLog(call_id="REVIEW-UNLINKED-OTHER", counterparty_id=cp.id, owner_id=322),
+        CallLog(call_id="REVIEW-UNRELATED", owner_id=321),
+    ]
+    session.add_all(calls)
+    await session.commit()
+
+    owner_headers = _sales_headers("review-owner")
+    own = await api.get(f"/sales/calls?counterparty_id={cp.id}&unlinked=true",
+                        headers=owner_headers)
+    assert own.status_code == 200, own.text
+    assert [row["id"] for row in own.json()] == [calls[0].id]
+    assert own.json()[0]["crm_client_id"] == own_client.id
+    all_scope = await api.get(f"/sales/calls?counterparty_id={cp.id}&unlinked=true")
+    assert all_scope.status_code == 200
+    assert {row["id"] for row in all_scope.json()} == {calls[0].id, calls[2].id}
+    assert all(row["crm_client_id"] is None for row in all_scope.json())
+    assert (await api.get("/sales/calls?counterparty_id=0")).status_code == 422
+    assert (await api.get(
+        "/sales/calls?counterparty_id=9223372036854775808"
+    )).status_code == 422
 
 
 @pytest.mark.asyncio
