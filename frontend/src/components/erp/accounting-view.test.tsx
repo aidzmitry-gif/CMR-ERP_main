@@ -365,6 +365,33 @@ describe("AccountingView", () => {
       counterparty_revision: "3",
     });
   });
+  it("selects an accounting item by MDM SKU ID and saves its historical snapshot", async () => {
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes("/accounts?")) return respond([
+        { id: 1, code: "41", title: "Товары", cash: false, required_dimensions: ["sku"] },
+        { id: 2, code: "60", title: "Поставщики", cash: false, required_dimensions: [] },
+      ]);
+      if (url.includes("/inventory/skus?q=")) return respond({ organization_id: 1,
+        items: [{ id: 71, code: "ITEM-71", title: "Мотор", unit: "шт" }] });
+      return original(url, init);
+    });
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    openPage("Документы", "Ручная операция");
+    fillManualOperation();
+    expect(screen.queryByLabelText("Номенклатура")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Поиск номенклатуры строки 1"), { target: { value: "Мотор" } });
+    fireEvent.click(screen.getByRole("button", { name: "Найти номенклатуру строки 1" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Выбрать ITEM-71 · Мотор · шт · ID 71" }));
+    fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сохранить", exact: true }));
+    expect(await screen.findByText("БС-8 · версия 1 сохранена.")).toBeInTheDocument();
+    const saved = fetchMock.mock.calls.find(([url, init]) => String(url).endsWith("/manual-documents") && init?.body);
+    expect(JSON.parse(String(saved?.[1]?.body)).posting.lines[0].dimensions).toEqual({
+      sku_id: "71", sku: "ITEM-71", sku_title: "Мотор", sku_unit: "шт",
+    });
+  });
   it("clears the previous organization report on selection change", async () => {
     render(<AccountingView />);
     await screen.findByRole("option", { name: "Тестовая компания · 999999999" });

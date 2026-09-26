@@ -33,6 +33,12 @@ posted entry can still be replayed exactly after the directory changes; its
 saved ledger dimensions and document revisions are not rewritten. Other
 analytical fields are not yet all bound to reference IDs.
 
+Where an account requires `sku`, the form searches the shared active SKU
+directory and saves ID, code, title and unit. New manual previews, saves and
+postings reject a free-text code or stale SKU snapshot, including the legacy
+direct-entry route. A posted entry retains its historical SKU description after
+the directory changes and can be replayed exactly.
+
 An erroneous **unposted** draft can be annulled with a required reason.
 Cancellation creates a separate immutable receipt with author and server time;
 the numbered document and all prior revisions remain readable. The cancelled

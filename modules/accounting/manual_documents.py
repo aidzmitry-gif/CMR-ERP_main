@@ -20,6 +20,7 @@ from modules.accounting.models import (
     Period,
 )
 from modules.accounting.schemas import Input, PostingInput
+from modules.accounting.sku_snapshot import verified_sku_snapshot
 
 
 class ManualDocumentCreate(Input):
@@ -51,17 +52,23 @@ def require_manual(posting: PostingInput, role: str):
 
 
 async def verify_analytic_references(session, posting: PostingInput):
-    """New saves cannot carry a free-text or stale counterparty reference."""
-    checked = set()
+    """New saves cannot carry free-text or stale directory references."""
+    checked_counterparties = set()
+    checked_skus = set()
     for line in posting.lines:
         dimensions = line.dimensions
-        if not {"counterparty", "counterparty_id", "counterparty_unp", "counterparty_revision"} & dimensions.keys():
-            continue
-        snapshot = tuple(dimensions.get(key, "") for key in
-                         ("counterparty_id", "counterparty", "counterparty_unp", "counterparty_revision"))
-        if snapshot not in checked:
-            await verified_counterparty(session, dimensions)
-            checked.add(snapshot)
+        if {"counterparty", "counterparty_id", "counterparty_unp", "counterparty_revision"} & dimensions.keys():
+            snapshot = tuple(dimensions.get(key, "") for key in
+                             ("counterparty_id", "counterparty", "counterparty_unp", "counterparty_revision"))
+            if snapshot not in checked_counterparties:
+                await verified_counterparty(session, dimensions)
+                checked_counterparties.add(snapshot)
+        if {"sku", "sku_id", "sku_title", "sku_unit"} & dimensions.keys():
+            snapshot = tuple(dimensions.get(key, "") for key in
+                             ("sku_id", "sku", "sku_title", "sku_unit"))
+            if snapshot not in checked_skus:
+                await verified_sku_snapshot(session, dimensions)
+                checked_skus.add(snapshot)
 
 
 async def verify_new_manual_references(session, org_id: int, posting: PostingInput):

@@ -190,3 +190,49 @@ async def test_manual_counterparty_snapshot_requires_directory_id_and_stays_hist
     assert replay.status_code == 201 and replay.json()["id"] == confirmed.json()["entry_id"]
     saved_history = (await client.get(f"{path}/{document_id}")).json()["revisions"]
     assert saved_history[0]["posting"]["lines"][1]["dimensions"]["counterparty"] == "supplier1"
+
+
+async def test_manual_sku_snapshot_requires_directory_id_and_stays_historical(client, db, book, posting):
+    from core.domain.models import Sku
+    from modules.accounting.schemas import PostingInput
+
+    db.add(Sku(id=71, code="ITEM-71", title="Motor", unit="шт", is_active=True))
+    await db.commit()
+    path = f"/accounting/organizations/{book[0]}/manual-documents"
+    payload = posting("MANUAL-SKU").model_dump(mode="json")
+    payload["lines"][0]["dimensions"] = {"sku": "ITEM-71"}
+    assert (await client.post(path, json={"key": str(uuid4()), "posting": payload})).status_code == 422
+    assert (await client.post(f"/accounting/organizations/{book[0]}/preview", json=payload)).status_code == 422
+    assert (await client.post(f"/accounting/organizations/{book[0]}/entries", json=payload)).status_code == 422
+
+    payload["lines"][0]["dimensions"] = {
+        "sku_id": "71", "sku": "ITEM-71", "sku_title": "Motor", "sku_unit": "шт",
+    }
+    saved = await client.post(path, json={"key": str(uuid4()), "posting": payload})
+    assert saved.status_code == 201, saved.text
+    document_id = saved.json()["id"]
+    sku = await db.get(Sku, 71)
+    sku.title = "Motor updated"
+    await db.commit()
+    stale = await client.post(f"{path}/{document_id}/post", json={
+        "key": str(uuid4()), "expected_version": 1,
+        "digest": service.digest(PostingInput.model_validate(payload)),
+    })
+    assert stale.status_code == 422 and "select it again" in stale.text
+    await db.refresh(sku)
+    payload["lines"][0]["dimensions"]["sku_title"] = sku.title
+    edited = await client.put(f"{path}/{document_id}", json={
+        "key": str(uuid4()), "expected_version": 1, "posting": payload,
+    })
+    assert edited.status_code == 200 and edited.json()["version"] == 2
+    confirmed = await client.post(f"{path}/{document_id}/post", json={
+        "key": str(uuid4()), "expected_version": 2,
+        "digest": service.digest(PostingInput.model_validate(payload)),
+    })
+    assert confirmed.status_code == 200, confirmed.text
+    sku.title = "Motor renamed again"
+    await db.commit()
+    entry = (await client.get(f"/accounting/organizations/{book[0]}/entries/{confirmed.json()['entry_id']}")).json()
+    assert entry["lines"][0]["dimensions"]["sku_title"] == "Motor updated"
+    replay = await client.post(f"/accounting/organizations/{book[0]}/entries", json=payload)
+    assert replay.status_code == 201 and replay.json()["id"] == confirmed.json()["entry_id"]

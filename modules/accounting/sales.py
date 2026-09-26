@@ -7,7 +7,6 @@ from typing import Annotated
 from pydantic import BeforeValidator, Field
 from sqlalchemy import select, text
 
-from core.domain.models import Sku
 from modules.accounting import inventory_cost, inventory_issues, service
 from modules.accounting.counterparty_snapshot import verified_counterparty
 from modules.accounting.models import Entry, InventorySaleReceipt
@@ -21,6 +20,7 @@ from modules.accounting.schemas import (
     PostingInput,
     exact,
 )
+from modules.accounting.sku_snapshot import verified_sku_snapshot
 
 
 class SaleSkuIdentity(Input):
@@ -81,13 +81,12 @@ async def verified_sku(session, document):
     identity = document.sku_identity
     if identity is None:
         raise service.AccountingError("Select the item from the SKU directory")
-    sku = await session.scalar(select(Sku).where(Sku.id == identity.id)
-                               .with_for_update(read=True).execution_options(populate_existing=True))
-    if (sku is None or not sku.is_active or document.sku != sku.code
-            or identity.code != sku.code or identity.title != sku.title
-            or identity.unit != sku.unit):
+    if identity.code != document.sku:
         raise service.AccountingError("SKU directory record changed; select it again")
-    return sku
+    return await verified_sku_snapshot(session, {
+        "sku_id": str(identity.id), "sku": identity.code,
+        "sku_title": identity.title, "sku_unit": identity.unit,
+    })
 
 
 def belongs(code, root):

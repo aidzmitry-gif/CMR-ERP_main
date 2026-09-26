@@ -49,6 +49,11 @@ current target database or all later source migrations.
   with targeted API, sales regression, UI and disposable PostgreSQL tests. The
   contract, warehouse and other manual analytical fields still require their
   own reference binding before this meets the full document standard.
+- The next local source change binds manual `sku` analytics to the shared active
+  SKU ID, code, title and unit. Free text and stale snapshots fail before new
+  preview, save or post; a completed entry keeps its historical description.
+  Focused API 6/6, UI 33/33, TypeScript, Ruff and disposable PostgreSQL 1/1
+  checks passed. Contract, warehouse and remaining manual analytics are open.
 
 - On 2026-09-26, a fresh disposable PostgreSQL 16 database passed **2**
   supplier-contract/receipt-history checks at migration `0186` and **4**

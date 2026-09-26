@@ -1307,6 +1307,61 @@ async def test_manual_document_counterparty_snapshot_rechecked_on_postgres(pg_fa
         assert lines[1].dimensions["counterparty"] == "Supplier renamed in PG"
 
 
+async def test_manual_document_sku_snapshot_rechecked_on_postgres(pg_factory, pg_book, posting):
+    from uuid import uuid4
+
+    from core.domain.models import Sku
+    from modules.accounting import manual_documents
+    from modules.accounting.schemas import PostingInput
+
+    async with pg_factory() as session:
+        connection = await session.connection()
+
+        def catalog(sync):
+            Sku.metadata.tables["ref_nomenclature_category"].create(sync)
+            Sku.__table__.create(sync)
+
+        await connection.run_sync(catalog)
+        session.add(Sku(id=71, code="PG-ITEM", title="Motor", unit="шт", is_active=True))
+        await session.commit()
+    source = posting("PG-MANUAL-SKU").model_dump(mode="json")
+    source["lines"][0]["dimensions"] = {
+        "sku_id": "71", "sku": "PG-ITEM", "sku_title": "Motor", "sku_unit": "шт",
+    }
+    first = PostingInput.model_validate(source)
+    async with pg_factory() as session:
+        saved = await manual_documents.create(session, pg_book[0],
+            manual_documents.ManualDocumentCreate(key=uuid4(), posting=first), "tester", "chief")
+        await session.commit()
+    async with pg_factory() as session:
+        row = await session.get(Sku, 71)
+        row.title = "Motor updated in PG"
+        await session.commit()
+    async with pg_factory() as session:
+        with pytest.raises(service.AccountingError, match="select it again"):
+            await manual_documents.post(session, pg_book[0], saved["id"],
+                manual_documents.ManualDocumentPost(key=uuid4(), expected_version=1,
+                                                    digest=service.digest(first)), "tester", "chief")
+        await session.rollback()
+    async with pg_factory() as session:
+        source["lines"][0]["dimensions"]["sku_title"] = "Motor updated in PG"
+        current = PostingInput.model_validate(source)
+        revised = await manual_documents.edit(session, pg_book[0], saved["id"],
+            manual_documents.ManualDocumentEdit(key=uuid4(), expected_version=1,
+                                                posting=current), "tester", "chief")
+        assert revised["version"] == 2
+        receipt = await manual_documents.post(session, pg_book[0], saved["id"],
+            manual_documents.ManualDocumentPost(key=uuid4(), expected_version=2,
+                                                digest=service.digest(current)), "tester", "chief")
+        await session.commit()
+    async with pg_factory() as session:
+        from modules.accounting.models import Line
+
+        lines = (await session.scalars(select(Line).where(Line.entry_id == receipt["entry_id"]))).all()
+        assert lines[0].dimensions["sku_id"] == "71"
+        assert lines[0].dimensions["sku_title"] == "Motor updated in PG"
+
+
 async def test_concurrent_replay_one_entry(pg_factory, pg_book, posting):
     async def writer():
         async with pg_factory() as session:
