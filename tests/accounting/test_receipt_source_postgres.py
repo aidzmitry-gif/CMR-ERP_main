@@ -1,8 +1,12 @@
 """Actual module wiring and role middleware for the accountant source viewer."""
 # ruff: noqa: F811
 import asyncio
+from datetime import date
+from uuid import uuid4
 
+import pytest
 from sqlalchemy import func, select, text, update
+from sqlalchemy.exc import DBAPIError
 
 from modules.accounting import service
 from modules.accounting.models import AccessGrant, Entry, Period
@@ -18,6 +22,7 @@ from tests.accounting.test_procurement_receipt_drafts import (
     ensure_receipt_catalog_sku,
     source_options,
 )
+from tests.accounting.test_zero_value_output_cost_postgres import run_migration
 from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 
@@ -53,6 +58,142 @@ async def test_receipt_save_replays_exact_create_and_edit_postgres(issuance_pg, 
     async with factory() as session:
         assert await session.scalar(select(func.count()).select_from(ReceiptDocument)) == 1
         assert await session.scalar(select(func.count()).select_from(ReceiptRevision)) == 2
+
+
+async def test_pg_posted_receipt_correction_draft_keeps_exact_source_and_blocks_posting(issuance_pg, pg_book):
+    api, factory = issuance_pg
+    api.headers["X-User"] = "tester"
+    api.headers["X-User-Roles"] = "director"
+    async with factory() as session:
+        await session.execute(text(
+            "SELECT setval(pg_get_serial_sequence('accounting.account', 'id'), "
+            "(SELECT max(id) FROM accounting.account))"))
+        path, options = await source_options(api, session, pg_book)
+    preview = await api.post(path + "/preview", json=options)
+    assert preview.status_code == 200, preview.text
+    confirmed = await api.post(path + "/confirm", json={**options, "digest": preview.json()["digest"]})
+    assert confirmed.status_code == 201, confirmed.text
+    original_id = int(path.rsplit("/", 1)[1])
+    correction_path = path + "/correction-drafts"
+    command = {"key": str(uuid4()), "expected_version": 1,
+               "expected_entry_id": confirmed.json()["entry_id"]}
+    created, concurrent = await asyncio.gather(
+        api.post(correction_path, json=command), api.post(correction_path, json=command))
+    assert created.status_code == concurrent.status_code == 201, (created.text, concurrent.text)
+    initial = created.json()
+    assert concurrent.json() == initial
+    assert initial["correction_of"] == {"receipt_id": original_id, "version": 1,
+                                        "entry_id": confirmed.json()["entry_id"]}
+    assert (await api.post(correction_path, json=command)).json() == initial
+
+    second_source = await api.post(path.rsplit("/", 1)[0], json={"key": "pg-second-source", "document": document()})
+    assert second_source.status_code == 201, second_source.text
+    collision = await api.post(
+        f"/procurement/organizations/{pg_book[0]}/receipt-documents/{second_source.json()['id']}/correction-drafts",
+        json=command)
+    assert collision.status_code == 409
+
+    edited = await api.put(f"/procurement/organizations/{pg_book[0]}/receipt-documents/{initial['id']}", json={
+        "key": str(uuid4()), "expected_version": 1,
+        "document": {**initial["revisions"][0]["document"], "explanation": "Synthetic correction review"},
+    })
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["version"] == 2 and edited.json()["correction_of"] == initial["correction_of"]
+    assert (await api.post(correction_path, json=command)).json() == edited.json()
+    assert (await api.post(f"/procurement/organizations/{pg_book[0]}/receipt-documents/{initial['id']}/preview",
+                           json={**options, "expected_version": 2})).status_code == 409
+    wms = await api.get(f"/wms/organizations/{pg_book[0]}/primary-receipts/{initial['id']}/source",
+                        params={"expected_version": 2})
+    assert wms.status_code == 409 and "Correction draft" in wms.text
+
+    async with factory() as session:
+        revision = await session.scalar(select(ReceiptRevision).where(
+            ReceiptRevision.receipt_id == initial["id"], ReceiptRevision.version == 1))
+        original_revision = await session.scalar(select(ReceiptRevision).where(
+            ReceiptRevision.receipt_id == original_id, ReceiptRevision.version == 1))
+        assert revision.document == original_revision.document
+        with pytest.raises(DBAPIError, match="exact posted source revision"):
+            async with session.begin_nested():
+                future_id = await session.scalar(text(
+                    "SELECT nextval(pg_get_serial_sequence('procurement.receipt_document', 'id'))"
+                ))
+                session.add(Entry(
+                    organization_id=pg_book[0], source=f"procurement:receipt:{future_id}",
+                    source_version=1, operation="manual", document_date=date(2026, 9, 3),
+                    operation_date=date(2026, 9, 3), posting_date=date(2026, 9, 3),
+                    policy_id=pg_book[1], rule_version="manual-v1",
+                    explanation="Entry inserted before a future correction draft",
+                    opening=False, correction_of=None, digest="c" * 64, actor="tester",
+                ))
+                await session.flush()
+                session.add(ReceiptDocument(
+                    id=future_id, organization_id=pg_book[0], source_key=str(uuid4()),
+                    current_version=1, status="draft", created_by="tester",
+                    correction_of_receipt_id=original_id, correction_of_version=1,
+                    correction_of_entry_id=confirmed.json()["entry_id"],
+                ))
+                await session.flush()
+                session.add(ReceiptRevision(
+                    receipt_id=future_id, version=1, request_key=None,
+                    document=original_revision.document, actor="tester",
+                ))
+                await session.flush()
+                await session.execute(text(
+                    "SET CONSTRAINTS procurement.receipt_correction_exact_revision IMMEDIATE"
+                ))
+        with pytest.raises(DBAPIError, match="separately approved correction workflow"):
+            async with session.begin_nested():
+                session.add(Entry(
+                    organization_id=pg_book[0], source=f"procurement:receipt:{initial['id']}",
+                    source_version=1, operation="manual", document_date=date(2026, 9, 3),
+                    operation_date=date(2026, 9, 3), posting_date=date(2026, 9, 3),
+                    policy_id=pg_book[1], rule_version="manual-v1", explanation="Direct SQL bypass",
+                    opening=False, correction_of=None, digest="b" * 64, actor="tester",
+                ))
+                await session.flush()
+        with pytest.raises(DBAPIError, match="separately approved correction workflow"):
+            async with session.begin_nested():
+                await session.execute(text("""
+                    INSERT INTO procurement.receipt_posting
+                    (receipt_id, version, entry_id, options, digest, actor)
+                    VALUES (:receipt_id, 2, :entry_id, '{}'::json, :digest, 'tester')
+                """), {"receipt_id": initial["id"], "entry_id": confirmed.json()["entry_id"],
+                      "digest": "a" * 64})
+        with pytest.raises(DBAPIError, match="Correction draft cannot be prepared"):
+            async with session.begin_nested():
+                await session.execute(text("""
+                    INSERT INTO wms.primary_receipt_binding
+                    (receipt_id, organization_id, request_key, source_receipt_id, source_version,
+                     command, source_snapshot, line_bindings, actor)
+                    VALUES (999999, :org_id, :request_key, :source_id, 2, '{}'::json,
+                            '{}'::json, '[]'::json, 'tester')
+                """), {"org_id": pg_book[0], "request_key": str(uuid4()), "source_id": initial["id"]})
+        assert await session.scalar(select(func.count()).select_from(ReceiptPosting)) == 1
+        assert await session.scalar(select(func.count()).select_from(Entry)) == 1
+        with pytest.raises(DBAPIError, match="Cannot downgrade while receipt correction drafts exist"):
+            await run_migration(session, "0190_procurement_receipt_correction_drafts.py", "downgrade")
+        await session.rollback()
+
+
+async def test_pg_receipt_correction_migration_empty_roundtrip(pg_factory):
+    async with pg_factory() as session:
+        assert await session.scalar(text(
+            "SELECT to_regprocedure('accounting.reject_correction_receipt_entry()') IS NOT NULL"
+        ))
+        await run_migration(session, "0190_procurement_receipt_correction_drafts.py", "downgrade")
+        assert not await session.scalar(text(
+            "SELECT to_regprocedure('accounting.reject_correction_receipt_entry()') IS NOT NULL"
+        ))
+        assert await session.scalar(text("""
+            SELECT count(*) FROM information_schema.columns
+            WHERE table_schema='procurement' AND table_name='receipt_document'
+              AND column_name LIKE 'correction_of_%'
+        """)) == 0
+        await run_migration(session, "0190_procurement_receipt_correction_drafts.py", "upgrade")
+        assert await session.scalar(text(
+            "SELECT to_regprocedure('accounting.reject_correction_receipt_entry()') IS NOT NULL"
+        ))
+        await session.commit()
 
 
 async def test_finance_reads_posted_primary_without_procurement_access(issuance_pg, pg_book):

@@ -72,6 +72,7 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0187_manual_document_drafts.py",
     "0188_manual_document_void.py",
     "0189_inventory_issue_directory_identity.py",
+    "0190_procurement_receipt_correction_drafts.py",
 )
 
 

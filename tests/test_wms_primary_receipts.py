@@ -138,6 +138,38 @@ async def test_primary_change_requires_reconciliation_after_physical_preparation
     assert report.json()["receipts"][0]["source_version"] == 1
 
 
+async def test_correction_draft_is_not_a_warehouse_primary_source(api, session, services):
+    from datetime import date
+
+    from modules.accounting.models import Account, Policy
+    from tests.accounting.test_procurement_receipt_drafts import source_options
+
+    org, _, core, user, _ = await setup(api, session, services)
+    policy = Policy(organization_id=org, effective_from=date(2026, 1, 1), reference="Synthetic WMS test",
+                    inventory_method="specific", allocation_basis="direct_cost",
+                    depreciation_method="straight_line", normative_reference="synthetic",
+                    normative_verified=True, approved_by="wms-owner-test")
+    session.add(policy)
+    session.add(Account(organization_id=org, code="60", title="Synthetic supplier", category="liability",
+                        valid_from=date(2026, 1, 1), required_dimensions=[], currency_tracking=False,
+                        quantity_tracking=False, cash=False, normative_ref="synthetic"))
+    await session.flush()
+    path, options = await source_options(api, session, (org, policy.id), unit="кг")
+    preview = await api.post(path + "/preview", json=options)
+    assert preview.status_code == 200, preview.text
+    posted = await api.post(path + "/confirm", json={**options, "digest": preview.json()["digest"]})
+    assert posted.status_code == 201, posted.text
+    original_id = int(path.rsplit("/", 1)[1])
+    correction = await api.post(path + "/correction-drafts", json={
+        "key": str(uuid4()), "expected_version": 1, "expected_entry_id": posted.json()["entry_id"],
+    })
+    assert correction.status_code == 201, correction.text
+    with pytest.raises(ValueError, match="Correction drafts cannot be prepared"):
+        await create_from_primary(session, core, user, org, correction.json()["id"], command())
+    assert await session.scalar(select(func.count()).select_from(PrimaryReceiptBinding)) == 0
+    assert original_id != correction.json()["id"]
+
+
 async def test_unit_mismatch_and_invalid_position_do_not_create_receipts(api, session, services):
     org, source, core, user, _ = await setup(api, session, services)
     for position, sku in [(1, "WRONG-UNIT"), (1, "MISSING"), (2, "WAREHOUSE-SKU")]:

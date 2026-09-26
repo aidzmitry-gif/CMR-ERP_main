@@ -39,6 +39,29 @@ class AccountingError(ValueError):
     pass
 
 
+async def reject_correction_receipt_source(session, org_id: int, source: str):
+    """A linked correction draft is evidence only until its dedicated workflow exists."""
+    prefix = "procurement:receipt:"
+    if not source.startswith(prefix):
+        return
+    receipt_id = source.removeprefix(prefix)
+    if (not receipt_id.isascii() or not receipt_id.isdigit() or receipt_id.startswith("0")
+            or len(receipt_id) > 10):
+        return
+    parsed_receipt_id = int(receipt_id)
+    if parsed_receipt_id > 2_147_483_647:
+        return
+    from modules.procurement.receipt_documents import ReceiptDocument
+
+    blocked = await session.scalar(select(ReceiptDocument.id).where(
+        ReceiptDocument.id == parsed_receipt_id,
+        ReceiptDocument.organization_id == org_id,
+        ReceiptDocument.correction_of_receipt_id.is_not(None),
+    ))
+    if blocked is not None:
+        raise AccountingError("Receipt correction draft requires the separately approved correction workflow")
+
+
 async def lock_organization(session, organization_id):
     statement = select(Organization).where(Organization.id == organization_id)
     if session.info.get("accounting_read_only_snapshot"):
@@ -190,6 +213,7 @@ async def validate_posting(session, org_id, data: PostingInput, *, inventory_pur
                            payroll_statutory_import=False,
                            fixed_asset_depreciation=False, repair_accounting=False,
                            fx_revaluation=False, settlement_offset=False):
+    await reject_correction_receipt_source(session, org_id, data.source)
     if data.operation == "inventory_purchase" and not inventory_purchase:
         raise AccountingError("Inventory purchases require a saved Procurement primary receipt")
     if inventory_purchase and (data.operation != "inventory_purchase" or data.opening):
@@ -367,6 +391,7 @@ async def validate_posting(session, org_id, data: PostingInput, *, inventory_pur
 
 async def preview_posting(session, org_id, data: PostingInput, *, inventory_purchase=False):
     """An identical retry remains previewable even after posting/period close."""
+    await reject_correction_receipt_source(session, org_id, data.source)
     existing = await session.scalar(select(Entry).where(
         Entry.organization_id == org_id, Entry.source == data.source,
         Entry.source_version == data.source_version, Entry.operation == data.operation,
@@ -386,6 +411,7 @@ async def post(session, org_id, data: PostingInput, actor, event_bus=None, *, in
                fixed_asset_depreciation=False, repair_accounting=False,
                fx_revaluation=False, settlement_offset=False):
     org = await lock_organization(session, org_id)
+    await reject_correction_receipt_source(session, org_id, data.source)
     existing = await session.scalar(select(Entry).where(
         Entry.organization_id == org_id, Entry.source == data.source,
         Entry.source_version == data.source_version, Entry.operation == data.operation,

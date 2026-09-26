@@ -78,6 +78,26 @@ it("shows draft and posted invoices from every date in the procurement register"
   expect(screen.getByText("Накладных по выбранному фильтру нет.")).toBeInTheDocument();
 });
 
+it("identifies linked correction drafts and keeps accounting and WMS actions hidden", async () => {
+  const document = { currency: "BYN", invoice_reference: "CORR-1", document_date: "2026-09-24",
+    operation_date: "2026-09-24", supplier: "Поставщик", supplier_id: 19, supplier_unp: "190000001",
+    contract: "D-1", contract_id: 50, contract_basis: null, warehouse: "Основной", explanation: "Исправление", items: [] };
+  const rows = [{ id: 92, organization_id: 7, version: 1, status: "draft", posting: null,
+    correction_of: { receipt_id: 81, version: 3, entry_id: 42 },
+    revisions: [{ version: 1, actor: "accountant", created_at: "2026-09-26", document }] }];
+  const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes("purchase-ownership") ? [] : rows }));
+  vi.stubGlobal("fetch", fetcher);
+
+  render(<ProcurementReceiptDrafts org="7" date="2026-09-26" />);
+  expect(await screen.findByText("Черновик исправления · версия 1")).toBeInTheDocument();
+  expect(screen.getByText(/К накладной № 81, версия 3 · проводка № 42/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /CORR-1/ }));
+  expect(screen.getByRole("status").textContent).toContain("Исходная накладная и её проводка не меняются");
+  expect(screen.getByRole("status").textContent).toContain("передача в WMS заблокированы до отдельного workflow");
+  expect(screen.queryByRole("link", { name: "Подготовить складскую приёмку" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Провести/ })).not.toBeInTheDocument();
+});
+
 it("requires a selected supplier and saves its directory snapshot in a new receipt", async () => {
   let submitted: Record<string, unknown> | null = null;
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {

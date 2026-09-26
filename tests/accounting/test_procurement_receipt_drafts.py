@@ -523,6 +523,97 @@ async def test_source_posting_uses_facts_and_freezes_document(client, db, book):
     assert (await client.get(source_path)).status_code == 403
 
 
+async def test_posted_receipt_correction_draft_is_exact_idempotent_and_fail_closed(client, db, book):
+    from modules.procurement.receipt_documents import ReceiptDocument, ReceiptPosting
+    from modules.procurement.source_gateway import ProcurementSourceService
+
+    path, options = await source_options(client, db, book)
+    preview = await client.post(path + "/preview", json=options)
+    assert preview.status_code == 200, preview.text
+    confirmed = await client.post(path + "/confirm", json={**options, "digest": preview.json()["digest"]})
+    assert confirmed.status_code == 201, confirmed.text
+    original_id = int(path.rsplit("/", 1)[1])
+    correction_path = path + "/correction-drafts"
+    command = {"key": str(uuid4()), "expected_version": 1,
+               "expected_entry_id": confirmed.json()["entry_id"]}
+
+    created = await client.post(correction_path, json=command)
+    assert created.status_code == 201, created.text
+    draft = created.json()
+    assert draft["id"] != original_id
+    assert draft["status"] == "draft" and draft["version"] == 1
+    assert draft["correction_of"] == {"receipt_id": original_id, "version": 1,
+                                      "entry_id": confirmed.json()["entry_id"]}
+    assert draft["revisions"][0]["document"] == (await client.get(path.rsplit("/", 1)[0])).json()[0]["revisions"][0]["document"]
+    replay = await client.post(correction_path, json=command)
+    assert replay.status_code == 201 and replay.json() == draft
+    assert (await client.post(correction_path, json={**command, "expected_entry_id": confirmed.json()["entry_id"] + 1})).status_code == 409
+    assert (await client.post(correction_path, json={**command, "expected_version": 2})).status_code == 409
+    assert (await client.post(correction_path, json={"key": str(uuid4()), "expected_version": 2,
+                                                     "expected_entry_id": confirmed.json()["entry_id"]})).status_code == 409
+    assert (await client.post(correction_path, json={"key": str(uuid4()), "expected_version": 1,
+                                                     "expected_entry_id": confirmed.json()["entry_id"] + 1})).status_code == 409
+    assert (await client.post(f"/procurement/organizations/{book[0] + 999}/receipt-documents/{original_id}/correction-drafts",
+                              json=command)).status_code == 403
+    second_source = await client.post(f"/procurement/organizations/{book[0]}/receipt-documents", json={
+        "key": "second-posted-source", "document": document(),
+    })
+    assert second_source.status_code == 201, second_source.text
+    unposted = await client.post(
+        f"/procurement/organizations/{book[0]}/receipt-documents/{second_source.json()['id']}/correction-drafts",
+        json={"key": str(uuid4()), "expected_version": 1,
+              "expected_entry_id": confirmed.json()["entry_id"]})
+    assert unposted.status_code == 409
+    collision = await client.post(
+        f"/procurement/organizations/{book[0]}/receipt-documents/{second_source.json()['id']}/correction-drafts",
+        json=command)
+    assert collision.status_code == 409
+
+    edited = await client.put(f"/procurement/organizations/{book[0]}/receipt-documents/{draft['id']}", json={
+        "key": str(uuid4()), "expected_version": 1,
+        "document": {**draft["revisions"][0]["document"], "explanation": "Explicit correction review note"},
+    })
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["version"] == 2 and edited.json()["correction_of"] == draft["correction_of"]
+    assert (await client.post(correction_path, json=command)).json() == edited.json()
+
+    preview_blocked = await client.post(f"/procurement/organizations/{book[0]}/receipt-documents/{draft['id']}/preview",
+                                        json={**options, "expected_version": 2})
+    assert preview_blocked.status_code == 409 and "correction workflow" in preview_blocked.text
+    confirm_blocked = await client.post(f"/procurement/organizations/{book[0]}/receipt-documents/{draft['id']}/confirm",
+                                        json={**options, "expected_version": 2, "digest": "a" * 64})
+    assert confirm_blocked.status_code == 409 and "correction workflow" in confirm_blocked.text
+    direct_entry = await client.post(f"/accounting/organizations/{book[0]}/entries", json={
+        "source": f"procurement:receipt:{draft['id']}", "source_version": 1,
+        "operation": "manual", "document_date": "2026-09-03", "operation_date": "2026-09-03",
+        "posting_date": "2026-09-03", "policy_id": book[1], "rule_version": "manual-v1",
+        "explanation": "Attempted direct posting of a correction draft", "opening": False,
+        "lines": [
+            {"account": "41.2", "side": "debit", "amount": "1.00", "quantity": "1.000000", "dimensions": {}},
+            {"account": "60", "side": "credit", "amount": "1.00", "dimensions": {}},
+        ],
+    })
+    assert direct_entry.status_code == 422 and "separately approved correction workflow" in direct_entry.text
+    from modules.accounting import service
+    await service.reject_correction_receipt_source(
+        db, book[0], "procurement:receipt:" + "9" * 100,
+    )
+
+    listed = await client.get(f"/procurement/organizations/{book[0]}/receipt-documents")
+    correction_row = next(row for row in listed.json() if row["id"] == draft["id"])
+    assert correction_row["correction_of"] == draft["correction_of"]
+    source = await ProcurementSourceService().receipt_source(db, book[0], draft["id"])
+    assert source["correction_of"] == draft["correction_of"]
+    with pytest.raises(ValueError, match="Correction drafts cannot be prepared"):
+        await ProcurementSourceService().warehouse_receipt_source(db, book[0], draft["id"], 2)
+    assert await db.scalar(select(func.count()).select_from(ReceiptDocument)) == 3
+    assert await db.scalar(select(func.count()).select_from(ReceiptPosting)) == 1
+    assert await db.scalar(select(func.count()).select_from(Entry)) == 1
+    original = await db.get(ReceiptDocument, original_id)
+    assert original.current_version == 1
+    assert await db.get(ReceiptPosting, original_id) is not None
+
+
 async def test_stale_source_preview_and_reader_cannot_post(client, db, book):
     path, options = await source_options(client, db, book)
     preview = (await client.post(path + "/preview", json=options)).json()

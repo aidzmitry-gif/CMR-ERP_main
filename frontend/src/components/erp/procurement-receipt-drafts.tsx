@@ -14,7 +14,7 @@ type Document = ReturnType<typeof blank>;
 type SupplierContract = { id: number; organization_id: number; supplier_id: number; number: string; title: string; signed_on: string; expires_on: string | null; evidence: string; is_active?: boolean; created_by?: string; created_at?: string; deactivated_by?: string | null; deactivated_at?: string | null; deactivation_reason?: string | null };
 type ContractHistoryPage = { organization_id: number; supplier_id: number; status: string; items: SupplierContract[]; truncated: boolean; next_before_at: string | null; next_before_id: number | null };
 type ContractHistoryCursor = { at: string; id: number };
-type Receipt = { id: number; organization_id?: number; key?: string; version: number; status?: string; posting?: { entry_id: number; version: number } | null; revisions: { version: number; request_key?: string | null; actor: string; created_at: string; document: Document }[] };
+type Receipt = { id: number; organization_id?: number; key?: string; version: number; status?: string; posting?: { entry_id: number; version: number } | null; correction_of?: { receipt_id: number; version: number; entry_id: number } | null; revisions: { version: number; request_key?: string | null; actor: string; created_at: string; document: Document }[] };
 type PendingSave = { org: string; receiptId: number | null; version: number; key: string; document: Document; closeAfterSave: boolean };
 type PendingContractRevoke = { org: string; supplierId: number; contractId: number; key: string; reason: string };
 type OwnedOrder = { kind: string; source_id: number; snapshot: { number: string; supplier: string } };
@@ -384,6 +384,10 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
         || !Number.isSafeInteger(row.version) || row.status !== "draft" || row.posting !== null
         || row.version !== command.version + 1
         || revision?.version !== row.version || !revision.document
+        || (selected?.correction_of && (!row.correction_of
+          || row.correction_of.receipt_id !== selected.correction_of.receipt_id
+          || row.correction_of.version !== selected.correction_of.version
+          || row.correction_of.entry_id !== selected.correction_of.entry_id))
         || canonical(revision.document) !== canonical(expectedSavedDocument(command.document))
         || (command.receiptId ? row.id !== command.receiptId || revision.request_key !== command.key
           : row.key !== command.key)) {
@@ -513,11 +517,13 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
         const source = row.revisions.at(-1)!.document;
         return <li key={row.id} className="flex flex-wrap items-center gap-2 py-2">
           <Button variant="secondary" onClick={() => open(row)}>{source.invoice_reference} · {source.document_date} · {source.supplier}</Button>
-          <span className="text-sm">{row.posting ? "Проведена" : "Черновик"} · версия {row.version}</span>
-          {row.posting && <Link className="text-sm text-accent underline" href={`/erp/procurement/receipts/posted/${row.posting.entry_id}?org=${org}`}>Открыть проведённую накладную</Link>}
+          <span className="text-sm">{row.correction_of ? "Черновик исправления" : row.posting ? "Проведена" : "Черновик"} · версия {row.version}</span>
+          {row.correction_of && <span className="text-sm">К накладной № {row.correction_of.receipt_id}, версия {row.correction_of.version} · проводка № {row.correction_of.entry_id}. Проведение и WMS пока недоступны.</span>}
+          {!row.correction_of && row.posting && <Link className="text-sm text-accent underline" href={`/erp/procurement/receipts/posted/${row.posting.entry_id}?org=${org}`}>Открыть проведённую накладную</Link>}
         </li>;
       })}</ul>}
       {listLoaded && !visible.length && <p className="text-sm text-muted">Накладных по выбранному фильтру нет.</p>}
+      {selected?.correction_of && <p role="status">Связанный черновик исправления накладной № {selected.correction_of.receipt_id}, версии {selected.correction_of.version}, проводка № {selected.correction_of.entry_id}. Исходная накладная и её проводка не меняются; проведение и передача в WMS заблокированы до отдельного workflow.</p>}
       {selected?.posting && <p role="status">Проведена · проводка № {selected.posting.entry_id}. Первичные данные доступны для просмотра.</p>}
       {contractRevokeUncertain && <Button variant="secondary" disabled={contractBusy || pendingContractRevoke.current?.org !== org} onClick={() => { if (pendingContractRevoke.current) void submitContractRevoke(pendingContractRevoke.current); }}>Повторить отзыв договора с тем же ключом</Button>}
       {editorOpen && <fieldset disabled={Boolean(selected?.posting) || uncertain || contractBusy || contractRevokeUncertain} className="space-y-3">
@@ -579,13 +585,13 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       <div className="flex gap-2"><Button variant="secondary" disabled={document.items.length >= 300} onClick={() => setDocument({ ...document, items: [...document.items, item()] })}>Добавить строку накладной</Button><Button onClick={() => void save()}>{selected ? `Сохранить исправление версии ${selected.version}` : "Сохранить первичную накладную"}</Button><Button variant="secondary" onClick={() => void save(true)}>Сохранить и закрыть</Button></div>
       </fieldset>}
     </fieldset>
-    {selected && !selected.posting && (uncertain ? <p>Сначала подтвердите исход сохранения этой редакции. Проведение и складская приёмка заблокированы.</p> : dirty ? <p>Сохраните изменения накладной перед расчётом проводок.</p> : !document.supplier_id ? <p>Сопоставьте поставщика со справочником перед проведением.</p> : document.items.some(row => !row.sku_id) ? <p>Сопоставьте все товары накладной со справочником перед проведением.</p> : <ProcurementReceiptPosting key={`${selected.id}/${selected.version}/${date}/${policyId}`} blocked={busy} org={org} receiptId={selected.id} version={selected.version} items={document.items} accounts={accounts} policyId={policyId} date={date} onBusy={(value) => { if (active.current) setBusy(value); }} onPosted={(entryId) => {
+    {selected && !selected.posting && !selected.correction_of && (uncertain ? <p>Сначала подтвердите исход сохранения этой редакции. Проведение и складская приёмка заблокированы.</p> : dirty ? <p>Сохраните изменения накладной перед расчётом проводок.</p> : !document.supplier_id ? <p>Сопоставьте поставщика со справочником перед проведением.</p> : document.items.some(row => !row.sku_id) ? <p>Сопоставьте все товары накладной со справочником перед проведением.</p> : <ProcurementReceiptPosting key={`${selected.id}/${selected.version}/${date}/${policyId}`} blocked={busy} org={org} receiptId={selected.id} version={selected.version} items={document.items} accounts={accounts} policyId={policyId} date={date} onBusy={(value) => { if (active.current) setBusy(value); }} onPosted={(entryId) => {
       if (!active.current) return;
       setSelected((current) => current?.id === selected.id ? { ...current, status: "posted", posting: { entry_id: entryId, version: selected.version } } : current);
       setRows((current) => current.map((row) => row.id === selected.id ? { ...row, status: "posted", posting: { entry_id: entryId, version: selected.version } } : row));
       setReload((value) => value + 1); onPosted?.();
     }} />)}
-    {selected && !uncertain && !dirty && document.supplier_id && document.items.every(row => row.sku_id) && <Link className="text-accent underline" href={`/erp/wms/receipts/from-primary?org=${org}&receipt=${selected.id}&version=${selected.version}`}>Подготовить складскую приёмку</Link>}
+    {selected && !selected.correction_of && !uncertain && !dirty && document.supplier_id && document.items.every(row => row.sku_id) && <Link className="text-accent underline" href={`/erp/wms/receipts/from-primary?org=${org}&receipt=${selected.id}&version=${selected.version}`}>Подготовить складскую приёмку</Link>}
     {selected && <details><summary>История накладной № {selected.id}</summary>{selected.revisions.map((row, index) => {
       const changes = index ? revisionChanges(selected.revisions[index - 1].document, row.document) : [];
       return <article key={row.version} className="border-b border-line py-3">
