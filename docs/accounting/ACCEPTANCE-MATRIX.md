@@ -32,6 +32,11 @@ current target database or all later source migrations.
 
 ## Current local evidence
 
+- On 2026-09-26, a fresh disposable PostgreSQL 16 database passed **2**
+  supplier-contract/receipt-history checks at migration `0186` and **4**
+  payroll applicability, organization-review, closed-period and partial-binding
+  guard checks. Both test containers were removed. These targeted checks do not
+  certify statutory payroll calculations or the target production database.
 - The focused reconciliation, migration-baseline and pilot-preflight suites
   passed together: **34 tests**. Five PostgreSQL reconciliation/queue tests
   also passed with the registered migration tail through `0174`.
