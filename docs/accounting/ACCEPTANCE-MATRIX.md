@@ -92,6 +92,16 @@ current target database or all later source migrations.
   issue UI passed 13/13 with TypeScript, ESLint, Ruff and the single Alembic head
   check. This remains local development evidence: G03D still includes the rest
   of the document lifecycle and no operational acceptance group is closed.
+- The next local G03D slice replaces free-text manual `contract` analytics with
+  an exact contract-directory snapshot. Accountants search the selected
+  counterparty's active supplier contracts and issued sales contracts; the
+  saved line carries source, immutable ID, number, title and version. Preview,
+  save, post and the legacy direct manual route reject an incomplete, foreign
+  or stale contract, while an already posted entry replays after revocation.
+  Related backend regression passed 58/58, the focused API suite 8/8, the UI
+  and client validator 37/37, and disposable PostgreSQL 1/1; TypeScript,
+  ESLint and Ruff passed. Settlement-document and remaining manual analytics,
+  release integration and real accountant acceptance remain open.
 - CRM deal Save and Close now requires a response with the exact deal ID,
   submitted editor fields and a valid new edit token. The PATCH response is
   generated from the saved deal; two concurrent edits on disposable

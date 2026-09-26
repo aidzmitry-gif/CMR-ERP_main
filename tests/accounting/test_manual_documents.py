@@ -1,5 +1,7 @@
 from uuid import uuid4
 
+from sqlalchemy import update
+
 from modules.accounting import service
 
 
@@ -302,3 +304,92 @@ async def test_manual_warehouse_snapshot_is_company_scoped_and_historical(client
     assert entry["lines"][0]["dimensions"]["warehouse_title"] == "Main store updated"
     replay = await client.post(f"/accounting/organizations/{book[0]}/entries", json=payload)
     assert replay.status_code == 201 and replay.json()["id"] == confirmed.json()["entry_id"]
+
+
+async def test_manual_contract_uses_counterparty_scoped_directory_and_keeps_replay(client, db, book, posting):
+    from datetime import date, datetime
+
+    from modules.accounting.schemas import PostingInput
+    from modules.procurement.supplier_contracts import SupplierContract
+    from modules.sales.accounting_ownership import DealOwnership
+    from modules.sales.client_document_register import DealClientBinding
+    from modules.sales.models import Deal, DealDocument
+
+    supplier_contract = SupplierContract(
+        organization_id=book[0], supplier_id=1, number="SUP-17", title="Поставка",
+        signed_on=date(2026, 1, 1), evidence="Synthetic registered supplier contract",
+        is_active=True, created_by="tester",
+    )
+    deal = Deal(number="DEAL-CONTRACT-17", title="Synthetic sale", counterparty="supplier1",
+                counterparty_id=1)
+    db.add_all([supplier_contract, deal])
+    await db.flush()
+    db.add_all([
+        DealOwnership(deal_id=deal.id, organization_id=book[0], snapshot={"test": True},
+                      evidence="Synthetic ownership", actor="tester"),
+        DealClientBinding(deal_id=deal.id, organization_id=book[0], counterparty_id=1,
+                          snapshot={"client": {"id": 1}}, evidence="Synthetic binding", actor="tester"),
+    ])
+    sales_contract = DealDocument(
+        deal_id=deal.id, kind="contract", number="SALE-19", status="posted", version=2,
+        issued_at=datetime(2026, 1, 2), content_sha256="b" * 64,
+        original_html="<p>contract</p>", snapshot_json={"organization_id": book[0]},
+    )
+    db.add(sales_contract)
+    await db.commit()
+    supplier_contract_id = supplier_contract.id
+    sales_contract_id = sales_contract.id
+
+    options = await client.get(
+        f"/accounting/organizations/{book[0]}/contracts?counterparty_id=1&q=1")
+    assert options.status_code == 200, options.text
+    assert options.headers["cache-control"] == "private, no-store"
+    assert {(item["source"], item["number"], item["version"]) for item in options.json()["items"]} == {
+        ("procurement", "SUP-17", 1), ("sales", "SALE-19", 2),
+    }
+
+    path = f"/accounting/organizations/{book[0]}/manual-documents"
+    payload = posting("MANUAL-CONTRACT").model_dump(mode="json")
+    payload["lines"][1]["dimensions"] = {
+        "counterparty_id": "1", "counterparty": "supplier1",
+        "counterparty_unp": "190000001", "counterparty_revision": "1",
+        "contract": "SUP-17",
+    }
+    assert (await client.post(path, json={"key": str(uuid4()), "posting": payload})).status_code == 422
+    assert (await client.post(
+        f"/accounting/organizations/{book[0]}/preview", json=payload)).status_code == 422
+    assert (await client.post(
+        f"/accounting/organizations/{book[0]}/entries", json=payload)).status_code == 422
+    payload["lines"][1]["dimensions"].update({
+        "contract_source": "procurement", "contract_id": str(supplier_contract_id),
+        "contract_title": "Поставка", "contract_version": "1",
+    })
+    saved = await client.post(path, json={"key": str(uuid4()), "posting": payload})
+    assert saved.status_code == 201, saved.text
+    confirmed = await client.post(f"{path}/{saved.json()['id']}/post", json={
+        "key": str(uuid4()), "expected_version": 1,
+        "digest": service.digest(PostingInput.model_validate(payload)),
+    })
+    assert confirmed.status_code == 200, confirmed.text
+    await db.execute(update(SupplierContract).where(SupplierContract.id == supplier_contract_id)
+                     .values(is_active=False))
+    await db.commit()
+    replay = await client.post(f"/accounting/organizations/{book[0]}/entries", json=payload)
+    assert replay.status_code == 201 and replay.json()["id"] == confirmed.json()["entry_id"]
+
+    stale_payload = posting("MANUAL-CONTRACT-STALE").model_dump(mode="json")
+    stale_payload["lines"][1]["dimensions"] = payload["lines"][1]["dimensions"]
+    stale = await client.post(path, json={"key": str(uuid4()), "posting": stale_payload})
+    assert stale.status_code == 422 and "select it again" in stale.text
+
+    sales_payload = posting("MANUAL-SALES-CONTRACT").model_dump(mode="json")
+    sales_payload["lines"][1]["dimensions"] = {
+        "counterparty_id": "1", "counterparty": "supplier1",
+        "counterparty_unp": "190000001", "counterparty_revision": "1",
+        "contract": "SALE-19", "contract_source": "sales",
+        "contract_id": str(sales_contract_id), "contract_title": "Договор продажи",
+        "contract_version": "2",
+    }
+    sales_saved = await client.post(
+        path, json={"key": str(uuid4()), "posting": sales_payload})
+    assert sales_saved.status_code == 201, sales_saved.text

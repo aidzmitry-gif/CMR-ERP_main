@@ -28,6 +28,7 @@ from modules.accounting import (
     bank_statement,
     bank_statement_csv,
     closing_controls,
+    contract_snapshot,
     fixed_assets,
     foreign_trade_register,
     fx_bank_settlement_preview,
@@ -1415,6 +1416,27 @@ async def sale_buyer_options(org_id: int, response: Response, q: str = Query("",
     return {"organization_id": org_id, "items": [
         {"id": row.id, "name": row.legal_name or row.name, "unp": row.unp or "",
          "revision": row.revision} for row in rows[:50]], "truncated": len(rows) > 50}
+
+
+@router.get("/organizations/{org_id}/contracts")
+async def contract_options(org_id: int, response: Response,
+                           counterparty_id: int = Query(gt=0),
+                           q: str = Query("", max_length=100), ctx=Depends(member)):
+    """Search current supplier and issued sales contracts for one exact counterparty."""
+    response.headers["Cache-Control"] = "private, no-store"
+    term = q.strip()
+    if not term:
+        return {"organization_id": org_id, "counterparty_id": counterparty_id,
+                "items": [], "truncated": False}
+    counterparty = await ctx[0].scalar(select(Counterparty.id).where(
+        Counterparty.id == counterparty_id, Counterparty.is_active.is_(True),
+        Counterparty.merged_into_id.is_(None)))
+    if counterparty is None:
+        raise HTTPException(409, "Select an active counterparty from the directory")
+    items, truncated = await contract_snapshot.options(
+        ctx[0], org_id, counterparty_id, term)
+    return {"organization_id": org_id, "counterparty_id": counterparty_id,
+            "items": items, "truncated": truncated}
 
 
 @router.post("/organizations/{org_id}/sales/posting-preview")

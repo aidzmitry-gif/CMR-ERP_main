@@ -10,6 +10,7 @@ from pydantic import Field
 from sqlalchemy import select
 
 from modules.accounting import service
+from modules.accounting.contract_snapshot import CONTRACT_KEYS, verified_contract_snapshot
 from modules.accounting.counterparty_snapshot import verified_counterparty
 from modules.accounting.models import (
     Entry,
@@ -57,6 +58,7 @@ async def verify_analytic_references(session, org_id: int, posting: PostingInput
     checked_counterparties = set()
     checked_skus = set()
     checked_warehouses = set()
+    checked_contracts = set()
     for line in posting.lines:
         dimensions = line.dimensions
         if {"counterparty", "counterparty_id", "counterparty_unp", "counterparty_revision"} & dimensions.keys():
@@ -77,6 +79,11 @@ async def verify_analytic_references(session, org_id: int, posting: PostingInput
             if snapshot not in checked_warehouses:
                 await verified_warehouse_snapshot(session, org_id, dimensions)
                 checked_warehouses.add(snapshot)
+        if CONTRACT_KEYS & dimensions.keys():
+            snapshot = tuple(dimensions.get(key, "") for key in sorted(CONTRACT_KEYS))
+            if snapshot not in checked_contracts:
+                await verified_contract_snapshot(session, org_id, dimensions)
+                checked_contracts.add(snapshot)
 
 
 async def verify_new_manual_references(session, org_id: int, posting: PostingInput):

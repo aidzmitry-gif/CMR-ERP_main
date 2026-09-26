@@ -1428,6 +1428,87 @@ async def test_manual_document_warehouse_snapshot_rechecked_on_postgres(pg_facto
         assert lines[0].dimensions["warehouse_title"] == "Main store updated"
 
 
+async def test_manual_document_contract_snapshot_rechecked_and_replayed_on_postgres(
+        pg_factory, pg_book, posting):
+    from datetime import date, datetime, timezone
+    from uuid import uuid4
+
+    from modules.accounting import manual_documents
+    from modules.accounting.schemas import PostingInput
+    from modules.procurement.supplier_contracts import SupplierContract
+
+    async with pg_factory() as session:
+        first_contract = SupplierContract(
+            organization_id=pg_book[0], supplier_id=1, number="PG-MANUAL-CONTRACT",
+            title="Initial contract", signed_on=date(2026, 1, 1),
+            evidence="Synthetic contract snapshot", is_active=True, created_by="tester",
+        )
+        session.add(first_contract)
+        await session.commit()
+        first_contract_id = first_contract.id
+    source = posting("PG-MANUAL-CONTRACT").model_dump(mode="json")
+    source["lines"][1]["dimensions"] = {
+        "counterparty_id": "1", "counterparty": "supplier1",
+        "counterparty_unp": "190000001", "counterparty_revision": "1",
+        "contract": "PG-MANUAL-CONTRACT", "contract_source": "procurement",
+        "contract_id": str(first_contract_id), "contract_title": "Initial contract",
+        "contract_version": "1",
+    }
+    first = PostingInput.model_validate(source)
+    async with pg_factory() as session:
+        saved = await manual_documents.create(
+            session, pg_book[0], manual_documents.ManualDocumentCreate(
+                key=uuid4(), posting=first), "tester", "chief")
+        await session.commit()
+    async with pg_factory() as session:
+        row = await session.get(SupplierContract, first_contract_id)
+        row.is_active = False
+        row.deactivated_by = "tester"
+        row.deactivated_at = datetime.now(timezone.utc)
+        row.deactivation_reason = "Replaced for a PostgreSQL validation scenario"
+        row.deactivation_key = str(uuid4())
+        replacement = SupplierContract(
+            organization_id=pg_book[0], supplier_id=1, number="PG-MANUAL-CONTRACT",
+            title="Replacement contract", signed_on=date(2026, 2, 1),
+            evidence="Synthetic replacement contract", is_active=True, created_by="tester",
+        )
+        session.add(replacement)
+        await session.commit()
+        replacement_id = replacement.id
+    async with pg_factory() as session:
+        with pytest.raises(service.AccountingError, match="select it again"):
+            await manual_documents.post(
+                session, pg_book[0], saved["id"], manual_documents.ManualDocumentPost(
+                    key=uuid4(), expected_version=1, digest=service.digest(first)),
+                "tester", "chief")
+        await session.rollback()
+    source["lines"][1]["dimensions"].update({
+        "contract_id": str(replacement_id), "contract_title": "Replacement contract",
+    })
+    current = PostingInput.model_validate(source)
+    async with pg_factory() as session:
+        revised = await manual_documents.edit(
+            session, pg_book[0], saved["id"], manual_documents.ManualDocumentEdit(
+                key=uuid4(), expected_version=1, posting=current), "tester", "chief")
+        receipt = await manual_documents.post(
+            session, pg_book[0], saved["id"], manual_documents.ManualDocumentPost(
+                key=uuid4(), expected_version=revised["version"], digest=service.digest(current)),
+            "tester", "chief")
+        await session.commit()
+    async with pg_factory() as session:
+        row = await session.get(SupplierContract, replacement_id)
+        row.is_active = False
+        row.deactivated_by = "tester"
+        row.deactivated_at = datetime.now(timezone.utc)
+        row.deactivation_reason = "Expired after the accounting operation"
+        row.deactivation_key = str(uuid4())
+        await session.commit()
+    async with pg_factory() as session:
+        replay = await service.post(session, pg_book[0], current, "tester")
+        assert replay.id == receipt["entry_id"]
+        await session.rollback()
+
+
 async def test_concurrent_replay_one_entry(pg_factory, pg_book, posting):
     async def writer():
         async with pg_factory() as session:
