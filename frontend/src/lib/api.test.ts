@@ -620,7 +620,9 @@ describe("api client — прочие операции и fallback'и", () => {
   it("сохранение полей сделки передаёт версию и отличает конфликт от успеха", async () => {
     const token = "b".repeat(64);
     const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 409 })
-      .mockResolvedValueOnce({ ok: true, status: 200 });
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({
+        id: 7, title: "Новая", edit_token: "c".repeat(64),
+      }) });
     vi.stubGlobal("fetch", fetchMock);
     expect(await updateDealFieldsIfCurrent("7", { title: "Новая" }, token)).toBe("conflict");
     expect(await updateDealFieldsIfCurrent("7", { title: "Новая" }, token)).toBe("saved");
@@ -628,6 +630,21 @@ describe("api client — прочие операции и fallback'и", () => {
       title: "Новая", expected_edit_token: token,
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("не закрывает редактор по 2xx без точной квитанции сохранённых полей", async () => {
+    const token = "b".repeat(64);
+    const responses = [
+      { id: 8, title: "Новая", amount: 100, edit_token: "c".repeat(64) },
+      { id: 7, title: "Чужое значение", amount: 100, edit_token: "c".repeat(64) },
+      { id: 7, title: "Новая", amount: 100, edit_token: "bad" },
+      { id: 7, title: "Новая", amount: 100, edit_token: "c".repeat(64) },
+    ];
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve({ ok: true, status: 200,
+      json: async () => responses.shift(),
+    })));
+    for (const result of ["unconfirmed", "unconfirmed", "unconfirmed", "saved"])
+      expect(await updateDealFieldsIfCurrent("7", { title: "Новая", amount: 100 }, token)).toBe(result);
   });
 
   it("все мутаторы возвращают fallback при сетевой ошибке", async () => {

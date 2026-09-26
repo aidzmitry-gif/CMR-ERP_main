@@ -134,11 +134,15 @@ async def test_deal_card_edit_rejects_stale_snapshot_without_changing_fields(api
     current = (await api.get(path)).json()
     assert current["title"] == "Второй"
     assert current["edit_token"] != token
-    assert (await api.patch(path, json={"expected_edit_token": current["edit_token"],
-                                        "title": "Третий"})).status_code == 200
+    edited = await api.patch(path, json={"expected_edit_token": current["edit_token"],
+                                         "title": "Третий"})
+    assert edited.status_code == 200
     saved = (await api.get(path)).json()
     assert saved["title"] == "Третий"
     assert saved["edit_token"] != current["edit_token"]
+    assert edited.json()["id"] == deal["id"]
+    assert edited.json()["title"] == saved["title"]
+    assert edited.json()["edit_token"] == saved["edit_token"]
     history = (await api.get(f"{path}/field-history")).json()["items"]
     assert len(history) == 2  # Rejected edit is absent from the audit.
     assert (await api.patch(path, json={"expected_edit_token": None, "title": "Нет"})).status_code == 422

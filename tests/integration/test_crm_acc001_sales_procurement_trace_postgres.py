@@ -1,12 +1,15 @@
+import asyncio
+
 import pytest
 from sqlalchemy import func, select
 
-from core.domain.models import OutboxEvent, User
+from core.domain.models import AuditLog, OutboxEvent, User
 from modules.accounting.models import Policy
 from modules.logistics.models import CarrierBid, CarrierRfqInvite
 from modules.sales.invoice_cancellation import InvoiceCancellationReceipt
-from modules.sales.models import DealDocument
+from modules.sales.models import Deal, DealDocument
 from modules.sales.reservation_source import SalesReservationSource
+from modules.sales.routes import deal_edit_token
 from modules.wms.invoice_reservations import InvoiceReservationRelease
 from modules.wms.invoice_shipments import PhysicalShipmentAct
 from modules.wms.models import ReservationVersion
@@ -14,9 +17,33 @@ from tests.accounting.test_invoice_settlements import bank
 from tests.accounting.test_postgres import pg_factory  # noqa: F401
 from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 from tests.test_invoice_cancellation import cancel_request
-from tests.test_invoice_issuance import erp_money_flow
+from tests.test_invoice_issuance import erp_money_flow, seed
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.mark.asyncio
+async def test_pg_deal_save_receipt_matches_winning_edit_and_history(issuance_pg):  # noqa: F811
+    api, factory = issuance_pg
+    async with factory() as session:
+        ids, _ = await seed(api, session, suffix="dealreceipt")
+        token = deal_edit_token(await session.get(Deal, ids["deal"]))
+    path = f"/sales/deals/{ids['deal']}"
+    responses = await asyncio.gather(*(
+        api.patch(path, json={"title": title, "expected_edit_token": token})
+        for title in ("Edited by A", "Edited by B")
+    ))
+    assert sorted(response.status_code for response in responses) == [200, 409]
+    saved = next(response.json() for response in responses if response.status_code == 200)
+    assert saved["id"] == ids["deal"]
+    async with factory() as session:
+        deal = await session.get(Deal, ids["deal"])
+        assert deal.title == saved["title"]
+        assert saved["edit_token"] == deal_edit_token(deal) != token
+        assert await session.scalar(select(func.count()).select_from(AuditLog).where(
+            AuditLog.action == "sales.deal.fields_updated",
+            AuditLog.entity_ref == f"deal:{ids['deal']}",
+        )) == 1
 
 
 @pytest.mark.asyncio

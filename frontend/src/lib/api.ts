@@ -964,14 +964,32 @@ export async function updateDealFieldsIfCurrent(
   fields: Record<string, unknown>,
   editToken: string,
 ): Promise<"saved" | "conflict" | "unconfirmed"> {
-  if (!/^[0-9a-f]{64}$/.test(editToken)) return "unconfirmed";
+  if (!/^[0-9a-f]{64}$/.test(editToken) || !/^[1-9]\d*$/.test(id)) return "unconfirmed";
   try {
     const res = await fetch(`/api/sales/deals/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...fields, expected_edit_token: editToken }),
     });
-    return res.ok ? "saved" : res.status === 409 ? "conflict" : "unconfirmed";
+    if (res.status === 409) return "conflict";
+    if (!res.ok) return "unconfirmed";
+    const receipt: unknown = await res.json();
+    if (!receipt || typeof receipt !== "object") return "unconfirmed";
+    const saved = receipt as Record<string, unknown>;
+    if (saved.id !== Number(id) || typeof saved.edit_token !== "string"
+        || !/^[0-9a-f]{64}$/.test(saved.edit_token)) return "unconfirmed";
+    const editorFields = new Set(["title", "amount", "next_step", "deal_date", "ship_deadline",
+      "penalty_rate_pct", "penalty_cap_pct", "penalty_terms"]);
+    const numbers = new Set(["amount", "penalty_rate_pct", "penalty_cap_pct"]);
+    for (const [key, expected] of Object.entries(fields)) {
+      if (!editorFields.has(key)) return "unconfirmed";
+      const actual = saved[key];
+      if (numbers.has(key)) {
+        if (expected === null ? actual !== null : typeof actual !== "number"
+            || !Number.isFinite(actual) || actual !== expected) return "unconfirmed";
+      } else if (actual !== expected) return "unconfirmed";
+    }
+    return "saved";
   } catch {
     return "unconfirmed";
   }
