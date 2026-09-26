@@ -316,6 +316,7 @@ def test_task_detail_id_mismatch_fails_without_value_leak(tmp_path):
 
 def _binary_metadata(root, *, call_url="https://microchops.bitrix24.by/rest/download.json?token=PRIVATE",
                      crm_file_items=None, call_record_file_id=None, source_call_id=None,
+                     call_owner_type=None, call_owner_id=None, call_user_id=None,
                      comments=None, deals=None, leads=None, tasks=None):
     root.mkdir()
     call = {"ID": "10", "CALL_RECORD_URL": call_url}
@@ -323,6 +324,12 @@ def _binary_metadata(root, *, call_url="https://microchops.bitrix24.by/rest/down
         call["RECORD_FILE_ID"] = call_record_file_id
     if source_call_id is not None:
         call["CALL_ID"] = source_call_id
+    if call_owner_type is not None:
+        call["CRM_ENTITY_TYPE"] = call_owner_type
+    if call_owner_id is not None:
+        call["CRM_ENTITY_ID"] = call_owner_id
+    if call_user_id is not None:
+        call["PORTAL_USER_ID"] = call_user_id
     rows = {
         "deals": [{"ID": "11"}] if deals is None else deals,
         "leads": [] if leads is None else leads,
@@ -506,6 +513,157 @@ def test_call_recording_refresh_checks_source_identity_and_file_id(tmp_path):
         module.export_binaries(WEBHOOK, metadata, output, session=session)
     assert all("token=NEW" not in url for url in session.downloads)
     assert not (output / "manifest.json").exists()
+
+
+@pytest.mark.parametrize(("field", "changed"), [
+    ("CRM_ENTITY_TYPE", "COMPANY"),
+    ("CRM_ENTITY_ID", "12"),
+    ("PORTAL_USER_ID", "6"),
+])
+def test_call_recording_refresh_preserves_owner_and_rejects_owner_drift(
+    tmp_path, field, changed
+):
+    metadata = tmp_path / "metadata"
+    _binary_metadata(
+        metadata, source_call_id="call-10", call_owner_type="CONTACT",
+        call_owner_id="11", call_user_id="5",
+    )
+
+    class SameOwner(BinarySession):
+        def post(self, url, *, json, timeout, allow_redirects):
+            if url.endswith("/voximplant.statistic.get.json"):
+                return Response({"result": [{
+                    "ID": "10", "CALL_ID": "call-10", "CRM_ENTITY_TYPE": "CONTACT",
+                    "CRM_ENTITY_ID": "11", "PORTAL_USER_ID": "5",
+                    "CALL_RECORD_URL": "https://microchops.bitrix24.by/rest/download.json?token=FRESH_CALL",
+                }]})
+            return super().post(url, json=json, timeout=timeout, allow_redirects=allow_redirects)
+
+    output = tmp_path / "binaries"
+    session = SameOwner()
+    module.export_binaries(WEBHOOK, metadata, output, session=session)
+    call_link = next(
+        row for row in module._staged_rows(output, "binary_links")
+        if row["source"] == "call"
+    )
+    assert {key: call_link[key] for key in (
+        "source_id", "call_id", "entity_type", "entity_id", "portal_user_id"
+    )} == {
+        "source_id": "10", "call_id": "call-10", "entity_type": "CONTACT",
+        "entity_id": "11", "portal_user_id": "5",
+    }
+    assert "FRESH_CALL" not in json.dumps(call_link)
+
+    class ChangedOwner(SameOwner):
+        def post(self, url, *, json, timeout, allow_redirects):
+            response = super().post(url, json=json, timeout=timeout,
+                                    allow_redirects=allow_redirects)
+            if url.endswith("/voximplant.statistic.get.json"):
+                response.data["result"][0][field] = changed
+            return response
+
+    drift = ChangedOwner()
+    with pytest.raises(module.ExportError, match="CALL_RECORD_CHANGED"):
+        module.export_binaries(WEBHOOK, metadata, tmp_path / "drift", session=drift)
+    assert all("FRESH_CALL" not in url for url in drift.downloads)
+
+
+@pytest.mark.parametrize(("field", "changed"), [
+    ("CALL_ID", "late-call-id"),
+    ("RECORD_FILE_ID", 42),
+])
+def test_call_recording_refresh_rejects_new_identity_after_snapshot(
+    tmp_path, field, changed
+):
+    metadata = tmp_path / "metadata"
+    _binary_metadata(metadata)
+
+    class ChangedCall(BinarySession):
+        def post(self, url, *, json, timeout, allow_redirects):
+            response = super().post(url, json=json, timeout=timeout,
+                                    allow_redirects=allow_redirects)
+            if url.endswith("/voximplant.statistic.get.json"):
+                response.data["result"][0][field] = changed
+            return response
+
+    session = ChangedCall()
+    with pytest.raises(module.ExportError, match="CALL_RECORD_CHANGED"):
+        module.export_binaries(WEBHOOK, metadata, tmp_path / "binaries", session=session)
+    assert all("FRESH_CALL" not in url for url in session.downloads)
+
+
+@pytest.mark.parametrize(("field", "argument", "error"), [
+    ("CRM_ENTITY_TYPE", "call_owner_type", "BAD_CALL_OWNER_TYPE"),
+    ("CRM_ENTITY_ID", "call_owner_id", "BAD_CALL_OWNER_ID"),
+    ("PORTAL_USER_ID", "call_user_id", "BAD_CALL_USER_ID"),
+])
+@pytest.mark.parametrize("invalid", [False, 0, [], {}])
+def test_call_recording_rejects_invalid_staged_owner_before_download(
+    tmp_path, field, argument, error, invalid
+):
+    metadata = tmp_path / "metadata"
+    _binary_metadata(metadata, **{argument: invalid})
+    session = BinarySession()
+    with pytest.raises(module.ExportError, match=error):
+        module.export_binaries(WEBHOOK, metadata, tmp_path / "binaries", session=session)
+    assert session.downloads == []
+
+
+@pytest.mark.parametrize("field", [
+    "CRM_ENTITY_TYPE", "CRM_ENTITY_ID", "PORTAL_USER_ID",
+])
+@pytest.mark.parametrize("invalid", [False, 0, [], {}])
+def test_call_recording_rejects_invalid_fresh_owner_before_recording_download(
+    tmp_path, field, invalid
+):
+    metadata = tmp_path / "metadata"
+    _binary_metadata(metadata)
+
+    class InvalidOwner(BinarySession):
+        def post(self, url, *, json, timeout, allow_redirects):
+            response = super().post(url, json=json, timeout=timeout,
+                                    allow_redirects=allow_redirects)
+            if url.endswith("/voximplant.statistic.get.json"):
+                response.data["result"][0][field] = invalid
+            return response
+
+    session = InvalidOwner()
+    with pytest.raises(module.ExportError, match="CALL_RECORD_CHANGED"):
+        module.export_binaries(WEBHOOK, metadata, tmp_path / "binaries", session=session)
+    assert all("FRESH_CALL" not in url for url in session.downloads)
+
+
+@pytest.mark.parametrize("bad_call_id", [False, 0])
+def test_call_recording_rejects_falsy_invalid_source_call_id_before_download(
+    tmp_path, bad_call_id
+):
+    metadata = tmp_path / "metadata"
+    _binary_metadata(metadata, source_call_id=bad_call_id)
+    session = BinarySession()
+    with pytest.raises(module.ExportError, match="BAD_CALL_ID"):
+        module.export_binaries(WEBHOOK, metadata, tmp_path / "binaries", session=session)
+    assert not session.downloads
+
+
+@pytest.mark.parametrize("bad_call_id", [False, 0])
+def test_call_recording_rejects_falsy_invalid_fresh_call_id_before_recording_download(
+    tmp_path, bad_call_id
+):
+    metadata = tmp_path / "metadata"
+    _binary_metadata(metadata)
+
+    class InvalidCall(BinarySession):
+        def post(self, url, *, json, timeout, allow_redirects):
+            response = super().post(url, json=json, timeout=timeout,
+                                    allow_redirects=allow_redirects)
+            if url.endswith("/voximplant.statistic.get.json"):
+                response.data["result"][0]["CALL_ID"] = bad_call_id
+            return response
+
+    session = InvalidCall()
+    with pytest.raises(module.ExportError, match="CALL_RECORD_CHANGED"):
+        module.export_binaries(WEBHOOK, metadata, tmp_path / "binaries", session=session)
+    assert all("FRESH_CALL" not in url for url in session.downloads)
 
 
 def test_call_with_record_file_id_retries_fresh_url_and_reports_unavailable(tmp_path):

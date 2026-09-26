@@ -830,6 +830,27 @@ def _positive_id(value: Any, code: str) -> str:
     return candidate
 
 
+def _call_id_field(value: Any, code: str) -> str:
+    if value is None or value == "":
+        return ""
+    if (not isinstance(value, str) or value != value.strip() or len(value) > 64
+            or any(ord(char) < 32 or ord(char) == 127 for char in value)):
+        raise ExportError(code)
+    return value
+
+
+def _optional_call_file_id(value: Any, code: str) -> str:
+    return "" if value is None or value == "" else _positive_id(value, code)
+
+
+def _optional_call_owner_type(value: Any, code: str) -> str:
+    return _call_id_field(value, code)
+
+
+def _optional_call_owner_id(value: Any, code: str) -> str:
+    return _optional_call_file_id(value, code)
+
+
 def _task_attachment_id(value: Any) -> str:
     # The task API can return an attached-object ID as either 491 or "n491".
     if isinstance(value, str) and value.startswith("n"):
@@ -1012,17 +1033,24 @@ def export_binaries(
             raise ExportError("BAD_TASK_FILES")
         for value in attachment_ids:
             task_refs.append((task_id, _task_attachment_id(value)))
-    call_refs: list[tuple[str, str, str | None, bool]] = []
+    call_refs: list[tuple[str, str, str, bool, str, str, str]] = []
     unavailable_recordings = 0
     for row in _staged_rows(metadata, "calls"):
         call_id = _positive_id(row.get("ID"), "BAD_CALL_ID")
         url = row.get("CALL_RECORD_URL")
-        record_file_id = (_positive_id(row["RECORD_FILE_ID"], "BAD_CALL_FILE_ID")
-                          if row.get("RECORD_FILE_ID") else None)
+        record_file_id = _optional_call_file_id(
+            row.get("RECORD_FILE_ID"), "BAD_CALL_FILE_ID"
+        )
         if url:
             _signed_download_url(url)
         if url or record_file_id:
-            call_refs.append((call_id, str(row.get("CALL_ID") or ""), record_file_id, bool(url)))
+            call_refs.append((
+                call_id, _call_id_field(row.get("CALL_ID"), "BAD_CALL_ID"),
+                record_file_id, bool(url),
+                _optional_call_owner_type(row.get("CRM_ENTITY_TYPE"), "BAD_CALL_OWNER_TYPE"),
+                _optional_call_owner_id(row.get("CRM_ENTITY_ID"), "BAD_CALL_OWNER_ID"),
+                _optional_call_owner_id(row.get("PORTAL_USER_ID"), "BAD_CALL_USER_ID"),
+            ))
     crm_file_stages: list[tuple[str, str, list[str], dict[str, set[str]]]] = []
     seen_crm_file_items: set[tuple[str, str]] = set()
     for row in _staged_rows(metadata, "crm_file_items"):
@@ -1126,7 +1154,8 @@ def export_binaries(
             result = binaries.add(key, file_row.get("DOWNLOAD_URL"), client.session, int(size))
             inventory.add(key, {**result, "name": file_row.get("NAME")})
             downloaded.add(key)
-    for call_id, source_call_id, record_file_id, had_url in call_refs:
+    for (call_id, source_call_id, record_file_id, had_url,
+         source_owner_type, source_owner_id, source_user_id) in call_refs:
         fresh = client.call("voximplant.statistic.get", {
             "FILTER": {"ID": [int(call_id)]}, "SORT": "ID", "ORDER": "ASC",
         })["result"]
@@ -1134,8 +1163,19 @@ def export_binaries(
                 or not isinstance(fresh[0], dict) or str(fresh[0].get("ID")) != call_id):
             raise ExportError("CALL_RECORD_MISMATCH")
         fresh_row = fresh[0]
-        if (source_call_id and str(fresh_row.get("CALL_ID") or "") != source_call_id
-                or record_file_id and str(fresh_row.get("RECORD_FILE_ID") or "") != record_file_id):
+        if (_call_id_field(fresh_row.get("CALL_ID"), "CALL_RECORD_CHANGED") != source_call_id
+                or _optional_call_file_id(
+                    fresh_row.get("RECORD_FILE_ID"), "CALL_RECORD_CHANGED"
+                ) != record_file_id
+                or _optional_call_owner_type(
+                    fresh_row.get("CRM_ENTITY_TYPE"), "CALL_RECORD_CHANGED"
+                ) != source_owner_type
+                or _optional_call_owner_id(
+                    fresh_row.get("CRM_ENTITY_ID"), "CALL_RECORD_CHANGED"
+                ) != source_owner_id
+                or _optional_call_owner_id(
+                    fresh_row.get("PORTAL_USER_ID"), "CALL_RECORD_CHANGED"
+                ) != source_user_id):
             raise ExportError("CALL_RECORD_CHANGED")
         url = fresh_row.get("CALL_RECORD_URL")
         if not url:
@@ -1146,7 +1186,13 @@ def export_binaries(
         key = "call:" + call_id
         result = binaries.add(key, _signed_download_url(url), client.session, None)
         inventory.add(key, result)
-        links.add(key, {"source": "call", "source_id": call_id, "binary_key": key})
+        links.add(key, {
+            "source": "call", "source_id": call_id,
+            "call_id": source_call_id or call_id,
+            "entity_type": source_owner_type, "entity_id": source_owner_id,
+            "portal_user_id": source_user_id,
+            "binary_key": key,
+        })
     summary = {"binary_files": binaries.summary(), "binary_inventory": inventory.summary(),
                "binary_links": links.summary(), "unavailable_recordings": {"records": unavailable_recordings}}
     with (output / "manifest.json").open("x", encoding="utf-8") as stream:
