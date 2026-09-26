@@ -134,6 +134,20 @@ current target database or all later source migrations.
   diff checks passed. The current register has no disposal-state field, so
   disposal applicability, release integration and real accountant acceptance
   keep G03D open.
+- The sixth local G03D slice binds manual `order` analytics to an immutable
+  production-order ownership snapshot for the selected organization, with an
+  explicit `production` source. It preserves ID, number, product, quantity,
+  creation time, digest and the stage at ownership without presenting that
+  stage as current. Free text and foreign, incomplete, forged, oversized or
+  unknown `order_*` references fail before preview, save or post; posted replay
+  survives a current-stage change and the UI ignores old-organization search
+  responses. Independent review reproduced and closed a multi-line validation
+  deduplication bypass. Focused backend 13/13, frontend/client 45/45,
+  disposable PostgreSQL 16 1/1, TypeScript, ESLint, Ruff and diff checks
+  passed. The narrow direct ownership read follows existing accounting
+  snapshot modules but remains an explicit exception to the preferred core
+  gateway boundary. `lot` still lacks a stable versioned registry; release
+  integration and real accountant acceptance keep G03D open.
 - CRM deal Save and Close now requires a response with the exact deal ID,
   submitted editor fields and a valid new edit token. The PATCH response is
   generated from the saved deal; two concurrent edits on disposable

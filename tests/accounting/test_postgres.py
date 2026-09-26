@@ -2560,3 +2560,86 @@ async def test_manual_asset_register_is_immutable_and_exact_replay_survives_post
         entry = await service.post(session, pg_book[0], reviewed, "tester")
         assert replay["entry_id"] == posted["entry_id"] == entry.id
         await session.commit()
+
+
+async def test_manual_production_order_snapshot_isolates_and_replays_after_stage_change_postgres(
+        pg_factory, pg_book, posting):
+    from core.services.auth import CurrentUser
+    from modules.accounting import manual_documents, order_snapshot
+    from modules.accounting.gateway import AccountingService
+    from modules.accounting.schemas import PostingInput
+    from modules.production.accounting_ownership import (
+        OwnershipCommand,
+        ProductionOrderOwnership,
+        assign_order,
+    )
+    from modules.production.accounting_ownership import (
+        order_snapshot as production_order_snapshot,
+    )
+    from modules.production.models import ProductionOrder
+
+    user = CurrentUser("tester", ["director"])
+    async with pg_factory() as session:
+        order = ProductionOrder(
+            number="SYN-MANUAL-ORDER", product="Synthetic pump", qty=3, stage="queue",
+        )
+        session.add(order)
+        await session.flush()
+        order_id = order.id
+        await assign_order(session, AccountingService(), pg_book[0], user, OwnershipCommand(
+            order_id=order_id,
+            expected_digest=production_order_snapshot(order)[1],
+            evidence="Synthetic manual accounting ownership",
+        ))
+        await session.commit()
+
+    async with pg_factory() as session:
+        order = await session.get(ProductionOrder, order_id)
+        order.stage = "assembly"
+        await session.commit()
+
+    async with pg_factory() as session:
+        selected = await order_snapshot.options(session, pg_book[0], "SYN-MANUAL-ORDER")
+        assert len(selected) == 1
+        dimensions = selected[0]
+        assert dimensions["order_source"] == "production"
+        assert dimensions["order_id"] == str(order_id)
+        assert dimensions["order_stage_at_ownership"] == "queue"
+        assert "status" not in dimensions and "stage" not in dimensions
+        assert await order_snapshot.options(session, pg_book[0] + 999, "SYN-MANUAL-ORDER") == []
+        with pytest.raises(service.AccountingError):
+            await order_snapshot.verify_reference(session, pg_book[0] + 999, dimensions)
+        with pytest.raises(service.AccountingError):
+            await order_snapshot.verify_reference(
+                session, pg_book[0], {**dimensions, "order_product": "Forged product"},
+            )
+
+    payload = posting("PG-MANUAL-PRODUCTION-ORDER").model_dump(mode="json")
+    payload["lines"][0]["dimensions"] = dimensions
+    reviewed = PostingInput.model_validate(payload)
+    async with pg_factory() as session:
+        saved = await manual_documents.create(session, pg_book[0],
+            manual_documents.ManualDocumentCreate(key=uuid4(), posting=reviewed), "tester", "chief")
+        await session.commit()
+    post_command = manual_documents.ManualDocumentPost(
+        key=uuid4(), expected_version=1, digest=service.digest(reviewed),
+    )
+    async with pg_factory() as session:
+        posted = await manual_documents.post(
+            session, pg_book[0], saved["id"], post_command, "tester", "chief")
+        await session.commit()
+
+    async with pg_factory() as session:
+        order = await session.get(ProductionOrder, order_id)
+        order.stage = "done"
+        await session.commit()
+
+    async with pg_factory() as session:
+        replay = await manual_documents.post(
+            session, pg_book[0], saved["id"], post_command, "tester", "chief")
+        await manual_documents.verify_new_manual_references(session, pg_book[0], reviewed)
+        entry = await service.post(session, pg_book[0], reviewed, "tester")
+        assert replay["entry_id"] == posted["entry_id"] == entry.id
+        ownership = await session.get(ProductionOrderOwnership, order_id)
+        assert ownership.snapshot["stage"] == "queue"
+        await session.commit()

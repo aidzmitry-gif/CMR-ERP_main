@@ -41,6 +41,7 @@ from modules.accounting import (
     inventory_issues,
     manual_documents,
     opening_import,
+    order_snapshot,
     output_vat_register,
     payroll_applicability_review,
     payroll_candidate,
@@ -578,6 +579,17 @@ async def manual_employee_options(org_id: int, on: date, response: Response,
     except service.AccountingError as exc:
         raise HTTPException(422, str(exc)) from exc
     return {"organization_id": org_id, "on": on.isoformat(), "items": items}
+
+
+@router.get("/organizations/{org_id}/manual-orders")
+async def manual_order_options(org_id: int, response: Response,
+                               q: str = Query(default="", max_length=100), ctx=Depends(member)):
+    response.headers["Cache-Control"] = "private, no-store"
+    try:
+        items = await order_snapshot.options(ctx[0], org_id, q)
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"organization_id": org_id, "items": items}
 
 
 @router.get("/organizations/{org_id}/manual-documents")

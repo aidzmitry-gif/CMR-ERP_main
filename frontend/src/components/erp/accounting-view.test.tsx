@@ -15,6 +15,11 @@ const respond = (data: unknown, ok = true) => Promise.resolve({ ok, json: async 
 const digest = "a".repeat(64);
 const registeredAsset = { id: 7, organization_id: 1, asset_key: "asset:equipment:001",
   digest, name: "Станок", inventory_number: "ОС-001" };
+const registeredProductionOrder = {
+  order: "ПР-17", order_source: "production", order_id: "17", order_number: "ПР-17",
+  order_product: "Насос", order_quantity: "3", order_created_at: "2026-09-01T10:00:00",
+  order_digest: digest, order_stage_at_ownership: "queue",
+};
 let manualDraft: { id: number; organization_id: number; number: string; source: string; posting_date: string; version: number; status: string; entry_id: number | null; updated_at: string; void?: { reason: string; actor: string; created_at: string }; revisions: { version: number; actor: string; created_at: string; digest: string; posting: Record<string, unknown> }[] } | null;
 function openPage(section: string, page: string) {
   fireEvent.click(screen.getByRole("button", { name: section, exact: true }));
@@ -661,6 +666,99 @@ it("selects an active employment snapshot and fills the required department", as
   const saved = fetchMock.mock.calls.find(([url, init]) =>
     String(url).endsWith("/manual-documents") && init?.body);
   expect(JSON.parse(String(saved?.[1]?.body)).posting.lines[0].dimensions).toEqual(employee);
+});
+
+it("selects an immutable production ownership snapshot for manual order analytics", async () => {
+  const original = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+    if (url.includes("/accounts?")) return respond([
+      { id: 1, code: "41", title: "Товары", cash: false, required_dimensions: ["order"] },
+      { id: 2, code: "60", title: "Поставщики", cash: false, required_dimensions: [] },
+    ]);
+    if (url.includes("/manual-orders?q=")) return respond({
+      organization_id: 1, items: [registeredProductionOrder],
+    });
+    return original(url, init);
+  });
+  render(<AccountingView />);
+  await screen.findByText(/включительно: 0\./);
+  openPage("Документы", "Ручная операция");
+  fillManualOperation();
+  fireEvent.change(screen.getByLabelText("Счёт 1"), { target: { value: "41" } });
+  fireEvent.change(screen.getByLabelText("Поиск производственного заказа строки 1"), {
+    target: { value: "ПР-17" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Найти заказ строки 1" }));
+  fireEvent.click(await screen.findByRole("button", {
+    name: "Выбрать ПР-17 · Насос · 3 шт. · ID 17",
+  }));
+  expect(screen.getByText(/этап на дату привязки: queue/)).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+  await screen.findByText("Проверенные проводки");
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить", exact: true }));
+  const lookup = fetchMock.mock.calls.find(([url]) => String(url).includes("/manual-orders?q="));
+  expect(String(lookup?.[0])).toContain("/organizations/1/manual-orders?q=%D0%9F%D0%A0-17");
+  expect(lookup?.[1]).toEqual({ cache: "no-store" });
+  const preview = fetchMock.mock.calls.find(([url, init]) =>
+    String(url).endsWith("/organizations/1/preview") && init?.method === "POST");
+  const saved = fetchMock.mock.calls.find(([url, init]) =>
+    String(url).endsWith("/manual-documents") && init?.body);
+  expect(JSON.parse(String(preview?.[1]?.body)).lines[0].dimensions).toEqual(registeredProductionOrder);
+  expect(JSON.parse(String(saved?.[1]?.body)).posting.lines[0].dimensions).toEqual(registeredProductionOrder);
+});
+
+it("ignores a pending production order lookup after changing organization", async () => {
+  const original = fetchMock.getMockImplementation()!;
+  const otherOrder = { ...registeredProductionOrder, order_id: "18", order_number: "ПР-18",
+    order: "ПР-18", order_product: "Компрессор", order_stage_at_ownership: "assembly" };
+  let resolveOld!: (value: { ok: boolean; json: () => Promise<unknown> }) => void;
+  const oldResponse = new Promise<{ ok: boolean; json: () => Promise<unknown> }>(
+    (resolve) => { resolveOld = resolve; },
+  );
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+    if (url.includes("/accounts?")) return respond([
+      { id: 1, code: "41", title: "Товары", cash: false, required_dimensions: ["order"] },
+      { id: 2, code: "60", title: "Поставщики", cash: false, required_dimensions: [] },
+    ]);
+    if (url.includes("/organizations/1/manual-orders?q=")) return oldResponse;
+    if (url.includes("/organizations/2/manual-orders?q=")) return respond({
+      organization_id: 2, items: [otherOrder],
+    });
+    return original(url, init);
+  });
+  render(<AccountingView />);
+  await screen.findByText(/включительно: 0\./);
+  openPage("Документы", "Ручная операция");
+  fillManualOperation();
+  fireEvent.change(screen.getByLabelText("Счёт 1"), { target: { value: "41" } });
+  fireEvent.change(screen.getByLabelText("Поиск производственного заказа строки 1"), {
+    target: { value: "ПР-17" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Найти заказ строки 1" }));
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) =>
+    String(url).includes("/organizations/1/manual-orders?q="))).toBe(true));
+
+  fireEvent.change(screen.getByLabelText("Организация"), { target: { value: "2" } });
+  await waitFor(() => expect(screen.getByLabelText("Организация")).toHaveValue("2"));
+  fillManualOperation();
+  fireEvent.change(screen.getByLabelText("Счёт 1"), { target: { value: "41" } });
+  fireEvent.change(screen.getByLabelText("Поиск производственного заказа строки 1"), {
+    target: { value: "ПР-18" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Найти заказ строки 1" }));
+  expect(await screen.findByRole("button", {
+    name: "Выбрать ПР-18 · Компрессор · 3 шт. · ID 18",
+  })).toBeInTheDocument();
+
+  await act(async () => resolveOld(await respond({
+    organization_id: 1, items: [registeredProductionOrder],
+  })));
+  expect(screen.queryByRole("button", {
+    name: "Выбрать ПР-17 · Насос · 3 шт. · ID 17",
+  })).not.toBeInTheDocument();
+  expect(confirm).toHaveBeenCalled();
 });
 
 it("selects an organization-owned fixed asset and sends its exact register snapshot", async () => {

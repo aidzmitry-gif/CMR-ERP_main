@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from pydantic import Field
 from sqlalchemy import select
 
-from modules.accounting import fixed_assets, service
+from modules.accounting import fixed_assets, order_snapshot, service
 from modules.accounting.contract_snapshot import CONTRACT_KEYS, verified_contract_snapshot
 from modules.accounting.counterparty_snapshot import verified_counterparty
 from modules.accounting.employee_snapshot import EMPLOYEE_SNAPSHOT_KEYS
@@ -95,6 +95,7 @@ async def verify_analytic_references(session, org_id: int, posting: PostingInput
     checked_contracts = set()
     checked_settlement_documents = set()
     checked_assets = set()
+    checked_orders = set()
     for line in posting.lines:
         dimensions = line.dimensions
         if {"counterparty", "counterparty_id", "counterparty_unp", "counterparty_revision"} & dimensions.keys():
@@ -136,6 +137,14 @@ async def verify_analytic_references(session, org_id: int, posting: PostingInput
             if snapshot not in checked_assets:
                 await verify_asset_snapshot(session, org_id, dimensions)
                 checked_assets.add(snapshot)
+        if order_snapshot.has_reference(dimensions):
+            snapshot = tuple(sorted(
+                (key, value) for key, value in dimensions.items()
+                if key == "order" or key.startswith("order_")
+            ))
+            if snapshot not in checked_orders:
+                await order_snapshot.verify_reference(session, org_id, dimensions)
+                checked_orders.add(snapshot)
 
 
 async def verify_new_manual_references(session, org_id: int, posting: PostingInput):

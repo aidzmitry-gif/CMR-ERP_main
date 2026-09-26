@@ -1,8 +1,98 @@
+from datetime import datetime
 from uuid import uuid4
 
+import pytest
 from sqlalchemy import update
 
 from modules.accounting import service
+
+
+def _production_ownership(book_id: int):
+    from modules.production.accounting_ownership import ProductionOrderOwnership, order_snapshot
+    from modules.production.models import ProductionOrder
+
+    order = ProductionOrder(
+        id=17, number="ПР-17", product="Насос", qty=3, stage="queue",
+        created_at=datetime(2026, 9, 1, 10, 0, 0),
+    )
+    snapshot, digest = order_snapshot(order)
+    return ProductionOrderOwnership(
+        order_id=17, organization_id=book_id, snapshot=snapshot, digest=digest,
+        evidence="Synthetic production ownership", actor="tester",
+    )
+
+
+async def test_manual_order_reference_requires_exact_production_ownership(book, posting):
+    from modules.accounting import manual_documents, order_snapshot
+    from modules.accounting.schemas import PostingInput
+
+    ownership = _production_ownership(book[0])
+    dimensions = order_snapshot.dimensions_from_ownership(ownership)
+
+    class Session:
+        def __init__(self, row):
+            self.row = row
+            self.calls = 0
+
+        async def scalar(self, _statement):
+            self.calls += 1
+            return self.row
+
+    session = Session(ownership)
+
+    def reviewed(reference):
+        payload = posting("MANUAL-PRODUCTION-ORDER").model_dump(mode="json")
+        payload["lines"][0]["dimensions"] = reference
+        return PostingInput.model_validate(payload)
+
+    await manual_documents.verify_analytic_references(session, book[0], reviewed(dimensions))
+    assert session.calls == 1
+    for invalid in (
+        {"order": "free text"},
+        {key: value for key, value in dimensions.items() if key != "order_quantity"},
+        {**dimensions, "order_product": "Forged product"},
+        {**dimensions, "order_digest": "b" * 64},
+        {**dimensions, "order_extra": "unrecognized"},
+    ):
+        with pytest.raises(service.AccountingError):
+            await manual_documents.verify_analytic_references(session, book[0], reviewed(invalid))
+
+    session.calls = 0
+    with pytest.raises(service.AccountingError):
+        await order_snapshot.verify_reference(session, book[0], {**dimensions, "order_id": "2147483648"})
+    assert session.calls == 0
+    session.row = _production_ownership(book[0] + 1)
+    with pytest.raises(service.AccountingError):
+        await order_snapshot.verify_reference(session, book[0], dimensions)
+
+    session.row = ownership
+    payload = reviewed(dimensions).model_dump(mode="json")
+    forged = {**dimensions, "order_zz": dimensions["order_stage_at_ownership"]}
+    del forged["order_stage_at_ownership"]
+    payload["lines"][1]["dimensions"] = forged
+    with pytest.raises(service.AccountingError):
+        await manual_documents.verify_analytic_references(
+            session, book[0], PostingInput.model_validate(payload),
+        )
+
+
+async def test_manual_order_options_are_organization_scoped_and_no_store(client, book, monkeypatch):
+    from modules.accounting import routes
+
+    async def options(_session, organization_id, term):
+        assert organization_id == book[0]
+        assert term == "ПР-17"
+        return [{"order_source": "production", "order_id": "17"}]
+
+    monkeypatch.setattr(routes.order_snapshot, "options", options)
+    response = await client.get(
+        f"/accounting/organizations/{book[0]}/manual-orders?q=%D0%9F%D0%A0-17",
+    )
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.json() == {
+        "organization_id": book[0], "items": [{"order_source": "production", "order_id": "17"}],
+    }
 
 
 async def _registered_manual_asset(db, book, posting):
