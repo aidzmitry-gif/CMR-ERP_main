@@ -587,20 +587,20 @@ async def test_contract_goes_through_approval(session, api):
     assert appr.route == "Юрист"
     assert appr.status == "pending"
 
-    # одобрение → документ проводится в 1С
+    # Одобрение фиксирует внутренний документ; ссылку 1С не выдумываем.
     d = await api.post(
         f"/sales/documents/{doc['id']}/decide", json={"approved": True, "by": "Юрист Юрьев"}
     )
     assert d.status_code == 200
     body = d.json()
     assert body["status"] == "posted"
-    assert body["onec_ref"] == "1С-ДГ-CT-1"
+    assert body["onec_ref"] is None
 
     # связанное согласование закрыто
     await session.refresh(appr)
     assert appr.status == "approved"
 
-    # события: создание документа + решение согласования + проведение в 1С
+    # События: создание документа, решение согласования и внутреннее проведение.
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
     assert "sales.document.created" in types
     assert "approval.approved" in types
@@ -662,13 +662,14 @@ async def test_order_reserves_stock(session, api):
     session.add(StockItem(sku_code="RSV-1", warehouse="Главный", qty_available=100, qty_reserved=3))
     await session.commit()
 
-    # заказ проводится в 1С и резервирует остатки по позициям сделки
+    # Старый заказ фиксируется в ERP и обновляет legacy-остаток; адресный резерв
+    # для счёта CRM создаётся отдельным сценарием выпуска счёта.
     r = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "order"})
     assert r.status_code == 201
     body = r.json()
     assert body["kind"] == "order"
     assert body["status"] == "posted"
-    assert body["onec_ref"] == "1С-ЗК-OR-1"
+    assert body["onec_ref"] is None
 
     item = (
         await session.execute(select(StockItem).where(StockItem.sku_code == "RSV-1"))

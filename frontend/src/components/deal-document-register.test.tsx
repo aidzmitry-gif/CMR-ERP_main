@@ -23,11 +23,11 @@ it("requires explicit book selection and shows honest coverage and reserve seman
   expect(screen.queryByRole("button", { name: /отмен|подтвердить|выпустить/i })).not.toBeInTheDocument();
 });
 
-it("shows an unavailable 1C link without inventing an external reference", async () => {
+it("shows ERP issuance without inventing an external 1C requirement", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok({ ...page, items: [{ ...row, status: "posted", onec_ref: null }] })));
   render(<DealDocumentRegister dealId="501" org="7" />);
-  expect(await screen.findByText("Связь с 1С не подтверждена.")).toBeInTheDocument();
-  expect(screen.queryByText(/Ссылка 1С:/)).toBeNull();
+  expect(await screen.findByText(/Выпущен в ERP/)).toBeInTheDocument();
+  expect(screen.queryByText(/1С/)).toBeNull();
 });
 
 it("uses scoped lookup for linked versions outside the current filter/page and opens saved HTML in a sandbox", async () => {

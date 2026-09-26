@@ -181,7 +181,7 @@ describe("DealDocuments", () => {
     await waitFor(() => expect(api.createDocumentResult).toHaveBeenCalledWith("1", "invoice"));
   });
 
-  it("договор на согласовании → проведение в 1С", async () => {
+  it("договор на согласовании → выпуск в ERP", async () => {
     mock(api.fetchDocuments).mockResolvedValue([
       { id: 3, kind: "contract", number: "ДГ-1", status: "pending_approval", onec_ref: null, amount: 1000, reserve_status: "none", valid_until: null },
     ]);
@@ -196,8 +196,7 @@ describe("DealDocuments", () => {
     mock(api.fetchDocuments).mockResolvedValue([issuedInvoice]);
     render(<DealDocuments dealId="1" />);
     expect(await screen.findByText("Выпущен в ERP")).toBeInTheDocument();
-    expect(screen.getByText("Связь с 1С не подтверждена")).toBeInTheDocument();
-    expect(screen.queryByText("Записан в 1С")).toBeNull();
+    expect(screen.queryByText(/1С/)).toBeNull();
   });
 
   it("смена типа документа и отклонение", async () => {

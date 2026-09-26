@@ -245,9 +245,6 @@ function DealDocumentsForDeal({ dealId }: { dealId: string }) {
                   <span className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${s.cls}`}>
                     {s.label}
                   </span>
-                  {d.status === "posted" && !d.onec_ref && <span className="inline-block rounded-md bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
-                    Связь с 1С не подтверждена
-                  </span>}
                   {d.status === "posted" && d.onec_ref && <span className="inline-block rounded-md bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700">
                     Указана ссылка 1С: {d.onec_ref}
                   </span>}
