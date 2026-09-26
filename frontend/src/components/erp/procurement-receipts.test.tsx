@@ -208,13 +208,19 @@ it("loads revoked supplier contracts as read-only history outside the selectable
     evidence: "Подписанный оригинал", is_active: false, created_by: "buyer",
     created_at: "2025-01-02T09:00:00Z", deactivated_by: "chief",
     deactivated_at: "2026-09-01T12:00:00Z", deactivation_reason: "Заменён новым" };
+  const older = { ...revoked, id: 48, number: "SC-EARLIER",
+    deactivated_at: "2026-08-01T12:00:00Z", deactivation_reason: "Заменён ранее" };
   const fetcher = vi.fn(async (url: string) => {
     if (url.includes("purchase-ownership")) return { ok: true, json: async () => [] };
     if (url.includes("supplier-options")) return { ok: true, json: async () => ({
       organization_id: 7, items: [{ id: 19, name: "Поставщик", unp: "190000001" }], truncated: false,
     }) };
     if (url.includes("status=revoked")) return { ok: true, json: async () => ({
-      organization_id: 7, supplier_id: 19, status: "revoked", items: [revoked], truncated: false,
+      organization_id: 7, supplier_id: 19, status: "revoked",
+      items: url.includes("before_id=49") ? [older] : [revoked],
+      truncated: !url.includes("before_id=49"),
+      next_before_at: url.includes("before_id=49") ? null : "2026-09-01T12:00:00+00:00",
+      next_before_id: url.includes("before_id=49") ? null : 49,
     }) };
     if (url.includes("supplier-contracts")) return { ok: true, json: async () => ({
       organization_id: 7, supplier_id: 19, status: "active", items: [], truncated: false,
@@ -230,6 +236,11 @@ it("loads revoked supplier contracts as read-only history outside the selectable
   expect(screen.getByText("№ SC-OLD · Прежний договор · ID 49")).toBeInTheDocument();
   expect(screen.getByText("Отозвал: chief, 2026-09-01T12:00:00Z. Причина: Заменён новым.")).toBeInTheDocument();
   expect(screen.queryByRole("option", { name: /SC-OLD/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Показать ещё отозванные договоры" }));
+  expect(await screen.findByText("№ SC-EARLIER · Прежний договор · ID 48")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Показать ещё отозванные договоры" })).not.toBeInTheDocument();
+  expect(fetcher.mock.calls.some(([url]) => url.includes("before_at=2026-09-01T12%3A00%3A00%2B00%3A00")
+    && url.includes("before_id=49"))).toBe(true);
 });
 
 it("warns before replacing an unsaved new receipt", async () => {

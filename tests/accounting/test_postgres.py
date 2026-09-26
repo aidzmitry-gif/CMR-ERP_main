@@ -1118,6 +1118,36 @@ async def test_supplier_contract_catalog_postgres_guards(pg_factory, pg_book):
         await session.rollback()
 
 
+async def test_revoked_contract_history_cursor_postgres(pg_factory, pg_book):
+    from datetime import date, datetime, timedelta, timezone
+    from uuid import uuid4
+
+    from modules.procurement.supplier_contracts import SupplierContract, list_contracts
+
+    timestamp = datetime(2026, 9, 26, 10, tzinfo=timezone.utc)
+    async with pg_factory() as session:
+        rows = [SupplierContract(
+            organization_id=pg_book[0], supplier_id=1, number=f"PG-HISTORY-{i}",
+            title="Synthetic signed contract", signed_on=date(2025, 1, 1),
+            evidence="Synthetic original", created_by="tester",
+        ) for i in range(3)]
+        session.add_all(rows)
+        await session.flush()
+        ids = [row.id for row in rows]
+        for index, row in enumerate(rows):
+            row.is_active = False
+            row.deactivated_by = "tester"
+            row.deactivated_at = timestamp if index else timestamp - timedelta(days=1)
+            row.deactivation_reason = "Synthetic correction"
+            row.deactivation_key = str(uuid4())
+        await session.commit()
+    async with pg_factory() as session:
+        page = await list_contracts(pg_book[0], supplier_id=1, status="revoked",
+                                    before_at=timestamp, before_id=ids[2], ctx=(session, None))
+        assert [row["id"] for row in page["items"]] == [ids[1], ids[0]]
+        assert page["truncated"] is False
+
+
 async def test_concurrent_replay_one_entry(pg_factory, pg_book, posting):
     async def writer():
         async with pg_factory() as session:

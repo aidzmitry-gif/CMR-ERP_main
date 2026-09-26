@@ -12,6 +12,8 @@ const item = () => ({ order_id: null as number | null, sku_id: null as number | 
 const blank = () => ({ currency: "BYN", invoice_reference: "", document_date: "", operation_date: "", supplier: "", supplier_id: null as number | null, supplier_unp: null as string | null, contract: "", contract_id: null as number | null, contract_basis: null as string | null, warehouse: "", explanation: "", items: [item()] });
 type Document = ReturnType<typeof blank>;
 type SupplierContract = { id: number; organization_id: number; supplier_id: number; number: string; title: string; signed_on: string; expires_on: string | null; evidence: string; is_active?: boolean; created_by?: string; created_at?: string; deactivated_by?: string | null; deactivated_at?: string | null; deactivation_reason?: string | null };
+type ContractHistoryPage = { organization_id: number; supplier_id: number; status: string; items: SupplierContract[]; truncated: boolean; next_before_at: string | null; next_before_id: number | null };
+type ContractHistoryCursor = { at: string; id: number };
 type Receipt = { id: number; key?: string; version: number; status?: string; posting?: { entry_id: number; version: number } | null; revisions: { version: number; request_key?: string | null; actor: string; created_at: string; document: Document }[] };
 type PendingSave = { org: string; receiptId: number | null; version: number; key: string; document: Document; closeAfterSave: boolean };
 type PendingContractRevoke = { org: string; supplierId: number; contractId: number; key: string; reason: string };
@@ -50,6 +52,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     : typeof data.detail === "string" ? data.detail : "Проверьте реквизиты, даты и суммы накладной."), { status: response.status });
   return data;
 }
+function checkedHistoryPage(data: ContractHistoryPage, org: string, supplierId: number) {
+  if (data.organization_id !== Number(org) || data.supplier_id !== supplierId || data.status !== "revoked"
+    || !Array.isArray(data.items) || data.items.some((row) => row.organization_id !== Number(org)
+      || row.supplier_id !== supplierId || row.is_active !== false)
+    || (data.truncated && (typeof data.next_before_at !== "string" || !Number.isInteger(data.next_before_id))))
+    throw new Error("История договоров вернула неверные данные юрлица, поставщика или страницы.");
+  const next: ContractHistoryCursor | null = data.truncated
+    ? { at: data.next_before_at!, id: data.next_before_id! } : null;
+  return { items: data.items, next };
+}
 export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], policyId, date = "", onPosted, onPendingChange }: { org: string; initialReceipt?: string; accounts?: ReceiptAccount[]; policyId?: number; date?: string; onPosted?: () => void; onPendingChange?: (pending: boolean) => void }) {
   const [rows, setRows] = useState<Receipt[]>([]), [document, setDocument] = useState(blank);
   const [query, setQuery] = useState(""), [statusFilter, setStatusFilter] = useState("all");
@@ -59,7 +71,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   const [supplierOptions, setSupplierOptions] = useState<ProcurementSupplierOption[]>([]);
   const [supplierError, setSupplierError] = useState("");
   const [contracts, setContracts] = useState<SupplierContract[]>([]), [contractError, setContractError] = useState("");
-  const [revokedState, setRevokedState] = useState<{ context: string; items: SupplierContract[]; error: string }>({ context: "", items: [], error: "" });
+  const [revokedState, setRevokedState] = useState<{ context: string; items: SupplierContract[]; next: ContractHistoryCursor | null; loading: boolean; error: string }>({ context: "", items: [], next: null, loading: false, error: "" });
   const [newContract, setNewContract] = useState({ number: "", title: "", signed_on: "", expires_on: "", evidence: "" });
   const [contractBusy, setContractBusy] = useState(false);
   const [contractRevokeReason, setContractRevokeReason] = useState("");
@@ -78,6 +90,8 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   supplierContext.current = `${org}:${document.supplier_id ?? ""}`;
   const revokedContracts = revokedState.context === supplierContext.current ? revokedState.items : [];
   const revokedError = revokedState.context === supplierContext.current ? revokedState.error : "";
+  const revokedNext = revokedState.context === supplierContext.current ? revokedState.next : null;
+  const revokedLoading = revokedState.context === supplierContext.current && revokedState.loading;
   const initialOpened = useRef(false);
   const [initialLoading, setInitialLoading] = useState(initialReceipt !== undefined);
   const path = `/organizations/${org}/receipt-documents`;
@@ -127,20 +141,37 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
         throw new Error("Справочник договоров вернул данные другого юрлица или поставщика.");
       setContracts(data.items); setContractError("");
     }).catch((cause: Error) => { if (current && generation === contractFetchVersion.current) { setContracts([]); setContractError(cause.message); } });
-    void request<{ organization_id: number; supplier_id: number; status: string; items: SupplierContract[]; truncated: boolean }>(
+    void request<ContractHistoryPage>(
       `/organizations/${org}/supplier-contracts?supplier_id=${supplierId}&status=revoked`,
     ).then((data) => {
       if (!current || generation !== contractFetchVersion.current) return;
-      if (data.organization_id !== Number(org) || data.supplier_id !== supplierId || data.status !== "revoked"
-        || !Array.isArray(data.items) || data.items.some((row) => row.organization_id !== Number(org)
-          || row.supplier_id !== supplierId || row.is_active !== false))
-        throw new Error("История договоров вернула данные другого юрлица или поставщика.");
-      setRevokedState({ context: `${org}:${supplierId}`, items: data.items,
-        error: data.truncated ? "Показаны последние 100 отзывов; постраничный просмотр пока недоступен." : "" });
+      const page = checkedHistoryPage(data, org, supplierId);
+      setRevokedState({ context: `${org}:${supplierId}`, ...page, loading: false, error: "" });
     }).catch((cause: Error) => { if (current && generation === contractFetchVersion.current)
-      setRevokedState({ context: `${org}:${supplierId}`, items: [], error: cause.message }); });
+      setRevokedState({ context: `${org}:${supplierId}`, items: [], next: null, loading: false, error: cause.message }); });
     return () => { current = false; };
   }, [org, document.supplier_id]);
+  async function loadMoreRevoked() {
+    const supplierId = document.supplier_id, cursor = revokedNext;
+    if (!supplierId || !cursor || revokedLoading) return;
+    const context = `${org}:${supplierId}`, generation = contractFetchVersion.current;
+    setRevokedState(current => ({ ...current, loading: true, error: "" }));
+    try {
+      const data = await request<ContractHistoryPage>(
+        `/organizations/${org}/supplier-contracts?supplier_id=${supplierId}&status=revoked&before_at=${encodeURIComponent(cursor.at)}&before_id=${cursor.id}`,
+      );
+      const page = checkedHistoryPage(data, org, supplierId);
+      if (active.current && supplierContext.current === context && contractFetchVersion.current === generation) {
+        setRevokedState(current => ({ context, items: [...current.items,
+          ...page.items.filter(row => !current.items.some(existing => existing.id === row.id))],
+          next: page.next, loading: false, error: "" }));
+      }
+    } catch (cause) {
+      if (active.current && supplierContext.current === context && contractFetchVersion.current === generation)
+        setRevokedState(current => ({ ...current, loading: false,
+          error: cause instanceof Error ? cause.message : "Не удалось загрузить историю договоров." }));
+    }
+  }
   useEffect(() => {
     let current = true;
     void request<OwnedOrder[]>(`/organizations/${org}/purchase-ownership`).then((data) => {
@@ -281,7 +312,9 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
         setContracts(current => current.filter(row => row.id !== command.contractId));
         setRevokedState(current => ({ context: `${command.org}:${command.supplierId}`,
           items: [result as SupplierContract, ...(current.context === `${command.org}:${command.supplierId}`
-            ? current.items.filter(row => row.id !== command.contractId) : [])], error: "" }));
+            ? current.items.filter(row => row.id !== command.contractId) : [])],
+          next: current.context === `${command.org}:${command.supplierId}` ? current.next : null,
+          loading: false, error: "" }));
         setDocument(current => current.supplier_id === command.supplierId && current.contract_id === command.contractId
           ? { ...current, contract_id: null, contract: "", contract_basis: null } : current);
         setContractRevokeReason("");
@@ -361,6 +394,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
             <p>Зарегистрировал: {shown(row.created_by)}, {shown(row.created_at)}.</p>
             <p>Отозвал: {shown(row.deactivated_by)}, {shown(row.deactivated_at)}. Причина: {shown(row.deactivation_reason)}.</p>
           </li>)}</ul>
+          {revokedNext && <Button variant="secondary" disabled={revokedLoading} onClick={() => void loadMoreRevoked()}>{revokedLoading ? "Загрузка…" : "Показать ещё отозванные договоры"}</Button>}
         </details>
         <details><summary>Зарегистрировать договор поставщика</summary><div className="grid gap-2 md:grid-cols-2">
           <label>Номер нового договора<Input aria-label="Номер нового договора" maxLength={200} value={newContract.number} onChange={e => setNewContract({ ...newContract, number: e.target.value })} /></label>

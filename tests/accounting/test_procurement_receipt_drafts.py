@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -129,6 +129,41 @@ async def test_supplier_contract_selection_is_company_supplier_and_date_scoped(c
     assert [item["id"] for item in (await client.get(path, params={"supplier_id": 1})).json()["items"]] == [replacement.json()["id"]]
     assert [item["id"] for item in (await client.get(path, params={"supplier_id": 1, "status": "revoked"})).json()["items"]] == [contract_id]
     assert accepted.json()["revisions"][0]["document"]["contract_id"] == contract_id
+
+
+async def test_revoked_supplier_contract_history_pages_without_skipping_equal_timestamps(client, db, book):
+    from modules.procurement.supplier_contracts import SupplierContract
+
+    path = f"/procurement/organizations/{book[0]}/supplier-contracts"
+    timestamp = datetime(2026, 9, 26, 10, tzinfo=timezone.utc)
+    rows = [SupplierContract(
+        organization_id=book[0], supplier_id=1, number=f"OLD-{i}", title="Synthetic historical agreement",
+        signed_on=date(2025, 1, 1), evidence="Synthetic signed original", created_by="tester",
+        is_active=False, deactivated_by="tester", deactivated_at=timestamp if i else timestamp - timedelta(days=1),
+        deactivation_reason="Synthetic replacement", deactivation_key=str(uuid4()),
+    ) for i in range(102)]
+    db.add_all(rows)
+    await db.flush()
+    expected = [row.id for row in rows[:0:-1]] + [rows[0].id]
+    await db.commit()
+
+    first = await client.get(path, params={"supplier_id": 1, "status": "revoked"})
+    assert first.status_code == 200, first.text
+    assert first.json()["truncated"] is True
+    assert len(first.json()["items"]) == 100
+    assert first.json()["next_before_at"] and first.json()["next_before_id"]
+    second = await client.get(path, params={"supplier_id": 1, "status": "revoked",
+                                            "before_at": first.json()["next_before_at"],
+                                            "before_id": first.json()["next_before_id"]})
+    assert second.status_code == 200, second.text
+    assert second.json()["truncated"] is False
+    assert second.json()["next_before_at"] is None
+    assert [row["id"] for row in first.json()["items"] + second.json()["items"]] == expected
+    assert (await client.get(path, params={"supplier_id": 1, "status": "revoked",
+                                          "before_id": first.json()["next_before_id"]})).status_code == 422
+    assert (await client.get(path, params={"supplier_id": 1, "status": "active",
+                                          "before_at": first.json()["next_before_at"],
+                                          "before_id": first.json()["next_before_id"]})).status_code == 422
 
 
 async def test_receipt_sku_selection_freezes_snapshot_and_rejects_catalog_drift(client, db, book):
