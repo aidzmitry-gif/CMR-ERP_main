@@ -13,6 +13,8 @@ const report = { organization_id: 1, status: "preliminary", pending_documents: 0
 const fetchMock = vi.fn();
 const respond = (data: unknown, ok = true) => Promise.resolve({ ok, json: async () => data });
 const digest = "a".repeat(64);
+const registeredAsset = { id: 7, organization_id: 1, asset_key: "asset:equipment:001",
+  digest, name: "Станок", inventory_number: "ОС-001" };
 let manualDraft: { id: number; organization_id: number; number: string; source: string; posting_date: string; version: number; status: string; entry_id: number | null; updated_at: string; void?: { reason: string; actor: string; created_at: string }; revisions: { version: number; actor: string; created_at: string; digest: string; posting: Record<string, unknown> }[] } | null;
 function openPage(section: string, page: string) {
   fireEvent.click(screen.getByRole("button", { name: section, exact: true }));
@@ -34,6 +36,7 @@ beforeEach(() => {
     if (input.endsWith("/organizations")) return respond([{ id: 1, name: "Тестовая компания", unp: "999999999" }, { id: 2, name: "Вторая компания", unp: "888888888" }]);
     if (input.includes("/accounts?")) return respond([{ id: 1, code: "41", title: "Товары", cash: false, required_dimensions: [] }, { id: 2, code: "60", title: "Поставщики", cash: false, required_dimensions: [] }]);
     if (input.endsWith("/policies")) return respond([{ id: 1, effective_from: "2020-01-01", reference: "Test", normative_verified: false }]);
+    if (input.endsWith("/fixed-assets")) return respond({ organization_id: 1, rows: [registeredAsset], statutory_certified: false });
     if (input.includes("/reports?")) return respond(input.includes("/2/") ? { ...report, organization_id: 2, trial_balance: [], movements: [] } : report);
     if (input.endsWith("/preview")) { const body = JSON.parse(String(init?.body)); return respond({ digest, explanation: body.explanation, lines: body.lines, normative_verified: false }); }
     if (input.endsWith("/manual-documents")) {
@@ -658,4 +661,95 @@ it("selects an active employment snapshot and fills the required department", as
   const saved = fetchMock.mock.calls.find(([url, init]) =>
     String(url).endsWith("/manual-documents") && init?.body);
   expect(JSON.parse(String(saved?.[1]?.body)).posting.lines[0].dimensions).toEqual(employee);
+});
+
+it("selects an organization-owned fixed asset and sends its exact register snapshot", async () => {
+  const original = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+    if (url.includes("/accounts?")) return respond([
+      { id: 1, code: "41", title: "Товары", cash: false,
+        required_dimensions: ["asset"], currency_tracking: false, quantity_tracking: false },
+      { id: 2, code: "60", title: "Поставщики", cash: false,
+        required_dimensions: [], currency_tracking: false, quantity_tracking: false },
+    ]);
+    return original(url, init);
+  });
+  render(<AccountingView />);
+  await screen.findByText(/включительно: 0\./);
+  openPage("Документы", "Ручная операция");
+  fillManualOperation();
+  await screen.findByRole("option", { name: "ОС-001 · Станок · asset:equipment:001" });
+  fireEvent.change(screen.getByLabelText("Основное средство строки 1"), { target: { value: "7" } });
+  fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+  await screen.findByText("Проверенные проводки");
+
+  const preview = fetchMock.mock.calls.find(([url, init]) =>
+    String(url).endsWith("/organizations/1/preview") && init?.method === "POST");
+  expect(preview?.[1]?.cache).toBe("no-store");
+  expect(JSON.parse(String(preview?.[1]?.body)).lines[0].dimensions).toEqual({
+    asset: "asset:equipment:001", asset_register_id: "7", asset_digest: digest,
+    asset_name: "Станок", asset_inventory_number: "ОС-001",
+  });
+});
+
+it("fails closed when the fixed asset response belongs to another organization", async () => {
+  const original = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+    if (url.includes("/accounts?")) return respond([
+      { id: 1, code: "41", title: "Товары", cash: false,
+        required_dimensions: ["asset"], currency_tracking: false, quantity_tracking: false },
+      { id: 2, code: "60", title: "Поставщики", cash: false,
+        required_dimensions: [], currency_tracking: false, quantity_tracking: false },
+    ]);
+    if (url.endsWith("/fixed-assets")) return respond({
+      organization_id: 2, rows: [registeredAsset], statutory_certified: false,
+    });
+    return original(url, init);
+  });
+  render(<AccountingView />);
+  await screen.findByText(/включительно: 0\./);
+  openPage("Документы", "Ручная операция");
+  fillManualOperation();
+  expect(await screen.findByRole("alert")).toHaveTextContent("не соответствует выбранной организации");
+  expect(screen.getByLabelText("Основное средство строки 1")).toBeDisabled();
+});
+
+it("ignores an old fixed asset response after the organization changes", async () => {
+  const original = fetchMock.getMockImplementation()!;
+  const asset2 = { ...registeredAsset, id: 8, organization_id: 2,
+    asset_key: "asset:equipment:002", name: "Пресс", inventory_number: "ОС-002" };
+  let resolveOld!: (value: { ok: boolean; json: () => Promise<unknown> }) => void;
+  const oldResponse = new Promise<{ ok: boolean; json: () => Promise<unknown> }>(
+    (resolve) => { resolveOld = resolve; },
+  );
+  fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+    if (url.includes("/accounts?")) return respond([
+      { id: 1, code: "41", title: "Товары", cash: false,
+        required_dimensions: ["asset"], currency_tracking: false, quantity_tracking: false },
+      { id: 2, code: "60", title: "Поставщики", cash: false,
+        required_dimensions: [], currency_tracking: false, quantity_tracking: false },
+    ]);
+    if (url.endsWith("/organizations/1/fixed-assets")) return oldResponse;
+    if (url.endsWith("/organizations/2/fixed-assets")) return respond({
+      organization_id: 2, rows: [asset2], statutory_certified: false,
+    });
+    return original(url, init);
+  });
+  render(<AccountingView />);
+  await screen.findByText(/включительно: 0\./);
+  openPage("Документы", "Ручная операция");
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) =>
+    String(url).endsWith("/organizations/1/fixed-assets"))).toBe(true));
+  fireEvent.change(screen.getByLabelText("Организация"), { target: { value: "2" } });
+  await waitFor(() => expect(screen.getByLabelText("Организация")).toHaveValue("2"));
+  fillManualOperation();
+  await screen.findByRole("option", { name: "ОС-002 · Пресс · asset:equipment:002" });
+
+  await act(async () => resolveOld(await respond({
+    organization_id: 1, rows: [registeredAsset], statutory_certified: false,
+  })));
+
+  expect(screen.getByRole("option", { name: "ОС-002 · Пресс · asset:equipment:002" })).toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: "ОС-001 · Станок · asset:equipment:001" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });

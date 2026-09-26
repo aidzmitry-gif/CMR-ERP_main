@@ -123,6 +123,17 @@ current target database or all later source migrations.
   frontend 41/41, disposable PostgreSQL 16 1/1, TypeScript, ESLint, Ruff and
   diff checks passed. Other manual analytics, release integration and real
   accountant acceptance keep G03D open.
+- The fifth local G03D slice binds manual `asset` analytics to an immutable
+  fixed-asset register row owned by the selected organization. The saved
+  snapshot contains the register ID, asset key, digest, name and inventory
+  number. Free text and foreign, forged, oversized or stale snapshots fail
+  before preview, save or post; a posted entry keeps exact historical replay.
+  The UI discards an old fixed-asset response after organization switching,
+  and the backend reuses the register's scoped lookup. Focused backend 11/11,
+  frontend 41/41, disposable PostgreSQL 16 1/1, TypeScript, ESLint, Ruff and
+  diff checks passed. The current register has no disposal-state field, so
+  disposal applicability, release integration and real accountant acceptance
+  keep G03D open.
 - CRM deal Save and Close now requires a response with the exact deal ID,
   submitted editor fields and a valid new edit token. The PATCH response is
   generated from the saved deal; two concurrent edits on disposable

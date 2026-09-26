@@ -2479,3 +2479,84 @@ async def test_fx_revaluation_receipt_is_immutable_and_matches_posting(pg_factor
             with pytest.raises(DBAPIError, match="immutable"):
                 await session.execute(text(statement), {"key": str(command.request_key)})
             await session.rollback()
+
+
+async def test_manual_asset_register_is_immutable_and_exact_replay_survives_postgres(
+        pg_factory, pg_book, posting):
+    from datetime import date
+    from decimal import Decimal
+
+    from sqlalchemy.exc import DBAPIError
+
+    from modules.accounting import fixed_assets, manual_documents
+    from modules.accounting.models import Account, Line
+    from modules.accounting.schemas import PostingInput
+
+    async with pg_factory() as session:
+        session.add_all([
+                Account(id=1001, organization_id=pg_book[0], code="01.1", title="Fixed assets", category="asset",
+                    valid_from=date(2026, 1, 1), required_dimensions=[], currency_tracking=False,
+                    quantity_tracking=False, cash=False, normative_ref="Synthetic"),
+                Account(id=1002, organization_id=pg_book[0], code="02.1", title="Accumulated depreciation", category="asset",
+                    valid_from=date(2026, 1, 1), required_dimensions=[], currency_tracking=False,
+                    quantity_tracking=False, cash=False, normative_ref="Synthetic"),
+                Account(id=1003, organization_id=pg_book[0], code="26", title="Fixed asset expenses", category="expense",
+                    valid_from=date(2026, 1, 1), required_dimensions=[], currency_tracking=False,
+                    quantity_tracking=False, cash=False, normative_ref="Synthetic"),
+        ])
+        await session.flush()
+        source = await service.post(
+            session, pg_book[0], posting("PG-ASSET-SOURCE", "01.1", "60", "100.00"), "tester")
+        source_line = await session.scalar(select(Line).where(
+            Line.entry_id == source.id, Line.side == "debit"))
+        command = fixed_assets.FixedAssetRegisterInput(
+            request_key=uuid4(), asset_key="asset:pg:001", source_entry_id=source.id,
+            source_line_id=source_line.id, expected_source_digest=source.digest,
+            name="Postgres asset", inventory_number="PG-OS-001",
+            acquisition_date=date(2026, 9, 1), commissioning_date=date(2026, 9, 1),
+            depreciation_start=date(2026, 9, 1), cost=Decimal("100.00"),
+            residual_value=Decimal("0.00"), useful_life_months=12,
+            depreciation_method="straight_line", asset_account="01.1",
+            accumulated_account="02.1", expense_account="26", dimensions={},
+            evidence="Synthetic PostgreSQL asset register evidence",
+        )
+        prepared = await fixed_assets.prepare_register(session, pg_book[0], command)
+        asset = await fixed_assets.confirm_register(session, pg_book[0],
+            fixed_assets.FixedAssetRegisterConfirmInput(
+                **command.model_dump(), digest=prepared["digest"]), "tester")
+        await session.commit()
+        asset_id = asset.id
+        asset_digest = asset.digest
+
+    source_posting = posting("PG-MANUAL-ASSET-REPLAY").model_dump(mode="json")
+    source_posting["lines"][0]["dimensions"] = {
+        "asset": "asset:pg:001", "asset_register_id": str(asset_id),
+        "asset_digest": asset_digest, "asset_name": "Postgres asset",
+        "asset_inventory_number": "PG-OS-001",
+    }
+    reviewed = PostingInput.model_validate(source_posting)
+    async with pg_factory() as session:
+        saved = await manual_documents.create(session, pg_book[0],
+            manual_documents.ManualDocumentCreate(key=uuid4(), posting=reviewed), "tester", "chief")
+        await session.commit()
+    post_command = manual_documents.ManualDocumentPost(
+        key=uuid4(), expected_version=1, digest=service.digest(reviewed))
+    async with pg_factory() as session:
+        posted = await manual_documents.post(
+            session, pg_book[0], saved["id"], post_command, "tester", "chief")
+        await session.commit()
+
+    async with pg_factory() as session:
+        with pytest.raises(DBAPIError, match="immutable"):
+            await session.execute(text(
+                "UPDATE accounting.fixed_asset_register_entry SET name='Forged name' WHERE id=:id"),
+                {"id": asset_id})
+        await session.rollback()
+
+    async with pg_factory() as session:
+        replay = await manual_documents.post(
+            session, pg_book[0], saved["id"], post_command, "tester", "chief")
+        await manual_documents.verify_new_manual_references(session, pg_book[0], reviewed)
+        entry = await service.post(session, pg_book[0], reviewed, "tester")
+        assert replay["entry_id"] == posted["entry_id"] == entry.id
+        await session.commit()

@@ -5,6 +5,51 @@ from sqlalchemy import update
 from modules.accounting import service
 
 
+async def _registered_manual_asset(db, book, posting):
+    from datetime import date
+    from decimal import Decimal
+    from uuid import uuid4
+
+    from sqlalchemy import select
+
+    from modules.accounting import models
+
+    db.add_all([
+        models.Account(organization_id=book[0], code="01.1", title="ОС оборудования",
+                       category="asset", valid_from=date(2026, 1, 1), required_dimensions=[],
+                       currency_tracking=False, quantity_tracking=False, cash=False,
+                       normative_ref="Synthetic fixed-asset fixture"),
+        models.Account(organization_id=book[0], code="02.1", title="Амортизация ОС",
+                       category="asset", valid_from=date(2026, 1, 1), required_dimensions=[],
+                       currency_tracking=False, quantity_tracking=False, cash=False,
+                       normative_ref="Synthetic fixed-asset fixture"),
+        models.Account(organization_id=book[0], code="26", title="Расходы ОС",
+                       category="expense", valid_from=date(2026, 1, 1), required_dimensions=[],
+                       currency_tracking=False, quantity_tracking=False, cash=False,
+                       normative_ref="Synthetic fixed-asset fixture"),
+    ])
+    await db.commit()
+    source = await service.post(
+        db, book[0], posting("MANUAL-ASSET-SOURCE", "01.1", "60", "1200.00"), "tester")
+    source_line = await db.scalar(select(models.Line).where(
+        models.Line.entry_id == source.id, models.Line.account_code == "01.1",
+        models.Line.side == "debit",
+    ))
+    row = models.FixedAssetRegisterEntry(
+        organization_id=book[0], request_key=str(uuid4()), asset_key="asset:equipment:001",
+        source_entry_id=source.id, source_line_id=source_line.id, source_digest=source.digest,
+        name="Станок", inventory_number="ОС-001", acquisition_date=date(2026, 9, 1),
+        commissioning_date=date(2026, 9, 1), depreciation_start=date(2026, 9, 1),
+        cost=Decimal("1200.00"), residual_value=Decimal("0.00"), useful_life_months=12,
+        depreciation_method="straight_line", asset_account="01.1", accumulated_account="02.1",
+        expense_account="26", dimensions={}, evidence="Synthetic registered asset fixture",
+        command={}, digest="a" * 64, actor="tester",
+    )
+    db.add(row)
+    await db.commit()
+    return row, source, source_line
+
+
 async def test_manual_document_save_history_close_guard_and_post(client, db, book, posting):
     prefix = f"/accounting/organizations/{book[0]}"
     path = prefix + "/manual-documents"
@@ -671,3 +716,101 @@ async def test_manual_employee_snapshot_uses_current_employment_and_preserves_re
     assert replay.status_code == 201 and replay.json()["id"] == confirmed.json()["entry_id"]
     posted_replay = await client.post(f"{path}/{document_id}/post", json=post_command)
     assert posted_replay.status_code == 200 and posted_replay.json()["entry_id"] == confirmed.json()["entry_id"]
+
+
+async def test_manual_asset_snapshot_requires_exact_company_register_row_and_keeps_replay(
+        client, db, book, posting):
+    from copy import deepcopy
+    from datetime import date
+    from decimal import Decimal
+    from uuid import uuid4
+
+    from modules.accounting import models
+    from modules.accounting.schemas import PostingInput
+
+    asset, source, source_line = await _registered_manual_asset(db, book, posting)
+    foreign_org = models.Organization(name="Foreign asset owner", unp="888888888")
+    db.add(foreign_org)
+    await db.flush()
+    foreign_asset = models.FixedAssetRegisterEntry(
+        organization_id=foreign_org.id, request_key=str(uuid4()), asset_key="asset:foreign:001",
+        source_entry_id=source.id, source_line_id=source_line.id, source_digest=source.digest,
+        name="Чужое ОС", inventory_number="ОС-F-001", acquisition_date=date(2026, 9, 1),
+        commissioning_date=date(2026, 9, 1), depreciation_start=date(2026, 9, 1),
+        cost=Decimal("1200.00"), residual_value=Decimal("0.00"), useful_life_months=12,
+        depreciation_method="straight_line", asset_account="01.1", accumulated_account="02.1",
+        expense_account="26", dimensions={}, evidence="Synthetic foreign asset fixture",
+        command={}, digest="b" * 64, actor="tester",
+    )
+    db.add(foreign_asset)
+    await db.commit()
+
+    def snapshot(row):
+        return {
+            "asset": row.asset_key, "asset_register_id": str(row.id),
+            "asset_digest": row.digest, "asset_name": row.name,
+            "asset_inventory_number": row.inventory_number,
+        }
+
+    valid = snapshot(asset)
+    invalid_snapshots = [{"asset": "unregistered free text"}, snapshot(foreign_asset),
+                         {**valid, "asset_register_id": "2147483648"}]
+    invalid_snapshots.extend({**valid, key: value + " forged"} for key, value in (
+        ("asset", "forge-key"), ("asset_digest", "forge-digest"),
+        ("asset_name", "forge-name"), ("asset_inventory_number", "forge-number"),
+    ))
+    prefix = f"/accounting/organizations/{book[0]}"
+    for index, dimensions in enumerate(invalid_snapshots):
+        payload = posting(f"MANUAL-ASSET-INVALID-{index}").model_dump(mode="json")
+        payload["lines"][0]["dimensions"] = dimensions
+        assert (await client.post(f"{prefix}/preview", json=payload)).status_code == 422
+        assert (await client.post(f"{prefix}/manual-documents", json={
+            "key": str(uuid4()), "posting": payload,
+        })).status_code == 422
+        assert (await client.post(f"{prefix}/entries", json=payload)).status_code == 422
+
+    payload = posting("MANUAL-ASSET-VALID").model_dump(mode="json")
+    payload["lines"][0]["dimensions"] = valid
+    saved = await client.post(f"{prefix}/manual-documents", json={
+        "key": str(uuid4()), "posting": payload,
+    })
+    assert saved.status_code == 201, saved.text
+    document_id = saved.json()["id"]
+
+    forged_edit = deepcopy(payload)
+    forged_edit["lines"][0]["dimensions"]["asset_name"] = "Forged name"
+    edit = await client.put(f"{prefix}/manual-documents/{document_id}", json={
+        "key": str(uuid4()), "expected_version": 1, "posting": forged_edit,
+    })
+    assert edit.status_code == 422
+
+    forged_posting = deepcopy(payload)
+    forged_posting["source"] = "MANUAL-ASSET-FORGED-POST"
+    forged_posting["lines"][0]["dimensions"]["asset_inventory_number"] = "Forged inventory"
+    forged_input = PostingInput.model_validate(forged_posting)
+    forged_document = models.ManualDocument(
+        organization_id=book[0], source=forged_input.source,
+        posting_date=forged_input.posting_date, version=1, create_key=str(uuid4()),
+    )
+    db.add(forged_document)
+    await db.flush()
+    forged_revision = models.ManualDocumentRevision(
+        document_id=forged_document.id, version=1, request_key=str(uuid4()),
+        posting=forged_input.model_dump(mode="json"), digest=service.digest(forged_input), actor="tester",
+    )
+    db.add(forged_revision)
+    await db.commit()
+    rejected_post = await client.post(f"{prefix}/manual-documents/{forged_document.id}/post", json={
+        "key": str(uuid4()), "expected_version": 1, "digest": forged_revision.digest,
+    })
+    assert rejected_post.status_code == 422
+
+    valid_input = PostingInput.model_validate(payload)
+    post_command = {"key": str(uuid4()), "expected_version": 1,
+                    "digest": service.digest(valid_input)}
+    confirmed = await client.post(f"{prefix}/manual-documents/{document_id}/post", json=post_command)
+    assert confirmed.status_code == 200, confirmed.text
+    replay = await client.post(f"{prefix}/manual-documents/{document_id}/post", json=post_command)
+    assert replay.status_code == 200 and replay.json()["entry_id"] == confirmed.json()["entry_id"]
+    direct_replay = await client.post(f"{prefix}/entries", json=payload)
+    assert direct_replay.status_code == 201 and direct_replay.json()["id"] == confirmed.json()["entry_id"]

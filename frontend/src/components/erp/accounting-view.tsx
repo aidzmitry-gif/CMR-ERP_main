@@ -54,6 +54,47 @@ type ManualRevision = { version: number; actor: string; created_at: string; dige
 type ManualDocument = { id: number; organization_id: number; number: string; source: string; posting_date: string; version: number; status: "draft" | "posted" | "voided"; entry_id: number | null; updated_at: string; void?: { reason: string; actor: string; created_at: string } | null; revisions: ManualRevision[] };
 type ManualDocumentList = { organization_id: number; items: Omit<ManualDocument, "revisions">[]; next_before_id: number | null };
 type ManualPostReceipt = { document_id: number; document_version: number; entry_id: number; digest: string };
+type FixedAssetOption = { id: number; organization_id: number; asset_key: string; digest: string; name: string; inventory_number: string };
+const fixedAssetDimensionKeys = new Set([
+  "asset", "asset_register_id", "asset_digest", "asset_name", "asset_inventory_number",
+]);
+function fixedAssetDimension(asset: FixedAssetOption): Record<string, string> {
+  return {
+    asset: asset.asset_key,
+    asset_register_id: String(asset.id),
+    asset_digest: asset.digest,
+    asset_name: asset.name,
+    asset_inventory_number: asset.inventory_number,
+  };
+}
+function parseFixedAssets(response: unknown, org: string): FixedAssetOption[] {
+  if (!response || typeof response !== "object" || Array.isArray(response)) {
+    throw new Error("Реестр основных средств вернул некорректный ответ.");
+  }
+  const data = response as { organization_id?: unknown; rows?: unknown };
+  if (String(data.organization_id) !== org || !Array.isArray(data.rows)) {
+    throw new Error("Реестр основных средств не соответствует выбранной организации.");
+  }
+  return data.rows.map((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("Реестр основных средств содержит некорректную запись.");
+    }
+    const row = value as Record<string, unknown>;
+    if (!Number.isSafeInteger(row.id) || Number(row.id) <= 0 || Number(row.id) > 2_147_483_647
+        || String(row.organization_id) !== org
+        || typeof row.asset_key !== "string" || !row.asset_key.trim()
+        || typeof row.digest !== "string" || !/^[a-f0-9]{64}$/.test(row.digest)
+        || typeof row.name !== "string" || !row.name.trim()
+        || typeof row.inventory_number !== "string" || !row.inventory_number.trim()) {
+      throw new Error("Реестр основных средств содержит неполную или чужую запись.");
+    }
+    return {
+      id: Number(row.id), organization_id: Number(row.organization_id),
+      asset_key: row.asset_key, digest: row.digest, name: row.name,
+      inventory_number: row.inventory_number,
+    };
+  });
+}
 type Trial = ExportTrial;
 type Movement = AccountMovement;
 type Report = { from: string; to: string; organization_id: number; status: string; pending_documents: number; review_items?: { code: string; count: number; message: string }[]; trial_balance: Trial[]; movements: Movement[]; opening_movements: Movement[]; balance: Record<string, string>; pnl: { income: string; expenses: string; profit: string }; cashflow: Record<string, string> };
@@ -380,6 +421,36 @@ function EmployeeDimensionPicker({ org, onDate, index, dimensions, disabled, req
   </div>;
 }
 
+function FixedAssetDimensionPicker({ org, index, dimensions, assets, assetsOrg, loading, error, disabled, onSelect }: {
+  org: string; index: number; dimensions: Record<string, string>; assets: FixedAssetOption[];
+  assetsOrg: string; loading: boolean; error: string; disabled: boolean;
+  onSelect: (snapshot: Record<string, string>) => void;
+}) {
+  const available = !!org && assetsOrg === org && !error;
+  const current = available ? assets.find((asset) => String(asset.id) === dimensions.asset_register_id) : undefined;
+  return <div className="space-y-1 text-sm">
+    <label className="block">Основное средство строки {index + 1}<Select
+      aria-label={`Основное средство строки ${index + 1}`}
+      value={current ? String(current.id) : ""}
+      disabled={disabled || !available || loading || !!error}
+      onChange={(event) => {
+        const asset = assets.find((item) => String(item.id) === event.target.value);
+        onSelect(asset ? fixedAssetDimension(asset) : {});
+      }}>
+      <option value="">{loading ? "Загрузка реестра ОС…" : "Выберите основное средство"}</option>
+      {available && assets.map((asset) => <option key={asset.id} value={String(asset.id)}>
+        {asset.inventory_number} · {asset.name} · {asset.asset_key}
+      </option>)}
+    </Select></label>
+    {current && <p>{current.inventory_number} · {current.name} · ID {current.id}</p>}
+    {!current && dimensions.asset_register_id && available
+      && <p role="status">Связь сохранённого документа отсутствует в реестре этой организации; выберите запись повторно.</p>}
+    {error && <p role="alert">{error}</p>}
+    {!loading && !error && available && assets.length === 0
+      && <p role="status">В реестре организации пока нет основных средств.</p>}
+  </div>;
+}
+
 export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?: string; suggestedEntry?: string }) {
   const today = new Date().toISOString().slice(0, 10);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -406,6 +477,13 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
   const [prepared, setPrepared] = useState<Posting | null>(null);
   const [manualDocument, setManualDocument] = useState<ManualDocument | null>(null);
   const [manualDocuments, setManualDocuments] = useState<ManualDocumentList | null>(null);
+  const [fixedAssets, setFixedAssets] = useState<FixedAssetOption[]>([]);
+  const [fixedAssetsOrg, setFixedAssetsOrg] = useState("");
+  const [fixedAssetsError, setFixedAssetsError] = useState("");
+  const [fixedAssetsErrorOrg, setFixedAssetsErrorOrg] = useState("");
+  const fixedAssetsLoading = !!org && tab === "entry"
+    && fixedAssetsOrg !== org && fixedAssetsErrorOrg !== org;
+  const fixedAssetsErrorForOrg = fixedAssetsErrorOrg === org ? fixedAssetsError : "";
   const [manualDirty, setManualDirty] = useState(false);
   const [voidReason, setVoidReason] = useState("");
   const [operationDate, setOperationDate] = useState(today);
@@ -422,6 +500,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
   const appliedSuggestedOrg = useRef<string | undefined>(undefined);
   const openedSuggestedEntry = useRef("");
   const manualListGeneration = useRef(0);
+  const fixedAssetsGeneration = useRef(0);
   const saveCommand = useRef<{ fingerprint: string; key: string } | null>(null);
   const postCommand = useRef<{ fingerprint: string; key: string } | null>(null);
   const voidCommand = useRef<{ fingerprint: string; key: string } | null>(null);
@@ -483,6 +562,24 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
       .then((result) => { if (token === manualListGeneration.current) setManualDocuments(result); })
       .catch((reason: Error) => { if (token === manualListGeneration.current) setError(reason.message); });
     return () => { manualListGeneration.current += 1; };
+  }, [org, tab]);
+  useEffect(() => {
+    const token = ++fixedAssetsGeneration.current;
+    if (!org || tab !== "entry") {
+      return () => { fixedAssetsGeneration.current += 1; };
+    }
+    void request<unknown>(`/organizations/${org}/fixed-assets`)
+      .then((response) => {
+        if (token !== fixedAssetsGeneration.current) return;
+        const rows = parseFixedAssets(response, org);
+        setFixedAssets(rows); setFixedAssetsOrg(org); setFixedAssetsError(""); setFixedAssetsErrorOrg("");
+      })
+      .catch((reason: Error) => {
+        if (token === fixedAssetsGeneration.current) {
+          setFixedAssetsError(reason.message); setFixedAssetsErrorOrg(org);
+        }
+      });
+    return () => { fixedAssetsGeneration.current += 1; };
   }, [org, tab]);
   async function reloadManualDocuments() {
     if (!org) return;
@@ -714,7 +811,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
       {manualDocument && <p className="text-sm text-muted">{manualDocument.status === "posted" ? "Проведена" : manualDocument.status === "voided" ? "Аннулирована" : "Черновик"} · версия {manualDocument.version} · изменена {manualDocument.updated_at}{manualDocument.entry_id != null && <Button variant="ghost" onClick={() => void openEntry(manualDocument.entry_id!)}>Открыть проводку № {manualDocument.entry_id}</Button>}</p>}
       <fieldset disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} className="space-y-4"><div className="grid gap-3 md:grid-cols-3"><label>Основание<Input aria-label="Основание" value={source} disabled={locked} onChange={(e) => { invalidatePreview(); setSource(e.target.value); }} placeholder="Номер документа" /></label><label>Дата отражения<Input aria-label="Дата операции" type="date" value={operationDate} disabled={locked} onChange={(e) => changeDate("operation", e.target.value)} /></label><label>Содержание<Input aria-label="Содержание" value={explanation} disabled={locked} onChange={(e) => { invalidatePreview(); setExplanation(e.target.value); }} /></label></div>
       <div className="grid gap-3 md:grid-cols-4"><label className="text-sm">Дата документа<Input aria-label="Дата документа" type="date" value={documentDate} disabled={locked} onChange={(e) => { invalidatePreview(); setDocumentDate(e.target.value); }} /></label><label className="text-sm">Дата хозяйственной операции<Input aria-label="Дата хозяйственной операции" type="date" value={economicDate} disabled={locked} onChange={(e) => { invalidatePreview(); setEconomicDate(e.target.value); }} /></label><label className="text-sm">Версия документа<Input aria-label="Версия документа" type="number" min="1" step="1" value={sourceVersion} disabled={locked} onChange={(e) => { invalidatePreview(); setSourceVersion(Number(e.target.value)); }} /></label><label className="text-sm">Исправляет операцию №<Input aria-label="Исправляет операцию" type="number" min="1" step="1" value={correctionOf} disabled={locked} onChange={(e) => { invalidatePreview(); setCorrectionOf(e.target.value); }} placeholder="Если это исправление" /></label></div>
-      {lines.map((line, i) => <fieldset key={i} disabled={locked} className="space-y-2 rounded-lg border border-line p-3"><legend className="text-sm">Строка {i + 1}</legend><div className="grid gap-3 md:grid-cols-3"><Select aria-label={`Сторона ${i + 1}`} value={line.side} onChange={(e) => changeLine(i, { side: e.target.value as "debit" | "credit" })}><option value="debit">Дебет</option><option value="credit">Кредит</option></Select><Select aria-label={`Счёт ${i + 1}`} value={line.account} onChange={(e) => changeLine(i, { account: e.target.value, dimensions: {}, cash_activity: undefined, currency: "BYN", original_amount: undefined, rate: undefined, rate_scale: undefined, rate_date: undefined, rate_source: undefined, quantity: undefined })}><option value="">Выберите счёт</option>{accounts.map((a) => <option key={a.id} value={a.code}>{a.code} · {a.title}</option>)}</Select><Input aria-label={`Сумма ${i + 1}`} inputMode="decimal" value={line.amount} placeholder="0.00 BYN" onChange={(e) => changeLine(i, { amount: e.target.value })} /></div>{accounts.find((a) => a.code === line.account)?.required_dimensions.map((dimension) => dimension === "counterparty" ? <CounterpartyDimensionPicker key={`${org}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => { const next = Object.fromEntries(Object.entries(line.dimensions).filter(([key]) => !key.startsWith("counterparty") && !key.startsWith("contract") && !key.startsWith("settlement_document"))); changeLine(i, { dimensions: { ...next, ...snapshot } }); }} /> : dimension === "contract" ? <ContractDimensionPicker key={`${org}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => { const next = Object.fromEntries(Object.entries(line.dimensions).filter(([key]) => !key.startsWith("settlement_document"))); changeLine(i, { dimensions: { ...next, ...snapshot } }); }} /> : dimension === "settlement_document" ? <SettlementDocumentDimensionPicker key={`${org}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => changeLine(i, { dimensions: { ...line.dimensions, ...snapshot } })} /> : dimension === "sku" ? <SkuDimensionPicker key={`${org}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => changeLine(i, { dimensions: { ...line.dimensions, ...snapshot } })} /> : dimension === "warehouse" ? <WarehouseDimensionPicker key={`${org}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => changeLine(i, { dimensions: { ...line.dimensions, ...snapshot } })} /> : dimension === "employee" ? <EmployeeDimensionPicker key={`${org}/${economicDate}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} onDate={economicDate} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} requiresDepartment={accounts.find((a) => a.code === line.account)?.required_dimensions.includes("department") ?? false} onSelect={(snapshot) => { const next = Object.fromEntries(Object.entries(line.dimensions).filter(([key]) => key !== "employee" && key !== "employment_binding_id" && key !== "department" && !key.startsWith("employee_"))); changeLine(i, { dimensions: { ...next, ...snapshot } }); }} /> : dimension === "department" && accounts.find((a) => a.code === line.account)?.required_dimensions.includes("employee") ? <label key={dimension} className="block text-sm">Подразделение строки {i + 1}<Input aria-label={`Подразделение строки ${i + 1}`} value={line.dimensions.department || ""} readOnly /><span className="text-xs text-muted">Заполняется из действующей привязки сотрудника.</span></label> : <label key={dimension} className="block text-sm">{labels[dimension] || dimension}<Input value={line.dimensions[dimension] || ""} onChange={(e) => changeLine(i, { dimensions: { ...line.dimensions, [dimension]: e.target.value } })} /></label>)}{accounts.find((a) => a.code === line.account)?.cash && <label className="block text-sm">Вид денежного потока<Select value={line.cash_activity || ""} onChange={(e) => changeLine(i, { cash_activity: e.target.value })}><option value="">Выберите вид</option><option value="operating">Текущая деятельность</option><option value="investing">Инвестиционная</option><option value="financing">Финансовая</option><option value="internal">Внутреннее перемещение</option></Select></label>}<AccountingCurrencyFields value={line} currency={accounts.find((a) => a.code === line.account)?.currency_tracking ?? false} quantity={accounts.find((a) => a.code === line.account)?.quantity_tracking ?? false} onChange={(patch) => changeLine(i, patch)} /></fieldset>)}
+      {lines.map((line, i) => <fieldset key={i} disabled={locked} className="space-y-2 rounded-lg border border-line p-3"><legend className="text-sm">Строка {i + 1}</legend><div className="grid gap-3 md:grid-cols-3"><Select aria-label={`Сторона ${i + 1}`} value={line.side} onChange={(e) => changeLine(i, { side: e.target.value as "debit" | "credit" })}><option value="debit">Дебет</option><option value="credit">Кредит</option></Select><Select aria-label={`Счёт ${i + 1}`} value={line.account} onChange={(e) => changeLine(i, { account: e.target.value, dimensions: {}, cash_activity: undefined, currency: "BYN", original_amount: undefined, rate: undefined, rate_scale: undefined, rate_date: undefined, rate_source: undefined, quantity: undefined })}><option value="">Выберите счёт</option>{accounts.map((a) => <option key={a.id} value={a.code}>{a.code} · {a.title}</option>)}</Select><Input aria-label={`Сумма ${i + 1}`} inputMode="decimal" value={line.amount} placeholder="0.00 BYN" onChange={(e) => changeLine(i, { amount: e.target.value })} /></div>{accounts.find((a) => a.code === line.account)?.required_dimensions.map((dimension) => dimension === "counterparty" ? <CounterpartyDimensionPicker key={`${org}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => { const next = Object.fromEntries(Object.entries(line.dimensions).filter(([key]) => !key.startsWith("counterparty") && !key.startsWith("contract") && !key.startsWith("settlement_document"))); changeLine(i, { dimensions: { ...next, ...snapshot } }); }} /> : dimension === "contract" ? <ContractDimensionPicker key={`${org}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => { const next = Object.fromEntries(Object.entries(line.dimensions).filter(([key]) => !key.startsWith("settlement_document"))); changeLine(i, { dimensions: { ...next, ...snapshot } }); }} /> : dimension === "settlement_document" ? <SettlementDocumentDimensionPicker key={`${org}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => changeLine(i, { dimensions: { ...line.dimensions, ...snapshot } })} />  : dimension === "asset" ? <FixedAssetDimensionPicker key={org + "/asset/" + i} org={org} index={i} dimensions={line.dimensions} assets={fixedAssets} assetsOrg={fixedAssetsOrg} loading={fixedAssetsLoading} error={fixedAssetsErrorForOrg} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => { const next = Object.fromEntries(Object.entries(line.dimensions).filter(([key]) => !fixedAssetDimensionKeys.has(key))); changeLine(i, { dimensions: { ...next, ...snapshot } }); }} /> : dimension === "sku" ? <SkuDimensionPicker key={`${org}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => changeLine(i, { dimensions: { ...line.dimensions, ...snapshot } })} /> : dimension === "warehouse" ? <WarehouseDimensionPicker key={`${org}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} onSelect={(snapshot) => changeLine(i, { dimensions: { ...line.dimensions, ...snapshot } })} /> : dimension === "employee" ? <EmployeeDimensionPicker key={`${org}/${economicDate}/${manualDocument?.id ?? "new"}/${manualDocument?.version ?? 0}/${i}/${line.account}/${dimension}`} org={org} onDate={economicDate} index={i} dimensions={line.dimensions} disabled={locked || (manualDocument != null && manualDocument.status !== "draft")} requiresDepartment={accounts.find((a) => a.code === line.account)?.required_dimensions.includes("department") ?? false} onSelect={(snapshot) => { const next = Object.fromEntries(Object.entries(line.dimensions).filter(([key]) => key !== "employee" && key !== "employment_binding_id" && key !== "department" && !key.startsWith("employee_"))); changeLine(i, { dimensions: { ...next, ...snapshot } }); }} /> : dimension === "department" && accounts.find((a) => a.code === line.account)?.required_dimensions.includes("employee") ? <label key={dimension} className="block text-sm">Подразделение строки {i + 1}<Input aria-label={`Подразделение строки ${i + 1}`} value={line.dimensions.department || ""} readOnly /><span className="text-xs text-muted">Заполняется из действующей привязки сотрудника.</span></label> : <label key={dimension} className="block text-sm">{labels[dimension] || dimension}<Input value={line.dimensions[dimension] || ""} onChange={(e) => changeLine(i, { dimensions: { ...line.dimensions, [dimension]: e.target.value } })} /></label>)}{accounts.find((a) => a.code === line.account)?.cash && <label className="block text-sm">Вид денежного потока<Select value={line.cash_activity || ""} onChange={(e) => changeLine(i, { cash_activity: e.target.value })}><option value="">Выберите вид</option><option value="operating">Текущая деятельность</option><option value="investing">Инвестиционная</option><option value="financing">Финансовая</option><option value="internal">Внутреннее перемещение</option></Select></label>}<AccountingCurrencyFields value={line} currency={accounts.find((a) => a.code === line.account)?.currency_tracking ?? false} quantity={accounts.find((a) => a.code === line.account)?.quantity_tracking ?? false} onChange={(patch) => changeLine(i, patch)} /></fieldset>)}
       <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={locked} onClick={() => { invalidatePreview(); setLines([...lines, { account: "", side: "debit", amount: "", dimensions: {} }]); }}>Добавить строку</Button><Button disabled={locked || !org || !source || !explanation} onClick={() => void prepare()}>Проверить проводки</Button></div>
       {preview && <div className="rounded-xl border border-accent p-4"><h3 className="font-semibold">Проверенные проводки</h3><p className="my-2">{preview.explanation}</p>{preview.lines.map((line, i) => <p key={i}>{line.side === "debit" ? "Дт" : "Кт"} {line.account} · {line.title} — {line.amount} BYN</p>)}{!preview.normative_verified && <p className="my-2 text-sm text-muted">Нормативная база не подтверждена: закрытие периода будет недоступно.</p>}<div className="mt-3 flex flex-wrap gap-2"><Button disabled={locked} onClick={() => void saveManual()}>Сохранить</Button><Button variant="secondary" disabled={locked} onClick={() => void saveManual(true)}>Сохранить и закрыть</Button><Button disabled={locked || !manualDocument || manualDirty || manualDocument.revisions[manualDocument.revisions.length - 1]?.digest !== preview.digest} onClick={() => void post()}>Подтвердить и провести</Button><Button variant="secondary" disabled={locked || !manualDocument || manualDirty || manualDocument.revisions[manualDocument.revisions.length - 1]?.digest !== preview.digest} onClick={() => void post(true)}>Провести и закрыть</Button></div></div>}
       </fieldset>

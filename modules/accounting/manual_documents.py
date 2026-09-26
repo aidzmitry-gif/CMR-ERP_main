@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from pydantic import Field
 from sqlalchemy import select
 
-from modules.accounting import service
+from modules.accounting import fixed_assets, service
 from modules.accounting.contract_snapshot import CONTRACT_KEYS, verified_contract_snapshot
 from modules.accounting.counterparty_snapshot import verified_counterparty
 from modules.accounting.employee_snapshot import EMPLOYEE_SNAPSHOT_KEYS
@@ -29,6 +29,11 @@ from modules.accounting.settlement_document_snapshot import (
 )
 from modules.accounting.sku_snapshot import verified_sku_snapshot
 from modules.accounting.warehouse_snapshot import verified_warehouse_snapshot
+
+ASSET_SNAPSHOT_KEYS = frozenset({
+    "asset", "asset_register_id", "asset_digest", "asset_name", "asset_inventory_number",
+})
+POSTGRES_INTEGER_MAX = 2_147_483_647
 
 
 class ManualDocumentCreate(Input):
@@ -59,6 +64,28 @@ def require_manual(posting: PostingInput, role: str):
         raise HTTPException(403, "Chief accountant access required for a correction")
 
 
+async def verify_asset_snapshot(session, org_id: int, dimensions: dict[str, str]):
+    raw_id = dimensions.get("asset_register_id", "")
+    if (not raw_id or not raw_id.isascii() or not raw_id.isdecimal()
+            or raw_id.startswith("0") or len(raw_id) > 10):
+        raise service.AccountingError("Select a registered fixed asset from this organization")
+    asset_id = int(raw_id)
+    if asset_id > POSTGRES_INTEGER_MAX:
+        raise service.AccountingError("Select a registered fixed asset from this organization")
+    row = await fixed_assets.asset_result(session, org_id, asset_id)
+    if row is None:
+        raise service.AccountingError("Fixed asset was not found in this organization's register")
+    expected = {
+        "asset": row.asset_key,
+        "asset_register_id": str(row.id),
+        "asset_digest": row.digest,
+        "asset_name": row.name,
+        "asset_inventory_number": row.inventory_number,
+    }
+    if any(dimensions.get(key) != value for key, value in expected.items()):
+        raise service.AccountingError("Fixed asset snapshot changed; select it again")
+
+
 async def verify_analytic_references(session, org_id: int, posting: PostingInput):
     """New saves cannot carry free-text or stale directory references."""
     checked_counterparties = set()
@@ -67,6 +94,7 @@ async def verify_analytic_references(session, org_id: int, posting: PostingInput
     checked_employees = set()
     checked_contracts = set()
     checked_settlement_documents = set()
+    checked_assets = set()
     for line in posting.lines:
         dimensions = line.dimensions
         if {"counterparty", "counterparty_id", "counterparty_unp", "counterparty_revision"} & dimensions.keys():
@@ -103,6 +131,11 @@ async def verify_analytic_references(session, org_id: int, posting: PostingInput
             if snapshot not in checked_settlement_documents:
                 await verified_settlement_document_snapshot(session, org_id, dimensions)
                 checked_settlement_documents.add(snapshot)
+        if ASSET_SNAPSHOT_KEYS & dimensions.keys():
+            snapshot = tuple(dimensions.get(key, "") for key in sorted(ASSET_SNAPSHOT_KEYS))
+            if snapshot not in checked_assets:
+                await verify_asset_snapshot(session, org_id, dimensions)
+                checked_assets.add(snapshot)
 
 
 async def verify_new_manual_references(session, org_id: int, posting: PostingInput):
