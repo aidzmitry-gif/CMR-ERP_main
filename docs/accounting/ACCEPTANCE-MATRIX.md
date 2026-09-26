@@ -6,6 +6,15 @@ real source documents, organization policy, PostgreSQL recovery evidence and
 the accountant's close.  It is therefore an operating checklist, not a claim
 that 1C can already be retired.
 
+Status on 2026-09-26: the Goal graph has **35 of 41** implementation nodes
+marked done. The six open nodes are G03D (document lifecycle), G06C (own
+payroll calculation), G07 (opening balances), G06E (statutory payroll forms),
+G08 (accepted pilot month) and G09 (cutover proof). The **13 requirement rows
+below are 13 separate operational acceptance groups**; none is recorded as
+accepted for production use or retirement of 1C. A passed local test is
+evidence for a group, not its acceptance. G09 additionally requires two
+consecutive accepted month closes, a quarterly cycle and a trial annual run.
+
 Current source branch: `agent/crm-acc-prod009`; `alembic heads` on 2026-09-26
 reports the single development source head `0188`. The fixed first-release candidate
 remains at `0186`; this later manual-document change is not part of that release.
@@ -61,6 +70,12 @@ current target database or all later source migrations.
   descriptions; exact replay keeps posted history. Focused API 7/7, UI 35/35,
   TypeScript, ESLint, Ruff and disposable PostgreSQL 1/1 passed. Contracts and
   other manual analytics remain open.
+- CRM deal Save and Close now requires a response with the exact deal ID,
+  submitted editor fields and a valid new edit token. The PATCH response is
+  generated from the saved deal; two concurrent edits on disposable
+  PostgreSQL yielded one success, one conflict and one audit entry. Focused
+  backend, frontend, type and lint checks passed. A real browser/user scenario
+  and integration into a reproducible release remain open.
 
 - On 2026-09-26, a fresh disposable PostgreSQL 16 database passed **2**
   supplier-contract/receipt-history checks at migration `0186` and **4**
