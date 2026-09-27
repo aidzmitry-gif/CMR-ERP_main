@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { fetchRegisterOrganizations, registerId, type RegisterOrganization } from "@/lib/document-register-api";
 import { fetchClientDocument, fetchClientDocuments, fetchClientOriginal, type ClientDocument, type ClientDocumentPage } from "@/lib/client-document-register-api";
-import { ShipmentDocumentDraft } from "@/components/erp/shipment-document-draft";
+import { ShipmentDocumentsRegister } from "@/components/erp/shipment-documents-register";
 
 const kinds: Record<string, string> = { invoice: "Счёт", contract: "Договор", order: "Заказ" };
 
@@ -71,7 +71,7 @@ function ClientPage({ org, clientId, kind }: { org: string; clientId: string; ki
       {!page.client_current.is_active && <p>Текущая запись неактивна. История ниже относится к исходному ID.</p>}
       {page.client_current.merged_into_id !== null && <p>В MDM указан преемник ID {page.client_current.merged_into_id}. Документы автоматически не перенесены.</p>}
     </div>}
-    {page && <ClientShipmentDocuments page={page} org={org} />}
+    {page && <ClientShipmentDocuments page={page} />}
     {page?.items.length === 0 && !busy && !error && <p>В выбранном юрлице и доступном CRM-контексте подтверждённые документы клиента по фильтру не найдены.</p>}
     {page?.items.map((row) => <ClientRow key={row.id} row={row} onSelect={setSelected} />)}
     {page && page.next_after_id !== null && !error && <Button variant="secondary" disabled={busy} onClick={next}>Ещё документы клиента</Button>}
@@ -79,17 +79,18 @@ function ClientPage({ org, clientId, kind }: { org: string; clientId: string; ki
   </div>;
 }
 
-function ClientShipmentDocuments({ page, org }: { page: ClientDocumentPage; org: string }) {
+function ClientShipmentDocuments({ page }: { page: ClientDocumentPage }) {
   if (page.coverage.shipments === "unavailable") return <p className="text-xs text-muted">Реестр внутренних актов отгрузки недоступен. Это не означает отсутствия отгрузок.</p>;
-  return <section aria-label="Внутренние акты отгрузки клиента" className="space-y-2 rounded-lg border border-line p-3 text-sm">
+  if (page.shipment_documents.length === 0) return <section aria-label="Внутренние акты отгрузки клиента" className="rounded-lg border border-line p-3 text-sm">
     <h3 className="font-semibold">Внутренние акты отгрузки клиента</h3>
-    <p className="text-xs text-muted">Акты WMS показаны по точной подтверждённой принадлежности клиента. Они не являются ТН или ТТН; из каждого акта можно подготовить проверяемый черновик реквизитов.</p>
-    {page.shipment_documents.length === 0 ? <p>Подтверждённых внутренних актов по документам этой страницы нет.</p> : <ul className="space-y-1">{page.shipment_documents.map((row) => <li key={row.act_id}>
-      <a className="text-accent underline" href={row.document_url} target="_blank" rel="noreferrer">Акт WMS № {row.act_id}</a>
-      <span> · счёт ID {row.document_id} · дата {row.operation_date} · строк {row.line_count} · {row.actor}</span>
-      <ShipmentDocumentDraft org={org} sourceKey={row.source_key} />
-    </li>)}</ul>}
+    <p>Подтверждённых внутренних актов по документам этой страницы нет.</p>
   </section>;
+  return <ShipmentDocumentsRegister
+    organizationId={page.organization_id}
+    items={page.shipment_documents}
+    title="Внутренние акты отгрузки клиента"
+    description="Акты WMS показаны по точной подтверждённой принадлежности клиента. Сохранённые ТН/ТТН отображаются как черновики по номеру; они не являются выпущенными или сертифицированными документами."
+  />;
 }
 function ClientRow({ row, onSelect, detail = false }: { row: ClientDocument; onSelect: (id: number) => void; detail?: boolean }) {
   return <article aria-label={`Документ клиента ${row.id}`} className="space-y-1 rounded-lg border border-line p-3 text-sm">

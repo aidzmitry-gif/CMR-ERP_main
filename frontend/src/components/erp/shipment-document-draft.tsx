@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { searchAccountingContracts, type AccountingContract } from "@/lib/accounting-contracts";
+import type { ShipmentPreparationDraftSummary } from "@/lib/document-register-api";
 
 type ItemDraft = { line_no: number; unit: string; unit_price: string; vat_basis: string };
 type PartyIdentity = { reference: string; id: number; name: string; unp: string; revision?: number; directory_current?: boolean; source_document_id?: number; source_document_version?: number };
@@ -60,6 +61,7 @@ type Draft = {
   statutory_certified: false;
   can_issue: false;
 };
+const EMPTY_PREPARATION_DOCUMENTS: ShipmentPreparationDraftSummary[] = [];
 
 const textInputs: Array<["document_number" | "document_date", string]> = [
   ["document_number", "Черновой номер (не официальный)"],
@@ -164,9 +166,13 @@ function readableField(path: string) {
   return new Map<string, string>([...textInputs, ...ttnInputs]).get(path) ?? path;
 }
 
-export function ShipmentDocumentDraft({ org, sourceKey }: { org: string; sourceKey: string }) {
+export function ShipmentDocumentDraft({ org, sourceKey, preparationDocuments = EMPTY_PREPARATION_DOCUMENTS }: {
+  org: string; sourceKey: string; preparationDocuments?: ShipmentPreparationDraftSummary[];
+}) {
   const [kind, setKind] = useState<"tn" | "ttn">("ttn");
   const [open, setOpen] = useState(false);
+  const [expectedOpenDraft, setExpectedOpenDraft] = useState<ShipmentPreparationDraftSummary | null>(null);
+  const [listedDrafts, setListedDrafts] = useState(preparationDocuments);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [fields, setFields] = useState<Fields>(() => emptyFields(null));
   const [baseFields, setBaseFields] = useState<Fields>(() => emptyFields(null));
@@ -181,6 +187,10 @@ export function ShipmentDocumentDraft({ org, sourceKey }: { org: string; sourceK
   const [contractOptions, setContractOptions] = useState<AccountingContract[]>([]);
   const contractLookup = useRef(0);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- saved identities follow the authorized register response. */
+  useEffect(() => { setListedDrafts(preparationDocuments); }, [preparationDocuments, sourceKey]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
   /* eslint-disable react-hooks/set-state-in-effect -- request state follows the external source query. */
   useEffect(() => {
     if (!open) return;
@@ -192,7 +202,12 @@ export function ShipmentDocumentDraft({ org, sourceKey }: { org: string; sourceK
     setError("");
     setNotice("");
     setDraft(null);
-    void fetch(`/api/accounting/organizations/${org}/shipments/${sourceKey}/tn-ttn-draft?kind=${kind}`, { cache: "no-store" })
+    const params = new URLSearchParams({ kind });
+    if (expectedOpenDraft?.kind === kind) {
+      params.set("expected_revision", String(expectedOpenDraft.revision));
+      params.set("expected_number", expectedOpenDraft.number ?? "");
+    }
+    void fetch(`/api/accounting/organizations/${org}/shipments/${sourceKey}/tn-ttn-draft?${params}`, { cache: "no-store" })
       .then(async (response) => {
         const value = await response.json();
         if (!response.ok) throw new Error(typeof value.detail === "string" ? value.detail : "Черновик ТН/ТТН недоступен.");
@@ -209,7 +224,7 @@ export function ShipmentDocumentDraft({ org, sourceKey }: { org: string; sourceK
       .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : "Черновик ТН/ТТН недоступен."); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [kind, open, org, sourceKey]);
+  }, [expectedOpenDraft, kind, open, org, sourceKey]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   function changeText(field: "document_number" | "document_date" | typeof ttnInputs[number][0], value: string) {
@@ -256,7 +271,13 @@ export function ShipmentDocumentDraft({ org, sourceKey }: { org: string; sourceK
   function selectKind(next: "tn" | "ttn") {
     if (next === kind) return;
     if (dirty && !window.confirm("Есть несохранённые изменения. Переключить вид документа и потерять их?")) return;
-    setDirty(false); setPendingRequestKey(null); setKind(next);
+    setDirty(false); setPendingRequestKey(null); setExpectedOpenDraft(null); setKind(next);
+  }
+
+  function openListedDraft(document: ShipmentPreparationDraftSummary) {
+    if (open && dirty && !window.confirm("Есть несохранённые изменения. Открыть редакцию из списка и потерять их?")) return;
+    setDirty(false); setPendingRequestKey(null); setExpectedOpenDraft(document); setKind(document.kind);
+    setError(""); setNotice(""); setOpen(true);
   }
 
   function closeEditor() {
@@ -308,12 +329,26 @@ export function ShipmentDocumentDraft({ org, sourceKey }: { org: string; sourceK
         }
         throw new Error(message);
       }
-      if (value.saved_revision !== draft.saved_revision + 1 || value.saved_by === null || !value.saved_at) {
+      const savedDraft = value as Draft;
+      const savedFields = savedDraft.saved_fields;
+      const savedNumber = savedFields?.document_number;
+      const savedDate = savedFields?.document_date;
+      if (value.saved_revision !== draft.saved_revision + 1
+        || typeof value.saved_by !== "string" || !value.saved_by.trim()
+        || typeof value.saved_at !== "string" || !Number.isFinite(Date.parse(value.saved_at))
+        || typeof savedNumber !== "string" || typeof savedDate !== "string") {
         throw new Error("Сервер не подтвердил новую редакцию черновика. Ввод сохранён на экране; обновите историю перед повтором.");
       }
-      setDraft(value as Draft);
-      setFields(emptyFields(value as Draft));
-      setBaseFields(emptyFields(value as Draft));
+      setDraft(savedDraft);
+      setFields(emptyFields(savedDraft));
+      setBaseFields(emptyFields(savedDraft));
+      setListedDrafts((current) => [
+        ...current.filter((item) => item.kind !== kind),
+        { kind, number: savedNumber.trim() || null, date: savedDate.trim() || null,
+          revision: value.saved_revision, saved_by: value.saved_by, saved_at: value.saved_at,
+          status: "preparation_draft" },
+      ]);
+      setExpectedOpenDraft(null);
       setDirty(false); setPendingRequestKey(null);
       setNotice(`Сохранена редакция ${value.saved_revision} · ${value.saved_by} · ${value.saved_at}`);
       if (closeAfterSave) setOpen(false);
@@ -325,7 +360,22 @@ export function ShipmentDocumentDraft({ org, sourceKey }: { org: string; sourceK
   }
 
   return <div className="mt-1 space-y-2">
-    <Button variant="secondary" onClick={() => open ? closeEditor() : setOpen(true)}>{open ? "Закрыть подготовку ТН/ТТН" : "Подготовить ТН/ТТН"}</Button>
+    {listedDrafts.length > 0 && <ul aria-label="Сохранённые черновики ТН/ТТН" className="space-y-1">
+      {listedDrafts.map((document) => {
+        const label = document.kind === "tn" ? "ТН" : "ТТН";
+        return <li key={document.kind} className="flex flex-wrap items-center gap-2">
+          <span>Черновик {label} № {document.number ?? "не указан"} · редакция {document.revision} · {document.saved_by} · {document.saved_at}</span>
+          <Button type="button" variant="ghost"
+            aria-label={`Открыть черновик ${label} № ${document.number ?? "без номера"}`}
+            onClick={() => openListedDraft(document)}>
+            Открыть черновик {label} № {document.number ?? "без номера"}
+          </Button>
+        </li>;
+      })}
+    </ul>}
+    <Button variant="secondary" onClick={() => open ? closeEditor() : (setExpectedOpenDraft(null), setOpen(true))}>
+      {open ? "Закрыть подготовку ТН/ТТН" : "Подготовить ТН/ТТН"}
+    </Button>
     {open && <div className="rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
       <label className="flex items-center gap-2">Вид<Select aria-label="Вид отгрузочного документа" value={kind} onChange={(event) => selectKind(event.target.value as "tn" | "ttn")}><option value="tn">ТН</option><option value="ttn">ТТН</option></Select></label>
       {loading && <p role="status" className="mt-2">Подготавливаем поля из проверенного акта…</p>}

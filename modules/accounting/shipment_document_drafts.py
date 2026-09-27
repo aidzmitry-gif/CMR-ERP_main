@@ -100,6 +100,59 @@ def source_name(organization_id: int, source_key: str, kind: str) -> str:
     return source
 
 
+async def registry_summaries(session, organization_id: int, source_keys: list[str]) -> dict[str, list[dict]]:
+    """Return only the latest saved TN/TTN identity for each verified source key."""
+    if not source_keys:
+        return {}
+    if len(source_keys) > 100 or len(set(source_keys)) != len(source_keys):
+        raise HTTPException(422, "Shipment source keys must be unique and bounded")
+
+    names: dict[str, tuple[str, str]] = {}
+    for raw_key in source_keys:
+        try:
+            key = str(UUID(str(raw_key)))
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise HTTPException(422, "Shipment source key must be a UUID") from exc
+        for kind in ("tn", "ttn"):
+            names[source_name(organization_id, key, kind)] = (key, kind)
+
+    rows = await session.scalars(select(ShipmentPreparationDraft).where(
+        ShipmentPreparationDraft.organization_id == organization_id,
+        ShipmentPreparationDraft.source.in_(names),
+    ).order_by(ShipmentPreparationDraft.source, ShipmentPreparationDraft.revision.desc(),
+               ShipmentPreparationDraft.id.desc()))
+    latest: dict[str, ShipmentPreparationDraft] = {}
+    for row in rows:
+        latest.setdefault(row.source, row)
+
+    result = {str(UUID(str(key))): [] for key in source_keys}
+    for source, row in latest.items():
+        identity = names.get(source)
+        payload = row.payload
+        if (identity is None or not isinstance(payload, dict) or payload.get("kind") != identity[1]
+                or not isinstance(payload.get("fields"), dict) or type(row.revision) is not int
+                or row.revision <= 0 or not isinstance(row.actor, str) or row.created_at is None):
+            raise HTTPException(409, "Saved TN/TTN draft history is inconsistent; manual review is required")
+        fields = payload["fields"]
+        number = fields.get("document_number", "")
+        document_date = fields.get("document_date", "")
+        if not isinstance(number, str) or not isinstance(document_date, str):
+            raise HTTPException(409, "Saved TN/TTN draft has an invalid document identity")
+        key, kind = identity
+        result[key].append({
+            "kind": kind,
+            "number": number.strip() or None,
+            "date": document_date.strip() or None,
+            "revision": row.revision,
+            "saved_by": row.actor,
+            "saved_at": _timestamp(row.created_at),
+            "status": "preparation_draft",
+        })
+    for documents in result.values():
+        documents.sort(key=lambda item: (item["kind"], item["revision"]))
+    return result
+
+
 def _verified_recipient_identity(organization_id: int, snapshot: dict, document, owner,
                                  binding, counterparty, issuance) -> dict:
     """Check the invoice's captured MDM buyer against the shipment ownership chain."""

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 
 import { ShipmentDocumentDraft } from "./shipment-document-draft";
+import { ShipmentDocumentsRegister } from "./shipment-documents-register";
 
 const emptyResponse = () => ({
   status: "draft_required" as const,
@@ -170,4 +171,104 @@ it("keeps unsaved input open on conflict and shows immutable before/after histor
   expect(postedBodies[1]).toMatchObject({ expected_revision: 3, fields: {
     document_number: "Несохранённый ввод", recipient_counterparty_id: 31, recipient_counterparty_revision: 4, contract_id: 13,
   } });
+});
+
+it("opens the saved TN number from the verified deal/client shipment register", async () => {
+  const user = userEvent.setup();
+  const sourceKey = "12345678-1234-4234-8234-123456789012";
+  const summary = { kind: "tn" as const, number: "TN-22/4", date: "2026-09-13", revision: 4,
+    saved_by: "accountant", saved_at: "2026-09-13T10:00:00Z", status: "preparation_draft" as const };
+  const savedDraft = { ...emptyResponse(), document_kind: "tn" as const, document_label: "ТН",
+    saved_revision: 4, saved_by: "accountant", saved_at: "2026-09-13T10:00:00Z",
+    saved_fields: { ...emptyResponse().saved_fields, document_number: "TN-22/4", document_date: "2026-09-13" } };
+  const fetchMock = vi.mocked(fetch);
+  fetchMock.mockImplementation((input) => {
+    const url = String(input);
+    if (url.includes("/shipment-tn-ttn-drafts?")) return Promise.resolve(response({ organization_id: 7, items: [
+      { source_key: sourceKey, status: "verified", preparation_documents: [summary] },
+    ] }));
+    if (url.includes("/tn-ttn-draft?")) return Promise.resolve(response(savedDraft));
+    return Promise.resolve(response(emptyResponse()));
+  });
+
+  render(<ShipmentDocumentsRegister organizationId={7} title="Отгрузки сделки" description="Подготовительные документы"
+    items={[{ act_id: 444, document_id: 81, source_key: sourceKey, operation_date: "2026-09-13", actor: "warehouse",
+      evidence: "verified", line_count: 1, status: "verified_internal_act", tn_ttn_status: "not_certified",
+      document_url: `/api/accounting/organizations/7/shipments/${sourceKey}` }]} />);
+  await user.click(await screen.findByRole("button", { name: /Открыть черновик ТН № TN-22\/4/ }));
+  expect(await screen.findByLabelText("Черновой номер (не официальный)")).toHaveValue("TN-22/4");
+  expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining(
+    `kind=tn&expected_revision=4&expected_number=TN-22%2F4`,
+  ), expect.objectContaining({ cache: "no-store" }));
+});
+
+it("does not expose draft editing when the shipment source cannot be verified", async () => {
+  const sourceKey = "12345678-1234-4234-8234-123456789012";
+  const fetchMock = vi.mocked(fetch);
+  fetchMock.mockResolvedValue(response({ organization_id: 7, items: [
+    { source_key: sourceKey, status: "unavailable", preparation_documents: [] },
+  ] }));
+  render(<ShipmentDocumentsRegister organizationId={7} title="Отгрузки клиента" description="Подготовительные документы"
+    items={[{ act_id: 444, document_id: 81, source_key: sourceKey, operation_date: "2026-09-13", actor: "warehouse",
+      evidence: "verified", line_count: 1, status: "verified_internal_act", tn_ttn_status: "not_certified", document_url: "/act" }]} />);
+  expect(await screen.findByRole("alert")).toHaveTextContent(/источник или покупатель не удалось подтвердить/i);
+  expect(screen.queryByRole("button", { name: /Подготовить ТН\/ТТН/ })).not.toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it("refreshes a stale register identity before opening the latest revision", async () => {
+  const user = userEvent.setup();
+  const sourceKey = "12345678-1234-4234-8234-123456789012";
+  let revision = 4;
+  const summary = () => ({ kind: "tn" as const, number: `TN-22/${revision}`, date: "2026-09-13", revision,
+    saved_by: "accountant", saved_at: "2026-09-13T10:00:00Z", status: "preparation_draft" as const });
+  const savedDraft = { ...emptyResponse(), document_kind: "tn" as const, document_label: "ТН",
+    saved_revision: 5, saved_by: "accountant", saved_at: "2026-09-13T11:00:00Z",
+    saved_fields: { ...emptyResponse().saved_fields, document_number: "TN-22/5", document_date: "2026-09-13" } };
+  const fetchMock = vi.mocked(fetch);
+  fetchMock.mockImplementation((input) => {
+    const url = String(input);
+    if (url.includes("/shipment-tn-ttn-drafts?")) return Promise.resolve(response({ organization_id: 7, items: [
+      { source_key: sourceKey, status: "verified", preparation_documents: [summary()] },
+    ] }));
+    if (url.includes("/tn-ttn-draft?") && url.includes("expected_revision=4")) {
+      return Promise.resolve(response({ detail: "Черновик изменился после загрузки списка; обновите реестр и откройте документ снова" }, 409));
+    }
+    if (url.includes("/tn-ttn-draft?") && url.includes("expected_revision=5")) return Promise.resolve(response(savedDraft));
+    return Promise.resolve(response(emptyResponse()));
+  });
+
+  render(<ShipmentDocumentsRegister organizationId={7} title="Отгрузки сделки" description="Подготовительные документы"
+    items={[{ act_id: 444, document_id: 81, source_key: sourceKey, operation_date: "2026-09-13", actor: "warehouse",
+      evidence: "verified", line_count: 1, status: "verified_internal_act", tn_ttn_status: "not_certified", document_url: "/act" }]} />);
+  await user.click(await screen.findByRole("button", { name: /Открыть черновик ТН № TN-22\/4/ }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(/обновите реестр/i);
+  revision = 5;
+  await user.click(screen.getByRole("button", { name: "Обновить список черновиков" }));
+  await user.click(await screen.findByRole("button", { name: /Открыть черновик ТН № TN-22\/5/ }));
+  expect(await screen.findByLabelText("Черновой номер (не официальный)")).toHaveValue("TN-22/5");
+  expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("expected_revision=5&expected_number=TN-22%2F5"),
+    expect.objectContaining({ cache: "no-store" }));
+});
+
+it("preserves an unsaved draft while the register list is refreshed", async () => {
+  const user = userEvent.setup();
+  const sourceKey = "12345678-1234-4234-8234-123456789012";
+  const fetchMock = vi.mocked(fetch);
+  fetchMock.mockImplementation((input) => {
+    if (String(input).includes("/shipment-tn-ttn-drafts?")) return Promise.resolve(response({ organization_id: 7, items: [
+      { source_key: sourceKey, status: "verified", preparation_documents: [{ kind: "tn", number: "TN-22/4", date: "2026-09-13",
+        revision: 4, saved_by: "accountant", saved_at: "2026-09-13T10:00:00Z", status: "preparation_draft" }] },
+    ] }));
+    return Promise.resolve(response(emptyResponse()));
+  });
+  render(<ShipmentDocumentsRegister organizationId={7} title="Отгрузки сделки" description="Подготовительные документы"
+    items={[{ act_id: 444, document_id: 81, source_key: sourceKey, operation_date: "2026-09-13", actor: "warehouse",
+      evidence: "verified", line_count: 1, status: "verified_internal_act", tn_ttn_status: "not_certified", document_url: "/act" }]} />);
+  await user.click(await screen.findByRole("button", { name: "Подготовить ТН/ТТН" }));
+  const number = await screen.findByLabelText("Черновой номер (не официальный)");
+  await user.type(number, "LOCAL-EDIT");
+  await user.click(screen.getByRole("button", { name: "Обновить список черновиков" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+  expect(screen.getByLabelText("Черновой номер (не официальный)")).toHaveValue("LOCAL-EDIT");
 });

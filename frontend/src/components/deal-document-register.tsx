@@ -7,7 +7,7 @@ import { DealClientBinding } from "@/components/deal-client-binding";
 import { InvoicePhysicalShipment } from "@/components/erp/invoice-physical-shipment";
 import { InvoiceCancellation } from "@/components/erp/invoice-cancellation";
 import { InvoiceNotificationRegister } from "@/components/invoice-notification-register";
-import { ShipmentDocumentDraft } from "@/components/erp/shipment-document-draft";
+import { ShipmentDocumentsRegister } from "@/components/erp/shipment-documents-register";
 import { DealDocumentCard } from "@/components/deal-document-card";
 
 import { Button } from "@/components/ui/button";
@@ -97,15 +97,16 @@ function RegisterPage({ org, dealId, kind, initialDocumentId }: { org: string; d
 
 function ShipmentDocuments({ page }: { page: DocumentRegisterPage }) {
   if (page.coverage.shipments === "unavailable") return <p className="text-xs text-muted">Реестр внутренних актов отгрузки недоступен. Это не означает отсутствия отгрузок.</p>;
-  return <section aria-label="Внутренние акты отгрузки" className="space-y-2 rounded-lg border border-line p-3 text-sm">
+  if (page.shipment_documents.length === 0) return <section aria-label="Внутренние акты отгрузки" className="rounded-lg border border-line p-3 text-sm">
     <h3 className="font-semibold">Внутренние акты отгрузки</h3>
-    <p className="text-xs text-muted">Акты WMS подтверждены источником и уменьшают резерв. Они не являются ТН или ТТН; из каждого акта можно подготовить проверяемый черновик реквизитов.</p>
-    {page.shipment_documents.length === 0 ? <p>Подтверждённых внутренних актов по документам этой страницы нет.</p> : <ul className="space-y-1">{page.shipment_documents.map((row) => <li key={row.act_id}>
-      <a className="text-accent underline" href={row.document_url} target="_blank" rel="noreferrer">Акт WMS № {row.act_id}</a>
-      <span> · счёт ID {row.document_id} · дата {row.operation_date} · строк {row.line_count} · {row.actor}</span>
-      <ShipmentDocumentDraft org={String(page.organization_id)} sourceKey={row.source_key} />
-    </li>)}</ul>}
+    <p>Подтверждённых внутренних актов по документам этой страницы нет.</p>
   </section>;
+  return <ShipmentDocumentsRegister
+    organizationId={page.organization_id}
+    items={page.shipment_documents}
+    title="Внутренние акты отгрузки"
+    description="Акты WMS подтверждены источником и уменьшают резерв. Сохранённые ТН/ТТН отображаются как черновики по номеру; черновик не является выпущенным или сертифицированным документом."
+  />;
 }
 
 function DocumentRow({ row, onSelect, detail = false }: { row: DocumentRegisterItem; onSelect: (id: number) => void; detail?: boolean }) {

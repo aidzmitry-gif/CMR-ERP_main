@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -7,7 +8,7 @@ from sqlalchemy import func, select, update
 
 from core.domain.models import Counterparty
 from modules.accounting import routes
-from modules.accounting.models import AccessGrant, Entry, ShipmentPreparationDraft
+from modules.accounting.models import AccessGrant, Entry, Organization, ShipmentPreparationDraft
 from modules.accounting.shipment_document_drafts import _verified_recipient_identity
 
 
@@ -186,6 +187,15 @@ async def test_tn_ttn_draft_versions_replay_history_and_conflict_without_posting
     assert first.json()["history"][0]["actor"] == "tester"
     assert first.json()["can_issue"] is False
 
+    opened = await client.get(url, params={
+        "kind": "ttn", "expected_revision": 1, "expected_number": "Черновик 12",
+    })
+    assert opened.status_code == 200 and opened.json()["saved_fields"]["document_number"] == "Черновик 12"
+    changed = await client.get(url, params={
+        "kind": "ttn", "expected_revision": 1, "expected_number": "WRONG-NUMBER",
+    })
+    assert changed.status_code == 409
+
     replay = await client.post(url, json=first_body)
     assert replay.status_code == 200, replay.text
     assert replay.json()["saved_revision"] == 1
@@ -195,6 +205,10 @@ async def test_tn_ttn_draft_versions_replay_history_and_conflict_without_posting
     assert stale.status_code == 409
     second = await client.post(url, json=body(expected_revision=1, document_number="Черновик 13"))
     assert second.status_code == 200, second.text
+    stale_registry_identity = await client.get(url, params={
+        "kind": "ttn", "expected_revision": 1, "expected_number": "Черновик 12",
+    })
+    assert stale_registry_identity.status_code == 409
     change = next(item for item in second.json()["history"][1]["changes"] if item["field"] == "document_number")
     assert (change["before"], change["after"]) == ("Черновик 12", "Черновик 13")
     assert second.json()["history"][0]["fields"]["sender_identity"]["name"] == "Synthetic test company"
@@ -284,6 +298,88 @@ async def test_tn_ttn_rejects_free_text_party_names_and_inactive_recipients(clie
     inactive = await client.post(url, json=body())
     assert inactive.status_code == 409
     assert "active directory record" in inactive.text
+
+
+async def test_open_listed_number_matches_trimmed_legacy_identity(client, book, monkeypatch):
+    organization_id = book[0]
+    source_key = str(uuid4())
+    prepared = {
+        "source": {"source_key": source_key, "digest": "a" * 64},
+        "saved_revision": 3,
+        "saved_fields": {"document_number": " TN-003 "},
+    }
+
+    async def verified(_session, _org, _key, _core):
+        return receipt(organization_id, source_key)
+
+    async def history(*_args):
+        return prepared
+
+    monkeypatch.setattr(routes, "verified_shipment_document_source", verified)
+    monkeypatch.setattr(routes, "build_shipment_document_draft", lambda *_args: prepared)
+    monkeypatch.setattr(routes.shipment_document_drafts, "attach_history", history)
+    url = f"/accounting/organizations/{organization_id}/shipments/{source_key}/tn-ttn-draft"
+    opened = await client.get(url, params={
+        "kind": "tn", "expected_revision": 3, "expected_number": "TN-003",
+    })
+    assert opened.status_code == 200, opened.text
+    assert opened.json()["saved_fields"]["document_number"] == " TN-003 "
+
+
+async def test_register_batch_returns_latest_draft_identity_with_exact_source_scope(client, db, book, monkeypatch):
+    organization_id = book[0]
+    source_key = "12345678-1234-4234-8234-123456789012"
+    other_source_key = "22345678-1234-4234-8234-123456789012"
+    created_at = datetime(2026, 9, 13, 10, tzinfo=timezone.utc)
+    other_org = Organization(name="Other register book", unp="888888888")
+    db.add(other_org)
+    await db.flush()
+
+    def row(org_id, source, revision, kind, number):
+        return ShipmentPreparationDraft(
+            organization_id=org_id,
+            source=source,
+            revision=revision,
+            request_key=str(uuid4()),
+            command_digest="a" * 64,
+            payload={"kind": kind, "fields": {"document_number": number, "document_date": "2026-09-13"}},
+            actor="accountant",
+            created_at=created_at,
+        )
+
+    tn_source = f"wms:physical-shipment:{organization_id}:{source_key}:tn-ttn:tn"
+    ttn_source = f"wms:physical-shipment:{organization_id}:{source_key}:tn-ttn:ttn"
+    db.add_all([
+        row(organization_id, tn_source, 1, "tn", "OLD-TN-1"),
+        row(organization_id, tn_source, 2, "tn", " TN-123/2 "),
+        row(organization_id, ttn_source, 1, "ttn", "TTN-123"),
+        row(other_org.id, tn_source, 3, "tn", "FOREIGN-TN"),
+        row(organization_id, f"wms:physical-shipment:{organization_id}:{other_source_key}:tn-ttn:tn", 1, "tn", "UNRELATED-TN"),
+    ])
+    await db.commit()
+
+    async def verified(_session, org_id, key, _core):
+        assert org_id == organization_id
+        if str(key) == other_source_key:
+            raise HTTPException(409, "source is no longer verifiable")
+        assert str(key) == source_key
+        return {}
+
+    monkeypatch.setattr(routes, "verified_shipment_document_source", verified)
+    path = f"/accounting/organizations/{organization_id}/shipment-tn-ttn-drafts"
+    response = await client.get(f"{path}?source_key={source_key}&source_key={other_source_key}")
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "private, no-store"
+    items = response.json()["items"]
+    assert items[0]["status"] == "verified"
+    assert [(d["kind"], d["number"], d["revision"]) for d in items[0]["preparation_documents"]] == [
+        ("tn", "TN-123/2", 2), ("ttn", "TTN-123", 1),
+    ]
+    assert all(d["saved_by"] == "accountant" and d["saved_at"] == "2026-09-13T10:00:00Z"
+               for d in items[0]["preparation_documents"])
+    assert all("payload" not in d and "command_digest" not in d for d in items[0]["preparation_documents"])
+    assert items[1] == {"source_key": other_source_key, "status": "unavailable", "preparation_documents": []}
+    assert (await client.get(f"{path}?source_key={source_key}&source_key={source_key}")).status_code == 422
 
 
 async def test_tn_ttn_recipient_and_contract_are_bound_to_source_buyer(client, db, book, monkeypatch):

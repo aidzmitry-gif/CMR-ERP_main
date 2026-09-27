@@ -1333,6 +1333,8 @@ async def accounting_shipment_document(org_id: int, key: UUID, ctx=Depends(membe
 @router.get("/organizations/{org_id}/shipments/{key}/tn-ttn-draft")
 async def accounting_shipment_tn_ttn_draft(
     org_id: int, key: UUID, response: Response, kind: str | None = Query(default=None),
+    expected_revision: int | None = Query(default=None, ge=1),
+    expected_number: str | None = Query(default=None, max_length=1000),
     ctx=Depends(member), core=Depends(get_core),
 ):
     """Prepare a source-bound TN/TTN form without issuing a statutory document."""
@@ -1352,8 +1354,52 @@ async def accounting_shipment_tn_ttn_draft(
             )
     except (KeyError, TypeError, ValueError, service.AccountingError) as exc:
         raise HTTPException(409, str(exc)) from exc
+    if (expected_revision is None) != (expected_number is None):
+        raise HTTPException(422, "Expected revision and document number must be supplied together")
+    if expected_revision is not None:
+        saved_number = draft.get("saved_fields", {}).get("document_number")
+        saved_identity_number = saved_number.strip() if isinstance(saved_number, str) else None
+        expected_identity_number = expected_number.strip() or None
+        if (draft.get("saved_revision") != expected_revision or not isinstance(saved_number, str)
+                or saved_identity_number != expected_identity_number):
+            raise HTTPException(409, "Черновик изменился после загрузки списка; обновите реестр и откройте документ снова")
     response.headers["Cache-Control"] = "private, no-store"
     return draft
+
+
+@router.get("/organizations/{org_id}/shipment-tn-ttn-drafts")
+async def accounting_shipment_tn_ttn_draft_registry(
+    org_id: int, response: Response,
+    source_key: list[UUID] = Query(default=[]),
+    ctx=Depends(member), core=Depends(get_core),
+):
+    """Batch-read saved draft identities for exact, verified WMS sources in a deal/client register."""
+    keys = [str(key) for key in source_key]
+    if not keys or len(keys) > 100 or len(set(keys)) != len(keys):
+        raise HTTPException(422, "Provide between 1 and 100 unique shipment source keys")
+
+    unavailable: set[str] = set()
+    verified: list[str] = []
+    for key in keys:
+        try:
+            await verified_shipment_document_source(ctx[0], org_id, UUID(key), core)
+        except HTTPException as exc:
+            if exc.status_code >= 500:
+                raise
+            unavailable.add(key)
+        else:
+            verified.append(key)
+
+    summaries = await shipment_document_drafts.registry_summaries(ctx[0], org_id, verified)
+    response.headers["Cache-Control"] = "private, no-store"
+    return {
+        "organization_id": org_id,
+        "items": [{
+            "source_key": key,
+            "status": "unavailable" if key in unavailable else "verified",
+            "preparation_documents": [] if key in unavailable else summaries[key],
+        } for key in keys],
+    }
 
 
 @router.post("/organizations/{org_id}/shipments/{key}/tn-ttn-draft")

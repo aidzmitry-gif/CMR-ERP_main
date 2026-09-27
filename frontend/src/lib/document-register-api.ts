@@ -4,6 +4,15 @@ export type ShipmentDocumentReference = {
   source_key: string; operation_date: string; actor: string; evidence: string; line_count: number;
   status: "verified_internal_act"; tn_ttn_status: "not_certified"; document_url: string;
 };
+export type ShipmentPreparationDraftSummary = {
+  kind: "tn" | "ttn"; number: string | null; date: string | null; revision: number;
+  saved_by: string; saved_at: string; status: "preparation_draft";
+};
+export type ShipmentDraftRegistryItem = {
+  source_key: string; status: "verified" | "unavailable";
+  preparation_documents: ShipmentPreparationDraftSummary[];
+};
+export type ShipmentDraftRegistry = { organization_id: number; items: ShipmentDraftRegistryItem[] };
 export type DocumentRegisterItem = {
   id: number; deal_id: number; organization_id: number; kind: string; number: string;
   version: number; status: string; amount: string; currency: string | null;
@@ -31,6 +40,8 @@ const object = (value: unknown): value is Record<string, unknown> => !!value && 
 const positive = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 const nullableString = (value: unknown) => value === null || typeof value === "string";
 const hash = (value: unknown) => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+const uuid = (value: unknown): value is string => typeof value === "string"
+  && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
 async function response(path: string): Promise<Response> {
   let result: Response;
@@ -61,6 +72,37 @@ function scope(org: string, dealId: string) {
   if (!registerId(org) || !registerId(dealId)) throw new DocumentRegisterError("Выберите юрлицо и точную сделку.");
   return `/api/sales/organizations/${org}/deals/${dealId}`;
 }
+
+function preparationDraft(value: unknown): value is ShipmentPreparationDraftSummary {
+  return object(value) && (value.kind === "tn" || value.kind === "ttn")
+    && nullableString(value.number) && nullableString(value.date) && positive(value.revision)
+    && typeof value.saved_by === "string" && typeof value.saved_at === "string"
+    && Number.isFinite(Date.parse(value.saved_at)) && value.status === "preparation_draft";
+}
+
+export async function fetchShipmentPreparationRegister(org: string, sourceKeys: string[]): Promise<ShipmentDraftRegistry> {
+  if (!registerId(org) || !Array.isArray(sourceKeys) || sourceKeys.length < 1 || sourceKeys.length > 100
+    || sourceKeys.some((key) => !uuid(key)) || new Set(sourceKeys.map((key) => key.toLowerCase())).size !== sourceKeys.length) invalid();
+  const params = new URLSearchParams();
+  sourceKeys.forEach((key) => params.append("source_key", key.toLowerCase()));
+  const value = await json(`/api/accounting/organizations/${org}/shipment-tn-ttn-drafts?${params}`);
+  if (!object(value) || value.organization_id !== Number(org) || !Array.isArray(value.items)
+    || value.items.length !== sourceKeys.length) invalid();
+  const expected = new Set(sourceKeys.map((key) => key.toLowerCase()));
+  const seen = new Set<string>();
+  for (const item of value.items) {
+    if (!object(item) || !uuid(item.source_key) || !expected.has(item.source_key.toLowerCase())
+      || seen.has(item.source_key.toLowerCase()) || !["verified", "unavailable"].includes(item.status as string)
+      || !Array.isArray(item.preparation_documents) || !item.preparation_documents.every(preparationDraft)) invalid();
+    const drafts = item.preparation_documents as ShipmentPreparationDraftSummary[];
+    if (item.status === "unavailable" && drafts.length > 0) invalid();
+    if (new Set(drafts.map((draft) => draft.kind)).size !== drafts.length) invalid();
+    seen.add(item.source_key.toLowerCase());
+  }
+  if (seen.size !== expected.size) invalid();
+  return value as ShipmentDraftRegistry;
+}
+
 function item(value: unknown, org: string, dealId: string): DocumentRegisterItem {
   if (!object(value) || !positive(value.id) || value.organization_id !== Number(org) || value.deal_id !== Number(dealId)
     || !positive(value.version) || typeof value.amount !== "string" || !/^-?\d+(\.\d+)?$/.test(value.amount)
