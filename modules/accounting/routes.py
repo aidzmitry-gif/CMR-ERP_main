@@ -62,6 +62,7 @@ from modules.accounting import (
     service,
     settlement_document_snapshot,
     settlement_offsets,
+    shipment_document_drafts,
     shipment_drafts,
     specific_zero_value_issue,
     statutory_requirements,
@@ -1334,10 +1335,40 @@ async def accounting_shipment_tn_ttn_draft(
             Policy.effective_from <= operation_date,
         ).order_by(Policy.effective_from.desc()).limit(1))
         draft = build_shipment_document_draft(result["receipt"], kind, policy)
+        if kind is not None:
+            draft = await shipment_document_drafts.attach_history(
+                ctx[0], org_id, draft["source"]["source_key"], kind, draft,
+            )
     except (KeyError, TypeError, ValueError, service.AccountingError) as exc:
         raise HTTPException(409, str(exc)) from exc
     response.headers["Cache-Control"] = "private, no-store"
     return draft
+
+
+@router.post("/organizations/{org_id}/shipments/{key}/tn-ttn-draft")
+async def save_accounting_shipment_tn_ttn_draft(
+    org_id: int, key: UUID, data: shipment_document_drafts.ShipmentDocumentDraftInput,
+    response: Response, ctx=Depends(member), core=Depends(get_core),
+):
+    """Save a versioned preparation draft; never issue a statutory document."""
+    result = await verified_shipment_source(ctx[0], org_id, key, core)
+    try:
+        operation_date = date.fromisoformat(str(result["receipt"]["snapshot"]["operation_date"]))
+        policy = await ctx[0].scalar(select(Policy).where(
+            Policy.organization_id == org_id,
+            Policy.effective_from <= operation_date,
+        ).order_by(Policy.effective_from.desc()).limit(1))
+        draft = build_shipment_document_draft(result["receipt"], data.kind, policy)
+        await shipment_document_drafts.save(
+            ctx[0], org_id, draft["source"]["source_key"], draft, data, ctx[1],
+        )
+        saved = await shipment_document_drafts.attach_history(
+            ctx[0], org_id, draft["source"]["source_key"], data.kind, draft,
+        )
+    except (KeyError, TypeError, ValueError, service.AccountingError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    return saved
 
 
 @router.post("/organizations/{org_id}/shipments/{key}/preview")
