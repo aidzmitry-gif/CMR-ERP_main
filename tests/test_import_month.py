@@ -126,6 +126,173 @@ def _module():
     return importlib.import_module("scripts.import_month")
 
 
+def test_onec_purchase_extract_requires_explicit_document_entity(monkeypatch, tmp_path):
+    module = _module()
+    monkeypatch.setenv("IMPORT_CACHE_DIR", str(tmp_path.resolve()))
+    monkeypatch.delenv("IMPORT_ONEC_PURCHASE_ENTITY", raising=False)
+    monkeypatch.setattr(module, "_onec_base_url", lambda: "https://synthetic.invalid/odata")
+    monkeypatch.setattr(
+        module,
+        "onec_window",
+        lambda *args: pytest.fail("invalid configuration must fail before a source request"),
+    )
+
+    with pytest.raises(RuntimeError, match="IMPORT_ONEC_PURCHASE_ENTITY"):
+        module.extract_onec_purchases()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_onec_purchase_cli_does_not_require_accounting_database(tmp_path):
+    env = os.environ.copy()
+    for name in (
+        "AIOS_DATABASE_URL",
+        "AIOS_ENVIRONMENT",
+        "IMPORT_ONEC_PURCHASE_ENTITY",
+        "IMPORT_ONEC_BASE",
+        "ONEC_BASE_URL",
+    ):
+        env.pop(name, None)
+    env["IMPORT_CACHE_DIR"] = str(tmp_path.resolve())
+    result = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve().parents[1] / "scripts/import_month.py"),
+         "extract-onec-purchases"],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "IMPORT_ONEC_PURCHASE_ENTITY" in result.stderr
+    assert "load-only" not in result.stderr
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("entity", ["Catalog_Номенклатура", "Document_", "Document_../Users"])
+def test_onec_purchase_extract_rejects_non_document_or_unsafe_entity(
+    monkeypatch, tmp_path, entity
+):
+    module = _module()
+    monkeypatch.setenv("IMPORT_CACHE_DIR", str(tmp_path.resolve()))
+    monkeypatch.setenv("IMPORT_ONEC_PURCHASE_ENTITY", entity)
+    monkeypatch.setattr(module, "_onec_base_url", lambda: "https://synthetic.invalid/odata")
+    monkeypatch.setattr(
+        module,
+        "onec_window",
+        lambda *args: pytest.fail("unsafe entity must fail before a source request"),
+    )
+
+    with pytest.raises(RuntimeError, match="IMPORT_ONEC_PURCHASE_ENTITY"):
+        module.extract_onec_purchases()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_onec_purchase_extract_preserves_month_rows_and_verifies_replay(monkeypatch, tmp_path):
+    module = _module()
+    monkeypatch.setenv("IMPORT_CACHE_DIR", str(tmp_path.resolve()))
+    monkeypatch.setenv("IMPORT_ONEC_PURCHASE_ENTITY", "Document_ПоступлениеТоваровУслуг")
+    monkeypatch.setattr(module, "ONEC_FROM", "2026-09-01T00:00:00")
+    monkeypatch.setattr(module, "ONEC_TO", "2026-10-01T00:00:00")
+    monkeypatch.setattr(module, "_onec_base_url", lambda: "https://synthetic.invalid/odata")
+    rows = [
+        {"Ref_Key": "purchase-1", "Number": "П-1", "Date": "2026-09-02T10:00:00",
+         "Контрагент_Key": "supplier-1", "Товары": [{"Номенклатура_Key": "sku-1", "Количество": "2"}]},
+        {"Ref_Key": "purchase-2", "Number": "П-2", "Date": "2026-09-30T15:00:00",
+         "Контрагент_Key": "supplier-2", "Товары": []},
+    ]
+    calls = []
+
+    def fetch(entity, date_from, date_to):
+        calls.append((entity, date_from, date_to))
+        return rows
+
+    monkeypatch.setattr(module, "onec_window", fetch)
+    module.extract_onec_purchases()
+
+    source_bytes = (tmp_path / "onec_purchases.jsonl").read_bytes()
+    cached_rows = [json.loads(line) for line in source_bytes.decode("utf-8").splitlines()]
+    metadata = json.loads((tmp_path / "onec_purchases.meta.json").read_text(encoding="utf-8"))
+    assert cached_rows == rows
+    assert calls == [("Document_ПоступлениеТоваровУслуг", "2026-09-01T00:00:00", "2026-10-01T00:00:00")]
+    assert metadata == {
+        "schema_version": "onec-purchase-cache-v1",
+        "source_system": "onec",
+        "entity": "Document_ПоступлениеТоваровУслуг",
+        "date_from": "2026-09-01T00:00:00",
+        "date_to": "2026-10-01T00:00:00",
+        "record_count": 2,
+        "source_sha256": module.hashlib.sha256(source_bytes).hexdigest(),
+    }
+
+    monkeypatch.setattr(
+        module,
+        "onec_window",
+        lambda *args: pytest.fail("verified cache replay must not contact the source"),
+    )
+    module.extract_onec_purchases()
+    assert (tmp_path / "onec_purchases.jsonl").read_bytes() == source_bytes
+
+    monkeypatch.setenv("IMPORT_ONEC_PURCHASE_ENTITY", "Document_ДругойТип")
+    with pytest.raises(RuntimeError, match="не совпадает"):
+        module.extract_onec_purchases()
+    assert (tmp_path / "onec_purchases.jsonl").read_bytes() == source_bytes
+
+
+@pytest.mark.parametrize(
+    ("rows", "message"),
+    [
+        ([{"Date": "2026-09-02T10:00:00"}], "Ref_Key"),
+        (
+            [
+                {"Ref_Key": "same", "Date": "2026-09-02T10:00:00"},
+                {"Ref_Key": "same", "Date": "2026-09-03T10:00:00"},
+            ],
+            "повторяется Ref_Key",
+        ),
+        ([{"Ref_Key": "late", "Date": "2026-10-01T00:00:00"}], "вне заданного периода"),
+    ],
+)
+def test_onec_purchase_extract_rejects_unstable_or_out_of_period_rows(
+    monkeypatch, tmp_path, rows, message
+):
+    module = _module()
+    monkeypatch.setenv("IMPORT_CACHE_DIR", str(tmp_path.resolve()))
+    monkeypatch.setenv("IMPORT_ONEC_PURCHASE_ENTITY", "Document_Purchase")
+    monkeypatch.setattr(module, "ONEC_FROM", "2026-09-01T00:00:00")
+    monkeypatch.setattr(module, "ONEC_TO", "2026-10-01T00:00:00")
+    monkeypatch.setattr(module, "_onec_base_url", lambda: "https://synthetic.invalid/odata")
+    monkeypatch.setattr(module, "onec_window", lambda *args: rows)
+
+    with pytest.raises(RuntimeError, match=message):
+        module.extract_onec_purchases()
+    assert not (tmp_path / "onec_purchases.jsonl").exists()
+    assert not (tmp_path / "onec_purchases.meta.json").exists()
+
+
+def test_onec_purchase_extract_rejects_tampered_cache(monkeypatch, tmp_path):
+    module = _module()
+    monkeypatch.setenv("IMPORT_CACHE_DIR", str(tmp_path.resolve()))
+    monkeypatch.setenv("IMPORT_ONEC_PURCHASE_ENTITY", "Document_Purchase")
+    monkeypatch.setattr(module, "ONEC_FROM", "2026-09-01T00:00:00")
+    monkeypatch.setattr(module, "ONEC_TO", "2026-10-01T00:00:00")
+    monkeypatch.setattr(module, "_onec_base_url", lambda: "https://synthetic.invalid/odata")
+    monkeypatch.setattr(
+        module, "onec_window",
+        lambda *args: [{"Ref_Key": "purchase-1", "Date": "2026-09-02T10:00:00"}],
+    )
+    module.extract_onec_purchases()
+    cache_path = tmp_path / "onec_purchases.jsonl"
+    cache_path.write_text('{"Ref_Key":"changed"}\n', encoding="utf-8")
+    monkeypatch.setattr(
+        module,
+        "onec_window",
+        lambda *args: pytest.fail("tampered cache must fail before a source request"),
+    )
+
+    with pytest.raises(RuntimeError, match="не совпадает"):
+        module.extract_onec_purchases()
+
+
 def test_import_module_does_not_load_connector_config(monkeypatch):
     sys.modules.pop("connectors.config", None)
     module = _module()

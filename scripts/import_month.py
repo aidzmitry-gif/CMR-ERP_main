@@ -6,6 +6,8 @@
 Двухфазный ETL с файловым кэшем в data/import_<YYYY-MM>/ (повторный прогон безопасен):
   python scripts/import_month.py extract      # Bitrix REST + 1C OData -> jsonl-кэш
   python scripts/import_month.py extract-onec # только 1С (без Bitrix) — товары/цены
+  python scripts/import_month.py extract-onec-purchases # сырые закупочные документы 1С -> кэш, без записи в ERP
+  # IMPORT_ONEC_PURCHASE_ENTITY задаётся точным Document_* из метаданных OData выбранной базы 1С.
   python scripts/import_month.py load-onec    # Sku + StockItem.price из кэша 1С
   python scripts/import_month.py load-prices  # цены SKU из строк реализаций (кэш)
   python scripts/import_month.py verify       # счётчики по таблицам
@@ -1138,6 +1140,83 @@ def extract_onec() -> None:
     print("extract-onec: готово ->", OUT_DIR, f"(sales={len(docs)})")
 
 
+def extract_onec_purchases() -> None:
+    """Сохранить только сырой месячный набор закупочных документов 1С в локальный кэш."""
+    global OUT_DIR
+    OUT_DIR = _resolve_cache_dir()
+    entity = os.getenv("IMPORT_ONEC_PURCHASE_ENTITY", "").strip()
+    prefix = "Document_"
+    suffix = entity[len(prefix):] if entity.startswith(prefix) else ""
+    if not suffix or len(entity) > 180 or any(not (char.isalnum() or char == "_") for char in suffix):
+        raise RuntimeError(
+            "Задайте IMPORT_ONEC_PURCHASE_ENTITY явным OData-типом Document_* из метаданных 1С"
+        )
+    if ONEC_FROM >= ONEC_TO:
+        raise RuntimeError("IMPORT_ONEC_FROM должен быть раньше IMPORT_ONEC_TO")
+
+    cache_path = OUT_DIR / "onec_purchases.jsonl"
+    metadata_path = OUT_DIR / "onec_purchases.meta.json"
+    if cache_path.exists() or metadata_path.exists():
+        if not cache_path.is_file() or not metadata_path.is_file():
+            raise RuntimeError("Неполный кэш закупочных документов 1С; сохраните его и разберите вручную")
+        try:
+            payload = cache_path.read_bytes()
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Не удалось проверить кэш закупочных документов 1С") from exc
+        row_count = sum(1 for line in payload.splitlines() if line.strip())
+        expected = {
+            "schema_version": "onec-purchase-cache-v1",
+            "source_system": "onec",
+            "entity": entity,
+            "date_from": ONEC_FROM,
+            "date_to": ONEC_TO,
+            "record_count": row_count,
+            "source_sha256": hashlib.sha256(payload).hexdigest(),
+        }
+        if metadata != expected:
+            raise RuntimeError(
+                "Кэш закупочных документов 1С не совпадает с типом, периодом или контрольной суммой; "
+                "сохраните исходный кэш и разберите его вручную"
+            )
+        print(f"extract-onec-purchases: кэш проверен ({entity}, документов={row_count})")
+        return
+
+    if not _onec_base_url():
+        raise RuntimeError("ONEC_BASE_URL / IMPORT_ONEC_BASE не задан — извлечение 1С невозможно")
+    docs = onec_window(entity, ONEC_FROM, ONEC_TO)
+    seen_refs: set[str] = set()
+    for index, row in enumerate(docs, start=1):
+        if not isinstance(row, dict):
+            raise RuntimeError(f"Документ 1С #{index} имеет неверный формат")
+        ref_key = row.get("Ref_Key")
+        if not isinstance(ref_key, str) or not ref_key.strip() or ref_key != ref_key.strip():
+            raise RuntimeError(f"Документ 1С #{index} не содержит устойчивый Ref_Key")
+        if ref_key in seen_refs:
+            raise RuntimeError(f"В выборке 1С повторяется Ref_Key документа #{index}")
+        seen_refs.add(ref_key)
+        document_date = row.get("Date")
+        if not isinstance(document_date, str) or not (ONEC_FROM <= document_date < ONEC_TO):
+            raise RuntimeError(f"Дата документа 1С #{index} вне заданного периода или отсутствует")
+
+    _dump("onec_purchases", docs)
+    payload = cache_path.read_bytes()
+    metadata = {
+        "schema_version": "onec-purchase-cache-v1",
+        "source_system": "onec",
+        "entity": entity,
+        "date_from": ONEC_FROM,
+        "date_to": ONEC_TO,
+        "record_count": len(docs),
+        "source_sha256": hashlib.sha256(payload).hexdigest(),
+    }
+    metadata_path.write_text(
+        json.dumps(metadata, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    print(f"extract-onec-purchases: кэш создан ({entity}, документов={len(docs)})")
+
+
 # ---------------------------------------------------------------- load
 
 # Bitrix STAGE_ID (основная воронка, категория 0) -> канон stages.py
@@ -2222,6 +2301,8 @@ if __name__ == "__main__":
         extract()
     if phase == "extract-onec":
         extract_onec()
+    if phase == "extract-onec-purchases":
+        extract_onec_purchases()
     if phase in ("load", "all"):
         asyncio.run(load())
     if phase == "load-onec":
