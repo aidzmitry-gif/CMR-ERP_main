@@ -120,7 +120,7 @@ def bx_list(method: str, params: dict) -> list[dict]:
 _onec = requests.Session()
 
 
-def onec_get(path: str, params: dict | None = None) -> dict:
+def onec_get(path: str, params: dict | None = None, *, parse_float=None) -> dict:
     cfg = _connector_config()
     if not _onec.auth:
         _onec.auth = (cfg.ONEC_USER, cfg.ONEC_PASSWORD)
@@ -132,28 +132,30 @@ def onec_get(path: str, params: dict | None = None) -> dict:
             time.sleep(2 ** attempt)
             continue
         resp.raise_for_status()
-        return resp.json()
+        json_options = {"parse_float": parse_float} if parse_float is not None else {}
+        return resp.json(**json_options)
     raise RuntimeError(f"1C {path}: исчерпаны ретраи")
 
 
-def onec_date_at(entity: str, skip: int) -> str | None:
+def onec_date_at(entity: str, skip: int, *, parse_float=None) -> str | None:
     """Date документа на позиции skip при сортировке по Date (для бинарного поиска)."""
-    rows = onec_get(entity, {"$orderby": "Date", "$top": 1, "$skip": skip,
-                             "$select": "Date"}).get("value", [])
+    params = {"$orderby": "Date", "$top": 1, "$skip": skip, "$select": "Date"}
+    rows = (onec_get(entity, params, parse_float=parse_float) if parse_float is not None
+            else onec_get(entity, params)).get("value", [])
     return rows[0]["Date"] if rows else None
 
 
-def onec_window(entity: str, date_from: str, date_to: str) -> list[dict]:
+def onec_window(entity: str, date_from: str, date_to: str, *, parse_float=None) -> list[dict]:
     """Все документы entity с date_from <= Date < date_to ($filter недоступен — окно по $skip)."""
     # верхняя граница числа документов — удвоение skip до пустой страницы
     hi = 1
-    while onec_date_at(entity, hi) is not None:
+    while onec_date_at(entity, hi, parse_float=parse_float) is not None:
         hi *= 2
     # левая граница окна: первый индекс с Date >= date_from
     lo, r = 0, hi
     while lo < r:
         mid = (lo + r) // 2
-        d = onec_date_at(entity, mid)
+        d = onec_date_at(entity, mid, parse_float=parse_float)
         if d is None or d >= date_from:
             r = mid
         else:
@@ -162,7 +164,9 @@ def onec_window(entity: str, date_from: str, date_to: str) -> list[dict]:
     docs: list[dict] = []
     skip = lo
     while True:
-        rows = onec_get(entity, {"$orderby": "Date", "$top": 200, "$skip": skip}).get("value", [])
+        params = {"$orderby": "Date", "$top": 200, "$skip": skip}
+        rows = (onec_get(entity, params, parse_float=parse_float) if parse_float is not None
+                else onec_get(entity, params)).get("value", [])
         if not rows:
             break
         for row in rows:
@@ -304,12 +308,41 @@ def _dump(name: str, rows: list[dict]) -> None:
     print(f"extract: {name} — {len(rows)} записей")
 
 
+def _exact_json(value) -> str:
+    """Serialize Decimal as an exact JSON number and reject binary floats."""
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise RuntimeError("1C returned a non-finite decimal")
+        return format(value, "f")
+    if isinstance(value, float):
+        raise RuntimeError("1C purchase response contains a binary float; exact decimal parsing is required")
+    if isinstance(value, dict):
+        return "{" + ",".join(
+            json.dumps(key, ensure_ascii=False) + ":" + _exact_json(item)
+            for key, item in value.items()
+        ) + "}"
+    if isinstance(value, list):
+        return "[" + ",".join(_exact_json(item) for item in value) + "]"
+    return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+
+
+def _dump_onec_purchase_cache(path: Path, rows: list[dict]) -> None:
+    """Preserve OData decimal tokens exactly; never rewrite them through float."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("x", encoding="utf-8", newline="\n") as stream:
+        for row in rows:
+            stream.write(_exact_json(row) + "\n")
+
+
 def _load_jsonl(name: str) -> list[dict]:
     path = OUT_DIR / f"{name}.jsonl"
     if not path.exists():
         return []
     with path.open(encoding="utf-8") as f:
-        return [json.loads(line) for line in f if line.strip()]
+        parse_float = Decimal if name == "onec_purchases" else None
+        if parse_float is None:
+            return [json.loads(line) for line in f if line.strip()]
+        return [json.loads(line, parse_float=parse_float) for line in f if line.strip()]
 
 
 def _nonempty_ids(rows: list[dict], field: str) -> set[str]:
@@ -1186,7 +1219,7 @@ def extract_onec_purchases() -> None:
 
     if not _onec_base_url():
         raise RuntimeError("ONEC_BASE_URL / IMPORT_ONEC_BASE не задан — извлечение 1С невозможно")
-    docs = onec_window(entity, ONEC_FROM, ONEC_TO)
+    docs = onec_window(entity, ONEC_FROM, ONEC_TO, parse_float=Decimal)
     seen_refs: set[str] = set()
     for index, row in enumerate(docs, start=1):
         if not isinstance(row, dict):
@@ -1201,7 +1234,7 @@ def extract_onec_purchases() -> None:
         if not isinstance(document_date, str) or not (ONEC_FROM <= document_date < ONEC_TO):
             raise RuntimeError(f"Дата документа 1С #{index} вне заданного периода или отсутствует")
 
-    _dump("onec_purchases", docs)
+    _dump_onec_purchase_cache(cache_path, docs)
     payload = cache_path.read_bytes()
     metadata = {
         "schema_version": "onec-purchase-cache-v1",

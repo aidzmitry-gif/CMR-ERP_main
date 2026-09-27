@@ -6,7 +6,9 @@ import json
 import os
 import subprocess
 import sys
+from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -126,6 +128,32 @@ def _module():
     return importlib.import_module("scripts.import_month")
 
 
+def test_onec_get_parses_response_decimal_without_float(monkeypatch):
+    module = _module()
+    monkeypatch.setattr(
+        module,
+        "_connector_config",
+        lambda: SimpleNamespace(ONEC_USER="synthetic-user", ONEC_PASSWORD="synthetic-password"),
+    )
+    monkeypatch.setattr(module, "_onec_base_url", lambda: "https://synthetic.invalid/odata")
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self, **options):
+            assert options["parse_float"] is Decimal
+            return {"value": [{"Amount": Decimal("123456789012345678.9012")} ]}
+
+    monkeypatch.setattr(module._onec, "get", lambda *args, **kwargs: Response())
+
+    result = module.onec_get("Document_Purchase", parse_float=Decimal)
+
+    assert result["value"][0]["Amount"] == Decimal("123456789012345678.9012")
+
+
 def test_onec_purchase_extract_requires_explicit_document_entity(monkeypatch, tmp_path):
     module = _module()
     monkeypatch.setenv("IMPORT_CACHE_DIR", str(tmp_path.resolve()))
@@ -202,7 +230,7 @@ def test_onec_purchase_extract_preserves_month_rows_and_verifies_replay(monkeypa
     ]
     calls = []
 
-    def fetch(entity, date_from, date_to):
+    def fetch(entity, date_from, date_to, **kwargs):
         calls.append((entity, date_from, date_to))
         return rows
 
@@ -227,7 +255,7 @@ def test_onec_purchase_extract_preserves_month_rows_and_verifies_replay(monkeypa
     monkeypatch.setattr(
         module,
         "onec_window",
-        lambda *args: pytest.fail("verified cache replay must not contact the source"),
+        lambda *args, **kwargs: pytest.fail("verified cache replay must not contact the source"),
     )
     module.extract_onec_purchases()
     assert (tmp_path / "onec_purchases.jsonl").read_bytes() == source_bytes
@@ -236,6 +264,28 @@ def test_onec_purchase_extract_preserves_month_rows_and_verifies_replay(monkeypa
     with pytest.raises(RuntimeError, match="не совпадает"):
         module.extract_onec_purchases()
     assert (tmp_path / "onec_purchases.jsonl").read_bytes() == source_bytes
+
+
+def test_onec_purchase_extract_preserves_exact_decimal_tokens(monkeypatch, tmp_path):
+    module = _module()
+    monkeypatch.setenv("IMPORT_CACHE_DIR", str(tmp_path.resolve()))
+    monkeypatch.setenv("IMPORT_ONEC_PURCHASE_ENTITY", "Document_ПоступлениеТоваровУслуг")
+    monkeypatch.setattr(module, "ONEC_FROM", "2026-09-01T00:00:00")
+    monkeypatch.setattr(module, "ONEC_TO", "2026-10-01T00:00:00")
+    monkeypatch.setattr(module, "_onec_base_url", lambda: "https://synthetic.invalid/odata")
+    amount = Decimal("123456789012345678.9012")
+
+    def fetch(entity, date_from, date_to, *, parse_float):
+        assert parse_float is Decimal
+        return [{"Ref_Key": "purchase-exact", "Date": "2026-09-02T10:00:00", "Amount": amount}]
+
+    monkeypatch.setattr(module, "onec_window", fetch)
+    module.extract_onec_purchases()
+
+    payload = (tmp_path / "onec_purchases.jsonl").read_bytes()
+    assert b'"Amount":123456789012345678.9012' in payload
+    cached = json.loads(payload.decode("utf-8"), parse_float=Decimal)
+    assert cached["Amount"] == amount
 
 
 @pytest.mark.parametrize(
@@ -261,7 +311,7 @@ def test_onec_purchase_extract_rejects_unstable_or_out_of_period_rows(
     monkeypatch.setattr(module, "ONEC_FROM", "2026-09-01T00:00:00")
     monkeypatch.setattr(module, "ONEC_TO", "2026-10-01T00:00:00")
     monkeypatch.setattr(module, "_onec_base_url", lambda: "https://synthetic.invalid/odata")
-    monkeypatch.setattr(module, "onec_window", lambda *args: rows)
+    monkeypatch.setattr(module, "onec_window", lambda *args, **kwargs: rows)
 
     with pytest.raises(RuntimeError, match=message):
         module.extract_onec_purchases()
@@ -278,7 +328,7 @@ def test_onec_purchase_extract_rejects_tampered_cache(monkeypatch, tmp_path):
     monkeypatch.setattr(module, "_onec_base_url", lambda: "https://synthetic.invalid/odata")
     monkeypatch.setattr(
         module, "onec_window",
-        lambda *args: [{"Ref_Key": "purchase-1", "Date": "2026-09-02T10:00:00"}],
+        lambda *args, **kwargs: [{"Ref_Key": "purchase-1", "Date": "2026-09-02T10:00:00"}],
     )
     module.extract_onec_purchases()
     cache_path = tmp_path / "onec_purchases.jsonl"
@@ -286,7 +336,7 @@ def test_onec_purchase_extract_rejects_tampered_cache(monkeypatch, tmp_path):
     monkeypatch.setattr(
         module,
         "onec_window",
-        lambda *args: pytest.fail("tampered cache must fail before a source request"),
+        lambda *args, **kwargs: pytest.fail("tampered cache must fail before a source request"),
     )
 
     with pytest.raises(RuntimeError, match="не совпадает"):

@@ -2,6 +2,7 @@ import hashlib
 import importlib
 import json
 from copy import deepcopy
+from decimal import Decimal
 
 # pytest fixtures are intentionally re-exported into this module's namespace.
 # ruff: noqa: F811
@@ -196,6 +197,28 @@ def test_cache_digest_is_verified_before_mapping(tmp_path, source_doc):
     (tmp_path / "onec_purchases.jsonl").write_bytes(payload + b" ")
     with pytest.raises(PurchaseImportError, match="digest"):
         load_verified_cache(tmp_path)
+
+
+def test_verified_cache_preserves_exact_decimal_json_number(tmp_path):
+    source = (
+        '{"Ref_Key":"receipt-ref-precise","Amount":123456789012345678.9012}\n'
+    ).encode("utf-8")
+    (tmp_path / "onec_purchases.jsonl").write_bytes(source)
+    metadata = {
+        "schema_version": "onec-purchase-cache-v1", "source_system": "onec",
+        "entity": ENTITY, "date_from": "2026-09-01T00:00:00",
+        "date_to": "2026-10-01T00:00:00", "record_count": 1,
+        "source_sha256": hashlib.sha256(source).hexdigest(),
+    }
+    (tmp_path / "onec_purchases.meta.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+    rows, _, _ = load_verified_cache(tmp_path)
+
+    assert rows[0]["Amount"] == Decimal("123456789012345678.9012")
+    with pytest.raises(PurchaseImportError, match="explicit decimal"):
+        from modules.accounting.onec_purchase_import import _decimal
+
+        _decimal(0.1, "amount")
 
 
 def test_month_plan_is_digest_addressed_and_exact_replay_is_idempotent(

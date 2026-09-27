@@ -187,7 +187,8 @@ def _text(value: Any, label: str, *, max_length: int = 200) -> str:
 
 
 def _decimal(value: Any, label: str) -> Decimal:
-    if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
+    # Never accept a binary float: it may already have rounded a source amount.
+    if isinstance(value, bool) or isinstance(value, float) or not isinstance(value, (str, int, Decimal)):
         raise PurchaseImportError(f"{label} must be an explicit decimal value")
     try:
         result = Decimal(str(value))
@@ -230,7 +231,11 @@ def load_verified_cache(cache_dir: Path) -> tuple[list[dict[str, Any]], dict[str
     if metadata.get("source_sha256") != digest:
         raise PurchaseImportError("monthly 1C purchase cache digest does not match its metadata")
     try:
-        rows = [json.loads(line) for line in payload.decode("utf-8").splitlines() if line.strip()]
+        rows = [
+            json.loads(line, parse_float=Decimal)
+            for line in payload.decode("utf-8").splitlines()
+            if line.strip()
+        ]
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise PurchaseImportError("monthly 1C purchase cache contains invalid JSONL") from exc
     if len(rows) != metadata.get("record_count"):
