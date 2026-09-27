@@ -18,26 +18,43 @@ const stateLabel: Record<InvoiceNotification["state"], string> = {
 
 const message = (error: unknown) => error instanceof Error ? error.message : "Не удалось выполнить операцию с уведомлением.";
 
-type RegisterProps = { organizationId: number; dealId: string; documentId: number };
+type RegisterProps = { organizationId: number; dealId: string; documentId: number; awaitingCancellationEvent?: boolean };
 
 export function InvoiceNotificationRegister(props: RegisterProps) {
   return <ScopedNotificationRegister key={`${props.organizationId}/${props.dealId}/${props.documentId}`} {...props} />;
 }
 
-function ScopedNotificationRegister({ organizationId, dealId, documentId }: RegisterProps) {
+function ScopedNotificationRegister({ organizationId, dealId, documentId, awaitingCancellationEvent = false }: RegisterProps) {
   const [rows, setRows] = useState<InvoiceNotification[] | null>(null);
   const [emails, setEmails] = useState<Record<number, DocumentEmail>>({});
   const [busy, setBusy] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
+  const cancellationNoticePending = awaitingCancellationEvent
+    && !rows?.some((row) => row.event_type === "sales.invoice.cancelled");
 
   useEffect(() => {
     let active = true;
-    void fetchInvoiceNotifications(organizationId, dealId, documentId)
-      .then((value) => { if (active) setRows(value); })
-      .catch((value: unknown) => { if (active) setError(message(value)); });
-    return () => { active = false; };
-  }, [organizationId, dealId, documentId, revision]);
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const load = async (attempt: 0 | 1) => {
+      try {
+        const value = await fetchInvoiceNotifications(organizationId, dealId, documentId);
+        if (!active) return;
+        setRows(value);
+        setError("");
+        const cancellationRecorded = value.some((row) => row.event_type === "sales.invoice.cancelled");
+        const pending = awaitingCancellationEvent && !cancellationRecorded;
+        if (pending && attempt === 0) retryTimer = setTimeout(() => { void load(1); }, 2200);
+      } catch (value: unknown) {
+        if (active) setError(message(value));
+      }
+    };
+    void load(0);
+    return () => {
+      active = false;
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+    };
+  }, [organizationId, dealId, documentId, revision, awaitingCancellationEvent]);
 
   async function prepare(row: InvoiceNotification) {
     if (busy !== null) return;
@@ -66,9 +83,10 @@ function ScopedNotificationRegister({ organizationId, dealId, documentId }: Regi
       <Button variant="ghost" disabled={busy !== null} onClick={() => setRevision((value) => value + 1)}>Обновить</Button>
     </div>
     <p className="text-xs text-muted">Решение и адрес взяты из сохранённой версии счёта. Подготовка не отправляет письмо; отправка требует отдельного подтверждения.</p>
-    {rows === null && !error && <p role="status">Загрузка решений…</p>}
+    {rows === null && !error && <p role="status">{awaitingCancellationEvent ? "Проверка регистрации отмены…" : "Загрузка решений…"}</p>}
     {error && <p role="alert" className="text-red-700">{error}</p>}
-    {rows?.length === 0 && !error && <p>Для этой версии счёта уведомлений нет.</p>}
+    {awaitingCancellationEvent && cancellationNoticePending && <p className="text-muted">Отмена подтверждена; запись уведомления ещё обрабатывается. Письмо автоматически не отправляется. Можно обновить реестр позже.</p>}
+    {rows?.length === 0 && !error && !cancellationNoticePending && <p>Для этой версии счёта уведомлений нет.</p>}
     {rows?.map((row) => {
       const email = emails[row.id];
       return <article key={row.id} className="space-y-2 rounded border border-line bg-surface p-3 text-sm">

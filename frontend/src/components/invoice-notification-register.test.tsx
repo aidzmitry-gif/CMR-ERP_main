@@ -1,9 +1,9 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { InvoiceNotificationRegister } from "./invoice-notification-register";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 const notification = { id: 4, organization_id: 7, deal_id: 501, document_id: 100, document_version: 2, event_id: 9, event_type: "sales.invoice.cancelled", business_key: "cancelled:abc", channel: "email", recipient: "buyer@example.com", state: "pending", reason: null, payload: {}, created_at: "2026-09-10T10:00:00Z" };
 const email = { id: "email-44", deal_id: 501, sender: "erp@example.com", to: ["buyer@example.com"], cc: [], subject: "Счёт отменён", body: "text", attachments: [], status: "prepared", created_at: "2026-09-10T10:00:00Z", confirmed_at: null, accepted_at: null, next_attempt_at: null, attempt_count: 0, last_reason: null, message_id: null };
 const response = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
@@ -43,4 +43,27 @@ it("shows a blocked decision without offering a send action", async () => {
   await screen.findByText(/Требуется сверка/);
   expect(screen.getByText(/recipient_email_missing_or_invalid/)).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /Подготовить письмо|Подтвердить отправку/ })).toBeNull();
+});
+
+it("rechecks once after cancellation for the delayed outbox projection", async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn().mockResolvedValueOnce(response([])).mockResolvedValueOnce(response([notification]));
+  vi.stubGlobal("fetch", fetchMock);
+  render(<InvoiceNotificationRegister organizationId={7} dealId="501" documentId={100} awaitingCancellationEvent />);
+  expect(screen.getByText(/Проверка регистрации отмены/)).toBeInTheDocument();
+  await act(async () => { await vi.advanceTimersByTimeAsync(2200); });
+  expect(screen.getByText(/Аннулирование счёта/)).toBeInTheDocument();
+  expect(screen.queryByText(/запись уведомления ещё обрабатывается/)).toBeNull();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it("keeps an absent cancellation decision pending after the bounded retry", async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn().mockResolvedValue(response([]));
+  vi.stubGlobal("fetch", fetchMock);
+  render(<InvoiceNotificationRegister organizationId={7} dealId="501" documentId={100} awaitingCancellationEvent />);
+  await act(async () => { await vi.advanceTimersByTimeAsync(2200); });
+  expect(screen.getByText(/запись уведомления ещё обрабатывается/)).toBeInTheDocument();
+  expect(screen.queryByText("Для этой версии счёта уведомлений нет.")).toBeNull();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
 });

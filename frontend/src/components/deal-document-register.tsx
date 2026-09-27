@@ -138,6 +138,7 @@ function SelectedDocument({ org, dealId, id, onSelect, onClose, onChanged }: { o
   const [cancellation, setCancellation] = useState(false);
   const [shipment, setShipment] = useState(false);
   const [notifications, setNotifications] = useState(false);
+  const [awaitingCancellationNotification, setAwaitingCancellationNotification] = useState(false);
   const [row, setRow] = useState<DocumentRegisterItem | null>(null);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
@@ -155,10 +156,10 @@ function SelectedDocument({ org, dealId, id, onSelect, onClose, onChanged }: { o
     {row && <><DocumentRow row={row} onSelect={onSelect} detail />
       <DealDocumentCard doc={{ ...row, amount: Number(row.amount), draft_edit_token: row.draft_edit_token ?? undefined }} label={`Условия и история документа № ${row.number}`} refresh={async () => { setRevision(n => n + 1); onChanged(); }} />
       {row.kind === "invoice" && <Button variant="secondary" onClick={() => setCancellation(true)}>Аннулирование счёта</Button>}
-      {cancellation && row.kind === "invoice" && <InvoiceCancellation scope={{ org: Number(org), deal: Number(dealId), document: id }} onCancelled={() => { setRevision(n => n + 1); onChanged(); setNotifications(true); }} />}
+      {cancellation && row.kind === "invoice" && <InvoiceCancellation scope={{ org: Number(org), deal: Number(dealId), document: id }} onCancelled={() => { setRevision(n => n + 1); onChanged(); setAwaitingCancellationNotification(true); setNotifications(true); }} />}
       {row.kind === "invoice" && <Button variant="secondary" onClick={() => setShipment(true)}>Фактическая отгрузка и акты</Button>}
       {row.kind === "invoice" && <Button variant="secondary" onClick={() => setNotifications(true)}>Уведомления клиенту</Button>}
-      {notifications && row.kind === "invoice" && <InvoiceNotificationRegister organizationId={Number(org)} dealId={dealId} documentId={id} />}
+      {notifications && row.kind === "invoice" && <InvoiceNotificationRegister organizationId={Number(org)} dealId={dealId} documentId={id} awaitingCancellationEvent={awaitingCancellationNotification} />}
       {shipment && row.kind === "invoice" && <InvoicePhysicalShipment scope={{ organization_id: Number(org), deal_id: Number(dealId), document_id: id }} />}
       {row.original_available && <Button variant="secondary" onClick={() => setOriginal(true)}>{row.original_state === "approval_copy" ? "Открыть сохранённую копию" : "Открыть оригинал"} ID {id}</Button>}
       {original && <Original org={org} dealId={dealId} id={id} onClose={() => setOriginal(false)} />}
