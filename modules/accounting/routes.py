@@ -1304,6 +1304,17 @@ async def verified_shipment_source(session, org_id, key, core):
     return result
 
 
+async def verified_shipment_document_source(session, org_id, key, core):
+    """Add the exact CRM invoice buyer to the read-only TN/TTN preparation source."""
+    result = await verified_shipment_source(session, org_id, key, core)
+    recipient = await shipment_document_drafts.verified_shipment_recipient(
+        session, org_id, result["receipt"])
+    return {
+        **result,
+        "receipt": {**result["receipt"], "source_recipient": recipient},
+    }
+
+
 @router.get("/organizations/{org_id}/shipments/{key}/source")
 async def accounting_shipment_source(org_id: int, key: UUID, response: Response, ctx=Depends(member), core=Depends(get_core)):
     result = await verified_shipment_source(ctx[0], org_id, key, core)
@@ -1327,7 +1338,7 @@ async def accounting_shipment_tn_ttn_draft(
     """Prepare a source-bound TN/TTN form without issuing a statutory document."""
     if kind not in {None, "tn", "ttn"}:
         raise HTTPException(422, "kind must be tn or ttn")
-    result = await verified_shipment_source(ctx[0], org_id, key, core)
+    result = await verified_shipment_document_source(ctx[0], org_id, key, core)
     try:
         operation_date = date.fromisoformat(str(result["receipt"]["snapshot"]["operation_date"]))
         policy = await ctx[0].scalar(select(Policy).where(
@@ -1351,7 +1362,8 @@ async def save_accounting_shipment_tn_ttn_draft(
     response: Response, ctx=Depends(member), core=Depends(get_core),
 ):
     """Save a versioned preparation draft; never issue a statutory document."""
-    result = await verified_shipment_source(ctx[0], org_id, key, core)
+    await service.lock_organization(ctx[0], org_id)
+    result = await verified_shipment_document_source(ctx[0], org_id, key, core)
     try:
         operation_date = date.fromisoformat(str(result["receipt"]["snapshot"]["operation_date"]))
         policy = await ctx[0].scalar(select(Policy).where(

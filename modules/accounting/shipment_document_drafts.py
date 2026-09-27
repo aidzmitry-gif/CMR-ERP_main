@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from datetime import timezone
 from typing import Literal
 from uuid import UUID
@@ -11,13 +12,20 @@ from pydantic import Field, field_validator, model_validator
 from sqlalchemy import select
 
 from core.domain.models import Counterparty
+from modules.accounting import contract_snapshot
 from modules.accounting.models import Organization, ShipmentPreparationDraft
 from modules.accounting.schemas import Input
 
 _COMMON_FIELDS = (
-    "contract_reference",
     "document_number",
     "document_date",
+)
+_CONTRACT_FIELDS = (
+    "contract_source",
+    "contract_id",
+    "contract_number",
+    "contract_title",
+    "contract_version",
 )
 _TTN_FIELDS = ("carrier", "vehicle_registration", "driver", "route", "loading_point", "unloading_point")
 _ITEM_FIELDS = ("unit", "unit_price", "vat_basis")
@@ -35,7 +43,7 @@ class ShipmentDocumentDraftInput(Input):
     @field_validator("fields")
     @classmethod
     def bounded_fields(cls, value):
-        allowed = set(_COMMON_FIELDS) | set(_TTN_FIELDS) | set(_RECIPIENT_FIELDS) | {"items"}
+        allowed = set(_COMMON_FIELDS) | set(_CONTRACT_FIELDS) | set(_TTN_FIELDS) | set(_RECIPIENT_FIELDS) | {"items"}
         if not isinstance(value, dict) or set(value) - allowed:
             raise ValueError("Draft contains unsupported TN/TTN fields")
         for key, item in value.items():
@@ -52,11 +60,14 @@ class ShipmentDocumentDraftInput(Input):
                     seen.add(line_no)
                     for field in _ITEM_FIELDS:
                         _bounded_text(row.get(field, ""), field, 500)
-            elif key in _RECIPIENT_FIELDS:
-                if isinstance(item, bool) or not isinstance(item, int) or item <= 0:
+            elif key in _RECIPIENT_FIELDS or key in {"contract_id", "contract_version"}:
+                if type(item) is not int or item <= 0:
                     raise ValueError(f"{key} must be a positive integer")
+            elif key == "contract_source":
+                if item != "sales":
+                    raise ValueError("Shipment contract must be selected from issued sales contracts")
             else:
-                _bounded_text(item, key, 1000)
+                _bounded_text(item, key, 500 if key in {"contract_number", "contract_title"} else 1000)
         try:
             encoded = json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8")
         except (TypeError, ValueError) as exc:
@@ -89,8 +100,109 @@ def source_name(organization_id: int, source_key: str, kind: str) -> str:
     return source
 
 
+def _verified_recipient_identity(organization_id: int, snapshot: dict, document, owner,
+                                 binding, counterparty, issuance) -> dict:
+    """Check the invoice's captured MDM buyer against the shipment ownership chain."""
+    document_id = snapshot.get("document_id")
+    version = snapshot.get("document_version")
+    content_sha256 = snapshot.get("content_sha256")
+    if (type(snapshot.get("organization_id")) is not int
+            or snapshot["organization_id"] != organization_id
+            or type(document_id) is not int or document_id <= 0
+            or type(version) is not int or version <= 0
+            or not isinstance(content_sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", content_sha256)):
+        raise HTTPException(409, "Shipment source does not identify one exact invoice version")
+
+    if (document is None or document.kind != "invoice" or document.version != version
+            or document.content_sha256 != content_sha256 or owner is None
+            or owner.organization_id != organization_id or binding is None
+            or binding.organization_id != organization_id):
+        raise HTTPException(409, "Shipment invoice ownership or version does not match its verified source")
+    if issuance is None:
+        raise HTTPException(409, "Shipment invoice has no immutable CRM issuance receipt")
+
+    invoice_snapshot = document.snapshot_json
+    if not isinstance(invoice_snapshot, dict):
+        raise HTTPException(409, "Shipment invoice has no immutable buyer snapshot")
+    buyer = invoice_snapshot.get("buyer")
+    buyer_id = buyer.get("counterparty_id") if isinstance(buyer, dict) else None
+    buyer_revision = buyer.get("revision") if isinstance(buyer, dict) else None
+    if (invoice_snapshot.get("deal_id") != document.deal_id
+            or buyer_id != binding.counterparty_id
+            or type(buyer_id) is not int or buyer_id <= 0
+            or type(buyer_revision) is not int or buyer_revision <= 0):
+        raise HTTPException(409, "Shipment invoice is not bound to an exact counterparty directory record")
+    if counterparty is not None and counterparty.id != buyer_id:
+        raise HTTPException(409, "The source invoice buyer does not match its directory record")
+    directory_current = bool(
+        counterparty is not None and counterparty.is_active and counterparty.merged_into_id is None
+    )
+    if directory_current:
+        name = counterparty.legal_name or counterparty.name
+        unp = counterparty.unp or ""
+        revision = counterparty.revision
+    else:
+        name = buyer.get("name")
+        unp = buyer.get("unp") or ""
+        revision = buyer_revision
+        if not isinstance(name, str) or not isinstance(unp, str):
+            raise HTTPException(409, "Shipment invoice buyer snapshot has invalid directory facts")
+    return {
+        "reference": "core.counterparties",
+        "id": buyer_id,
+        "name": name,
+        "unp": unp,
+        "revision": revision,
+        "directory_current": directory_current,
+        "source_document_id": document.id,
+        "source_document_version": document.version,
+    }
+
+
+async def verified_shipment_recipient(session, organization_id: int, receipt: dict) -> dict:
+    """Resolve the shipment recipient from the immutable issued CRM invoice."""
+    snapshot = receipt.get("snapshot") if isinstance(receipt, dict) else None
+    if not isinstance(snapshot, dict):
+        raise HTTPException(409, "Verified shipment invoice snapshot is required")
+    document_id = snapshot.get("document_id")
+    if (type(snapshot.get("organization_id")) is not int
+            or snapshot["organization_id"] != organization_id
+            or type(document_id) is not int or document_id <= 0
+            or type(snapshot.get("document_version")) is not int
+            or snapshot["document_version"] <= 0
+            or not isinstance(snapshot.get("content_sha256"), str)
+            or not re.fullmatch(r"[a-f0-9]{64}", snapshot["content_sha256"])):
+        raise HTTPException(409, "Shipment source does not identify one exact invoice version")
+
+    from modules.sales.accounting_ownership import DealOwnership
+    from modules.sales.client_document_register import DealClientBinding
+    from modules.sales.invoice_issuance import verified_receipt
+    from modules.sales.models import DealDocument
+
+    document = await session.get(DealDocument, document_id, populate_existing=True)
+    owner = await session.get(DealOwnership, document.deal_id) if document is not None else None
+    binding = await session.get(DealClientBinding, document.deal_id) if document is not None else None
+    if document is None:
+        raise HTTPException(409, "Shipment invoice ownership or version does not match its verified source")
+    try:
+        issuance = await verified_receipt(session, document, organization_id)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(409, "Shipment invoice buyer snapshot is not verifiable") from exc
+    invoice_snapshot = document.snapshot_json
+    buyer = invoice_snapshot.get("buyer") if isinstance(invoice_snapshot, dict) else None
+    buyer_id = buyer.get("counterparty_id") if isinstance(buyer, dict) else None
+    counterparty = None
+    if type(buyer_id) is int and buyer_id > 0:
+        counterparty = await session.scalar(select(Counterparty).where(
+            Counterparty.id == buyer_id,
+        ).execution_options(populate_existing=True))
+    return _verified_recipient_identity(
+        organization_id, snapshot, document, owner, binding, counterparty, issuance,
+    )
+
+
 def _normalize_request_fields(raw: dict, kind: str, package: dict) -> dict:
-    allowed = set(_COMMON_FIELDS) | set(_RECIPIENT_FIELDS) | ({"items"} if kind == "tn" else set(_TTN_FIELDS) | {"items"})
+    allowed = set(_COMMON_FIELDS) | set(_CONTRACT_FIELDS) | set(_RECIPIENT_FIELDS) | ({"items"} if kind == "tn" else set(_TTN_FIELDS) | {"items"})
     if set(raw) - allowed:
         raise HTTPException(422, "Draft contains fields that do not belong to this document kind")
     fields = {key: raw.get(key, "") for key in _COMMON_FIELDS}
@@ -104,9 +216,25 @@ def _normalize_request_fields(raw: dict, kind: str, package: dict) -> dict:
 
     for key in _RECIPIENT_FIELDS:
         value = raw.get(key)
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        if type(value) is not int or value <= 0:
             raise HTTPException(409, "Select the recipient from the active counterparty directory")
         fields[key] = value
+
+    if raw.get("contract_source") != "sales":
+        raise HTTPException(409, "Select an issued sales contract from the contract directory")
+    for key in ("contract_id", "contract_version"):
+        value = raw.get(key)
+        if type(value) is not int or value <= 0:
+            raise HTTPException(409, "Select a current sales contract from the contract directory")
+        fields[key] = value
+    fields["contract_source"] = "sales"
+    for key in ("contract_number", "contract_title"):
+        try:
+            fields[key] = _bounded_text(raw.get(key), key, 500).strip()
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if not fields[key]:
+            raise HTTPException(409, "Select a current sales contract from the contract directory")
 
     source_lines = package.get("prefilled", {}).get("items")
     if not isinstance(source_lines, list) or not source_lines:
@@ -173,7 +301,18 @@ async def _directory_snapshots(session, organization_id: int, recipient_id: int,
 
 
 def _materialize_fields(request_fields: dict, sender: dict, recipient: dict) -> dict:
-    fields = {key: value for key, value in request_fields.items() if key not in _RECIPIENT_FIELDS}
+    contract = {
+        "reference": "sales.deal_document",
+        "source": request_fields["contract_source"],
+        "id": request_fields["contract_id"],
+        "number": request_fields["contract_number"],
+        "title": request_fields["contract_title"],
+        "version": request_fields["contract_version"],
+    }
+    fields = {key: value for key, value in request_fields.items()
+              if key not in {*_RECIPIENT_FIELDS, *_CONTRACT_FIELDS}}
+    fields["contract_reference"] = contract["number"]
+    fields["contract_identity"] = contract
     fields["sender_identity"] = sender
     fields["sender_legal_entity"] = sender["name"]
     fields["recipient_identity"] = recipient
@@ -183,13 +322,16 @@ def _materialize_fields(request_fields: dict, sender: dict, recipient: dict) -> 
 
 def _blank_fields(package: dict, kind: str, sender: dict) -> dict:
     fields = {key: "" for key in _COMMON_FIELDS}
+    fields["contract_reference"] = ""
+    recipient = package.get("prefilled", {}).get("recipient_identity")
     if kind == "ttn":
         fields.update({key: "" for key in _TTN_FIELDS})
     fields.update({
         "sender_identity": sender,
         "sender_legal_entity": sender["name"],
-        "recipient_identity": None,
-        "recipient_legal_entity": "",
+        "recipient_identity": recipient,
+        "recipient_legal_entity": recipient.get("name", "") if isinstance(recipient, dict) else "",
+        "contract_identity": None,
     })
     fields["items"] = [
         {"line_no": line["line_no"], **{key: "" for key in _ITEM_FIELDS}}
@@ -280,11 +422,19 @@ async def attach_history(session, organization_id: int, source_key: str, kind: s
         "history": history,
     })
     latest_fields = rows[-1].payload["fields"] if rows else package["saved_fields"]
+    source_recipient = package.get("prefilled", {}).get("recipient_identity")
     package["directory_identity_status"] = (
-        "verified" if isinstance(latest_fields.get("sender_identity"), dict)
+        "source_mismatch" if rows and isinstance(source_recipient, dict)
+        and isinstance(latest_fields.get("recipient_identity"), dict)
+        and latest_fields["recipient_identity"].get("id") != source_recipient.get("id")
+        else "verified" if isinstance(latest_fields.get("sender_identity"), dict)
         and isinstance(latest_fields.get("recipient_identity"), dict)
         else "legacy_unbound" if rows else "recipient_required"
     )
+    if package["directory_identity_status"] == "source_mismatch":
+        package["blockers"].append(
+            "Историческая редакция связана с другим контрагентом; новая редакция будет привязана к покупателю исходного счёта."
+        )
     if any(row.payload.get("source_digest") != package["source"]["digest"] for row in rows):
         package["source_history_current"] = False
         package["blockers"].append("Сохранённая редакция связана с другой версией акта; продолжение сохранения заблокировано.")
@@ -327,12 +477,44 @@ async def save(session, organization_id: int, source_key: str, package: dict,
     revision = head.revision if head else 0
     if revision != data.expected_revision:
         raise HTTPException(409, "TN/TTN draft changed; reload history before saving another version")
+    source_recipient = package.get("prefilled", {}).get("recipient_identity")
+    if (not isinstance(source_recipient, dict)
+            or request_fields["recipient_counterparty_id"] != source_recipient.get("id")):
+        raise HTTPException(409, "Recipient must be the exact buyer bound to the source invoice")
+    if source_recipient.get("directory_current") is not True:
+        raise HTTPException(409, "The source invoice buyer is no longer an active directory record")
+    if request_fields["recipient_counterparty_revision"] != source_recipient.get("revision"):
+        raise HTTPException(409, "Recipient directory entry changed; reload before saving")
     sender, recipient = await _directory_snapshots(
         session, organization_id,
         request_fields["recipient_counterparty_id"],
         request_fields["recipient_counterparty_revision"],
     )
-    fields = _materialize_fields(request_fields, sender, recipient)
+    recipient = {
+        **recipient,
+        "directory_current": True,
+        "source_document_id": source_recipient["source_document_id"],
+        "source_document_version": source_recipient["source_document_version"],
+    }
+    contract = await contract_snapshot.verified_contract_snapshot(session, organization_id, {
+        "counterparty_id": str(recipient["id"]),
+        "contract_source": request_fields["contract_source"],
+        "contract_id": str(request_fields["contract_id"]),
+        "contract": request_fields["contract_number"],
+        "contract_title": request_fields["contract_title"],
+        "contract_version": str(request_fields["contract_version"]),
+    })
+    contract_facts = contract_snapshot.sales_result(contract)
+    if (contract_facts["number"] != request_fields["contract_number"]
+            or contract_facts["version"] != request_fields["contract_version"]):
+        raise HTTPException(409, "Contract directory record changed; select it again")
+    verified_fields = {
+        **request_fields,
+        "contract_number": contract_facts["number"],
+        "contract_title": contract_facts["title"],
+        "contract_version": contract_facts["version"],
+    }
+    fields = _materialize_fields(verified_fields, sender, recipient)
     payload = {
         "kind": data.kind,
         "source_digest": current_digest,

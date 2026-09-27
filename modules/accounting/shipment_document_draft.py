@@ -127,6 +127,7 @@ def build(receipt: dict, kind: DocumentKind | None = None, policy: object | None
     selected = kind if kind in {"tn", "ttn"} else None
     label = {"tn": "ТН", "ttn": "ТТН"}.get(selected) if selected else None
     required = list(_COMMON_REQUIRED) + (list(_TTN_REQUIRED) if selected == "ttn" else [])
+    source_recipient = receipt.get("source_recipient")
     prefilled = {
         "source_key": receipt.get("source_key"),
         "source_digest": receipt.get("digest"),
@@ -134,6 +135,7 @@ def build(receipt: dict, kind: DocumentKind | None = None, policy: object | None
         "organization_id": snapshot.get("organization_id"),
         "sales_document_id": snapshot.get("document_id"),
         "sales_document_version": snapshot.get("document_version"),
+        "recipient_identity": source_recipient,
         "operation_date": snapshot.get("operation_date"),
         "items": [
             {
@@ -154,6 +156,10 @@ def build(receipt: dict, kind: DocumentKind | None = None, policy: object | None
         "Заполните обязательные реквизиты и подтвердите форму бухгалтером.",
         "Выпуск ТН/ТТН из этого черновика недоступен до отдельного подключённого контура.",
     ]
+    if not isinstance(source_recipient, dict):
+        blockers.append("Покупатель не подтверждён неизменяемым снимком исходного счёта.")
+    elif source_recipient.get("directory_current") is not True:
+        blockers.append("Покупатель исходного счёта больше не активен в справочнике; новая редакция заблокирована, история остаётся доступной.")
     policy_blocker = _policy_blocker(shipment_policy["status"])
     if policy_blocker is not None:
         blockers.insert(1, policy_blocker)

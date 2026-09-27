@@ -2,6 +2,7 @@
 
 # ruff: noqa: F811
 import asyncio
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -17,16 +18,32 @@ from tests.accounting.test_shipment_receipt_postgres import prepare_accounting
 from tests.integration.test_invoice_physical_shipments_postgres import physical_pg  # noqa: F401
 
 
-async def test_concurrent_tn_ttn_saves_create_one_version_and_sql_blocks_mutation(physical_pg):
+async def test_concurrent_tn_ttn_saves_create_one_version_and_sql_blocks_mutation(physical_pg, monkeypatch):
     factory, organization_id, act, _ = await prepare_accounting(physical_pg)
-    package = shipment_document_draft.build(act, "ttn")
     source_key = act["source_key"]
     async with factory() as session:
         recipient = Counterparty(name="Synthetic TN/TTN recipient", unp=None)
         session.add(recipient)
         await session.flush()
         recipient_id = recipient.id
+        recipient_revision = recipient.revision
         await session.commit()
+    source_recipient = {
+        "reference": "core.counterparties", "id": recipient_id,
+        "name": "Synthetic TN/TTN recipient", "unp": "", "revision": recipient_revision,
+        "directory_current": True,
+        "source_document_id": act["snapshot"]["document_id"],
+        "source_document_version": act["snapshot"]["document_version"],
+    }
+    package = shipment_document_draft.build({**act, "source_recipient": source_recipient}, "ttn")
+
+    async def verified_contract(_session, _org, dimensions):
+        assert dimensions["counterparty_id"] == str(recipient_id)
+        assert dimensions["contract_source"] == "sales"
+        return SimpleNamespace(id=12, number="Synthetic contract", version=1)
+
+    monkeypatch.setattr(shipment_document_drafts.contract_snapshot,
+                        "verified_contract_snapshot", verified_contract)
 
     async def write():
         async with factory() as session:
@@ -39,7 +56,12 @@ async def test_concurrent_tn_ttn_saves_create_one_version_and_sql_blocks_mutatio
                     source_digest=act["digest"],
                     fields={
                         "recipient_counterparty_id": recipient_id,
-                        "recipient_counterparty_revision": 1,
+                        "recipient_counterparty_revision": recipient_revision,
+                        "contract_source": "sales",
+                        "contract_id": 12,
+                        "contract_number": "Synthetic contract",
+                        "contract_title": "Договор продажи",
+                        "contract_version": 1,
                     },
                 )
                 row = await shipment_document_drafts.save(

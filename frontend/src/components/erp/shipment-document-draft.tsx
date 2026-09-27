@@ -4,16 +4,18 @@ import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
-import { searchAccountingBuyers, type AccountingBuyer } from "@/lib/accounting-buyers";
+import { searchAccountingContracts, type AccountingContract } from "@/lib/accounting-contracts";
 
 type ItemDraft = { line_no: number; unit: string; unit_price: string; vat_basis: string };
-type PartyIdentity = { reference: string; id: number; name: string; unp: string; revision?: number };
+type PartyIdentity = { reference: string; id: number; name: string; unp: string; revision?: number; directory_current?: boolean; source_document_id?: number; source_document_version?: number };
+type ContractIdentity = AccountingContract & { reference: string };
 type Fields = {
   sender_legal_entity: string;
   sender_identity: PartyIdentity | null;
   recipient_legal_entity: string;
   recipient_identity: PartyIdentity | null;
   contract_reference: string;
+  contract_identity: ContractIdentity | null;
   document_number: string;
   document_date: string;
   carrier: string;
@@ -38,7 +40,7 @@ type Draft = {
   document_kind: "tn" | "ttn" | null;
   document_label: string | null;
   source: { source_key: string; digest: string };
-  prefilled: { operation_date: string; total_quantity: string; items: Array<{ line_no: number; sku_code: string; quantity: string }> };
+  prefilled: { operation_date: string; total_quantity: string; sales_document_id: number; sales_document_version: number; recipient_identity: PartyIdentity; items: Array<{ line_no: number; sku_code: string; quantity: string }> };
   required_fields: string[];
   blockers: string[];
   shipment_document_policy: {
@@ -54,13 +56,12 @@ type Draft = {
   saved_at: string | null;
   history: HistoryVersion[];
   source_history_current: boolean;
-  directory_identity_status: "verified" | "legacy_unbound" | "recipient_required";
+  directory_identity_status: "verified" | "legacy_unbound" | "recipient_required" | "source_mismatch";
   statutory_certified: false;
   can_issue: false;
 };
 
-const textInputs: Array<["contract_reference" | "document_number" | "document_date", string]> = [
-  ["contract_reference", "Договор / основание"],
+const textInputs: Array<["document_number" | "document_date", string]> = [
   ["document_number", "Черновой номер (не официальный)"],
   ["document_date", "Дата документа"],
 ];
@@ -76,13 +77,17 @@ const itemLabels: Record<string, string> = { unit: "Единица измере�
 
 function emptyFields(draft: Draft | null): Fields {
   const saved = draft?.saved_fields ?? {};
+  const sourceRecipient = draft?.prefilled.recipient_identity ?? null;
+  const recipientMismatch = Boolean(saved.recipient_identity && sourceRecipient
+    && saved.recipient_identity.id !== sourceRecipient.id);
   const itemValues = saved.items ?? draft?.prefilled.items.map((item) => ({ line_no: item.line_no, unit: "", unit_price: "", vat_basis: "" })) ?? [];
   return {
     sender_legal_entity: saved.sender_legal_entity ?? saved.sender_identity?.name ?? "",
     sender_identity: saved.sender_identity ?? null,
-    recipient_legal_entity: saved.recipient_legal_entity ?? "",
-    recipient_identity: saved.recipient_identity ?? null,
-    contract_reference: saved.contract_reference ?? "",
+    recipient_legal_entity: sourceRecipient?.name ?? saved.recipient_legal_entity ?? "",
+    recipient_identity: sourceRecipient ?? saved.recipient_identity ?? null,
+    contract_reference: recipientMismatch ? "" : saved.contract_reference ?? saved.contract_identity?.number ?? "",
+    contract_identity: recipientMismatch ? null : saved.contract_identity ?? null,
     document_number: saved.document_number ?? "",
     document_date: saved.document_date ?? "",
     carrier: saved.carrier ?? "",
@@ -112,8 +117,12 @@ function rebaseFields(base: Fields, local: Fields, latest: Fields): Fields {
   }
   merged.items = [...latestItems.values()];
   if (JSON.stringify(local.recipient_identity) !== JSON.stringify(base.recipient_identity)) {
-    merged.recipient_identity = local.recipient_identity;
-    merged.recipient_legal_entity = local.recipient_legal_entity;
+    merged.recipient_identity = latest.recipient_identity;
+    merged.recipient_legal_entity = latest.recipient_legal_entity;
+  }
+  if (JSON.stringify(local.contract_identity) !== JSON.stringify(base.contract_identity)) {
+    merged.contract_identity = local.contract_identity;
+    merged.contract_reference = local.contract_reference;
   }
   return merged;
 }
@@ -147,6 +156,11 @@ function readableField(path: string) {
     const field = path.slice("recipient_identity.".length);
     return `Получатель из справочника: ${{ id: "ID", name: "Наименование", unp: "УНП", revision: "редакция" }[field] ?? field}`;
   }
+  if (path.startsWith("contract_identity.")) {
+    const field = path.slice("contract_identity.".length);
+    return `Договор из справочника: ${{ id: "ID", number: "номер", title: "вид", version: "редакция", source: "источник", reference: "справочник" }[field] ?? field}`;
+  }
+  if (path === "contract_reference") return "Номер договора";
   return new Map<string, string>([...textInputs, ...ttnInputs]).get(path) ?? path;
 }
 
@@ -163,17 +177,17 @@ export function ShipmentDocumentDraft({ org, sourceKey }: { org: string; sourceK
   const [dirty, setDirty] = useState(false);
   const [pendingRequestKey, setPendingRequestKey] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
-  const [recipientSearch, setRecipientSearch] = useState("");
-  const [recipientOptions, setRecipientOptions] = useState<AccountingBuyer[]>([]);
-  const recipientLookup = useRef(0);
+  const [contractSearch, setContractSearch] = useState("");
+  const [contractOptions, setContractOptions] = useState<AccountingContract[]>([]);
+  const contractLookup = useRef(0);
 
   /* eslint-disable react-hooks/set-state-in-effect -- request state follows the external source query. */
   useEffect(() => {
     if (!open) return;
     let active = true;
-    recipientLookup.current++;
-    setRecipientSearch("");
-    setRecipientOptions([]);
+    contractLookup.current++;
+    setContractSearch("");
+    setContractOptions([]);
     setLoading(true);
     setError("");
     setNotice("");
@@ -198,36 +212,38 @@ export function ShipmentDocumentDraft({ org, sourceKey }: { org: string; sourceK
   }, [kind, open, org, sourceKey]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  function changeText(field: "contract_reference" | "document_number" | "document_date" | typeof ttnInputs[number][0], value: string) {
+  function changeText(field: "document_number" | "document_date" | typeof ttnInputs[number][0], value: string) {
     setFields((current) => ({ ...current, [field]: value }));
     setDirty(true); setPendingRequestKey(null); setError(""); setNotice("");
   }
 
-  async function findRecipients() {
-    const token = ++recipientLookup.current;
+  async function findContracts() {
+    const counterpartyId = fields.recipient_identity?.id;
+    if (!counterpartyId) return;
+    const token = ++contractLookup.current;
     setError("");
     try {
-      const items = await searchAccountingBuyers(org, recipientSearch);
-      if (token === recipientLookup.current) setRecipientOptions(items);
+      const items = await searchAccountingContracts(org, String(counterpartyId), contractSearch);
+      if (token === contractLookup.current) setContractOptions(items.filter((item) => item.source === "sales"));
     } catch (cause) {
-      if (token === recipientLookup.current) setError(cause instanceof Error ? cause.message : "Не удалось найти получателя в справочнике.");
+      if (token === contractLookup.current) setError(cause instanceof Error ? cause.message : "Не удалось найти договор в справочнике.");
     }
   }
 
-  function selectRecipient(id: number) {
-    const selected = recipientOptions.find((item) => item.id === id);
+  function selectContract(id: number) {
+    const selected = contractOptions.find((item) => item.id === id && item.source === "sales");
     if (!selected) return;
-    const identity: PartyIdentity = { reference: "core.counterparties", ...selected };
-    setFields((current) => ({ ...current, recipient_identity: identity, recipient_legal_entity: selected.name }));
+    const identity: ContractIdentity = { reference: "sales.deal_document", ...selected };
+    setFields((current) => ({ ...current, contract_identity: identity, contract_reference: selected.number }));
     setDirty(true); setPendingRequestKey(null); setError(""); setNotice("");
   }
 
-  function changeRecipientSearch(value: string) {
-    recipientLookup.current++;
-    const clearingSelection = fields.recipient_identity !== null;
-    setRecipientSearch(value);
-    setRecipientOptions([]);
-    setFields((current) => ({ ...current, recipient_identity: null, recipient_legal_entity: "" }));
+  function changeContractSearch(value: string) {
+    contractLookup.current++;
+    const clearingSelection = fields.contract_identity !== null;
+    setContractSearch(value);
+    setContractOptions([]);
+    setFields((current) => ({ ...current, contract_identity: null, contract_reference: "" }));
     if (clearingSelection) setDirty(true);
     setPendingRequestKey(null); setError(""); setNotice("");
   }
@@ -246,7 +262,7 @@ export function ShipmentDocumentDraft({ org, sourceKey }: { org: string; sourceK
   function closeEditor() {
     if (dirty && !window.confirm("Есть несохранённые изменения. Закрыть без сохранения?")) return;
     setOpen(false);
-    recipientLookup.current++;
+    contractLookup.current++;
   }
 
   async function saveDraft(closeAfterSave: boolean) {
@@ -257,7 +273,11 @@ export function ShipmentDocumentDraft({ org, sourceKey }: { org: string; sourceK
     const payloadFields: Record<string, unknown> = {
       recipient_counterparty_id: fields.recipient_identity?.id,
       recipient_counterparty_revision: fields.recipient_identity?.revision,
-      contract_reference: fields.contract_reference,
+      contract_source: fields.contract_identity?.source,
+      contract_id: fields.contract_identity?.id,
+      contract_number: fields.contract_identity?.number,
+      contract_title: fields.contract_identity?.title,
+      contract_version: fields.contract_identity?.version,
       document_number: fields.document_number,
       document_date: fields.document_date,
       items: fields.items,
@@ -315,8 +335,11 @@ export function ShipmentDocumentDraft({ org, sourceKey }: { org: string; sourceK
         <div><p><b>Черновик {draft.document_label}</b> · редакция {draft.saved_revision} · операция {draft.prefilled.operation_date} · количество {draft.prefilled.total_quantity}</p>
           <p className="font-semibold">Документ не выпущен: акт WMS не является ТН/ТТН.</p>
           <p>Учётная политика: {policyStatus(draft)}</p>
-          <p>Отправитель берётся из выбранного юрлица бухгалтерии. Получатель выбирается из справочника покупателей; редакция хранит ID и снимок названия, УНП и версии.</p>
-          {draft.directory_identity_status === "legacy_unbound" && <p role="status">В предыдущей редакции названия сторон были свободным текстом. Она сохранена в истории без подмены справочными данными; выберите получателя из справочника для новой редакции.</p>}
+          <p>Отправитель берётся из выбранного юрлица. Получатель автоматически связан с покупателем исходного счёта № {draft.prefilled.sales_document_id}, редакция {draft.prefilled.sales_document_version}; новая редакция сохраняет ID и снимок данных справочника.</p>
+          {draft.directory_identity_status === "legacy_unbound" && <p role="status">В предыдущей редакции сторона не была связана со справочником. История сохранена без подмены; новая редакция будет привязана к покупателю исходного счёта.</p>}
+          {draft.directory_identity_status === "source_mismatch" && <p role="status">В предыдущей редакции был указан другой контрагент. История сохранена; для новой редакции используйте покупателя исходного счёта.</p>}
+          {fields.recipient_identity?.directory_current === false && <p role="alert">Покупатель исходного счёта больше не активен в справочнике. История доступна, новую редакцию сохранить нельзя.</p>}
+          {draft.saved_fields.contract_reference && !draft.saved_fields.contract_identity && <p role="status">В предыдущей редакции договор был указан текстом. История сохранена; для новой редакции выберите выданный договор продажи из справочника.</p>}
           <ul className="list-disc pl-5">{draft.blockers.map((item) => <li key={item}>{item}</li>)}</ul>
           <p>Обязательные поля для проверки: {draft.required_fields.join(", ")}.</p>
         </div>
@@ -326,12 +349,16 @@ export function ShipmentDocumentDraft({ org, sourceKey }: { org: string; sourceK
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="grid gap-1">Отправитель из справочника юрлиц<input aria-label="Отправитель из справочника юрлиц" readOnly value={fields.sender_legal_entity} className="rounded border bg-slate-100 px-2 py-1 text-slate-700" /></label>
             <p className="self-end">УНП {fields.sender_identity?.unp || "не заполнен"} · ID {fields.sender_identity?.id ?? "—"}</p>
-            <label className="grid gap-1">Поиск получателя в справочнике<Input aria-label="Поиск получателя в справочнике" value={recipientSearch} onChange={(event) => changeRecipientSearch(event.target.value)} /></label>
-            <Button type="button" variant="secondary" onClick={() => void findRecipients()} disabled={!recipientSearch.trim()}>Найти получателя</Button>
-            <label className="grid gap-1">Получатель из справочника<Select aria-label="Получатель из справочника" value={fields.recipient_identity?.id ?? ""} onChange={(event) => selectRecipient(Number(event.target.value))}>
-              <option value="">Выберите покупателя</option>
-              {fields.recipient_identity && !recipientOptions.some((item) => item.id === fields.recipient_identity?.id) && <option value={fields.recipient_identity.id}>{fields.recipient_identity.name} · {fields.recipient_identity.unp || "без УНП"} · ID {fields.recipient_identity.id}</option>}
-              {recipientOptions.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.unp || "без УНП"} · ID {item.id}</option>)}
+            <label className="grid gap-1">Получатель по исходному счёту<input aria-label="Получатель по исходному счёту" readOnly value={fields.recipient_legal_entity} className="rounded border bg-slate-100 px-2 py-1 text-slate-700" /></label>
+            <p className="self-end">УНП {fields.recipient_identity?.unp || "не заполнен"} · контрагент ID {fields.recipient_identity?.id ?? "—"} · редакция справочника {fields.recipient_identity?.revision ?? "—"}</p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="grid gap-1">Поиск договора продажи<Input aria-label="Поиск договора продажи" value={contractSearch} onChange={(event) => changeContractSearch(event.target.value)} /></label>
+            <Button type="button" variant="secondary" onClick={() => void findContracts()} disabled={!contractSearch.trim() || !fields.recipient_identity || fields.recipient_identity.directory_current === false}>Найти договор</Button>
+            <label className="grid gap-1">Договор из справочника продаж<Select aria-label="Договор из справочника продаж" value={fields.contract_identity?.id ?? ""} onChange={(event) => selectContract(Number(event.target.value))}>
+              <option value="">Выберите выданный договор продажи</option>
+              {fields.contract_identity && !contractOptions.some((item) => item.id === fields.contract_identity?.id && item.source === "sales") && <option value={fields.contract_identity.id}>{fields.contract_identity.number} · {fields.contract_identity.title} · ID {fields.contract_identity.id} · ред. {fields.contract_identity.version}</option>}
+              {contractOptions.filter((item) => item.source === "sales").map((item) => <option key={item.id} value={item.id}>{item.number} · {item.title} · ID {item.id} · ред. {item.version}</option>)}
             </Select></label>
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
@@ -352,8 +379,8 @@ export function ShipmentDocumentDraft({ org, sourceKey }: { org: string; sourceK
           </div>
         </fieldset>
         <div className="flex flex-wrap gap-2">
-          <Button disabled={saving || loading || !draft.source_history_current || !fields.recipient_identity} onClick={() => void saveDraft(false)}>{saving ? "Сохраняем…" : "Сохранить редакцию"}</Button>
-          <Button variant="secondary" disabled={saving || loading || !draft.source_history_current || !fields.recipient_identity} onClick={() => void saveDraft(true)}>{saving ? "Сохраняем…" : "Сохранить и закрыть"}</Button>
+          <Button disabled={saving || loading || !draft.source_history_current || !fields.recipient_identity || fields.recipient_identity.directory_current === false || fields.contract_identity?.source !== "sales"} onClick={() => void saveDraft(false)}>{saving ? "Сохраняем…" : "Сохранить редакцию"}</Button>
+          <Button variant="secondary" disabled={saving || loading || !draft.source_history_current || !fields.recipient_identity || fields.recipient_identity.directory_current === false || fields.contract_identity?.source !== "sales"} onClick={() => void saveDraft(true)}>{saving ? "Сохраняем…" : "Сохранить и закрыть"}</Button>
           <Button variant="secondary" disabled={saving} onClick={closeEditor}>Закрыть</Button>
         </div>
         <section className="border-t border-amber-300 pt-2">
