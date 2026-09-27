@@ -17,7 +17,8 @@ def document():
             "operation_date": "2026-09-02", "supplier": "supplier1", "supplier_id": 1,
             "supplier_unp": "190000001", "contract": "contract1",
             "contract_basis": "Synthetic purchase without a registered contract",
-            "warehouse": "warehouse1", "explanation": "Synthetic primary invoice",
+            "warehouse": "warehouse1", "warehouse_id": 1,
+            "warehouse_title": "Synthetic warehouse", "explanation": "Synthetic primary invoice",
             "items": [{"sku_id": 1, "sku_title": "Synthetic receipt item", "sku": "sku1", "unit": "шт",
                        "lot": "lot1", "quantity": "2.000001",
                        "net_amount": "100.01", "vat_rate": "20", "vat_amount": "20.00",
@@ -193,10 +194,94 @@ async def test_receipt_sku_selection_freezes_snapshot_and_rejects_catalog_drift(
     })).status_code == 409
 
 
+async def test_receipt_warehouse_selection_is_scoped_snapshotted_and_replayable(client, db, book):
+    from modules.accounting.models import Organization
+    from modules.wms.models import WarehouseDirectory
+
+    org = book[0]
+    options_path = f"/procurement/organizations/{org}/receipt-warehouse-options"
+    options = await client.get(options_path, params={"q": "Synthetic"})
+    assert options.status_code == 200, options.text
+    assert options.json()["items"] == [{"id": 1, "name": "warehouse1",
+                                        "title": "Synthetic warehouse", "is_active": True}]
+    assert options.headers["cache-control"] == "private, no-store"
+
+    path = f"/procurement/organizations/{org}/receipt-documents"
+    facts = document()
+    unbound = {key: value for key, value in facts.items()
+               if key not in {"warehouse_id", "warehouse_title"}}
+    missing = await client.post(path, json={"key": "warehouse-unbound", "document": unbound})
+    assert missing.status_code == 422 and "warehouse" in missing.text.lower()
+
+    stale = await client.post(path, json={"key": "warehouse-stale", "document": {
+        **facts, "warehouse_title": "Old warehouse title",
+    }})
+    assert stale.status_code == 409, stale.text
+    warehouse = await db.get(WarehouseDirectory, 1)
+    warehouse.is_active = False
+    await db.commit()
+    inactive = await client.post(path, json={"key": "warehouse-inactive", "document": facts})
+    assert inactive.status_code == 409, inactive.text
+    warehouse.is_active = True
+
+    other = Organization(name="Other warehouse company", unp="999999994")
+    db.add(other)
+    await db.flush()
+    foreign = WarehouseDirectory(organization_id=other.id, name="warehouse1",
+                                 title="Synthetic warehouse", is_active=True, created_by="other")
+    db.add(foreign)
+    await db.commit()
+    wrong_company = await client.post(path, json={"key": "warehouse-foreign", "document": {
+        **facts, "warehouse_id": foreign.id,
+    }})
+    assert wrong_company.status_code == 409, wrong_company.text
+
+    created = await client.post(path, json={"key": "warehouse-bound", "document": facts})
+    assert created.status_code == 201, created.text
+    receipt_id = created.json()["id"]
+    assert created.json()["revisions"][0]["document"]["warehouse_id"] == warehouse.id
+    assert created.json()["revisions"][0]["document"]["warehouse_title"] == "Synthetic warehouse"
+
+    warehouse.title = "Renamed warehouse"
+    await db.commit()
+    replay = await client.post(path, json={"key": "warehouse-bound", "document": facts})
+    assert replay.status_code == 201 and replay.json()["id"] == receipt_id
+    assert replay.json()["revisions"][0]["document"]["warehouse_title"] == "Synthetic warehouse"
+    preview = await client.post(f"{path}/{receipt_id}/preview", json={
+        "expected_version": 1, "posting_date": "2026-09-03", "policy_id": book[1],
+        "settlement_account": "60", "vat_account": None, "inventory_accounts": ["41"],
+    })
+    assert preview.status_code == 409 and "Warehouse directory" in preview.text
+    with pytest.raises(ValueError, match="Warehouse directory record changed"):
+        await client.test_app.state.core.services.procurement_source.warehouse_receipt_source(
+            db, org, receipt_id, 1,
+        )
+    stale_edit = await client.put(f"{path}/{receipt_id}", json={
+        "key": "warehouse-stale-edit", "expected_version": 1,
+        "document": {**facts, "explanation": "Changed with stale warehouse snapshot"},
+    })
+    assert stale_edit.status_code == 409, stale_edit.text
+    rebound = await client.put(f"{path}/{receipt_id}", json={
+        "key": "warehouse-rebind", "expected_version": 1,
+        "document": {**facts, "warehouse_title": "Renamed warehouse",
+                     "explanation": "Changed after explicit warehouse selection"},
+    })
+    assert rebound.status_code == 200, rebound.text
+    assert rebound.json()["version"] == 2
+    assert rebound.json()["revisions"][1]["document"]["warehouse_title"] == "Renamed warehouse"
+    from modules.procurement.receipt_documents import ReceiptContent, classify_receipt_correction
+    flags, classification = classify_receipt_correction(
+        ReceiptContent.model_validate(facts),
+        ReceiptContent.model_validate(rebound.json()["revisions"][1]["document"]),
+    )
+    assert flags["primary_document_change"] is True
+    assert flags["physical_change"] is False
+    assert "primary_document_change" in classification
+
+
 @pytest.mark.parametrize("missing", [{"sku_id", "sku_title"}, {"sku_title"}])
 async def test_old_text_sku_draft_needs_explicit_selection_before_posting_or_warehouse(client, db, book, missing):
     from modules.procurement.receipt_documents import ReceiptDocument
-    from modules.procurement.source_gateway import ProcurementSourceService
 
     facts = document()
     legacy = {**facts, "items": [{k: v for k, v in facts["items"][0].items()
@@ -217,7 +302,9 @@ async def test_old_text_sku_draft_needs_explicit_selection_before_posting_or_war
     })
     assert preview.status_code == 409 and "SKU catalogue" in preview.text
     with pytest.raises(ValueError, match="SKU catalogue"):
-        await ProcurementSourceService().warehouse_receipt_source(db, book[0], receipt_id, 1)
+        await client.test_app.state.core.services.procurement_source.warehouse_receipt_source(
+            db, book[0], receipt_id, 1,
+        )
     edited = await client.put(path, json={"key": "legacy-sku-upgrade", "expected_version": 1, "document": facts})
     assert edited.status_code == 200, edited.text
     assert edited.json()["version"] == 2
@@ -713,13 +800,20 @@ def test_correction_classification_keeps_value_and_vat_changes_on_shared_lines_w
 async def test_correction_readiness_classifies_physical_primary_and_operation_date_changes(client, db, book):
     readiness_path, draft = await create_readiness_correction(client, db, book)
     original = draft["revisions"][0]["document"]
+    from modules.wms.models import WarehouseDirectory
+    alternate_warehouse = WarehouseDirectory(organization_id=book[0], name="warehouse2",
+                                             title="Synthetic alternate warehouse", is_active=True,
+                                             created_by="tester")
+    db.add(alternate_warehouse)
+    await db.flush()
     corrected = {
         **original,
         "invoice_reference": "INV2",
         "document_date": "2026-09-05",
         "operation_date": "2026-09-05",
         "contract": "contract2",
-        "warehouse": "warehouse2",
+        "warehouse": "warehouse2", "warehouse_id": alternate_warehouse.id,
+        "warehouse_title": "Synthetic alternate warehouse",
         "items": [{**original["items"][0], "lot": "lot2", "quantity": "3.000000"}],
     }
     edited = await client.put(f"/procurement/organizations/{book[0]}/receipt-documents/{draft['id']}", json={

@@ -13,6 +13,12 @@ async function selectReceiptSku() {
   fireEvent.change(screen.getByLabelText("Номенклатура строки 1"), { target: { value: "31" } });
 }
 
+async function selectReceiptWarehouse() {
+  fireEvent.change(screen.getByLabelText("Поиск склада накладной"), { target: { value: "Склад приемки" } });
+  await screen.findByRole("option", { name: "receiving · Склад приемки · ID 9" });
+  fireEvent.change(screen.getByLabelText("Склад накладной из справочника"), { target: { value: "9" } });
+}
+
 function explainUnregisteredContract() {
   fireEvent.change(screen.getByLabelText("Основание покупки без зарегистрированного договора"),
     { target: { value: "Поставка по счёту без зарегистрированного договора" } });
@@ -28,7 +34,8 @@ function durableReceiptDocument(invoiceReference = "INV-DURABLE") {
     currency: "BYN", invoice_reference: invoiceReference, document_date: "2026-09-24",
     operation_date: "2026-09-24", supplier: "Поставщик", supplier_id: 19,
     supplier_unp: "190000001", contract: "Без договора", contract_basis: "Поставка без договора",
-    warehouse: "Основной склад", explanation: "Товар", items: [{ order_id: null, sku_id: 31,
+    warehouse: "receiving", warehouse_id: 9, warehouse_title: "Склад приемки",
+    explanation: "Товар", items: [{ order_id: null, sku_id: 31,
       sku_title: "Аккумулятор", sku: "AKB", unit: "шт", lot: "LOT-1", quantity: "2.000001",
       net_amount: "100.01", vat_rate: "20", vat_amount: "20.00", vat_basis: "ОСН" }],
   };
@@ -212,6 +219,11 @@ function inboundVatWorkpaperFetcher(options: {
   const saved = new Map<string, unknown>();
   const confirmedBodies: string[] = [];
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("receipt-warehouse-options")) {
+      const organizationId = Number(url.match(/\/organizations\/(\d+)\//)?.[1] ?? 7);
+      return { ok: true, json: async () => ({ organization_id: organizationId,
+        items: [{ id: 9, name: "receiving", title: "Склад приемки", is_active: true }], truncated: false }) };
+    }
     if (url.includes("/inbound-vat-correction-workpapers/preview")) {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       return { ok: true, json: async () => options.preview ? options.preview(body)
@@ -668,10 +680,13 @@ it("requires a selected supplier and saves its directory snapshot in a new recei
   let submitted: Record<string, unknown> | null = null;
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes("purchase-ownership")) return { ok: true, json: async () => [] };
+    if (url.includes("receipt-warehouse-options")) return { ok: true, json: async () => ({
+      organization_id: 7, items: [{ id: 9, name: "receiving", title: "Склад приемки", is_active: true }], truncated: false,
+    }) };
     if (url.includes("supplier-options")) return { ok: true, json: async () => ({
       organization_id: 7, items: [{ id: 19, name: "Поставщик из каталога", unp: "190000001" }], truncated: false,
     }) };
-    if (url.includes("supplier-contracts")) return { ok: true, json: async () => ({ organization_id: 7, supplier_id: 19, items: [] }) };
+    if (url.includes("supplier-contracts")) return { ok: true, json: async () => emptyContracts(url) };
     if (url.includes("sku-options")) return { ok: true, json: async () => ({
       organization_id: 7, items: [{ id: 31, code: "AKB", title: "Аккумулятор", unit: "шт" }], truncated: false,
     }) };
@@ -686,16 +701,16 @@ it("requires a selected supplier and saves its directory snapshot in a new recei
   render(<ProcurementReceiptDrafts org="7" />);
   await screen.findByText("Показано 0 из 0 накладных выбранного юрлица за все даты.");
   fireEvent.click(screen.getByRole("button", { name: "Сохранить первичную накладную" }));
-  expect(screen.getByRole("alert")).toHaveTextContent("Выберите поставщика накладной из справочника");
+  expect(screen.getByText("Выберите поставщика накладной из справочника.")).toHaveAttribute("role", "alert");
   expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   fireEvent.change(screen.getByLabelText("Поиск поставщика накладной"), { target: { value: "Поставщик" } });
   await screen.findByRole("option", { name: "Поставщик из каталога · 190000001" });
   fireEvent.change(screen.getByLabelText("Поставщик накладной из справочника"), { target: { value: "19" } });
   fireEvent.click(screen.getByRole("button", { name: "Сохранить первичную накладную" }));
-  expect(screen.getByRole("alert")).toHaveTextContent("Выберите договор из справочника");
+  expect(screen.getByText("Выберите договор из справочника или укажите основание покупки без зарегистрированного договора.")).toHaveAttribute("role", "alert");
   explainUnregisteredContract();
   fireEvent.click(screen.getByRole("button", { name: "Сохранить первичную накладную" }));
-  expect(screen.getByRole("alert")).toHaveTextContent("Выберите номенклатуру каждой строки накладной из справочника");
+  expect(screen.getByText("Выберите номенклатуру каждой строки накладной из справочника.")).toHaveAttribute("role", "alert");
   expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   await selectReceiptSku();
   fireEvent.change(screen.getByLabelText("Количество черновика 1"), { target: { value: "02.000001" } });
@@ -703,9 +718,14 @@ it("requires a selected supplier and saves its directory snapshot in a new recei
   fireEvent.change(screen.getByLabelText("Ставка НДС % черновика 1"), { target: { value: "020" } });
   fireEvent.change(screen.getByLabelText("Сумма НДС черновика 1"), { target: { value: "020.00" } });
   fireEvent.click(screen.getByRole("button", { name: "Сохранить первичную накладную" }));
+  expect(screen.getByText("Выберите склад накладной из справочника юрлица.")).toHaveAttribute("role", "alert");
+  expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  await selectReceiptWarehouse();
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить первичную накладную" }));
   await waitFor(() => expect(submitted).not.toBeNull());
   expect(submitted!.document).toMatchObject({ supplier: "Поставщик из каталога", supplier_id: 19,
     supplier_unp: "190000001", contract_basis: "Поставка по счёту без зарегистрированного договора",
+    warehouse: "receiving", warehouse_id: 9, warehouse_title: "Склад приемки",
     items: [{ sku_id: 31, sku: "AKB", sku_title: "Аккумулятор", unit: "шт",
       quantity: "2.000001", net_amount: "100.01", vat_rate: "20", vat_amount: "20.00" }] });
   expect(await screen.findByText("Накладная № 41: сохранена версия 1.")).toBeInTheDocument();
@@ -716,6 +736,9 @@ it("registers a supplier contract in the chosen company and saves its ID in the 
   let receiptCommand: Record<string, unknown> | null = null;
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes("purchase-ownership")) return { ok: true, json: async () => [] };
+    if (url.includes("receipt-warehouse-options")) return { ok: true, json: async () => ({
+      organization_id: 7, items: [{ id: 9, name: "receiving", title: "Склад приемки", is_active: true }], truncated: false,
+    }) };
     if (url.includes("supplier-options")) return { ok: true, json: async () => ({
       organization_id: 7, items: [{ id: 19, name: "Поставщик", unp: "190000001" }], truncated: false,
     }) };
@@ -749,6 +772,7 @@ it("registers a supplier contract in the chosen company and saves its ID in the 
   expect(await screen.findByRole("option", { name: "SC-50 · Поставка аккумуляторов · ID 50" })).toBeInTheDocument();
   expect(screen.getByLabelText("Договор поставщика из справочника")).toHaveValue("50");
   await selectReceiptSku();
+  await selectReceiptWarehouse();
   fireEvent.click(screen.getByRole("button", { name: "Сохранить первичную накладную" }));
   await waitFor(() => expect(receiptCommand).not.toBeNull());
   expect(receiptCommand!.document).toMatchObject({ supplier_id: 19, contract_id: 50, contract: "SC-50" });
@@ -886,6 +910,9 @@ it("closes a new receipt only after the server confirms its saved version", asyn
   let rows: Record<string, unknown>[] = [];
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes("purchase-ownership")) return { ok: true, json: async () => [] };
+    if (url.includes("receipt-warehouse-options")) return { ok: true, json: async () => ({
+      organization_id: 7, items: [{ id: 9, name: "receiving", title: "Склад приемки", is_active: true }], truncated: false,
+    }) };
     if (url.includes("supplier-options")) return { ok: true, json: async () => ({
       organization_id: 7, items: [{ id: 19, name: "Поставщик из каталога", unp: "190000001" }], truncated: false,
     }) };
@@ -911,6 +938,7 @@ it("closes a new receipt only after the server confirms its saved version", asyn
   fireEvent.change(screen.getByLabelText("Поставщик накладной из справочника"), { target: { value: "19" } });
   explainUnregisteredContract();
   await selectReceiptSku();
+  await selectReceiptWarehouse();
   fireEvent.change(screen.getByLabelText("Номер первичной накладной"), { target: { value: "INV-41" } });
   fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
   expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("INV-41");
@@ -1121,13 +1149,15 @@ it("shows who changed receipt fields and their prior and new saved values", asyn
   const first = {
     currency: "BYN", invoice_reference: "INV-41", document_date: "2026-09-23",
     operation_date: "2026-09-24", supplier: "Первый поставщик", supplier_id: 11,
-    supplier_unp: "190000011", contract: "Договор А", warehouse: "Склад",
+    supplier_unp: "190000011", contract: "Договор А", warehouse: "Склад", warehouse_id: 4,
+    warehouse_title: "Основной склад",
     explanation: "Товар", items: [{ order_id: null, sku: "AKB", unit: "шт",
       lot: "L1", quantity: "1.000000", net_amount: "100.00", vat_rate: "20.00",
       vat_amount: "20.00", vat_basis: "ОСН" }],
   };
   const second = { ...first, contract: "Договор Б", supplier: "Новый поставщик",
     supplier_id: 19, supplier_unp: "190000019",
+    warehouse: "Склад возвратов", warehouse_id: 5, warehouse_title: "Склад возвратов",
     items: [{ ...first.items[0], quantity: "2.000000" }, { ...first.items[0], sku: "CHG",
       lot: "L2", vat_amount: "8.00" }] };
   const row = { id: 41, version: 2, status: "draft", posting: null, revisions: [
@@ -1144,6 +1174,8 @@ it("shows who changed receipt fields and their prior and new saved values", asyn
   expect(screen.getByText("Строка 1 · Количество: было «1.000000», стало «2.000000».")).toBeInTheDocument();
   expect(screen.getByText("Строка 2 · Сумма НДС: было «—», стало «8.00».")).toBeInTheDocument();
   expect(screen.getByText(/Поставщик: было «Первый поставщик · УНП 190000011 · ID 11»/)).toBeInTheDocument();
+  expect(screen.getByText("Склад (справочник): было «Склад · Основной склад · ID 4», стало «Склад возвратов · Склад возвратов · ID 5»."))
+    .toBeInTheDocument();
 });
 
 it("previews, confirms, and reloads the exact version-2 review-only inbound VAT workpaper", async () => {

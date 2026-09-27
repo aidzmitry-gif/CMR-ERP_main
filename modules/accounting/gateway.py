@@ -1,5 +1,5 @@
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from config.access import is_package_allowed
 from modules.accounting.models import AccessGrant, Organization, Period, SourceControl
@@ -209,13 +209,20 @@ class AccountingService:
         ))
         if role not in {"accountant", "chief"}:
             raise HTTPException(403, "Accounting write access required")
+        control = await session.scalar(select(SourceControl).where(
+            SourceControl.organization_id == organization_id,
+            SourceControl.source == document.get("source"),
+        ))
+        # A preview or first confirmation must use the current physical warehouse
+        # identity. Exact replay of an already posted entry keeps its historical snapshot.
+        if confirm_digest is None or control is None or control.entry_id is None:
+            await self.verify_warehouse_snapshot(session, organization_id, document)
+        purchase_document = {key: value for key, value in document.items()
+                             if key not in {"warehouse_id", "warehouse_title"}}
         posting, accounts, policy = await preview_purchase(
-            session, organization_id, PurchaseDocument.model_validate(document),
+            session, organization_id, PurchaseDocument.model_validate(purchase_document),
             verified_counterparty_id=verified_counterparty_id,
         )
-        control = await session.scalar(select(SourceControl).where(
-            SourceControl.organization_id == organization_id, SourceControl.source == posting.source,
-        ))
         if control is None or control.version != posting.source_version:
             raise HTTPException(409, "Source completeness registration is missing or stale")
         if control.month != posting.posting_date.strftime("%Y-%m"):
@@ -284,6 +291,45 @@ class AccountingService:
         # keys that do not exist yet. The caller owns transaction completion.
         await organization_role(session, organization_id, actor)
         return actor
+
+    async def source_warehouse_options(self, session, organization_id, user, query=""):
+        """Expose the active legal-entity warehouse directory to an authorized source module."""
+        from modules.wms.models import WarehouseDirectory
+
+        await self.source_member(session, organization_id, user)
+        statement = select(WarehouseDirectory).where(
+            WarehouseDirectory.organization_id == organization_id,
+            WarehouseDirectory.is_active.is_(True),
+        )
+        term = query.strip()
+        if term:
+            statement = statement.where(or_(
+                WarehouseDirectory.name.icontains(term, autoescape=True),
+                WarehouseDirectory.title.icontains(term, autoescape=True),
+            ))
+        rows = (await session.scalars(statement.order_by(
+            WarehouseDirectory.name, WarehouseDirectory.id,
+        ).limit(51))).all()
+        return {
+            "organization_id": organization_id,
+            "items": [{"id": row.id, "name": row.name, "title": row.title,
+                       "is_active": row.is_active} for row in rows[:50]],
+            "truncated": len(rows) > 50,
+        }
+
+    async def verify_warehouse_snapshot(self, session, organization_id, document):
+        """Validate the exact active physical warehouse snapshot at a source boundary."""
+        from modules.accounting import service
+        from modules.accounting.warehouse_snapshot import verified_warehouse_snapshot
+
+        dimensions = dict(document)
+        raw_id = dimensions.get("warehouse_id")
+        if type(raw_id) is int:
+            dimensions["warehouse_id"] = str(raw_id)
+        try:
+            return await verified_warehouse_snapshot(session, organization_id, dimensions)
+        except service.AccountingError as exc:
+            raise HTTPException(409, str(exc)) from exc
 
     async def source_organizations(self, session, user):
         actor = subject(user)

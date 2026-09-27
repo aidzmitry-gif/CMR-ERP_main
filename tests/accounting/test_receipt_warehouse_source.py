@@ -3,7 +3,6 @@ from sqlalchemy import func, select
 
 from modules.accounting.models import Entry
 from modules.procurement.receipt_documents import ReceiptRevision
-from modules.procurement.source_gateway import ProcurementSourceService
 from tests.accounting.test_procurement_receipt_drafts import document
 
 pytestmark = pytest.mark.usefixtures("receipt_catalog_sku")
@@ -21,7 +20,7 @@ async def create(client, org, *, quantity="2.00", unit="шт"):
 async def test_warehouse_source_keeps_version_line_identity_and_explicit_units(client, db, book, receipt_catalog_sku):
     org = book[0]
     receipt, data = await create(client, org)
-    gateway = ProcurementSourceService()
+    gateway = client.test_app.state.core.services.procurement_source
     first = await gateway.warehouse_receipt_source(db, org, receipt, 1)
     assert first["lines"] == [{"source_line": f"procurement:receipt:{receipt}:1:1", "position": 1,
                                "sku": "sku1", "lot": "lot1", "quantity": "2.00", "unit": "шт"}]
@@ -52,7 +51,9 @@ async def test_warehouse_source_keeps_version_line_identity_and_explicit_units(c
 async def test_warehouse_source_rejects_incompatible_quantity(client, db, book, quantity):
     receipt, _ = await create(client, book[0], quantity=quantity)
     with pytest.raises(ValueError, match="cannot be represented"):
-        await ProcurementSourceService().warehouse_receipt_source(db, book[0], receipt, 1)
+        await client.test_app.state.core.services.procurement_source.warehouse_receipt_source(
+            db, book[0], receipt, 1,
+        )
     assert await db.scalar(select(func.count()).select_from(Entry)) == 0
 
 

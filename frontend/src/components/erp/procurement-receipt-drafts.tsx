@@ -9,8 +9,9 @@ import { useUnsavedDocumentGuard } from "@/lib/use-unsaved-document-guard";
 import { ProcurementReceiptPosting, type ReceiptAccount } from "./procurement-receipt-posting";
 
 const item = () => ({ order_id: null as number | null, sku_id: null as number | null, sku_title: null as string | null, sku: "", unit: null as string | null, lot: "", quantity: "", net_amount: "", vat_amount: "", vat_rate: "", vat_basis: "" });
-const blank = () => ({ currency: "BYN", invoice_reference: "", document_date: "", operation_date: "", supplier: "", supplier_id: null as number | null, supplier_unp: null as string | null, contract: "", contract_id: null as number | null, contract_basis: null as string | null, warehouse: "", explanation: "", items: [item()] });
+const blank = () => ({ currency: "BYN", invoice_reference: "", document_date: "", operation_date: "", supplier: "", supplier_id: null as number | null, supplier_unp: null as string | null, contract: "", contract_id: null as number | null, contract_basis: null as string | null, warehouse: "", warehouse_id: null as number | null, warehouse_title: null as string | null, explanation: "", items: [item()] });
 type Document = ReturnType<typeof blank>;
+type ReceiptWarehouseOption = { id: number; name: string; title: string; is_active: true };
 type SupplierContract = { id: number; organization_id: number; supplier_id: number; number: string; title: string; signed_on: string; expires_on: string | null; evidence: string; is_active?: boolean; created_by?: string; created_at?: string; deactivated_by?: string | null; deactivated_at?: string | null; deactivation_reason?: string | null };
 type ContractHistoryPage = { organization_id: number; supplier_id: number; status: string; items: SupplierContract[]; truncated: boolean; next_before_at: string | null; next_before_id: number | null };
 type ContractHistoryCursor = { at: string; id: number };
@@ -46,7 +47,7 @@ const inboundVatWorkpaperFlags = { review_only: true, signature_verified: false,
 type PendingSave = { org: string; receiptId: number | null; version: number; key: string; document: Document; closeAfterSave: boolean };
 type PendingContractRevoke = { org: string; supplierId: number; contractId: number; key: string; reason: string };
 type OwnedOrder = { kind: string; source_id: number; snapshot: { number: string; supplier: string } };
-const fields = [["invoice_reference", "Номер первичной накладной"], ["document_date", "Дата первичной накладной"], ["operation_date", "Дата поступления"], ["contract", "Договор накладной"], ["warehouse", "Склад накладной"], ["explanation", "Содержание накладной"]] as const;
+const fields = [["invoice_reference", "Номер первичной накладной"], ["document_date", "Дата первичной накладной"], ["operation_date", "Дата поступления"], ["contract", "Договор накладной"], ["explanation", "Содержание накладной"]] as const;
 const itemFields = [["lot", "Партия"], ["quantity", "Количество"], ["net_amount", "Стоимость без НДС"], ["vat_rate", "Ставка НДС %"], ["vat_amount", "Сумма НДС"], ["vat_basis", "Основание НДС"]] as const;
 const itemHistoryFields = [["order_id", "Заказ поставщику"], ["order_line_id", "Строка заказа"], ["sku_id", "ID номенклатуры"], ["sku_title", "Название номенклатуры"], ["sku", "Код номенклатуры"], ["unit", "Единица измерения"], ...itemFields] as const;
 const shown = (value: unknown) => value === null || value === undefined || value === "" ? "—" : String(value);
@@ -120,13 +121,17 @@ function validSavedDocument(value: unknown): value is Document {
   const document = value as Record<string, unknown>;
   const required = ["currency", "invoice_reference", "document_date", "operation_date", "supplier", "supplier_id",
     "supplier_unp", "contract", "warehouse", "explanation", "items"];
-  if (!exactKeys(document, required, ["contract_id", "contract_basis"])
+  if (!exactKeys(document, required, ["contract_id", "contract_basis", "warehouse_id", "warehouse_title"])
     || !["currency", "invoice_reference", "document_date", "operation_date", "supplier", "contract", "warehouse", "explanation"]
       .every((key) => typeof document[key] === "string")
     || !positiveIdOrNull(document.supplier_id)
     || !(document.supplier_unp === null || typeof document.supplier_unp === "string")
     || !(document.contract_id === undefined || positiveIdOrNull(document.contract_id) && document.contract_id !== null)
     || !(document.contract_basis === undefined || typeof document.contract_basis === "string")
+    || !(document.warehouse_id === undefined || positiveIdOrNull(document.warehouse_id))
+    || !(document.warehouse_title === undefined || document.warehouse_title === null || typeof document.warehouse_title === "string")
+    || ((document.warehouse_id === undefined || document.warehouse_id === null)
+      !== (document.warehouse_title === undefined || document.warehouse_title === null))
     || !Array.isArray(document.items) || document.items.length < 1 || document.items.length > 300) return false;
   const lineRequired = ["order_id", "sku_id", "sku_title", "sku", "unit", "lot", "quantity", "net_amount", "vat_rate", "vat_amount", "vat_basis"];
   return document.items.every((value) => {
@@ -207,6 +212,7 @@ function clearPendingSave(command: PendingSave) {
   } catch { /* Keep unreadable evidence for explicit recovery. */ }
 }
 const supplierSnapshot = (document: Document) => `${shown(document.supplier)} · УНП ${shown(document.supplier_unp)} · ${document.supplier_id ? `ID ${document.supplier_id}` : "без связи со справочником"}`;
+const warehouseSnapshot = (document: Document) => `${shown(document.warehouse)} · ${shown(document.warehouse_title)} · ${document.warehouse_id ? `ID ${document.warehouse_id}` : "без связи со справочником"}`;
 function revisionChanges(previous: Document, current: Document) {
   const changes: { label: string; before: string; after: string }[] = [];
   const add = (label: string, before: unknown, after: unknown) => {
@@ -215,6 +221,7 @@ function revisionChanges(previous: Document, current: Document) {
   add("Валюта", previous.currency, current.currency);
   for (const [field, label] of fields) add(label, previous[field], current[field]);
   add("Поставщик", supplierSnapshot(previous), supplierSnapshot(current));
+  add("Склад (справочник)", warehouseSnapshot(previous), warehouseSnapshot(current));
   add("ID договора", previous.contract_id, current.contract_id);
   add("Основание без зарегистрированного договора", previous.contract_basis, current.contract_basis);
   for (let index = 0; index < Math.max(previous.items.length, current.items.length); index++) {
@@ -600,6 +607,9 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   const [supplierSearch, setSupplierSearch] = useState("");
   const [supplierOptions, setSupplierOptions] = useState<ProcurementSupplierOption[]>([]);
   const [supplierError, setSupplierError] = useState("");
+  const [warehouseSearch, setWarehouseSearch] = useState("");
+  const [warehouseOptions, setWarehouseOptions] = useState<ReceiptWarehouseOption[]>([]);
+  const [warehouseError, setWarehouseError] = useState("");
   const [contracts, setContracts] = useState<SupplierContract[]>([]), [contractError, setContractError] = useState("");
   const [revokedState, setRevokedState] = useState<{ context: string; items: SupplierContract[]; next: ContractHistoryCursor | null; loading: boolean; error: string }>({ context: "", items: [], next: null, loading: false, error: "" });
   const [newContract, setNewContract] = useState({ number: "", title: "", signed_on: "", expires_on: "", evidence: "" });
@@ -640,7 +650,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   const [loadedKey, setLoadedKey] = useState("");
   const pending = useRef<PendingSave | null>(null), unknownSave = useRef(false), corruptJournal = useRef(false), active = useRef(true);
   const pendingContractRevoke = useRef<PendingContractRevoke | null>(null);
-  const contractFetchVersion = useRef(0), supplierContext = useRef("");
+  const contractFetchVersion = useRef(0), warehouseFetchVersion = useRef(0), supplierContext = useRef("");
   supplierContext.current = `${org}:${document.supplier_id ?? ""}`;
   const revokedContracts = revokedState.context === supplierContext.current ? revokedState.items : [];
   const revokedError = revokedState.context === supplierContext.current ? revokedState.error : "";
@@ -683,6 +693,10 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       && (!search || [source.invoice_reference, source.supplier, source.document_date]
         .some((value) => value.toLocaleLowerCase("ru").includes(search)));
   });
+  const exactWarehouse = warehouseOptions.find((option) => option.id === document.warehouse_id
+    && option.name === document.warehouse && option.title === document.warehouse_title);
+  const warehouseSelectionValue = exactWarehouse ? String(exactWarehouse.id)
+    : document.warehouse_id ? `saved:${document.warehouse_id}` : "";
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   useEffect(() => {
     try {
@@ -724,6 +738,31 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
     }, 250);
     return () => { current = false; window.clearTimeout(timer); };
   }, [org, skuSearch]);
+  useEffect(() => {
+    let current = true;
+    const generation = ++warehouseFetchVersion.current;
+    const timer = window.setTimeout(() => {
+      void request<{ organization_id: number; items: unknown[]; truncated: boolean }>(
+        `/organizations/${org}/receipt-warehouse-options?q=${encodeURIComponent(warehouseSearch.trim())}`,
+      ).then((data) => {
+        if (!current || generation !== warehouseFetchVersion.current) return;
+        if (data.organization_id !== Number(org) || !Array.isArray(data.items))
+          throw new Error("Справочник складов вернул данные другого юрлица.");
+        const items = data.items.map((value) => {
+          if (!isRecord(value) || !positiveInteger(value.id) || typeof value.name !== "string"
+            || !value.name.trim() || typeof value.title !== "string" || !value.title.trim()
+            || value.is_active !== true) throw new Error("Справочник складов вернул неверную или неактивную запись.");
+          return { id: value.id, name: value.name, title: value.title, is_active: true as const };
+        });
+        setWarehouseOptions(items); setWarehouseError("");
+      }).catch((cause: Error) => {
+        if (current && generation === warehouseFetchVersion.current) {
+          setWarehouseOptions([]); setWarehouseError(cause.message);
+        }
+      });
+    }, 250);
+    return () => { current = false; window.clearTimeout(timer); };
+  }, [org, warehouseSearch]);
   useEffect(() => {
     const supplierId = document.supplier_id;
     const generation = ++contractFetchVersion.current;
@@ -1100,6 +1139,9 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
     }
     if (!document.items.length || document.items.some(row => !row.sku_id || !row.sku_title || !row.unit)) {
       setError("Выберите номенклатуру каждой строки накладной из справочника."); return;
+    }
+    if (!document.warehouse_id || !document.warehouse_title?.trim()) {
+      setError("Выберите склад накладной из справочника юрлица."); return;
     }
     let savedDocument: Document;
     try { savedDocument = expectedSavedDocument(document) as Document; }
@@ -1705,8 +1747,14 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       </section>}
       {selected?.posting && <p role="status">Проведена · проводка № {selected.posting.entry_id}. Первичные данные доступны для просмотра.</p>}
       {contractRevokeUncertain && <Button variant="secondary" disabled={contractBusy || pendingContractRevoke.current?.org !== org} onClick={() => { if (pendingContractRevoke.current) void submitContractRevoke(pendingContractRevoke.current); }}>Повторить отзыв договора с тем же ключом</Button>}
-      {editorOpen && <fieldset disabled={Boolean(selected?.posting) || uncertain || contractBusy || contractRevokeUncertain} className="space-y-3">
+      {editorOpen && <fieldset disabled={Boolean(selected?.posting) || busy || uncertain || contractBusy || contractRevokeUncertain} className="space-y-3">
       <div className="grid gap-3 md:grid-cols-3">{fields.map(([field, label]) => <label key={field}>{label}<Input type={field.endsWith("date") ? "date" : "text"} disabled={field === "contract" && Boolean(document.contract_id)} value={document[field]} onChange={(e) => setDocument({ ...document, [field]: e.target.value })} /></label>)}</div>
+      <div className="grid gap-3 md:grid-cols-2"><label>Поиск склада накладной<Input aria-label="Поиск склада накладной" maxLength={100} value={warehouseSearch} onChange={(e) => setWarehouseSearch(e.target.value)} /></label><label>Склад накладной из справочника<Select aria-label="Склад накладной из справочника" value={warehouseSelectionValue} onChange={(e) => {
+        if (!e.target.value) { setDocument({ ...document, warehouse: "", warehouse_id: null, warehouse_title: null }); return; }
+        const warehouse = warehouseOptions.find((option) => String(option.id) === e.target.value);
+        if (warehouse) setDocument({ ...document, warehouse: warehouse.name, warehouse_id: warehouse.id, warehouse_title: warehouse.title });
+      }}><option value="">Выберите склад</option>{document.warehouse_id && !exactWarehouse && <option value={`saved:${document.warehouse_id}`}>{document.warehouse} · {document.warehouse_title || "старый снимок"} · ID {document.warehouse_id} (сохранённый)</option>}{warehouseOptions.map((option) => <option key={option.id} value={option.id}>{option.name} · {option.title} · ID {option.id}</option>)}</Select></label></div>
+      {warehouseError && <p role="alert">Справочник складов недоступен: {warehouseError}</p>}{selected && !document.warehouse_id && <p>У этой версии нет связи со справочником складов. Выберите склад перед сохранением.</p>}{document.warehouse_id && !exactWarehouse && <p>Проверьте сохранённый снимок склада и выберите актуальную запись из списка.</p>}
       <div className="grid gap-3 md:grid-cols-2"><label>Поиск поставщика<Input aria-label="Поиск поставщика накладной" disabled={contractBusy} maxLength={100} value={supplierSearch} onChange={(e) => { setSupplierSearch(e.target.value); setSupplierOptions([]); setSupplierError(""); setContracts([]); setDocument((current) => ({ ...current, supplier: "", supplier_id: null, supplier_unp: null, contract: "", contract_id: null, contract_basis: null })); }} /></label><label>Поставщик накладной из справочника<Select aria-label="Поставщик накладной из справочника" disabled={contractBusy} value={document.supplier_id ?? ""} onChange={(e) => {
         const supplier = supplierOptions.find((option) => String(option.id) === e.target.value);
         setContracts([]); setContractError("");
@@ -1779,7 +1827,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
           ? <ul>{changes.map((change, i) => <li key={`${change.label}:${i}`}>{change.label}: было «{change.before}», стало «{change.after}».</li>)}</ul>
           : <p>Реквизиты не изменились.</p>}</div> : <p>Исходная редакция.</p>}
         <details><summary>Полный снимок версии {row.version}</summary>
-          <dl>{fields.map(([field, label]) => <div key={field}><dt>{label}</dt><dd>{row.document[field]}</dd></div>)}<div><dt>Поставщик накладной</dt><dd>{row.document.supplier} · {row.document.supplier_unp || "УНП не указан"} · {row.document.supplier_id ? `ID ${row.document.supplier_id}` : "связь со справочником неизвестна"}</dd></div></dl>
+          <dl>{fields.map(([field, label]) => <div key={field}><dt>{label}</dt><dd>{row.document[field]}</dd></div>)}<div><dt>Поставщик накладной</dt><dd>{row.document.supplier} · {row.document.supplier_unp || "УНП не указан"} · {row.document.supplier_id ? `ID ${row.document.supplier_id}` : "связь со справочником неизвестна"}</dd></div><div><dt>Склад накладной</dt><dd>{warehouseSnapshot(row.document)}</dd></div></dl>
           {row.document.items.map((r, i) => <p key={i}>{r.sku} · {r.sku_title || "название неизвестно"} · {r.sku_id ? `SKU ID ${r.sku_id}` : "связь со справочником неизвестна"}{r.order_id ? ` · заказ № ${r.order_id}` : ""} · партия {r.lot} · {r.quantity} {r.unit ?? "(единица не указана)"} · без НДС {r.net_amount} BYN · НДС {r.vat_rate}% / {r.vat_amount} BYN · {r.vat_basis}</p>)}
         </details>
       </article>;

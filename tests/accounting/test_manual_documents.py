@@ -615,7 +615,8 @@ async def test_manual_settlement_document_uses_exact_register_revision_and_keeps
         "currency": "BYN", "invoice_reference": "ТН-61", "document_date": "2026-09-01",
         "operation_date": "2026-09-02", "supplier": "supplier1", "supplier_id": 1,
         "supplier_unp": "190000001", "contract": "SUP-51",
-        "contract_id": supplier_contract.id, "warehouse": "warehouse1",
+        "contract_id": supplier_contract.id, "warehouse": "warehouse1", "warehouse_id": 1,
+        "warehouse_title": "Synthetic warehouse",
         "explanation": "Synthetic primary invoice", "items": [],
     }
     db.add_all([

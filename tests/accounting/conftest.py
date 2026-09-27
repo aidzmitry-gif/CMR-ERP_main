@@ -98,6 +98,8 @@ async def book(db):
     db.add(org)
     await db.flush()
     db.add(models.AccessGrant(organization_id=org.id, subject="tester", role="chief"))
+    db.add(WarehouseDirectory(organization_id=org.id, name="warehouse1",
+                              title="Synthetic warehouse", is_active=True, created_by="tester"))
     policy = models.Policy(organization_id=org.id, effective_from=date(2026, 1, 1),
                            reference="TEST ONLY", inventory_method="specific",
                            allocation_basis="direct_cost", depreciation_method="straight_line",
@@ -128,7 +130,10 @@ async def client(db, book):
     app.include_router(deal_demands.router, prefix="/procurement")
     app.include_router(ownership.router, prefix="/procurement")
     app.include_router(expected_reservations.router, prefix="/procurement")
-    app.state.core = SimpleNamespace(services=SimpleNamespace(event_bus=None, accounting=AccountingService()))
+    services = SimpleNamespace(event_bus=None, accounting=AccountingService())
+    from modules.procurement.source_gateway import ProcurementSourceService
+    services.procurement_source = ProcurementSourceService(services)
+    app.state.core = SimpleNamespace(services=services)
 
     async def session():
         yield db

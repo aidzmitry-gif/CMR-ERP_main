@@ -60,6 +60,87 @@ async def test_receipt_save_replays_exact_create_and_edit_postgres(issuance_pg, 
         assert await session.scalar(select(func.count()).select_from(ReceiptRevision)) == 2
 
 
+async def test_pg_receipt_warehouse_binding_rejects_stale_snapshot_and_keeps_replay(issuance_pg, pg_book):
+    from modules.wms.models import WarehouseDirectory
+
+    api, factory = issuance_pg
+    api.headers["X-User"] = "tester"
+    api.headers["X-User-Roles"] = "director"
+    async with factory() as session:
+        await ensure_receipt_catalog_sku(session)
+        warehouse = await session.scalar(select(WarehouseDirectory).where(
+            WarehouseDirectory.organization_id == pg_book[0],
+            WarehouseDirectory.name == "warehouse1",
+        ))
+        assert warehouse is not None
+        warehouse_id = warehouse.id
+        await session.commit()
+
+    base = f"/procurement/organizations/{pg_book[0]}"
+    options = await api.get(base + "/receipt-warehouse-options", params={"q": "warehouse1"})
+    assert options.status_code == 200, options.text
+    assert options.json()["items"] == [{"id": warehouse_id, "name": "warehouse1",
+                                        "title": "Synthetic warehouse", "is_active": True}]
+    path = base + "/receipt-documents"
+    facts = document()
+    unbound = {key: value for key, value in facts.items()
+               if key not in {"warehouse_id", "warehouse_title"}}
+    rejected = await api.post(path, json={"key": "pg-warehouse-unbound", "document": unbound})
+    assert rejected.status_code == 422 and "warehouse" in rejected.text.lower()
+
+    create = {"key": "pg-warehouse-bound", "document": facts}
+    created = await api.post(path, json=create)
+    assert created.status_code == 201, created.text
+    receipt_id = created.json()["id"]
+    snapshot = created.json()["revisions"][0]["document"]
+    assert (snapshot["warehouse_id"], snapshot["warehouse"], snapshot["warehouse_title"]) == (
+        warehouse_id, "warehouse1", "Synthetic warehouse",
+    )
+
+    async with factory() as session:
+        warehouse = await session.get(WarehouseDirectory, warehouse_id)
+        warehouse.title = "Renamed warehouse"
+        await session.commit()
+    replay = await api.post(path, json=create)
+    assert replay.status_code == 201 and replay.json()["id"] == receipt_id
+    assert replay.json()["revisions"][0]["document"] == snapshot
+
+    preview = await api.post(f"{path}/{receipt_id}/preview", json={
+        "expected_version": 1, "posting_date": "2026-09-03", "policy_id": pg_book[1],
+        "settlement_account": "60", "vat_account": None, "inventory_accounts": ["41"],
+    })
+    assert preview.status_code == 409 and "Warehouse directory record changed" in preview.text
+    wms_source = await api.get(f"/wms/organizations/{pg_book[0]}/primary-receipts/{receipt_id}/source",
+                               params={"expected_version": 1})
+    assert wms_source.status_code == 409 and "Warehouse directory record changed" in wms_source.text
+
+    stale_edit = await api.put(f"{path}/{receipt_id}", json={
+        "key": "pg-warehouse-stale-edit", "expected_version": 1,
+        "document": {**facts, "explanation": "Still using the old warehouse title"},
+    })
+    assert stale_edit.status_code == 409, stale_edit.text
+    rebound = await api.put(f"{path}/{receipt_id}", json={
+        "key": "pg-warehouse-rebind", "expected_version": 1,
+        "document": {**facts, "warehouse_title": "Renamed warehouse",
+                     "explanation": "Rebound to current warehouse revision"},
+    })
+    assert rebound.status_code == 200, rebound.text
+    assert rebound.json()["version"] == 2
+    assert rebound.json()["revisions"][1]["document"]["warehouse_id"] == warehouse_id
+    assert rebound.json()["revisions"][1]["document"]["warehouse_title"] == "Renamed warehouse"
+
+    async with factory() as session:
+        revisions = (await session.scalars(select(ReceiptRevision).where(
+            ReceiptRevision.receipt_id == receipt_id,
+        ).order_by(ReceiptRevision.version))).all()
+        assert [revision.document["warehouse_title"] for revision in revisions] == [
+            "Synthetic warehouse", "Renamed warehouse",
+        ]
+        assert await session.scalar(select(func.count()).select_from(ReceiptPosting).where(
+            ReceiptPosting.receipt_id == receipt_id,
+        )) == 0
+
+
 async def test_pg_posted_receipt_correction_draft_keeps_exact_source_and_blocks_posting(issuance_pg, pg_book):
     api, factory = issuance_pg
     api.headers["X-User"] = "tester"

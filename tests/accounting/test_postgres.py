@@ -564,9 +564,10 @@ async def pg_book(pg_factory, db, book):
     from core.domain.models import Counterparty
     from modules.accounting.models import AccessGrant, Account, Organization, Policy
     from modules.procurement.models import Supplier
+    from modules.wms.models import WarehouseDirectory
 
     async with pg_factory() as session:
-        for model in (Organization, AccessGrant, Account, Policy, Counterparty, Supplier):
+        for model in (Organization, AccessGrant, Account, Policy, Counterparty, Supplier, WarehouseDirectory):
             rows = (await db.scalars(select(model))).all()
             for row in rows:
                 session.add(model(**{c.key: getattr(row, c.key) for c in model.__table__.columns}))
@@ -1682,7 +1683,8 @@ async def test_manual_settlement_revision_rechecked_and_replayed_on_postgres(
             "document_date": "2026-09-01", "operation_date": "2026-09-02",
             "supplier": "supplier1", "supplier_id": 1, "supplier_unp": "190000001",
             "contract": "PG-SETTLEMENT-CONTRACT", "contract_id": contract_id,
-            "warehouse": "warehouse1", "explanation": "Synthetic receipt", "items": [],
+            "warehouse": "warehouse1", "warehouse_id": 1,
+            "warehouse_title": "Synthetic warehouse", "explanation": "Synthetic receipt", "items": [],
         }
         session.add(ReceiptRevision(
             receipt_id=receipt_id, version=1, document=facts, actor="tester"))
