@@ -8,6 +8,8 @@
   python scripts/import_month.py extract-onec # только 1С (без Bitrix) — товары/цены
   python scripts/import_month.py extract-onec-purchases # сырые закупочные документы 1С -> кэш, без записи в ERP
   # IMPORT_ONEC_PURCHASE_ENTITY задаётся точным Document_* из метаданных OData выбранной базы 1С.
+  python scripts/import_month.py map-onec-purchases # полный пакет черновиков закупок по явной карте справочников
+  # IMPORT_ONEC_PURCHASE_MAPPING — абсолютный путь к JSON; импортёр только готовит payload существующей накладной закупки.
   python scripts/import_month.py load-onec    # Sku + StockItem.price из кэша 1С
   python scripts/import_month.py load-prices  # цены SKU из строк реализаций (кэш)
   python scripts/import_month.py verify       # счётчики по таблицам
@@ -1217,6 +1219,42 @@ def extract_onec_purchases() -> None:
     print(f"extract-onec-purchases: кэш создан ({entity}, документов={len(docs)})")
 
 
+def map_onec_purchases() -> None:
+    """Build API-compatible procurement draft payloads; do not write to ERP."""
+    from modules.accounting.onec_purchase_import import (
+        PurchaseImportError,
+        UnmappedPurchaseDocuments,
+        prepare_month_plan,
+        write_month_plan,
+        write_unmapped_report,
+    )
+
+    cache_dir = _resolve_cache_dir(require_override=True)
+    raw_mapping_path = os.getenv("IMPORT_ONEC_PURCHASE_MAPPING", "").strip()
+    if not raw_mapping_path:
+        raise RuntimeError("map-onec-purchases требует IMPORT_ONEC_PURCHASE_MAPPING")
+    mapping_path = Path(raw_mapping_path).expanduser()
+    if not mapping_path.is_absolute():
+        raise RuntimeError("IMPORT_ONEC_PURCHASE_MAPPING должен быть абсолютным путём")
+    mapping_path = mapping_path.resolve()
+    try:
+        drafts, metadata = prepare_month_plan(cache_dir, mapping_path)
+    except UnmappedPurchaseDocuments as exc:
+        report = write_unmapped_report(cache_dir, exc.issues)
+        raise RuntimeError(
+            f"Весь месячный пакет остановлен: несопоставлено строк/документов={len(exc.issues)}; "
+            f"отчёт={report.name}; черновой пакет не создан"
+        ) from exc
+    except PurchaseImportError as exc:
+        raise RuntimeError(f"map-onec-purchases: {exc}") from exc
+    data_path, meta_path = write_month_plan(cache_dir, drafts, metadata)
+    print(
+        "map-onec-purchases: пакет проверен "
+        f"(документов={metadata['source_record_count']}, черновиков={len(drafts)}, "
+        f"payload={data_path.name}, metadata={meta_path.name}, previewed=false, posted=false)"
+    )
+
+
 # ---------------------------------------------------------------- load
 
 # Bitrix STAGE_ID (основная воронка, категория 0) -> канон stages.py
@@ -1311,6 +1349,9 @@ async def _load_sales_prices(session, stats: dict) -> None:
 
 async def load() -> None:
     _require_isolated_load()
+    # SQLite smoke loads create all registered metadata; input VAT evidence
+    # references this procurement-owned source table by foreign key.
+    import modules.procurement.receipt_documents  # noqa: F401
     from core.domain.models import Contact, Counterparty, CounterpartyAlias, Sku
     from modules.finance.models import Payment
     from modules.leads.models import Lead
@@ -2303,6 +2344,8 @@ if __name__ == "__main__":
         extract_onec()
     if phase == "extract-onec-purchases":
         extract_onec_purchases()
+    if phase == "map-onec-purchases":
+        map_onec_purchases()
     if phase in ("load", "all"):
         asyncio.run(load())
     if phase == "load-onec":
