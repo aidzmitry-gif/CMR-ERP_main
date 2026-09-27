@@ -10,18 +10,18 @@ from fastapi import HTTPException
 from pydantic import Field, field_validator, model_validator
 from sqlalchemy import select
 
-from modules.accounting.models import ShipmentPreparationDraft
+from core.domain.models import Counterparty
+from modules.accounting.models import Organization, ShipmentPreparationDraft
 from modules.accounting.schemas import Input
 
 _COMMON_FIELDS = (
-    "sender_legal_entity",
-    "recipient_legal_entity",
     "contract_reference",
     "document_number",
     "document_date",
 )
 _TTN_FIELDS = ("carrier", "vehicle_registration", "driver", "route", "loading_point", "unloading_point")
 _ITEM_FIELDS = ("unit", "unit_price", "vat_basis")
+_RECIPIENT_FIELDS = ("recipient_counterparty_id", "recipient_counterparty_revision")
 _MAX_PAYLOAD_BYTES = 2_000_000
 
 
@@ -35,7 +35,7 @@ class ShipmentDocumentDraftInput(Input):
     @field_validator("fields")
     @classmethod
     def bounded_fields(cls, value):
-        allowed = set(_COMMON_FIELDS) | set(_TTN_FIELDS) | {"items"}
+        allowed = set(_COMMON_FIELDS) | set(_TTN_FIELDS) | set(_RECIPIENT_FIELDS) | {"items"}
         if not isinstance(value, dict) or set(value) - allowed:
             raise ValueError("Draft contains unsupported TN/TTN fields")
         for key, item in value.items():
@@ -52,6 +52,9 @@ class ShipmentDocumentDraftInput(Input):
                     seen.add(line_no)
                     for field in _ITEM_FIELDS:
                         _bounded_text(row.get(field, ""), field, 500)
+            elif key in _RECIPIENT_FIELDS:
+                if isinstance(item, bool) or not isinstance(item, int) or item <= 0:
+                    raise ValueError(f"{key} must be a positive integer")
             else:
                 _bounded_text(item, key, 1000)
         try:
@@ -86,8 +89,8 @@ def source_name(organization_id: int, source_key: str, kind: str) -> str:
     return source
 
 
-def _normalize_fields(raw: dict, kind: str, package: dict) -> dict:
-    allowed = set(_COMMON_FIELDS) | ({"items"} if kind == "tn" else set(_TTN_FIELDS) | {"items"})
+def _normalize_request_fields(raw: dict, kind: str, package: dict) -> dict:
+    allowed = set(_COMMON_FIELDS) | set(_RECIPIENT_FIELDS) | ({"items"} if kind == "tn" else set(_TTN_FIELDS) | {"items"})
     if set(raw) - allowed:
         raise HTTPException(422, "Draft contains fields that do not belong to this document kind")
     fields = {key: raw.get(key, "") for key in _COMMON_FIELDS}
@@ -98,6 +101,12 @@ def _normalize_fields(raw: dict, kind: str, package: dict) -> dict:
             fields[key] = _bounded_text(value, key, 1000).strip()
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+
+    for key in _RECIPIENT_FIELDS:
+        value = raw.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise HTTPException(409, "Select the recipient from the active counterparty directory")
+        fields[key] = value
 
     source_lines = package.get("prefilled", {}).get("items")
     if not isinstance(source_lines, list) or not source_lines:
@@ -130,6 +139,62 @@ def _normalize_fields(raw: dict, kind: str, package: dict) -> dict:
         fields["items"].append(normalized)
     if by_line:
         raise HTTPException(409, "Draft contains an item that is not in the verified shipment")
+    return fields
+
+
+async def _directory_snapshots(session, organization_id: int, recipient_id: int,
+                               recipient_revision: int) -> tuple[dict, dict]:
+    organization = await session.scalar(select(Organization).where(
+        Organization.id == organization_id,
+    ).with_for_update())
+    if organization is None:
+        raise HTTPException(404, "Accounting organization was not found")
+    counterparty = await session.scalar(select(Counterparty).where(
+        Counterparty.id == recipient_id,
+    ).with_for_update())
+    if counterparty is None or not counterparty.is_active or counterparty.merged_into_id is not None:
+        raise HTTPException(409, "Select an active recipient from the counterparty directory")
+    if counterparty.revision != recipient_revision:
+        raise HTTPException(409, "Recipient directory entry changed; select it again before saving")
+    sender = {
+        "reference": "accounting.organization",
+        "id": organization.id,
+        "name": organization.name,
+        "unp": organization.unp,
+    }
+    recipient = {
+        "reference": "core.counterparties",
+        "id": counterparty.id,
+        "name": counterparty.legal_name or counterparty.name,
+        "unp": counterparty.unp or "",
+        "revision": counterparty.revision,
+    }
+    return sender, recipient
+
+
+def _materialize_fields(request_fields: dict, sender: dict, recipient: dict) -> dict:
+    fields = {key: value for key, value in request_fields.items() if key not in _RECIPIENT_FIELDS}
+    fields["sender_identity"] = sender
+    fields["sender_legal_entity"] = sender["name"]
+    fields["recipient_identity"] = recipient
+    fields["recipient_legal_entity"] = recipient["name"]
+    return fields
+
+
+def _blank_fields(package: dict, kind: str, sender: dict) -> dict:
+    fields = {key: "" for key in _COMMON_FIELDS}
+    if kind == "ttn":
+        fields.update({key: "" for key in _TTN_FIELDS})
+    fields.update({
+        "sender_identity": sender,
+        "sender_legal_entity": sender["name"],
+        "recipient_identity": None,
+        "recipient_legal_entity": "",
+    })
+    fields["items"] = [
+        {"line_no": line["line_no"], **{key: "" for key in _ITEM_FIELDS}}
+        for line in package.get("prefilled", {}).get("items", [])
+    ]
     return fields
 
 
@@ -185,6 +250,15 @@ def _history(rows) -> list[dict]:
 
 async def attach_history(session, organization_id: int, source_key: str, kind: str, package: dict) -> dict:
     source = source_name(organization_id, source_key, kind)
+    organization = await session.scalar(select(Organization).where(Organization.id == organization_id))
+    if organization is None:
+        raise HTTPException(404, "Accounting organization was not found")
+    sender = {
+        "reference": "accounting.organization",
+        "id": organization.id,
+        "name": organization.name,
+        "unp": organization.unp,
+    }
     rows = (await session.scalars(select(ShipmentPreparationDraft).where(
         ShipmentPreparationDraft.organization_id == organization_id,
         ShipmentPreparationDraft.source == source,
@@ -200,11 +274,17 @@ async def attach_history(session, organization_id: int, source_key: str, kind: s
     history = _history(rows)
     package.update({
         "saved_revision": rows[-1].revision if rows else 0,
-        "saved_fields": rows[-1].payload["fields"] if rows else _normalize_fields({}, kind, package),
+        "saved_fields": rows[-1].payload["fields"] if rows else _blank_fields(package, kind, sender),
         "saved_by": rows[-1].actor if rows else None,
         "saved_at": _timestamp(rows[-1].created_at) if rows else None,
         "history": history,
     })
+    latest_fields = rows[-1].payload["fields"] if rows else package["saved_fields"]
+    package["directory_identity_status"] = (
+        "verified" if isinstance(latest_fields.get("sender_identity"), dict)
+        and isinstance(latest_fields.get("recipient_identity"), dict)
+        else "legacy_unbound" if rows else "recipient_required"
+    )
     if any(row.payload.get("source_digest") != package["source"]["digest"] for row in rows):
         package["source_history_current"] = False
         package["blockers"].append("Сохранённая редакция связана с другой версией акта; продолжение сохранения заблокировано.")
@@ -220,14 +300,14 @@ async def save(session, organization_id: int, source_key: str, package: dict,
     current_digest = package.get("source", {}).get("digest")
     if data.source_digest != current_digest:
         raise HTTPException(409, "Verified shipment changed; reload the draft before saving")
-    fields = _normalize_fields(data.fields, data.kind, package)
+    request_fields = _normalize_request_fields(data.fields, data.kind, package)
     command = {
         "source": source,
         "kind": data.kind,
         "request_key": str(data.request_key),
         "expected_revision": data.expected_revision,
         "source_digest": current_digest,
-        "fields": fields,
+        "fields": request_fields,
     }
     digest = hashlib.sha256(json.dumps(command, ensure_ascii=False, sort_keys=True,
                                        separators=(",", ":"), allow_nan=False).encode()).hexdigest()
@@ -247,10 +327,17 @@ async def save(session, organization_id: int, source_key: str, package: dict,
     revision = head.revision if head else 0
     if revision != data.expected_revision:
         raise HTTPException(409, "TN/TTN draft changed; reload history before saving another version")
+    sender, recipient = await _directory_snapshots(
+        session, organization_id,
+        request_fields["recipient_counterparty_id"],
+        request_fields["recipient_counterparty_revision"],
+    )
+    fields = _materialize_fields(request_fields, sender, recipient)
     payload = {
         "kind": data.kind,
         "source_digest": current_digest,
         "fields": fields,
+        "request_fields": request_fields,
         "basis": package,
     }
     encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False)

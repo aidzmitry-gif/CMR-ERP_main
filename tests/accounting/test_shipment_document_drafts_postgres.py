@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 
+from core.domain.models import Counterparty
 from modules.accounting import service, shipment_document_draft, shipment_document_drafts
 from modules.accounting.models import ShipmentPreparationDraft
 from tests.accounting.test_postgres import pg_factory  # noqa: F401
@@ -20,6 +21,12 @@ async def test_concurrent_tn_ttn_saves_create_one_version_and_sql_blocks_mutatio
     factory, organization_id, act, _ = await prepare_accounting(physical_pg)
     package = shipment_document_draft.build(act, "ttn")
     source_key = act["source_key"]
+    async with factory() as session:
+        recipient = Counterparty(name="Synthetic TN/TTN recipient", unp=None)
+        session.add(recipient)
+        await session.flush()
+        recipient_id = recipient.id
+        await session.commit()
 
     async def write():
         async with factory() as session:
@@ -30,7 +37,10 @@ async def test_concurrent_tn_ttn_saves_create_one_version_and_sql_blocks_mutatio
                     request_key=uuid4(),
                     expected_revision=0,
                     source_digest=act["digest"],
-                    fields={"sender_legal_entity": "Synthetic sender"},
+                    fields={
+                        "recipient_counterparty_id": recipient_id,
+                        "recipient_counterparty_revision": 1,
+                    },
                 )
                 row = await shipment_document_drafts.save(
                     session, organization_id, source_key, package, data, "allocator",

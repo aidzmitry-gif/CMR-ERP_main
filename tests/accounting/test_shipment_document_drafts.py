@@ -2,6 +2,7 @@ from uuid import uuid4
 
 from sqlalchemy import func, select, update
 
+from core.domain.models import Counterparty
 from modules.accounting import routes
 from modules.accounting.models import AccessGrant, Entry, ShipmentPreparationDraft
 
@@ -29,8 +30,8 @@ def receipt(organization_id, source_key, digest="a" * 64):
 
 def body(digest="a" * 64, *, expected_revision=0, request_key=None, **field_changes):
     fields = {
-        "sender_legal_entity": "ООО Альфа",
-        "recipient_legal_entity": "ООО Бета",
+        "recipient_counterparty_id": 1,
+        "recipient_counterparty_revision": 1,
         "contract_reference": "Договор 12",
         "document_number": "Черновик 12",
         "document_date": "2026-09-13",
@@ -69,12 +70,23 @@ async def test_tn_ttn_draft_versions_replay_history_and_conflict_without_posting
     assert initial.status_code == 200, initial.text
     assert initial.json()["saved_revision"] == 0
     assert initial.json()["can_issue"] is False
+    assert initial.json()["saved_fields"]["sender_identity"] == {
+        "reference": "accounting.organization", "id": organization_id,
+        "name": "Synthetic test company", "unp": "999999999",
+    }
+    assert initial.json()["directory_identity_status"] == "recipient_required"
     first_body = body()
     first = await client.post(url, json=first_body)
     assert first.status_code == 200, first.text
     assert first.json()["saved_revision"] == 1
     assert first.json()["saved_by"] == "tester"
     assert first.json()["saved_at"].endswith("Z")
+    assert first.json()["saved_fields"]["sender_legal_entity"] == "Synthetic test company"
+    assert first.json()["saved_fields"]["recipient_identity"] == {
+        "reference": "core.counterparties", "id": 1,
+        "name": "supplier1", "unp": "190000001", "revision": 1,
+    }
+    assert first.json()["directory_identity_status"] == "verified"
     assert first.json()["history"][0]["actor"] == "tester"
     assert first.json()["can_issue"] is False
 
@@ -83,12 +95,13 @@ async def test_tn_ttn_draft_versions_replay_history_and_conflict_without_posting
     assert replay.json()["saved_revision"] == 1
     assert await db.scalar(select(func.count()).select_from(ShipmentPreparationDraft)) == 1
 
-    stale = await client.post(url, json=body(expected_revision=0, recipient_legal_entity="ООО Другая"))
+    stale = await client.post(url, json=body(expected_revision=0, document_number="Черновик 13"))
     assert stale.status_code == 409
-    second = await client.post(url, json=body(expected_revision=1, sender_legal_entity="ООО Гамма"))
+    second = await client.post(url, json=body(expected_revision=1, document_number="Черновик 13"))
     assert second.status_code == 200, second.text
-    change = next(item for item in second.json()["history"][1]["changes"] if item["field"] == "sender_legal_entity")
-    assert (change["before"], change["after"]) == ("ООО Альфа", "ООО Гамма")
+    change = next(item for item in second.json()["history"][1]["changes"] if item["field"] == "document_number")
+    assert (change["before"], change["after"]) == ("Черновик 12", "Черновик 13")
+    assert second.json()["history"][0]["fields"]["sender_identity"]["name"] == "Synthetic test company"
     assert second.json()["history"][1]["actor"] == "tester"
     assert second.json()["history"][1]["created_at"].endswith("Z")
     assert await db.scalar(select(func.count()).select_from(ShipmentPreparationDraft)) == 2
@@ -123,3 +136,56 @@ async def test_tn_draft_rejects_ttn_only_fields(client, book, monkeypatch):
     data = body()
     data["kind"] = "tn"
     assert (await client.post(url, json=data)).status_code == 422
+
+
+async def test_tn_ttn_party_identity_comes_from_live_directory_and_replay_keeps_snapshot(client, db, book, monkeypatch):
+    organization_id = book[0]
+    source_key = str(uuid4())
+    await connect_source(monkeypatch, organization_id, source_key)
+    url = f"/accounting/organizations/{organization_id}/shipments/{source_key}/tn-ttn-draft"
+    request = body()
+
+    first = await client.post(url, json=request)
+    assert first.status_code == 200, first.text
+    counterparty = await db.get(Counterparty, 1)
+    counterparty.legal_name = "ООО Переименованный поставщик"
+    await db.commit()
+    current_revision = await db.scalar(select(Counterparty.revision).where(Counterparty.id == 1))
+
+    replay = await client.post(url, json=request)
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["saved_fields"]["recipient_identity"]["name"] == "supplier1"
+
+    stale_reference = body(expected_revision=1)
+    assert (await client.post(url, json=stale_reference)).status_code == 409
+    current_reference = body(expected_revision=1, recipient_counterparty_revision=current_revision)
+    second = await client.post(url, json=current_reference)
+    assert second.status_code == 200, second.text
+    assert second.json()["history"][0]["fields"]["recipient_identity"]["name"] == "supplier1"
+    assert second.json()["saved_fields"]["recipient_identity"]["name"] == "ООО Переименованный поставщик"
+    identity_change = next(
+        item for item in second.json()["history"][1]["changes"]
+        if item["field"] == "recipient_identity.name"
+    )
+    assert (identity_change["before"], identity_change["after"]) == (
+        "supplier1", "ООО Переименованный поставщик",
+    )
+
+
+async def test_tn_ttn_rejects_free_text_party_names_and_inactive_recipients(client, db, book, monkeypatch):
+    organization_id = book[0]
+    source_key = str(uuid4())
+    await connect_source(monkeypatch, organization_id, source_key)
+    url = f"/accounting/organizations/{organization_id}/shipments/{source_key}/tn-ttn-draft"
+
+    free_text = body()
+    free_text["fields"]["recipient_legal_entity"] = "Not a directory record"
+    assert (await client.post(url, json=free_text)).status_code == 422
+
+    recipient = await db.get(Counterparty, 1)
+    recipient.is_active = False
+    await db.commit()
+    inactive = await client.post(url, json=body())
+    assert inactive.status_code == 409
+    assert "active recipient" in inactive.text
+    assert await db.scalar(select(func.count()).select_from(ShipmentPreparationDraft)) == 0
