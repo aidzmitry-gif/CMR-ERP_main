@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { canonical, fetchProcurementSkus, fetchProcurementSuppliers, type ProcurementSkuOption, type ProcurementSupplierOption } from "@/lib/procurement-machine";
@@ -22,6 +22,16 @@ type CorrectionReadinessState = { context: string; status: "idle" | "loading" | 
 type InboundVatEvidenceKind = "supplier_eschf_xml" | "supporting_document_pdf";
 type InboundVatEvidenceFile = { file_id: number; organization_id: number; receipt_id: number; receipt_version: number; kind: InboundVatEvidenceKind; tax_period: string; reference: string; filename: string; content_type: string; size_bytes: number; sha256: string; evidence: string; request_key: string; supersedes_id: number | null; digest: string; actor: string; created_at: string; is_current: boolean; bytes_verified_at_upload: true; signature_verified: false; document_facts_verified: false; posting_available: false };
 type InboundVatEvidenceState = { context: string; status: "idle" | "loading" | "ready" | "error"; files?: Record<InboundVatEvidenceKind, InboundVatEvidenceFile[]> };
+type InboundVatWorkpaperFlags = { review_only: true; signature_verified: false; document_facts_verified: false; deduction_eligibility_assessed: false; accountant_accepted: false; posting_available: false };
+type InboundVatWorkpaperEvidence = { file_id: number; receipt_id: number; receipt_version: number; kind: InboundVatEvidenceKind; tax_period: string; reference: string; filename: string; content_type: string; size_bytes: number; sha256: string; digest: string };
+type InboundVatWorkpaperLine = { line_id: number; account_id: number; account_code: string; account_title: string; category: string; cash: boolean; amount: string; currency: string; dimensions: Record<string, unknown> };
+type InboundVatWorkpaperSnapshot = InboundVatWorkpaperFlags & { organization_id: number; receipt: { correction_receipt_id: number; correction_version: number; correction_revision_id: number; correction_document_digest: string; original_receipt_id: number; original_version: number; original_revision_id: number; original_document_digest: string; source_entry_id: number; source_entry: string; source_version: number; source_entry_digest: string; source_posting_date: string; source_operation_date: string }; tax_period: string; classification: string[]; source_account_18_lines: InboundVatWorkpaperLine[]; evidence_files: InboundVatWorkpaperEvidence[] };
+type InboundVatWorkpaperPreview = InboundVatWorkpaperFlags & { organization_id: number; receipt_id: number; receipt_version: number; original_receipt_id: number; original_version: number; tax_period: string; basis: InboundVatWorkpaperSnapshot; basis_digest: string; status: "review_only_workpaper_ready"; source_account_18_line_count: number; current_evidence_file_count: number; evidence_bytes_verified_at_review: true };
+type InboundVatWorkpaperConfirmBody = { request_key: string; receipt_id: number; receipt_version: number; tax_period: string; basis_digest: string; reviewer_evidence: string; supersedes_workpaper_id: number | null };
+type InboundVatWorkpaperResult = InboundVatWorkpaperFlags & { workpaper_id: number; organization_id: number; receipt_id: number; receipt_version: number; original_receipt_id: number; original_version: number; source_entry_id: number; source_entry_digest: string; tax_period: string; revision: number; supersedes_workpaper_id: number | null; request_key: string; request_digest: string; basis_digest: string; snapshot_digest: string; reviewer_evidence: string; reviewed_by: string; created_at: string; snapshot: InboundVatWorkpaperSnapshot; status: "review_only_workpaper"; evidence_bytes_verified_at_review: true };
+type PendingInboundVatWorkpaper = { organization_id: number; receipt_id: number; receipt_version: number; tax_period: string; request_key: string; body: InboundVatWorkpaperConfirmBody; body_json: string; journal_json: string };
+type InboundVatWorkpaperHistoryState = { scope: string; status: "idle" | "loading" | "ready" | "error"; items: InboundVatWorkpaperResult[]; error: string };
+type InboundVatWorkpaperPreviewState = { scope: string; evidence_digest: string; status: "idle" | "loading" | "ready" | "error"; data?: InboundVatWorkpaperPreview; error: string };
 type InboundVatEvidenceForm = { file: File | null; reference: string; tax_period: string; evidence: string };
 const evidenceKinds: { kind: InboundVatEvidenceKind; title: string; accept: string; mime: string[]; extension: string }[] = [
   { kind: "supplier_eschf_xml", title: "Электронный счёт-фактура поставщика (XML)", accept: ".xml,application/xml,text/xml", mime: ["application/xml", "text/xml"], extension: ".xml" },
@@ -29,7 +39,10 @@ const evidenceKinds: { kind: InboundVatEvidenceKind; title: string; accept: stri
 ];
 const evidenceMaxBytes = 10 * 1024 * 1024;
 const evidenceSha256 = /^[a-f0-9]{64}$/;
+const taxPeriodPattern = /^\d{4}-(0[1-9]|1[0-2])$/;
 const secureUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const inboundVatWorkpaperFlags = { review_only: true, signature_verified: false, document_facts_verified: false,
+  deduction_eligibility_assessed: false, accountant_accepted: false, posting_available: false } as const;
 type PendingSave = { org: string; receiptId: number | null; version: number; key: string; document: Document; closeAfterSave: boolean };
 type PendingContractRevoke = { org: string; supplierId: number; contractId: number; key: string; reason: string };
 type OwnedOrder = { kind: string; source_id: number; snapshot: { number: string; supplier: string } };
@@ -234,7 +247,7 @@ async function accountingRequest<T>(path: string, options?: RequestInit): Promis
   }
   const detail = !Array.isArray(data) && typeof (data as Record<string, unknown>).detail === "string"
     ? (data as Record<string, unknown>).detail as string : null;
-  if (!response.ok) throw new Error(detail ?? "Не удалось сохранить или загрузить доказательство НДС.");
+  if (!response.ok) throw Object.assign(new Error(detail ?? "Не удалось сохранить или загрузить проверочные данные НДС."), { status: response.status });
   return data as T;
 }
 function evidenceScopePath(org: string, receipt: Receipt, kind: InboundVatEvidenceKind) {
@@ -278,6 +291,269 @@ function checkedEvidenceList(value: unknown, org: string, receipt: Receipt, kind
     ids.add(row.file_id);
   }
   return rows;
+}
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+function positiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+function validIsoDate(value: unknown) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value));
+}
+function workpaperFlagsMatch(value: Record<string, unknown>) {
+  return Object.entries(inboundVatWorkpaperFlags).every(([key, expected]) => value[key] === expected);
+}
+function checkedCurrentWorkpaperEvidence(value: InboundVatEvidenceState, org: string, receipt: Receipt,
+  taxPeriod: string): InboundVatWorkpaperEvidence[] {
+  if (!receipt.correction_of || !taxPeriodPattern.test(taxPeriod))
+    throw new Error("Укажите допустимый налоговый период для текущей редакции исправления.");
+  if (value.context !== JSON.stringify([org, org, receipt.id, receipt.version, receipt.correction_of.receipt_id,
+    receipt.correction_of.version, receipt.correction_of.entry_id]) || value.status !== "ready" || !value.files)
+    throw new Error("Не загружены проверенные доказательства текущей редакции исправления.");
+  const files = Object.values(value.files).flatMap((history) => history.at(-1) ? [history.at(-1)!] : []);
+  if (!files.length) throw new Error("Для просмотра рабочей ведомости требуется хотя бы один текущий файл доказательства.");
+  if (files.some((file) => file.organization_id !== Number(org) || file.receipt_id !== receipt.id
+    || file.receipt_version !== receipt.version || file.is_current !== true || file.bytes_verified_at_upload !== true
+    || !evidenceSha256.test(file.sha256) || !evidenceSha256.test(file.digest)))
+    throw new Error("Доказательство не привязано к текущему юрлицу и редакции либо его байты не проверены.");
+  if (files.some((file) => file.tax_period !== taxPeriod))
+    throw new Error("Налоговый период должен совпадать с периодом каждого текущего файла доказательства.");
+  return files.map(({ file_id, receipt_id, receipt_version, kind, tax_period, reference, filename,
+    content_type, size_bytes, sha256, digest }) => ({ file_id, receipt_id, receipt_version, kind,
+    tax_period, reference, filename, content_type, size_bytes, sha256, digest }))
+    .sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.file_id - b.file_id));
+}
+function checkedWorkpaperSnapshot(value: unknown, org: string, receipt: Receipt, taxPeriod: string): InboundVatWorkpaperSnapshot {
+  const invalid = () => new Error("Снимок рабочей ведомости не совпадает с юрлицом, исправлением или безопасным review-only контрактом.");
+  if (!isRecord(value)) throw invalid();
+  const snapshot = value;
+  const snapshotKeys = ["organization_id", "receipt", "tax_period", "classification", "source_account_18_lines", "evidence_files",
+    ...Object.keys(inboundVatWorkpaperFlags)];
+  const sourceKeys = ["correction_receipt_id", "correction_version", "correction_revision_id", "correction_document_digest",
+    "original_receipt_id", "original_version", "original_revision_id", "original_document_digest", "source_entry_id",
+    "source_entry", "source_version", "source_entry_digest", "source_posting_date", "source_operation_date"];
+  const lineKeys = ["line_id", "account_id", "account_code", "account_title", "category", "cash", "amount", "currency", "dimensions"];
+  const evidenceKeys = ["file_id", "receipt_id", "receipt_version", "kind", "tax_period", "reference", "filename",
+    "content_type", "size_bytes", "sha256", "digest"];
+  if (!exactKeys(snapshot, snapshotKeys) || !workpaperFlagsMatch(snapshot)
+    || snapshot.organization_id !== Number(org) || !positiveInteger(snapshot.organization_id)
+    || snapshot.tax_period !== taxPeriod || !taxPeriodPattern.test(taxPeriod)
+    || !Array.isArray(snapshot.classification) || snapshot.classification.length !== 1 || snapshot.classification[0] !== "vat_change"
+    || !isRecord(snapshot.receipt) || !exactKeys(snapshot.receipt, sourceKeys)) throw invalid();
+  const source = snapshot.receipt;
+  if (!positiveInteger(source.correction_receipt_id) || source.correction_receipt_id !== receipt.id
+    || !positiveInteger(source.correction_version) || source.correction_version !== receipt.version
+    || !positiveInteger(source.correction_revision_id)
+    || typeof source.correction_document_digest !== "string" || !evidenceSha256.test(source.correction_document_digest)
+    || !positiveInteger(source.original_receipt_id) || source.original_receipt_id !== receipt.correction_of?.receipt_id
+    || !positiveInteger(source.original_version) || source.original_version !== receipt.correction_of?.version
+    || !positiveInteger(source.original_revision_id)
+    || typeof source.original_document_digest !== "string" || !evidenceSha256.test(source.original_document_digest)
+    || !positiveInteger(source.source_entry_id) || source.source_entry_id !== receipt.correction_of?.entry_id
+    || source.source_entry !== `procurement:receipt:${source.original_receipt_id}`
+    || source.source_version !== source.original_version
+    || typeof source.source_entry_digest !== "string" || !evidenceSha256.test(source.source_entry_digest)
+    || !validIsoDate(source.source_posting_date) || !validIsoDate(source.source_operation_date)
+    || !Array.isArray(snapshot.source_account_18_lines) || snapshot.source_account_18_lines.length < 1
+    || !Array.isArray(snapshot.evidence_files) || snapshot.evidence_files.length < 1) throw invalid();
+  const lineIds = new Set<number>();
+  for (const candidate of snapshot.source_account_18_lines) {
+    if (!isRecord(candidate) || !exactKeys(candidate, lineKeys)
+      || !positiveInteger(candidate.line_id) || lineIds.has(candidate.line_id)
+      || !positiveInteger(candidate.account_id) || typeof candidate.account_code !== "string"
+      || !(candidate.account_code === "18" || candidate.account_code.startsWith("18."))
+      || typeof candidate.account_title !== "string" || typeof candidate.category !== "string"
+      || typeof candidate.cash !== "boolean" || typeof candidate.amount !== "string"
+      || !/^\d+\.\d{2}$/.test(candidate.amount) || typeof candidate.currency !== "string"
+      || !isRecord(candidate.dimensions)) throw invalid();
+    lineIds.add(candidate.line_id);
+  }
+  const evidenceIds = new Set<number>();
+  for (const candidate of snapshot.evidence_files) {
+    if (!isRecord(candidate) || !exactKeys(candidate, evidenceKeys)
+      || !positiveInteger(candidate.file_id) || evidenceIds.has(candidate.file_id)
+      || candidate.receipt_id !== receipt.id || candidate.receipt_version !== receipt.version
+      || (candidate.kind !== "supplier_eschf_xml" && candidate.kind !== "supporting_document_pdf")
+      || candidate.tax_period !== taxPeriod || typeof candidate.reference !== "string" || !candidate.reference.trim()
+      || typeof candidate.filename !== "string" || !candidate.filename.trim()
+      || typeof candidate.content_type !== "string" || !candidate.content_type.trim()
+      || !positiveInteger(candidate.size_bytes) || typeof candidate.sha256 !== "string" || !evidenceSha256.test(candidate.sha256)
+      || typeof candidate.digest !== "string" || !evidenceSha256.test(candidate.digest)) throw invalid();
+    evidenceIds.add(candidate.file_id);
+  }
+  return snapshot as unknown as InboundVatWorkpaperSnapshot;
+}
+async function sha256Canonical(value: unknown) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical(value)));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+async function checkedWorkpaperPreview(value: unknown, org: string, receipt: Receipt, taxPeriod: string,
+  expectedEvidence: InboundVatWorkpaperEvidence[]): Promise<InboundVatWorkpaperPreview> {
+  const invalid = () => new Error("Предпросмотр рабочей ведомости вернул повреждённую или устаревшую область данных.");
+  if (!isRecord(value)) throw invalid();
+  const row = value;
+  const keys = ["organization_id", "receipt_id", "receipt_version", "original_receipt_id", "original_version", "tax_period",
+    "basis", "basis_digest", "status", "source_account_18_line_count", "current_evidence_file_count", "evidence_bytes_verified_at_review",
+    ...Object.keys(inboundVatWorkpaperFlags)];
+  if (!exactKeys(row, keys) || !workpaperFlagsMatch(row)
+    || row.organization_id !== Number(org) || row.receipt_id !== receipt.id || row.receipt_version !== receipt.version
+    || row.original_receipt_id !== receipt.correction_of?.receipt_id || row.original_version !== receipt.correction_of?.version
+    || row.tax_period !== taxPeriod || row.status !== "review_only_workpaper_ready" || row.evidence_bytes_verified_at_review !== true
+    || !positiveInteger(row.source_account_18_line_count) || !positiveInteger(row.current_evidence_file_count)
+    || typeof row.basis_digest !== "string" || !evidenceSha256.test(row.basis_digest)) throw invalid();
+  const basis = checkedWorkpaperSnapshot(row.basis, org, receipt, taxPeriod);
+  if (basis.source_account_18_lines.length !== row.source_account_18_line_count
+    || basis.evidence_files.length !== row.current_evidence_file_count
+    || canonical(basis.evidence_files) !== canonical(expectedEvidence)
+    || await sha256Canonical(basis) !== row.basis_digest) throw invalid();
+  return row as unknown as InboundVatWorkpaperPreview;
+}
+async function checkedWorkpaperResult(value: unknown, org: string, receipt: Receipt, taxPeriod: string,
+  expectedBody?: InboundVatWorkpaperConfirmBody): Promise<InboundVatWorkpaperResult> {
+  const invalid = () => new Error("Сохранённая рабочая ведомость не подтверждает точный запрос, источник или review-only ограничения.");
+  if (!isRecord(value)) throw invalid();
+  const row = value;
+  const keys = ["workpaper_id", "organization_id", "receipt_id", "receipt_version", "original_receipt_id", "original_version",
+    "source_entry_id", "source_entry_digest", "tax_period", "revision", "supersedes_workpaper_id", "request_key", "request_digest",
+    "basis_digest", "snapshot_digest", "reviewer_evidence", "reviewed_by", "created_at", "snapshot", "status",
+    "evidence_bytes_verified_at_review", ...Object.keys(inboundVatWorkpaperFlags)];
+  if (!exactKeys(row, keys) || !workpaperFlagsMatch(row)
+    || !positiveInteger(row.workpaper_id) || row.organization_id !== Number(org)
+    || row.receipt_id !== receipt.id || row.receipt_version !== receipt.version
+    || row.original_receipt_id !== receipt.correction_of?.receipt_id || row.original_version !== receipt.correction_of?.version
+    || row.tax_period !== taxPeriod || !positiveInteger(row.revision)
+    || !(row.supersedes_workpaper_id === null || positiveInteger(row.supersedes_workpaper_id))
+    || typeof row.request_key !== "string" || !secureUuid.test(row.request_key)
+    || typeof row.request_digest !== "string" || !evidenceSha256.test(row.request_digest)
+    || typeof row.basis_digest !== "string" || !evidenceSha256.test(row.basis_digest)
+    || typeof row.snapshot_digest !== "string" || !evidenceSha256.test(row.snapshot_digest)
+    || typeof row.reviewer_evidence !== "string" || row.reviewer_evidence.trim().length < 10
+    || typeof row.reviewed_by !== "string" || !row.reviewed_by.trim()
+    || typeof row.created_at !== "string" || !Number.isFinite(Date.parse(row.created_at))
+    || row.status !== "review_only_workpaper" || row.evidence_bytes_verified_at_review !== true) throw invalid();
+  const snapshot = checkedWorkpaperSnapshot(row.snapshot, org, receipt, taxPeriod);
+  const body: InboundVatWorkpaperConfirmBody = expectedBody ?? {
+    request_key: row.request_key as string,
+    receipt_id: receipt.id,
+    receipt_version: receipt.version,
+    tax_period: taxPeriod,
+    basis_digest: row.basis_digest as string,
+    reviewer_evidence: (row.reviewer_evidence as string).trim(),
+    supersedes_workpaper_id: row.supersedes_workpaper_id as number | null,
+  };
+  if (row.request_key !== body.request_key || body.receipt_id !== receipt.id || body.receipt_version !== receipt.version
+    || body.tax_period !== taxPeriod || row.basis_digest !== body.basis_digest
+    || row.reviewer_evidence !== body.reviewer_evidence.trim() || row.supersedes_workpaper_id !== body.supersedes_workpaper_id
+    || row.source_entry_id !== snapshot.receipt.source_entry_id || row.source_entry_digest !== snapshot.receipt.source_entry_digest
+    || await sha256Canonical(snapshot) !== row.snapshot_digest || row.snapshot_digest !== row.basis_digest
+    || await sha256Canonical({ ...body, reviewer_evidence: body.reviewer_evidence.trim() }) !== row.request_digest) throw invalid();
+  return row as unknown as InboundVatWorkpaperResult;
+}
+function workpaperHistoryChain(value: unknown, org: string, receipt: Receipt, taxPeriod: string): Promise<InboundVatWorkpaperResult[]> {
+  if (!Array.isArray(value)) throw new Error("История рабочих ведомостей вернула неверный формат.");
+  return Promise.all(value.map((row) => checkedWorkpaperResult(row, org, receipt, taxPeriod))).then((items) => {
+    const ids = new Set<number>();
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index];
+      const previous = items[index - 1];
+      if (ids.has(item.workpaper_id) || item.revision !== index + 1
+        || (index === 0 ? item.supersedes_workpaper_id !== null
+          : item.supersedes_workpaper_id !== previous!.workpaper_id))
+        throw new Error("История рабочих ведомостей нарушает последовательность неизменяемых редакций.");
+      ids.add(item.workpaper_id);
+    }
+    return items;
+  });
+}
+const workpaperJournalKey = (org: string, receiptId: number, receiptVersion: number, taxPeriod: string) =>
+  `inbound-vat-correction-workpaper:v1:${org}:${receiptId}:${receiptVersion}:${taxPeriod}`;
+function readPendingWorkpaper(org: string, receipt: Receipt, taxPeriod: string): PendingInboundVatWorkpaper | null {
+  const raw = sessionStorage.getItem(workpaperJournalKey(org, receipt.id, receipt.version, taxPeriod));
+  if (raw === null) return null;
+  const invalid = () => new Error("Журнал подтверждения рабочей ведомости повреждён; новый запрос для этой области заблокирован.");
+  let value: unknown;
+  try { value = JSON.parse(raw); } catch { throw invalid(); }
+  if (!isRecord(value) || !exactKeys(value, ["organization_id", "receipt_id", "receipt_version", "tax_period", "request_key", "body_json"])) throw invalid();
+  let bodyValue: unknown;
+  try { bodyValue = JSON.parse(String(value.body_json)); } catch { throw invalid(); }
+  const bodyKeys = ["request_key", "receipt_id", "receipt_version", "tax_period", "basis_digest", "reviewer_evidence", "supersedes_workpaper_id"];
+  if (!isRecord(bodyValue) || !exactKeys(bodyValue, bodyKeys)
+    || value.organization_id !== Number(org) || value.receipt_id !== receipt.id || value.receipt_version !== receipt.version
+    || value.tax_period !== taxPeriod || typeof value.request_key !== "string" || !secureUuid.test(value.request_key)
+    || typeof value.body_json !== "string" || !positiveInteger(bodyValue.receipt_id) || bodyValue.receipt_id !== receipt.id
+    || !positiveInteger(bodyValue.receipt_version) || bodyValue.receipt_version !== receipt.version
+    || bodyValue.tax_period !== taxPeriod || bodyValue.request_key !== value.request_key
+    || typeof bodyValue.basis_digest !== "string" || !evidenceSha256.test(bodyValue.basis_digest)
+    || typeof bodyValue.reviewer_evidence !== "string" || bodyValue.reviewer_evidence.trim().length < 10
+    || bodyValue.reviewer_evidence.trim() !== bodyValue.reviewer_evidence
+    || !(bodyValue.supersedes_workpaper_id === null || positiveInteger(bodyValue.supersedes_workpaper_id))) throw invalid();
+  return { organization_id: value.organization_id as number, receipt_id: value.receipt_id as number,
+    receipt_version: value.receipt_version as number, tax_period: taxPeriod, request_key: value.request_key as string,
+    body: bodyValue as unknown as InboundVatWorkpaperConfirmBody, body_json: value.body_json as string, journal_json: raw };
+}
+function storePendingWorkpaper(command: Omit<PendingInboundVatWorkpaper, "journal_json">) {
+  const journal = { organization_id: command.organization_id, receipt_id: command.receipt_id,
+    receipt_version: command.receipt_version, tax_period: command.tax_period, request_key: command.request_key,
+    body_json: command.body_json };
+  const raw = JSON.stringify(journal);
+  const key = workpaperJournalKey(String(command.organization_id), command.receipt_id, command.receipt_version, command.tax_period);
+  sessionStorage.setItem(key, raw);
+  if (sessionStorage.getItem(key) !== raw) throw new Error("Не удалось сохранить точный запрос рабочей ведомости. Отправка не выполнена.");
+  return { ...command, journal_json: raw };
+}
+function clearPendingWorkpaper(command: PendingInboundVatWorkpaper, org: string, receipt: Receipt) {
+  const key = workpaperJournalKey(org, receipt.id, receipt.version, command.tax_period);
+  if (sessionStorage.getItem(key) === command.journal_json) sessionStorage.removeItem(key);
+}
+function pendingWorkpaperJournalsForReceipt(org: string, receiptId: number) {
+  const prefix = `inbound-vat-correction-workpaper:v1:${org}:${receiptId}:`;
+  const journals: { key: string; receipt_version: number | null; tax_period: string | null }[] = [];
+  for (let index = 0; index < sessionStorage.length; index++) {
+    const key = sessionStorage.key(index);
+    if (!key?.startsWith(prefix)) continue;
+    const [versionText, taxPeriod, ...extra] = key.slice(prefix.length).split(":");
+    const version = /^\d+$/.test(versionText) ? Number(versionText) : null;
+    journals.push({ key, receipt_version: positiveInteger(version) ? version : null,
+      tax_period: extra.length === 0 && taxPeriodPattern.test(taxPeriod) ? taxPeriod : null });
+  }
+  return journals.sort((a, b) => (a.receipt_version ?? 0) - (b.receipt_version ?? 0)
+    || (a.tax_period ?? "").localeCompare(b.tax_period ?? "") || a.key.localeCompare(b.key));
+}
+function pendingWorkpaperJournalForReceipt(org: string, receiptId: number) {
+  return pendingWorkpaperJournalsForReceipt(org, receiptId)[0] ?? null;
+}
+function receiptAtWorkpaperVersion(receipt: Receipt, version: number): Receipt {
+  const revisions = receipt.revisions.filter((revision) => revision.version <= version);
+  if (!receipt.correction_of || !positiveInteger(version) || !revisions.some((revision) => revision.version === version))
+    throw new Error(`Редакция исправления ${version} отсутствует в загруженной истории.`);
+  return { ...receipt, version, revisions };
+}
+function WorkpaperSnapshotDetails({ snapshot }: { snapshot: InboundVatWorkpaperSnapshot }) {
+  const source = snapshot.receipt;
+  return <div className="space-y-2 text-sm">
+    <p>Исправление: накладная № {source.correction_receipt_id}, версия {source.correction_version}, снимок редакции № {source.correction_revision_id} · SHA-256 документа {source.correction_document_digest}</p>
+    <p>Исходная накладная: № {source.original_receipt_id}, версия {source.original_version}, снимок редакции № {source.original_revision_id} · SHA-256 документа {source.original_document_digest}</p>
+    <p>Исходная проводка: запись № {source.source_entry_id} ({source.source_entry}), версия {source.source_version} · SHA-256 {source.source_entry_digest}</p>
+    <p>Даты источника: проводка {source.source_posting_date}, операция {source.source_operation_date} · классификация: только изменение НДС.</p>
+    <div><h5 className="font-medium">Строки исходной проводки по счёту 18</h5>
+      <ul className="list-disc pl-5">{snapshot.source_account_18_lines.map((line) =>
+        <li key={line.line_id}>Строка № {line.line_id} · счёт {line.account_code} · {line.account_title} · {line.amount} {line.currency}</li>)}</ul>
+    </div>
+    <div><h5 className="font-medium">Файлы, привязанные к рабочей ведомости · период {snapshot.tax_period}</h5>
+      <ul className="list-disc pl-5">{snapshot.evidence_files.map((file) => <li key={file.file_id}>
+        Файл № {file.file_id} · {file.kind} · {file.filename} · SHA-256 {file.sha256} · digest {file.digest}
+      </li>)}</ul>
+    </div>
+    <dl className="grid gap-1 md:grid-cols-2">
+      <div><dt>Review-only</dt><dd>{snapshot.review_only ? "Да" : "Нет"}</dd></div>
+      <div><dt>Подпись проверена</dt><dd>{snapshot.signature_verified ? "Да" : "Нет"}</dd></div>
+      <div><dt>Факты документа проверены</dt><dd>{snapshot.document_facts_verified ? "Да" : "Нет"}</dd></div>
+      <div><dt>Право на вычет оценено</dt><dd>{snapshot.deduction_eligibility_assessed ? "Да" : "Нет"}</dd></div>
+      <div><dt>Принято бухгалтером</dt><dd>{snapshot.accountant_accepted ? "Да" : "Нет"}</dd></div>
+      <div><dt>Проведение доступно</dt><dd>{snapshot.posting_available ? "Да" : "Нет"}</dd></div>
+    </dl>
+  </div>;
 }
 function vatOnlyEvidenceAllowed(readiness: CorrectionReadiness | undefined, org: string, receipt: Receipt) {
   return Boolean(readiness && receipt.correction_of && Number(org) > 0
@@ -344,6 +620,19 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
   const [evidenceMessage, setEvidenceMessage] = useState("");
   const evidenceMessageContext = useRef("");
   const evidenceUploadEpoch = useRef(0);
+  const [workpaperTaxPeriod, setWorkpaperTaxPeriod] = useState("");
+  const [workpaperReviewerEvidence, setWorkpaperReviewerEvidence] = useState("");
+  const [workpaperPreview, setWorkpaperPreview] = useState<InboundVatWorkpaperPreviewState>({ scope: "", evidence_digest: "", status: "idle", error: "" });
+  const [workpaperHistory, setWorkpaperHistory] = useState<InboundVatWorkpaperHistoryState>({ scope: "", status: "idle", items: [], error: "" });
+  const [pendingWorkpaper, setPendingWorkpaper] = useState<PendingInboundVatWorkpaper | null>(null);
+  const [workpaperJournalError, setWorkpaperJournalError] = useState("");
+  const [workpaperMessage, setWorkpaperMessage] = useState("");
+  const [workpaperBusy, setWorkpaperBusy] = useState<"preview" | "confirm" | "recover" | null>(null);
+  const [workpaperHistoryReload, setWorkpaperHistoryReload] = useState(0);
+  const workpaperEpoch = useRef(0);
+  const workpaperCardEpoch = useRef(0);
+  const workpaperHistoryRequest = useRef(0);
+  const workpaperJournalLookup = useRef(0);
   const [uncertain, setUncertain] = useState(false);
   const [recoveryBlocked, setRecoveryBlocked] = useState(false);
   const [editorOpen, setEditorOpen] = useState(true);
@@ -367,9 +656,23 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       selected.correction_of.version, selected.correction_of.entry_id]) : "";
   const correctionContextRef = useRef(correctionContext);
   correctionContextRef.current = correctionContext;
+  const workpaperScope = selected?.correction_of ? JSON.stringify([correctionContext, workpaperTaxPeriod]) : "";
+  const workpaperScopeRef = useRef(workpaperScope);
+  workpaperScopeRef.current = workpaperScope;
+  const workpaperEvidenceDigest = inboundVatEvidence.context === correctionContext && inboundVatEvidence.status === "ready" && inboundVatEvidence.files
+    ? canonical(Object.values(inboundVatEvidence.files).flatMap((history) => history.at(-1) ? [history.at(-1)] : []).map((file) => ({
+      file_id: file!.file_id, receipt_id: file!.receipt_id, receipt_version: file!.receipt_version, kind: file!.kind,
+      tax_period: file!.tax_period, sha256: file!.sha256, digest: file!.digest,
+    })).sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.file_id - b.file_id))) : "";
+  const workpaperEvidenceDigestRef = useRef(workpaperEvidenceDigest);
+  workpaperEvidenceDigestRef.current = workpaperEvidenceDigest;
   const correctionReadinessForSelection: CorrectionReadinessState = correctionReadiness.context === correctionContext
     ? correctionReadiness
     : { context: correctionContext, status: selected?.correction_of ? selectedOrg === org ? "loading" : "error" : "idle" };
+  const correctionReadinessRef = useRef(correctionReadinessForSelection);
+  correctionReadinessRef.current = correctionReadinessForSelection;
+  const inboundVatEvidenceRef = useRef(inboundVatEvidence);
+  inboundVatEvidenceRef.current = inboundVatEvidence;
   const dirty = JSON.stringify(document) !== JSON.stringify(selected ? selected.revisions.at(-1)!.document : blank());
   const confirmDiscard = useUnsavedDocumentGuard(dirty || busy || uncertain || contractBusy || contractRevokeUncertain, onPendingChange);
   const search = query.trim().toLocaleLowerCase("ru");
@@ -566,18 +869,228 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
     });
     setEvidenceMessage("");
   }, [correctionContext, selected]);
+  useEffect(() => {
+    workpaperEpoch.current += 1;
+    setWorkpaperTaxPeriod("");
+    setWorkpaperReviewerEvidence("");
+    setWorkpaperPreview({ scope: "", evidence_digest: "", status: "idle", error: "" });
+    setWorkpaperHistory({ scope: "", status: "idle", items: [], error: "" });
+    setPendingWorkpaper(null);
+    setWorkpaperJournalError("");
+    setWorkpaperMessage("");
+    setWorkpaperBusy(null);
+  }, [correctionContext]);
+  useEffect(() => { workpaperCardEpoch.current += 1; }, [correctionContext]);
+  useEffect(() => {
+    if (!selected?.correction_of || selectedOrg !== org || inboundVatEvidence.context !== correctionContext
+      || inboundVatEvidence.status !== "ready" || !inboundVatEvidence.files || workpaperTaxPeriod) return;
+    const currentPeriods = [...new Set(Object.values(inboundVatEvidence.files)
+      .flatMap((history) => history.at(-1) ? [history.at(-1)!.tax_period] : []))];
+    if (currentPeriods.length === 1 && taxPeriodPattern.test(currentPeriods[0])) {
+      workpaperEpoch.current += 1;
+      setWorkpaperTaxPeriod(currentPeriods[0]);
+    }
+  }, [org, selected, selectedOrg, correctionContext, inboundVatEvidence.context,
+    inboundVatEvidence.status, inboundVatEvidence.files, workpaperTaxPeriod]);
+  useEffect(() => { workpaperEpoch.current += 1; setWorkpaperBusy(null); }, [workpaperScope]);
+  const showNextPendingWorkpaper = useCallback((receipt: Receipt): { key: string } | null => {
+    let journals: ReturnType<typeof pendingWorkpaperJournalsForReceipt>;
+    try { journals = pendingWorkpaperJournalsForReceipt(org, receipt.id); }
+    catch {
+      setPendingWorkpaper(null);
+      setWorkpaperJournalError("Не удалось проверить оставшиеся журналы рабочей ведомости; новая версия заблокирована.");
+      return { key: "журнал недоступен" };
+    }
+    const journal = journals[0];
+    if (!journal) {
+      setPendingWorkpaper(null);
+      setWorkpaperJournalError("");
+      return null;
+    }
+    try {
+      if (!journal.receipt_version || !journal.tax_period) throw new Error("Ключ не содержит корректную версию и налоговый период.");
+      const journalReceipt = journal.receipt_version === receipt.version
+        ? receipt : receiptAtWorkpaperVersion(receipt, journal.receipt_version);
+      const command = readPendingWorkpaper(org, journalReceipt, journal.tax_period);
+      if (!command) throw new Error("Точный запрос не найден по ключу.");
+      setPendingWorkpaper(command);
+      setWorkpaperJournalError(`Остался несверенный запрос рабочей ведомости ${journal.key}; сохранение и переход заблокированы.`);
+    } catch (cause) {
+      setPendingWorkpaper(null);
+      const detail = cause instanceof Error ? cause.message : "формат запроса не подтверждён";
+      setWorkpaperJournalError(`Оставшийся журнал ${journal.key} нельзя безопасно сверить: ${detail}. Он сохранён, новая версия заблокирована.`);
+    }
+    return { key: journal.key };
+  }, [org]);
+  useEffect(() => {
+    const receipt = selected;
+    const scope = workpaperScope;
+    const taxPeriod = workpaperTaxPeriod;
+    if (!receipt?.correction_of || selectedOrg !== org || correctionReadinessForSelection.status !== "ready"
+      || correctionReadinessForSelection.context !== correctionContext || !taxPeriodPattern.test(taxPeriod)) {
+      setWorkpaperHistory({ scope, status: "idle", items: [], error: "" });
+      return;
+    }
+    const epoch = workpaperEpoch.current;
+    const requestId = ++workpaperHistoryRequest.current;
+    let current = true;
+    setWorkpaperHistory({ scope, status: "loading", items: [], error: "" });
+    const query = new URLSearchParams({ receipt_id: String(receipt.id), receipt_version: String(receipt.version), tax_period: taxPeriod });
+    void accountingRequest<unknown>(`/organizations/${org}/inbound-vat-correction-workpapers?${query.toString()}`)
+      .then((data) => workpaperHistoryChain(data, org, receipt, taxPeriod))
+      .then((items) => {
+        if (!current || requestId !== workpaperHistoryRequest.current || epoch !== workpaperEpoch.current
+          || workpaperScopeRef.current !== scope) return;
+        setWorkpaperHistory({ scope, status: "ready", items, error: "" });
+      })
+      .catch((cause: Error & { status?: number }) => {
+        if (!current || requestId !== workpaperHistoryRequest.current || epoch !== workpaperEpoch.current
+          || workpaperScopeRef.current !== scope) return;
+        setWorkpaperHistory({ scope, status: "error", items: [], error: cause.status === 403
+          ? `Доступ к истории рабочей ведомости запрещён (403): ${cause.message}` : cause.message });
+      });
+    return () => { current = false; };
+  }, [org, selected, selectedOrg, correctionContext, correctionReadinessForSelection.context,
+    correctionReadinessForSelection.status, workpaperScope, workpaperTaxPeriod, workpaperHistoryReload]);
+  useEffect(() => {
+    const receipt = selected;
+    const scope = workpaperScope;
+    const taxPeriod = workpaperTaxPeriod;
+    if (!receipt?.correction_of || selectedOrg !== org) {
+      setPendingWorkpaper(null);
+      setWorkpaperJournalError("");
+      return;
+    }
+    let journal: ReturnType<typeof pendingWorkpaperJournalForReceipt>;
+    try { journal = pendingWorkpaperJournalForReceipt(org, receipt.id); }
+    catch {
+      setPendingWorkpaper(null);
+      setWorkpaperJournalError("Не удалось проверить журнал рабочей ведомости; новая версия заблокирована.");
+      return;
+    }
+    if (journal && journal.receipt_version !== receipt.version) {
+      try {
+        if (!journal.receipt_version || !journal.tax_period) throw new Error("Ключ не содержит корректную версию и налоговый период.");
+        const oldReceipt = receiptAtWorkpaperVersion(receipt, journal.receipt_version);
+        const oldCommand = readPendingWorkpaper(org, oldReceipt, journal.tax_period);
+        if (!oldCommand) throw new Error("Сохранённый запрос рабочей ведомости не найден.");
+        setPendingWorkpaper(oldCommand);
+        setWorkpaperJournalError(`Есть несверенный запрос рабочей ведомости версии ${journal.receipt_version}; сверьте его, прежде чем изменять текущую версию.`);
+      } catch (cause) {
+        setPendingWorkpaper(null);
+        setWorkpaperJournalError(cause instanceof Error
+          ? `Не удалось подготовить сверку старого запроса: ${cause.message} Новая версия заблокирована.`
+          : "Не удалось подготовить сверку старого запроса; новая версия заблокирована.");
+      }
+      return;
+    }
+    if (journal && journal.tax_period !== taxPeriod) {
+      try {
+        if (!journal.tax_period) throw new Error("Ключ не содержит корректный налоговый период.");
+        const command = readPendingWorkpaper(org, receipt, journal.tax_period);
+        if (!command) throw new Error("Сохранённый запрос рабочей ведомости не найден.");
+        setPendingWorkpaper(command);
+        setWorkpaperJournalError(`Есть несверенный запрос за период ${journal.tax_period}; сверьте его, прежде чем изменять накладную.`);
+      } catch (cause) {
+        setPendingWorkpaper(null);
+        setWorkpaperJournalError(cause instanceof Error
+          ? `Не удалось подготовить сверку старого запроса: ${cause.message} Новая версия заблокирована.`
+          : "Не удалось подготовить сверку старого запроса; новая версия заблокирована.");
+      }
+      return;
+    }
+    if (correctionReadinessForSelection.status !== "ready"
+      || correctionReadinessForSelection.context !== correctionContext || !taxPeriodPattern.test(taxPeriod)) {
+      setPendingWorkpaper(null);
+      setWorkpaperJournalError("");
+      return;
+    }
+    let command: PendingInboundVatWorkpaper | null;
+    try { command = readPendingWorkpaper(org, receipt, taxPeriod); }
+    catch (cause) {
+      setPendingWorkpaper(null);
+      setWorkpaperJournalError(cause instanceof Error ? cause.message : "Журнал рабочей ведомости недоступен.");
+      return;
+    }
+    setPendingWorkpaper(command);
+    setWorkpaperJournalError("");
+    if (!command) return;
+    const epoch = workpaperEpoch.current;
+    const lookupId = ++workpaperJournalLookup.current;
+    let current = true;
+    setWorkpaperBusy("recover");
+    setWorkpaperMessage("Проверяю сохранённый ключ подтверждения рабочей ведомости.");
+    void accountingRequest<unknown>(`/organizations/${org}/inbound-vat-correction-workpapers/by-request/${command.request_key}`)
+      .then((data) => checkedWorkpaperResult(data, org, receipt, taxPeriod, command!.body))
+      .then((saved) => {
+        if (!current || lookupId !== workpaperJournalLookup.current || epoch !== workpaperEpoch.current
+          || workpaperScopeRef.current !== scope) return;
+        clearPendingWorkpaper(command!, org, receipt);
+        const next = showNextPendingWorkpaper(receipt);
+        setWorkpaperMessage(`Подтверждение найдено: сохранена рабочая ведомость № ${saved.workpaper_id}, редакция ${saved.revision}.${next
+          ? ` Следующий ключ ${next.key} остаётся заблокированным до сверки.` : " Все журналы этой накладной разрешены."}`);
+        setWorkpaperHistoryReload((value) => value + 1);
+      })
+      .catch((cause: Error & { status?: number }) => {
+        if (!current || lookupId !== workpaperJournalLookup.current || epoch !== workpaperEpoch.current
+          || workpaperScopeRef.current !== scope) return;
+        if (cause.status === 404) setWorkpaperMessage("Ответ не найден по сохранённому ключу. Повтор отправит тот же ключ и точное тело запроса.");
+        else setWorkpaperMessage(cause.status === 403
+          ? `Доступ к рабочей ведомости запрещён (403): ${cause.message}`
+          : `Не удалось сверить сохранённый запрос: ${cause.message}`);
+      }).finally(() => {
+        if (current && lookupId === workpaperJournalLookup.current && epoch === workpaperEpoch.current
+          && workpaperScopeRef.current === scope) setWorkpaperBusy(null);
+      });
+    return () => { current = false; };
+  }, [org, selected, selectedOrg, correctionContext, correctionReadinessForSelection.context,
+    correctionReadinessForSelection.status, workpaperScope, workpaperTaxPeriod, showNextPendingWorkpaper]);
   function open(row: Receipt | null) {
     if (pending.current || uncertain) {
       setError("Сначала подтвердите сохранённую попытку той же редакции. Открытие другой накладной сейчас запрещено.");
       return;
     }
+    if (workpaperBusy === "confirm" || workpaperBusy === "recover") {
+      setError("Дождитесь сверки рабочей ведомости; переход к другой накладной заблокирован.");
+      return;
+    }
+    if (selected?.correction_of && row?.id !== selected.id) {
+      try {
+        if (pendingWorkpaperJournalForReceipt(org, selected.id)) {
+          setError("Сначала сверьте сохранённую рабочую ведомость этой накладной; переход заблокирован.");
+          return;
+        }
+      } catch {
+        setError("Не удалось проверить журнал рабочей ведомости; переход к другой накладной заблокирован.");
+        return;
+      }
+    }
     if (!confirmDiscard()) return;
+    workpaperCardEpoch.current += 1;
+    workpaperEpoch.current += 1;
     setContracts([]); setContractError("");
     setSelected(row); setSelectedOrg(row ? org : null); setDocument(row ? structuredClone(row.revisions.at(-1)!.document) : blank());
+    setWorkpaperTaxPeriod("");
+    setWorkpaperReviewerEvidence("");
     setEditorOpen(true);
     pending.current = null; setUncertain(false); setError(""); setNotice("");
   }
   function save(closeAfterSave = false) {
+    if (selected?.correction_of) {
+      let journal: ReturnType<typeof pendingWorkpaperJournalForReceipt>;
+      try { journal = pendingWorkpaperJournalForReceipt(org, selected.id); }
+      catch {
+        setError("Не удалось проверить журнал рабочей ведомости; новая версия заблокирована.");
+        return;
+      }
+      if (journal || workpaperBusy === "confirm" || workpaperBusy === "recover") {
+        const older = Boolean(journal?.receipt_version && journal.receipt_version !== selected.version);
+        setError(older
+          ? `Сохранён запрос рабочей ведомости для версии ${journal?.receipt_version}; сначала сверьте его, новая версия заблокирована.`
+          : "Сначала сверьте сохранённую рабочую ведомость; новая версия накладной заблокирована.");
+        return;
+      }
+    }
     if (selected?.posting || busy || uncertain || pending.current) return;
     if (!document.supplier_id || document.supplier_unp == null) {
       setError("Выберите поставщика накладной из справочника."); return;
@@ -797,6 +1310,222 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
       if (isCurrentUpload()) setEvidenceBusy(null);
     }
   }
+  function currentWorkpaperEvidence(receipt: Receipt, taxPeriod: string) {
+    const readiness = correctionReadinessRef.current;
+    if (selectedOrg !== org || readiness.context !== correctionContext || readiness.status !== "ready"
+      || !vatOnlyEvidenceAllowed(readiness.data, org, receipt))
+      throw new Error("Рабочая ведомость доступна только для точной VAT-only редакции текущего юрлица.");
+    return checkedCurrentWorkpaperEvidence(inboundVatEvidenceRef.current, org, receipt, taxPeriod);
+  }
+  function workpaperRequestIsCurrent(scope: string, epoch: number, evidenceDigest?: string) {
+    return active.current && epoch === workpaperEpoch.current && workpaperScopeRef.current === scope
+      && (evidenceDigest === undefined || workpaperEvidenceDigestRef.current === evidenceDigest);
+  }
+  async function previewInboundVatWorkpaper() {
+    const receipt = selected;
+    const taxPeriod = workpaperTaxPeriod;
+    const scope = workpaperScope;
+    const epoch = workpaperEpoch.current;
+    if (!receipt?.correction_of || !taxPeriodPattern.test(taxPeriod) || workpaperBusy) return;
+    try {
+      const expectedEvidence = currentWorkpaperEvidence(receipt, taxPeriod);
+      const evidenceDigest = workpaperEvidenceDigest;
+      setWorkpaperBusy("preview");
+      setWorkpaperMessage("");
+      setWorkpaperPreview({ scope, evidence_digest: evidenceDigest, status: "loading", error: "" });
+      const preview = await accountingRequest<unknown>(`/organizations/${org}/inbound-vat-correction-workpapers/preview`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ receipt_id: receipt.id, receipt_version: receipt.version, tax_period: taxPeriod }),
+      });
+      const checked = await checkedWorkpaperPreview(preview, org, receipt, taxPeriod, expectedEvidence);
+      if (!workpaperRequestIsCurrent(scope, epoch, evidenceDigest)) return;
+      setWorkpaperPreview({ scope, evidence_digest: evidenceDigest, status: "ready", data: checked, error: "" });
+      setWorkpaperMessage("Предпросмотр привязан к текущей редакции и текущим байтово проверенным доказательствам.");
+    } catch (cause) {
+      if (!workpaperRequestIsCurrent(scope, epoch)) return;
+      const detail = cause instanceof Error ? cause.message : "Не удалось проверить основу рабочей ведомости.";
+      const errorMessage = (cause as Error & { status?: number }).status === 403
+        ? `Доступ к предпросмотру запрещён (403): ${detail}` : detail;
+      setWorkpaperPreview({ scope, evidence_digest: workpaperEvidenceDigestRef.current, status: "error", error: errorMessage });
+      setWorkpaperMessage("");
+    } finally {
+      if (workpaperRequestIsCurrent(scope, epoch)) setWorkpaperBusy(null);
+    }
+  }
+  function acceptSavedWorkpaper(command: PendingInboundVatWorkpaper, saved: InboundVatWorkpaperResult,
+    receipt: Receipt, scope: string, epoch: number, requestIsCurrent = () => workpaperRequestIsCurrent(scope, epoch)) {
+    if (!requestIsCurrent()) return;
+    clearPendingWorkpaper(command, org, receipt);
+    const selectedReceipt = selected?.id === receipt.id ? selected : receipt;
+    const next = showNextPendingWorkpaper(selectedReceipt);
+    setWorkpaperPreview({ scope, evidence_digest: "", status: "idle", error: "" });
+    setWorkpaperMessage(`Сохранена рабочая ведомость № ${saved.workpaper_id}, редакция ${saved.revision}, для версии накладной ${command.receipt_version}. Все review-only ограничения остаются включёнными.${next
+      ? ` Следующий ключ ${next.key} остаётся заблокированным до сверки.` : " Все журналы этой накладной разрешены."}`);
+    setWorkpaperHistoryReload((value) => value + 1);
+  }
+  async function confirmInboundVatWorkpaper() {
+    const receipt = selected;
+    const taxPeriod = workpaperTaxPeriod;
+    const scope = workpaperScope;
+    const epoch = workpaperEpoch.current;
+    const preview = workpaperPreview.scope === scope && workpaperPreview.status === "ready"
+      ? workpaperPreview.data : undefined;
+    const history = workpaperHistory.scope === scope && workpaperHistory.status === "ready"
+      ? workpaperHistory.items : undefined;
+    if (!receipt?.correction_of || !preview || !history || workpaperBusy || pendingWorkpaper || workpaperJournalError) return;
+    try {
+      currentWorkpaperEvidence(receipt, taxPeriod);
+      if (workpaperPreview.evidence_digest !== workpaperEvidenceDigest)
+        throw new Error("Доказательства изменились после предпросмотра. Загрузите актуальный предпросмотр.");
+      if (workpaperHistory.status !== "ready") throw new Error("Сначала загрузите и проверьте историю рабочей ведомости.");
+      const reviewerEvidence = workpaperReviewerEvidence.trim();
+      if (reviewerEvidence.length < 10 || reviewerEvidence.length > 2000)
+        throw new Error("Укажите содержательное основание проверки длиной от 10 до 2000 символов.");
+      const requestKey = crypto.randomUUID();
+      if (!secureUuid.test(requestKey)) throw new Error("Браузер не предоставил безопасный UUID; подтверждение заблокировано.");
+      const latest = history.at(-1) ?? null;
+      const body: InboundVatWorkpaperConfirmBody = { request_key: requestKey, receipt_id: receipt.id,
+        receipt_version: receipt.version, tax_period: taxPeriod, basis_digest: preview.basis_digest,
+        reviewer_evidence: reviewerEvidence, supersedes_workpaper_id: latest?.workpaper_id ?? null };
+      const bodyJson = JSON.stringify(body);
+      const journalKey = workpaperJournalKey(org, receipt.id, receipt.version, taxPeriod);
+      if (sessionStorage.getItem(journalKey) !== null) throw new Error("Для этой области уже сохранён неподтверждённый запрос. Сначала сверьте и повторите именно его.");
+      const command = storePendingWorkpaper({ organization_id: Number(org), receipt_id: receipt.id,
+        receipt_version: receipt.version, tax_period: taxPeriod, request_key: requestKey, body, body_json: bodyJson });
+      setPendingWorkpaper(command);
+      setWorkpaperBusy("confirm");
+      setWorkpaperMessage("Сохраняю неизменяемую рабочую ведомость только для review; проводка и решение о вычете не создаются.");
+      try {
+        const result = await accountingRequest<unknown>(`/organizations/${org}/inbound-vat-correction-workpapers`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: command.body_json,
+        });
+        const saved = await checkedWorkpaperResult(result, org, receipt, taxPeriod, body);
+        acceptSavedWorkpaper(command, saved, receipt, scope, epoch);
+      } catch (cause) {
+        if (!workpaperRequestIsCurrent(scope, epoch)) return;
+        let recovered: InboundVatWorkpaperResult | null = null;
+        let recoveryError: Error & { status?: number } | null = null;
+        try {
+          const result = await accountingRequest<unknown>(`/organizations/${org}/inbound-vat-correction-workpapers/by-request/${requestKey}`);
+          recovered = await checkedWorkpaperResult(result, org, receipt, taxPeriod, body);
+        } catch (lookupCause) { recoveryError = lookupCause as Error & { status?: number }; }
+        if (!workpaperRequestIsCurrent(scope, epoch)) return;
+        if (recovered) acceptSavedWorkpaper(command, recovered, receipt, scope, epoch);
+        else {
+          setPendingWorkpaper(command);
+          const causeMessage = cause instanceof Error ? cause.message : "Сервер не подтвердил ответ.";
+          const lookupMessage = recoveryError?.status === 404
+            ? "Сохранённая запись пока не найдена по ключу."
+            : recoveryError?.status === 403 ? `Проверка ключа запрещена (403): ${recoveryError.message}`
+              : recoveryError ? `Не удалось проверить ключ: ${recoveryError.message}` : "";
+          setWorkpaperMessage(`${causeMessage} Результат запроса остаётся неизвестным. ${lookupMessage} Повтор используйте только с тем же ключом и телом.`);
+        }
+      }
+    } catch (cause) {
+      if (!workpaperRequestIsCurrent(scope, epoch)) return;
+      const errorMessage = cause instanceof Error ? cause.message : "Не удалось сохранить запрос рабочей ведомости.";
+      setWorkpaperMessage((cause as Error & { status?: number }).status === 403
+        ? `Доступ к подтверждению запрещён (403): ${errorMessage}` : errorMessage);
+    } finally {
+      if (workpaperRequestIsCurrent(scope, epoch)) setWorkpaperBusy(null);
+    }
+  }
+  async function retryPendingInboundVatWorkpaper() {
+    const receipt = selected;
+    const command = pendingWorkpaper;
+    const scope = workpaperScope;
+    const epoch = workpaperEpoch.current;
+    const cardEpoch = workpaperCardEpoch.current;
+    const cardContext = correctionContext;
+    if (!receipt?.correction_of || !command || workpaperBusy
+      || command.organization_id !== Number(org) || command.receipt_id !== receipt.id
+      || command.receipt_version > receipt.version) return;
+    let commandReceipt: Receipt;
+    try { commandReceipt = receiptAtWorkpaperVersion(receipt, command.receipt_version); }
+    catch (cause) {
+      setWorkpaperJournalError(cause instanceof Error ? cause.message : "Редакция запроса отсутствует в загруженной истории.");
+      return;
+    }
+    const staleVersion = command.receipt_version < receipt.version;
+    const requestIsCurrent = () => staleVersion
+      ? active.current && cardEpoch === workpaperCardEpoch.current && correctionContextRef.current === cardContext
+      : workpaperRequestIsCurrent(scope, epoch);
+    setWorkpaperBusy("recover");
+    setWorkpaperMessage(`Сверяю сохранённый запрос для версии ${command.receipt_version} по request key.`);
+    try {
+      let saved: InboundVatWorkpaperResult | null = null;
+      try {
+        const existing = await accountingRequest<unknown>(`/organizations/${org}/inbound-vat-correction-workpapers/by-request/${command.request_key}`);
+        saved = await checkedWorkpaperResult(existing, org, commandReceipt, command.tax_period, command.body);
+      } catch (lookupCause) {
+        const lookupError = lookupCause as Error & { status?: number };
+        const absent = lookupError.status === 404;
+        const retryableCurrentLookup = !staleVersion && lookupError.status !== 403
+          && (lookupError.status !== undefined && lookupError.status >= 500
+            || lookupCause instanceof TypeError);
+        if (!absent && !retryableCurrentLookup) throw lookupCause;
+      }
+      if (saved) acceptSavedWorkpaper(command, saved, commandReceipt, scope, epoch, requestIsCurrent);
+      else {
+        try {
+          const result = await accountingRequest<unknown>(`/organizations/${org}/inbound-vat-correction-workpapers`, {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: command.body_json,
+          });
+          const checked = await checkedWorkpaperResult(result, org, commandReceipt, command.tax_period, command.body);
+          acceptSavedWorkpaper(command, checked, commandReceipt, scope, epoch, requestIsCurrent);
+        } catch (cause) {
+          const failure = cause as Error & { status?: number };
+          if (staleVersion && failure.status === 409
+            && failure.message === "Workpaper requires the exact current correction draft revision") {
+            if (!requestIsCurrent()) return;
+            clearPendingWorkpaper(command, org, commandReceipt);
+            const next = showNextPendingWorkpaper(receipt);
+            setWorkpaperPreview({ scope, evidence_digest: "", status: "idle", error: "" });
+            setWorkpaperMessage(`Запрос рабочей ведомости для версии ${command.receipt_version} не создал запись: сервер подтвердил устаревшую редакцию.${next
+              ? ` Следующий ключ ${next.key} остаётся заблокированным до сверки.` : ` Новая версия ${receipt.version} разблокирована.`}`);
+            return;
+          }
+          throw cause;
+        }
+      }
+    } catch (cause) {
+      if (!requestIsCurrent()) return;
+      const errorMessage = cause instanceof Error ? cause.message : "Не удалось сверить сохранённый запрос.";
+      setPendingWorkpaper(command);
+      if (staleVersion) setWorkpaperJournalError(`Запрос версии ${command.receipt_version} не разрешён; текущая версия остаётся заблокированной.`);
+      setWorkpaperMessage((cause as Error & { status?: number }).status === 403
+        ? `Доступ к восстановлению запрещён (403): ${errorMessage}`
+        : `Рабочая ведомость пока не подтверждена: ${errorMessage}. Сохранённый ключ и тело оставлены без изменений.`);
+    } finally {
+      if (requestIsCurrent()) setWorkpaperBusy(null);
+    }
+  }
+  const currentWorkpaperPreview = workpaperPreview.scope === workpaperScope
+    && workpaperPreview.evidence_digest === workpaperEvidenceDigest && workpaperPreview.status === "ready"
+    ? workpaperPreview.data : undefined;
+  const currentWorkpaperHistory = workpaperHistory.scope === workpaperScope ? workpaperHistory : null;
+  const selectedPendingWorkpaper = pendingWorkpaper && pendingWorkpaper.organization_id === Number(org)
+    && pendingWorkpaper.receipt_id === selected?.id ? pendingWorkpaper : null;
+  const currentPendingWorkpaper = selectedPendingWorkpaper
+    && selectedPendingWorkpaper.receipt_version === selected?.version
+    && selectedPendingWorkpaper.tax_period === workpaperTaxPeriod ? selectedPendingWorkpaper : null;
+  const workpaperBlocksReceiptEdit = Boolean(selected?.correction_of && workpaperJournalError);
+  let currentWorkpaperEvidenceError = "";
+  if (selected?.correction_of && taxPeriodPattern.test(workpaperTaxPeriod)
+    && inboundVatEvidence.context === correctionContext && inboundVatEvidence.status === "ready") {
+    try { checkedCurrentWorkpaperEvidence(inboundVatEvidence, org, selected, workpaperTaxPeriod); }
+    catch (cause) { currentWorkpaperEvidenceError = cause instanceof Error ? cause.message : "Проверка доказательств НДС завершилась ошибкой."; }
+  }
+  const workpaperReadinessAllowed = Boolean(selected?.correction_of && selectedOrg === org
+    && correctionReadinessForSelection.context === correctionContext && correctionReadinessForSelection.status === "ready"
+    && vatOnlyEvidenceAllowed(correctionReadinessForSelection.data, org, selected));
+  const workpaperCanPreview = Boolean(workpaperReadinessAllowed && selected?.correction_of
+    && taxPeriodPattern.test(workpaperTaxPeriod) && inboundVatEvidence.context === correctionContext
+    && inboundVatEvidence.status === "ready" && !currentWorkpaperEvidenceError && workpaperEvidenceDigest
+    && !currentPendingWorkpaper && !workpaperJournalError && !workpaperBusy);
+  const workpaperCanConfirm = Boolean(workpaperCanPreview && currentWorkpaperPreview
+    && currentWorkpaperHistory?.status === "ready" && workpaperReviewerEvidence.trim().length >= 10
+    && workpaperReviewerEvidence.trim().length <= 2000);
   if (initialLoading) return <section className="space-y-3 rounded-xl border border-line bg-surface p-4"><p role="status">Загрузка накладной из ссылки…</p>{error && <><p role="alert">{error}</p><Button onClick={() => setReload(value => value + 1)}>Повторить загрузку накладной</Button></>}</section>;
   return <section className="space-y-4 rounded-xl border border-line bg-surface p-4">
     <h2 className="font-semibold">Реестр первичных накладных</h2>
@@ -907,6 +1636,73 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
           && <p className="text-sm text-muted">Проведение и вычет НДС остаются недоступны.</p>}
         {evidenceMessageContext.current === correctionContext && evidenceMessage && <p role="status">{evidenceMessage}</p>}
       </section>}
+      {selected?.correction_of && (correctionReadinessForSelection.status === "ready" || selectedPendingWorkpaper || workpaperJournalError) && <section aria-labelledby="inbound-vat-workpaper-heading" className="space-y-3 rounded border border-line p-3">
+        <h3 id="inbound-vat-workpaper-heading" className="font-semibold">Рабочая ведомость входного НДС · только review</h3>
+        <p className="text-sm text-muted">Ведомость фиксирует проверяемые источники и неизменяемую историю. Подтверждение не проверяет подпись или факты документа, не оценивает право на вычет, не означает принятие бухгалтером и не создаёт проводку.</p>
+        <div className="grid gap-3 md:grid-cols-2">
+          <label>Налоговый период<Input aria-label="Налоговый период рабочей ведомости" type="month" value={workpaperTaxPeriod}
+            onChange={(event) => {
+              workpaperEpoch.current += 1;
+              setWorkpaperTaxPeriod(event.target.value);
+              setWorkpaperReviewerEvidence("");
+              setWorkpaperPreview({ scope: "", evidence_digest: "", status: "idle", error: "" });
+              setWorkpaperHistory({ scope: "", status: "idle", items: [], error: "" });
+              setWorkpaperJournalError("");
+              setWorkpaperMessage("");
+              setWorkpaperBusy(null);
+            }} /></label>
+          <label>Основание проверки бухгалтером<Input aria-label="Основание проверки бухгалтером" maxLength={2000}
+            value={workpaperReviewerEvidence} onChange={(event) => setWorkpaperReviewerEvidence(event.target.value)} /></label>
+        </div>
+        {!taxPeriodPattern.test(workpaperTaxPeriod) && <p className="text-sm text-muted">Укажите налоговый период в формате ГГГГ-ММ.</p>}
+        {!workpaperReadinessAllowed && <p role="alert">Предпросмотр и подтверждение доступны только при точной VAT-only готовности для выбранных юрлица и редакции. Проведение и движение WMS остаются недоступны.</p>}
+        {inboundVatEvidence.context === correctionContext && inboundVatEvidence.status === "loading" && <p role="status">Ожидаются текущие документы с проверенными байтами.</p>}
+        {inboundVatEvidence.context === correctionContext && inboundVatEvidence.status === "error" && <p role="alert">Список текущих доказательств не проверен; предпросмотр и подтверждение заблокированы.</p>}
+        {currentWorkpaperEvidenceError && <p role="alert">{currentWorkpaperEvidenceError}</p>}
+        {workpaperJournalError && <p role="alert">{workpaperJournalError}</p>}
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" disabled={!workpaperCanPreview} onClick={() => void previewInboundVatWorkpaper()}>
+            {workpaperBusy === "preview" ? "Проверка основы…" : "Предпросмотр рабочей ведомости"}
+          </Button>
+          <Button variant="secondary" disabled={!workpaperCanConfirm || workpaperBusy !== null}
+            onClick={() => void confirmInboundVatWorkpaper()}>
+            {workpaperBusy === "confirm" ? "Сохранение review-only записи…" : "Подтвердить ведомость (только review)"}
+          </Button>
+          <Button variant="secondary" disabled={workpaperBusy !== null || !taxPeriodPattern.test(workpaperTaxPeriod)}
+            onClick={() => setWorkpaperHistoryReload((value) => value + 1)}>Обновить историю ведомостей</Button>
+        </div>
+        {workpaperPreview.scope === workpaperScope && workpaperPreview.status === "loading" && <p role="status">Проверяю основу по текущим редакциям, проводке, счёту 18 и файлам.</p>}
+        {workpaperPreview.scope === workpaperScope && workpaperPreview.status === "error" && <p role="alert">{workpaperPreview.error}</p>}
+        {workpaperMessage && <p role={/запрещён|не удалось|не совпадает|не подтверждена|не подтверждает|не найдена|повреждён|ошибка/i.test(workpaperMessage) ? "alert" : "status"}>{workpaperMessage}</p>}
+        {currentWorkpaperPreview && <article className="space-y-2 rounded border border-line p-3">
+          <h4 className="font-medium">Проверенный предпросмотр · {currentWorkpaperPreview.tax_period}</h4>
+          <p>Основа SHA-256: {currentWorkpaperPreview.basis_digest} · строк счёта 18: {currentWorkpaperPreview.source_account_18_line_count} · текущих файлов: {currentWorkpaperPreview.current_evidence_file_count}.</p>
+          <p>Байты файлов проверены сервером на момент review: да. Статус: только review; принятие бухгалтером и проведение недоступны.</p>
+          <WorkpaperSnapshotDetails snapshot={currentWorkpaperPreview.basis} />
+        </article>}
+        {selectedPendingWorkpaper && <div className="rounded border border-accent p-3">
+          <p role="status">Осталась неподтверждённая попытка для версии {selectedPendingWorkpaper.receipt_version}, периода {selectedPendingWorkpaper.tax_period}, ключ {selectedPendingWorkpaper.request_key}. Сохранение и переход заблокированы до сверки.</p>
+          <Button variant="secondary" disabled={workpaperBusy !== null} onClick={() => void retryPendingInboundVatWorkpaper()}>
+            {workpaperBusy === "recover" ? "Сверка сохранённого запроса…" : selectedPendingWorkpaper.receipt_version !== selected?.version
+              ? `Сверить рабочую ведомость версии ${selectedPendingWorkpaper.receipt_version}` : "Повторить ту же рабочую ведомость"}
+          </Button>
+        </div>}
+        {currentWorkpaperHistory?.status === "loading" && <p role="status">Загрузка неизменяемой истории ведомостей…</p>}
+        {currentWorkpaperHistory?.status === "error" && <p role="alert">История ведомостей не подтверждена: {currentWorkpaperHistory.error}</p>}
+        {currentWorkpaperHistory?.status === "ready" && <div className="space-y-2">
+          <h4 className="font-medium">История рабочих ведомостей · {workpaperTaxPeriod}</h4>
+          {!currentWorkpaperHistory.items.length && <p className="text-sm text-muted">Для этой версии и периода сохранённых ведомостей пока нет.</p>}
+          {currentWorkpaperHistory.items.map((entry) => <article key={entry.workpaper_id} className="space-y-2 rounded border border-line p-3">
+            <h5 className="font-medium">Ведомость № {entry.workpaper_id} · редакция {entry.revision}
+              {entry.supersedes_workpaper_id ? ` · заменяет ведомость № ${entry.supersedes_workpaper_id}` : " · первая редакция"}</h5>
+            <p>Период {entry.tax_period} · проверил {entry.reviewed_by} · {entry.created_at}</p>
+            <p>Основание: {entry.reviewer_evidence}</p>
+            <p className="break-all">request key: {entry.request_key} · basis digest: {entry.basis_digest} · snapshot digest: {entry.snapshot_digest}</p>
+            <p>Байты доказательств проверены сервером на review: да. Подпись проверена: нет. Факты документа проверены: нет. Право на вычет оценено: нет. Принято бухгалтером: нет. Проведение доступно: нет.</p>
+            <WorkpaperSnapshotDetails snapshot={entry.snapshot} />
+          </article>)}
+        </div>}
+      </section>}
       {selected?.posting && <p role="status">Проведена · проводка № {selected.posting.entry_id}. Первичные данные доступны для просмотра.</p>}
       {contractRevokeUncertain && <Button variant="secondary" disabled={contractBusy || pendingContractRevoke.current?.org !== org} onClick={() => { if (pendingContractRevoke.current) void submitContractRevoke(pendingContractRevoke.current); }}>Повторить отзыв договора с тем же ключом</Button>}
       {editorOpen && <fieldset disabled={Boolean(selected?.posting) || uncertain || contractBusy || contractRevokeUncertain} className="space-y-3">
@@ -965,7 +1761,7 @@ export function ProcurementReceiptDrafts({ org, initialReceipt, accounts = [], p
         <label>Заказ поставщику<Select aria-label={`Заказ строки ${index + 1}`} value={row.order_id ?? ""} onChange={(e) => setDocument({ ...document, items: document.items.map((r, i) => i === index ? { ...r, order_id: e.target.value ? Number(e.target.value) : null } : r) })}><option value="">Без связи с заказом</option>{row.order_id && !orders.some((order) => order.source_id === row.order_id) && <option value={row.order_id}>Сохранённый заказ № {row.order_id}</option>}{orders.map((order) => <option key={order.source_id} value={order.source_id}>{order.snapshot.number || `№ ${order.source_id}`} · {order.snapshot.supplier}</option>)}</Select></label>
         <div className="grid gap-3 md:grid-cols-4">{itemFields.map(([field, label]) => <label key={field}>{label}<Input aria-label={`${label} черновика ${index + 1}`} value={row[field] ?? ""} onChange={(e) => setDocument({ ...document, items: document.items.map((r, i) => i === index ? { ...r, [field]: e.target.value } : r) })} /></label>)}</div>
         <Button variant="secondary" disabled={document.items.length === 1} onClick={() => setDocument({ ...document, items: document.items.filter((_, i) => i !== index) })}>Удалить строку {index + 1}</Button></fieldset>)}
-      <div className="flex gap-2"><Button variant="secondary" disabled={document.items.length >= 300} onClick={() => setDocument({ ...document, items: [...document.items, item()] })}>Добавить строку накладной</Button><Button onClick={() => void save()}>{selected ? `Сохранить исправление версии ${selected.version}` : "Сохранить первичную накладную"}</Button><Button variant="secondary" onClick={() => void save(true)}>Сохранить и закрыть</Button></div>
+      <div className="flex gap-2"><Button variant="secondary" disabled={document.items.length >= 300} onClick={() => setDocument({ ...document, items: [...document.items, item()] })}>Добавить строку накладной</Button><Button disabled={workpaperBlocksReceiptEdit} onClick={() => void save()}>{selected ? `Сохранить исправление версии ${selected.version}` : "Сохранить первичную накладную"}</Button><Button variant="secondary" disabled={workpaperBlocksReceiptEdit} onClick={() => void save(true)}>Сохранить и закрыть</Button></div>
       </fieldset>}
     </fieldset>
     {selected && !selected.posting && !selected.correction_of && (uncertain ? <p>Сначала подтвердите исход сохранения этой редакции. Проведение и складская приёмка заблокированы.</p> : dirty ? <p>Сохраните изменения накладной перед расчётом проводок.</p> : !document.supplier_id ? <p>Сопоставьте поставщика со справочником перед проведением.</p> : document.items.some(row => !row.sku_id) ? <p>Сопоставьте все товары накладной со справочником перед проведением.</p> : <ProcurementReceiptPosting key={`${selected.id}/${selected.version}/${date}/${policyId}`} blocked={busy} org={org} receiptId={selected.id} version={selected.version} items={document.items} accounts={accounts} policyId={policyId} date={date} onBusy={(value) => { if (active.current) setBusy(value); }} onPosted={(entryId) => {

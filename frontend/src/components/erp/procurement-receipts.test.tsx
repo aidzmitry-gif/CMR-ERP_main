@@ -46,17 +46,25 @@ function correctionReadiness(receiptId = 92, flagOverrides: Record<string, boole
     ...overrides };
 }
 
-function correctionRow(id = 92, invoiceReference = `CORR-${id}`) {
+function correctionRow(id = 92, invoiceReference = `CORR-${id}`, version = 1) {
   const document = { currency: "BYN", invoice_reference: invoiceReference, document_date: "2026-09-24",
     operation_date: "2026-09-24", supplier: "Поставщик", supplier_id: 19, supplier_unp: "190000001",
     contract: "D-1", contract_id: 50, contract_basis: null, warehouse: "Основной", explanation: "Исправление", items: [] };
-  return { id, organization_id: 7, version: 1, status: "draft", posting: null,
+  return { id, organization_id: 7, version, status: "draft", posting: null,
     correction_of: { receipt_id: 81, version: 3, entry_id: 42 },
-    revisions: [{ version: 1, actor: "accountant", created_at: "2026-09-26", document }] };
+    revisions: [{ version, actor: "accountant", created_at: "2026-09-26", document }] };
 }
 
-function vatOnlyCorrectionReadiness(receiptId = 92) {
+function correctionRowWithHistory(id = 92, version = 2) {
+  const row = correctionRow(id, `CORR-${id}`, version);
+  const prior = { ...row.revisions[0], version: version - 1, actor: "accountant",
+    created_at: "2026-09-25", document: { ...row.revisions[0].document, invoice_reference: `CORR-${id}-V${version - 1}` } };
+  return { ...row, revisions: [prior, ...row.revisions] };
+}
+
+function vatOnlyCorrectionReadiness(receiptId = 92, receiptVersion = 1) {
   return correctionReadiness(receiptId, { vat_change: true, no_difference: false }, {
+    current_version: receiptVersion,
     blockers: ["vat_register_and_eschf_evidence_required", "correction_posting_period_required", "posting_workflow_not_approved"],
   });
 }
@@ -108,10 +116,151 @@ function correctionEvidenceFetcher(options: {
   });
 }
 
+function canonicalWorkpaper(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalWorkpaper).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value).sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalWorkpaper((value as Record<string, unknown>)[key])}`).join(",")}}`;
+  return JSON.stringify(value);
+}
+
+function workpaperDigest(value: unknown) {
+  return createHash("sha256").update(canonicalWorkpaper(value)).digest("hex");
+}
+
+function workpaperEvidence(receiptId = 92, receiptVersion = 2, taxPeriod = "2026-09") {
+  const xml = inboundEvidenceFile("supplier_eschf_xml", { file_id: 13, receipt_id: receiptId,
+    receipt_version: receiptVersion, tax_period: taxPeriod, filename: "invoice-v2.xml", sha256: "a".repeat(64), digest: "b".repeat(64) });
+  const pdf = inboundEvidenceFile("supporting_document_pdf", { file_id: 21, receipt_id: receiptId,
+    receipt_version: receiptVersion, tax_period: taxPeriod, filename: "proof-v2.pdf", sha256: "c".repeat(64), digest: "d".repeat(64) });
+  return { xml, pdf };
+}
+
+function workpaperSnapshot(receiptId = 92, receiptVersion = 2, taxPeriod = "2026-09",
+  options: { lineId?: number; xmlTaxPeriod?: string; organizationId?: number; extraLineFields?: Record<string, unknown> } = {}) {
+  const evidence = workpaperEvidence(receiptId, receiptVersion, taxPeriod);
+  const evidenceSnapshot = [
+    { file_id: evidence.xml.file_id, receipt_id: receiptId, receipt_version: receiptVersion, kind: "supplier_eschf_xml",
+      tax_period: taxPeriod, reference: evidence.xml.reference, filename: evidence.xml.filename,
+      content_type: evidence.xml.content_type, size_bytes: evidence.xml.size_bytes, sha256: evidence.xml.sha256, digest: evidence.xml.digest },
+    { file_id: evidence.pdf.file_id, receipt_id: receiptId, receipt_version: receiptVersion, kind: "supporting_document_pdf",
+      tax_period: options.xmlTaxPeriod ?? taxPeriod, reference: evidence.pdf.reference, filename: evidence.pdf.filename,
+      content_type: evidence.pdf.content_type, size_bytes: evidence.pdf.size_bytes, sha256: evidence.pdf.sha256, digest: evidence.pdf.digest },
+  ];
+  const flags = { review_only: true, signature_verified: false, document_facts_verified: false,
+    deduction_eligibility_assessed: false, accountant_accepted: false, posting_available: false };
+  return {
+    organization_id: options.organizationId ?? 7,
+    receipt: { correction_receipt_id: receiptId, correction_version: receiptVersion,
+      correction_revision_id: receiptId * 10 + receiptVersion, correction_document_digest: "e".repeat(64),
+      original_receipt_id: 81, original_version: 3, original_revision_id: 813,
+      original_document_digest: "f".repeat(64), source_entry_id: 42, source_entry: "procurement:receipt:81",
+      source_version: 3, source_entry_digest: "1".repeat(64), source_posting_date: "2026-09-24", source_operation_date: "2026-09-24" },
+    tax_period: taxPeriod, classification: ["vat_change"],
+    source_account_18_lines: [{ line_id: options.lineId ?? 501, account_id: 18, account_code: "18.01",
+      account_title: "НДС по приобретённым ценностям", category: "vat", cash: false, amount: "20.00",
+      currency: "BYN", dimensions: {}, ...options.extraLineFields }],
+    evidence_files: evidenceSnapshot, ...flags,
+  };
+}
+
+function workpaperPreviewValue(receiptId = 92, receiptVersion = 2, taxPeriod = "2026-09",
+  options: Parameters<typeof workpaperSnapshot>[3] = {}) {
+  const basis = workpaperSnapshot(receiptId, receiptVersion, taxPeriod, options);
+  return { organization_id: 7, receipt_id: receiptId, receipt_version: receiptVersion,
+    original_receipt_id: 81, original_version: 3, tax_period: taxPeriod, basis,
+    basis_digest: workpaperDigest(basis), status: "review_only_workpaper_ready",
+    source_account_18_line_count: basis.source_account_18_lines.length,
+    current_evidence_file_count: basis.evidence_files.length, evidence_bytes_verified_at_review: true,
+    review_only: true, signature_verified: false, document_facts_verified: false,
+    deduction_eligibility_assessed: false, accountant_accepted: false, posting_available: false };
+}
+
+function savedWorkpaper(body: Record<string, unknown>, options: { id?: number; revision?: number; organizationId?: number; flags?: Record<string, unknown> } = {}) {
+  const receiptId = Number(body.receipt_id), receiptVersion = Number(body.receipt_version), taxPeriod = String(body.tax_period);
+  const snapshot = workpaperSnapshot(receiptId, receiptVersion, taxPeriod);
+  const bodyTyped = body as { request_key: string; receipt_id: number; receipt_version: number; tax_period: string;
+    basis_digest: string; reviewer_evidence: string; supersedes_workpaper_id: number | null };
+  const flags = { review_only: true, signature_verified: false, document_facts_verified: false,
+    deduction_eligibility_assessed: false, accountant_accepted: false, posting_available: false, ...options.flags };
+  return { workpaper_id: options.id ?? 501, organization_id: options.organizationId ?? 7,
+    receipt_id: receiptId, receipt_version: receiptVersion, original_receipt_id: 81, original_version: 3,
+    source_entry_id: 42, source_entry_digest: "1".repeat(64), tax_period: taxPeriod,
+    revision: options.revision ?? 1, supersedes_workpaper_id: bodyTyped.supersedes_workpaper_id,
+    request_key: bodyTyped.request_key, request_digest: workpaperDigest(bodyTyped), basis_digest: bodyTyped.basis_digest,
+    snapshot_digest: workpaperDigest(snapshot), reviewer_evidence: bodyTyped.reviewer_evidence,
+    reviewed_by: "accountant@example.test", created_at: "2026-09-27T10:00:00Z", snapshot,
+    status: "review_only_workpaper", evidence_bytes_verified_at_review: true, ...flags };
+}
+
+function pendingWorkpaperJournal(receiptVersion = 1, taxPeriod = "2026-09", requestKey = "95bd12f3-a45c-4b89-b005-2f9fa22c38a1") {
+  const body = { request_key: requestKey, receipt_id: 92,
+    receipt_version: receiptVersion, tax_period: taxPeriod, basis_digest: workpaperDigest(workpaperSnapshot(92, receiptVersion, taxPeriod)),
+    reviewer_evidence: "Проверена связь документа с источником.", supersedes_workpaper_id: null };
+  return { key: `inbound-vat-correction-workpaper:v1:7:92:${receiptVersion}:${taxPeriod}`, body,
+    bodyJson: JSON.stringify(body), journalJson: JSON.stringify({ organization_id: 7, receipt_id: 92,
+      receipt_version: receiptVersion, tax_period: taxPeriod, request_key: body.request_key,
+      body_json: JSON.stringify(body) }) };
+}
+
+function inboundVatWorkpaperFetcher(options: {
+  rows?: ReturnType<typeof correctionRow>[];
+  evidence?: Record<number, { xml: ReturnType<typeof inboundEvidenceFile>; pdf: ReturnType<typeof inboundEvidenceFile> }>;
+  preview?: (body: Record<string, unknown>) => unknown | Promise<unknown>;
+  onConfirm?: (body: Record<string, unknown>, rawBody: string) => unknown | Promise<unknown>;
+  onByRequest?: (key: string) => unknown | Promise<unknown>;
+}) {
+  const saved = new Map<string, unknown>();
+  const confirmedBodies: string[] = [];
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("/inbound-vat-correction-workpapers/preview")) {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return { ok: true, json: async () => options.preview ? options.preview(body)
+        : workpaperPreviewValue(Number(body.receipt_id), Number(body.receipt_version), String(body.tax_period)) };
+    }
+    if (url.endsWith("/inbound-vat-correction-workpapers") && init?.method === "POST") {
+      const rawBody = String(init.body), body = JSON.parse(rawBody) as Record<string, unknown>;
+      confirmedBodies.push(rawBody);
+      const result = options.onConfirm ? await options.onConfirm(body, rawBody) : savedWorkpaper(body);
+      saved.set(String(body.request_key), result);
+      return { ok: true, status: 201, json: async () => result };
+    }
+    if (url.includes("/inbound-vat-correction-workpapers/by-request/")) {
+      const key = url.split("/by-request/")[1];
+      const result = options.onByRequest ? await options.onByRequest(key) : saved.get(key);
+      return result ? { ok: true, status: 200, json: async () => result }
+        : { ok: false, status: 404, json: async () => ({ detail: "not found" }) };
+    }
+    if (url.includes("/inbound-vat-correction-workpapers?")) {
+      const query = new URL(url, "http://localhost").searchParams;
+      const items = [...saved.values()].filter((value) => {
+        const row = value as Record<string, unknown>;
+        return row.receipt_id === Number(query.get("receipt_id"))
+          && row.receipt_version === Number(query.get("receipt_version")) && row.tax_period === query.get("tax_period");
+      });
+      return { ok: true, json: async () => items };
+    }
+    if (url.includes("/receipt-correction-evidence-files")) {
+      const query = new URL(url, "http://localhost").searchParams;
+      const id = Number(query.get("receipt_id")), data = options.evidence?.[id] ?? workpaperEvidence(id, 2);
+      return { ok: true, json: async () => query.get("kind") === "supplier_eschf_xml" ? [data.xml] : [data.pdf] };
+    }
+    if (url.includes("correction-readiness")) {
+      const id = Number(url.match(/receipt-documents\/(\d+)/)?.[1] ?? 92);
+      return { ok: true, json: async () => vatOnlyCorrectionReadiness(id, 2) };
+    }
+    if (url.includes("purchase-ownership")) return { ok: true, json: async () => [] };
+    if (url.includes("supplier-contracts")) return { ok: true, json: async () => emptyContracts(url) };
+    if (url.includes("receipt-documents")) return { ok: true, json: async () => options.rows ?? [correctionRow(92, "CORR-92", 2)] };
+    return { ok: true, json: async () => [] };
+  });
+  return { fetcher, saved, confirmedBodies };
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => { resolve = done; });
-  return { promise, resolve };
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 
 it("requires an explicit legal entity before opening supplier invoices", async () => {
@@ -298,7 +447,7 @@ it.each([
   render(<ProcurementReceiptDrafts org="7" />);
   fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
 
-  expect(await screen.findByRole("alert")).toHaveTextContent("Просмотр и загрузка доказательств заблокированы");
+  expect(await screen.findByText("Не удалось проверить принадлежность и целостность документов. Просмотр и загрузка доказательств заблокированы.")).toBeInTheDocument();
   expect(screen.queryByText(/invoice\.xml/)).not.toBeInTheDocument();
   expect(screen.queryByRole("link", { name: /Открыть файл/ })).not.toBeInTheDocument();
   expect(fetcher.mock.calls.some(([url, init]) => url.includes("/receipt-correction-evidence-files") && init?.method === "POST")).toBe(false);
@@ -995,4 +1144,458 @@ it("shows who changed receipt fields and their prior and new saved values", asyn
   expect(screen.getByText("Строка 1 · Количество: было «1.000000», стало «2.000000».")).toBeInTheDocument();
   expect(screen.getByText("Строка 2 · Сумма НДС: было «—», стало «8.00».")).toBeInTheDocument();
   expect(screen.getByText(/Поставщик: было «Первый поставщик · УНП 190000011 · ID 11»/)).toBeInTheDocument();
+});
+
+it("previews, confirms, and reloads the exact version-2 review-only inbound VAT workpaper", async () => {
+  const evidence = workpaperEvidence();
+  const { fetcher, saved, confirmedBodies } = inboundVatWorkpaperFetcher({ evidence: { 92: evidence } });
+  vi.stubGlobal("fetch", fetcher);
+  const firstView = render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  await waitFor(() => expect(screen.getByLabelText("Налоговый период рабочей ведомости")).toHaveValue("2026-09"));
+  await screen.findByText("История рабочих ведомостей · 2026-09");
+
+  fireEvent.click(screen.getByRole("button", { name: "Предпросмотр рабочей ведомости" }));
+  expect(await screen.findByText(/Проверенный предпросмотр · 2026-09/)).toBeInTheDocument();
+  expect(screen.getByText(/Строка № 501 · счёт 18\.01/)).toBeInTheDocument();
+  expect(screen.getByText(/Файл № 13 · supplier_eschf_xml/)).toBeInTheDocument();
+  expect(screen.getByText(/Файл № 21 · supporting_document_pdf/)).toBeInTheDocument();
+  expect(screen.getByText("Подпись проверена").parentElement).toHaveTextContent("Нет");
+  expect(screen.getByText("Право на вычет оценено").parentElement).toHaveTextContent("Нет");
+  expect(screen.queryByRole("button", { name: /Провести|Рассчитать вычет/ })).not.toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Основание проверки бухгалтером"),
+    { target: { value: "Сверены реквизиты исправления и приложенные документы." } });
+  fireEvent.click(screen.getByRole("button", { name: "Подтвердить ведомость (только review)" }));
+  expect(await screen.findByText(/Ведомость № 501 · редакция 1 · первая редакция/)).toBeInTheDocument();
+  expect(screen.getByText(/Период 2026-09 · проверил accountant@example\.test · 2026-09-27T10:00:00Z/)).toBeInTheDocument();
+  expect(screen.getByText(/Исходная накладная: № 81, версия 3, снимок редакции № 813/)).toBeInTheDocument();
+  expect(screen.getByText(/Проведение доступно: нет/)).toBeInTheDocument();
+  expect(confirmedBodies).toHaveLength(1);
+  expect(JSON.parse(confirmedBodies[0])).toMatchObject({ receipt_id: 92, receipt_version: 2,
+    tax_period: "2026-09", reviewer_evidence: "Сверены реквизиты исправления и приложенные документы.",
+    supersedes_workpaper_id: null });
+  expect(sessionStorage.getItem("inbound-vat-correction-workpaper:v1:7:92:2:2026-09")).toBeNull();
+  expect([...saved.values()]).toHaveLength(1);
+
+  firstView.unmount();
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  expect(await screen.findByText(/Ведомость № 501 · редакция 1/)).toBeInTheDocument();
+  expect(screen.getByText(/Подпись проверена: нет\. Факты документа проверены: нет\. Право на вычет оценено: нет\. Принято бухгалтером: нет\. Проведение доступно: нет\./)).toBeInTheDocument();
+  expect(fetcher.mock.calls.some(([url]) => url.includes("receipt_id=92&receipt_version=2&tax_period=2026-09"))).toBe(true);
+});
+
+it("blocks preview when a current evidence file belongs to another tax period", async () => {
+  const evidence = workpaperEvidence();
+  evidence.pdf.tax_period = "2026-10";
+  const { fetcher } = inboundVatWorkpaperFetcher({ evidence: { 92: evidence } });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  const period = await screen.findByLabelText("Налоговый период рабочей ведомости");
+  fireEvent.change(period, { target: { value: "2026-09" } });
+  expect(await screen.findByRole("alert")).toHaveTextContent("должен совпадать с периодом каждого текущего файла");
+  expect(screen.getByRole("button", { name: "Предпросмотр рабочей ведомости" })).toBeDisabled();
+  expect(fetcher.mock.calls.some(([url]) => url.includes("/inbound-vat-correction-workpapers/preview"))).toBe(false);
+  expect(fetcher.mock.calls.some(([url, init]) => url.endsWith("/inbound-vat-correction-workpapers") && init?.method === "POST")).toBe(false);
+});
+
+it.each([
+  ["wrong organization", (value: ReturnType<typeof workpaperPreviewValue>) => ({ ...value, organization_id: 8 }), "Предпросмотр рабочей ведомости вернул повреждённую или устаревшую область данных"],
+  ["wrong basis digest", (value: ReturnType<typeof workpaperPreviewValue>) => ({ ...value, basis_digest: "a".repeat(64) }), "Предпросмотр рабочей ведомости вернул повреждённую или устаревшую область данных"],
+  ["account-18 line with a debit side", (value: ReturnType<typeof workpaperPreviewValue>) => {
+    const basis = { ...value.basis, source_account_18_lines: [{ ...value.basis.source_account_18_lines[0], side: "debit" }] };
+    return { ...value, basis, basis_digest: workpaperDigest(basis) };
+  }, "Снимок рабочей ведомости не совпадает с юрлицом, исправлением или безопасным review-only контрактом"],
+  ["evidence in a different period", (value: ReturnType<typeof workpaperPreviewValue>) => {
+    const basis = { ...value.basis, evidence_files: value.basis.evidence_files.map((file, index) =>
+      index === 1 ? { ...file, tax_period: "2026-10" } : file) };
+    return { ...value, basis, basis_digest: workpaperDigest(basis) };
+  }, "Снимок рабочей ведомости не совпадает с юрлицом, исправлением или безопасным review-only контрактом"],
+])("rejects a preview with %s", async (_label, change, expectedError) => {
+  const evidence = workpaperEvidence();
+  const { fetcher } = inboundVatWorkpaperFetcher({ evidence: { 92: evidence }, preview: () => change(workpaperPreviewValue()) });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  await screen.findByText("История рабочих ведомостей · 2026-09");
+  fireEvent.click(screen.getByRole("button", { name: "Предпросмотр рабочей ведомости" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(expectedError);
+  expect(screen.getByRole("button", { name: "Подтвердить ведомость (только review)" })).toBeDisabled();
+  expect(fetcher.mock.calls.some(([url, init]) => url.endsWith("/inbound-vat-correction-workpapers") && init?.method === "POST")).toBe(false);
+});
+
+it("recovers a lost confirm response by replaying the exact saved request key and body", async () => {
+  const evidence = workpaperEvidence();
+  let confirmations = 0;
+  const { fetcher, confirmedBodies } = inboundVatWorkpaperFetcher({ evidence: { 92: evidence },
+    onConfirm: (body) => {
+      confirmations += 1;
+      if (confirmations === 1) throw new TypeError("Connection lost after sending the request");
+      return savedWorkpaper(body);
+    },
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  await screen.findByText("История рабочих ведомостей · 2026-09");
+  fireEvent.click(screen.getByRole("button", { name: "Предпросмотр рабочей ведомости" }));
+  await screen.findByText(/Проверенный предпросмотр/);
+  fireEvent.change(screen.getByLabelText("Основание проверки бухгалтером"),
+    { target: { value: "Проверена связь документа с исходной записью." } });
+  fireEvent.click(screen.getByRole("button", { name: "Подтвердить ведомость (только review)" }));
+  expect(await screen.findByText(/Повтор используйте только с тем же ключом и телом/)).toBeInTheDocument();
+  const journal = JSON.parse(sessionStorage.getItem("inbound-vat-correction-workpaper:v1:7:92:2:2026-09")!);
+  const exactBody = journal.body_json as string;
+  expect(fetcher.mock.calls.some(([url]) => url.includes(`/by-request/${journal.request_key}`))).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Повторить ту же рабочую ведомость" }));
+  expect(await screen.findByText(/Ведомость № 501 · редакция 1/)).toBeInTheDocument();
+  expect(confirmedBodies).toHaveLength(2);
+  expect(confirmedBodies[0]).toBe(exactBody);
+  expect(confirmedBodies[1]).toBe(exactBody);
+  expect(JSON.parse(confirmedBodies[1]).request_key).toBe(journal.request_key);
+  expect(sessionStorage.getItem("inbound-vat-correction-workpaper:v1:7:92:2:2026-09")).toBeNull();
+});
+
+it("blocks a new receipt version and navigation until the pending workpaper request is checked", async () => {
+  const lostResponse = deferred<unknown>();
+  let confirmations = 0;
+  const { fetcher, confirmedBodies } = inboundVatWorkpaperFetcher({ rows: [
+    correctionRow(92, "CORR-92", 2), correctionRow(93, "CORR-93", 2),
+  ], evidence: { 92: workpaperEvidence() }, onConfirm: (body) => {
+    confirmations += 1;
+    return confirmations === 1 ? lostResponse.promise : savedWorkpaper(body);
+  } });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  await screen.findByText("История рабочих ведомостей · 2026-09");
+  fireEvent.click(screen.getByRole("button", { name: "Предпросмотр рабочей ведомости" }));
+  await screen.findByText(/Проверенный предпросмотр/);
+  fireEvent.change(screen.getByLabelText("Основание проверки бухгалтером"),
+    { target: { value: "Проверена связь исправления с исходной проводкой." } });
+  fireEvent.click(screen.getByRole("button", { name: "Подтвердить ведомость (только review)" }));
+  await waitFor(() => expect(confirmedBodies).toHaveLength(1));
+
+  const journalKey = "inbound-vat-correction-workpaper:v1:7:92:2:2026-09";
+  const savedJournal = JSON.parse(sessionStorage.getItem(journalKey)!);
+  const exactBody = savedJournal.body_json as string;
+  expect(exactBody).toBe(confirmedBodies[0]);
+  const saveButton = screen.getByRole("button", { name: "Сохранить исправление версии 2" });
+  expect(saveButton).toBeEnabled();
+  fireEvent.change(screen.getByLabelText("Номер первичной накладной"), { target: { value: "CORR-92-EDITED" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить исправление версии 2" }));
+  expect(await screen.findByText("Сначала сверьте сохранённую рабочую ведомость; новая версия накладной заблокирована.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /CORR-93/ }));
+  expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("CORR-92-EDITED");
+  expect(fetcher.mock.calls.some(([url, init]) => url.includes("receipt-documents")
+    && ["POST", "PUT", "PATCH"].includes(String(init?.method)))).toBe(false);
+
+  await act(async () => { lostResponse.reject(new TypeError("Response lost after request was sent")); });
+  expect(await screen.findByText(/Повтор используйте только с тем же ключом и телом/)).toBeInTheDocument();
+  expect(sessionStorage.getItem(journalKey)).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Повторить ту же рабочую ведомость" }));
+  expect(await screen.findByText(/Сохранена рабочая ведомость № 501/)).toBeInTheDocument();
+  expect(confirmedBodies).toHaveLength(2);
+  expect(confirmedBodies[0]).toBe(exactBody);
+  expect(confirmedBodies[1]).toBe(exactBody);
+  expect(sessionStorage.getItem(journalKey)).toBeNull();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Сохранить исправление версии 2" })).toBeEnabled());
+});
+
+it("reports an older workpaper journal and refuses a new receipt version", async () => {
+  const journal = pendingWorkpaperJournal();
+  sessionStorage.setItem(journal.key, journal.journalJson);
+  const { fetcher } = inboundVatWorkpaperFetcher({ rows: [
+    correctionRowWithHistory(92, 2), correctionRow(93, "CORR-93", 2),
+  ] });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("несверенный запрос рабочей ведомости версии 1");
+  expect(screen.getByRole("button", { name: "Сверить рабочую ведомость версии 1" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Сохранить исправление версии 2" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: /CORR-93/ }));
+  expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("CORR-92");
+  expect(fetcher.mock.calls.some(([url, init]) => url.includes("receipt-documents")
+    && ["POST", "PUT", "PATCH"].includes(String(init?.method)))).toBe(false);
+});
+
+it.each([true, false])("invalidates delayed older-journal recovery after same-card reopen=%s, but not period setup", async (reopen) => {
+  const journal = pendingWorkpaperJournal();
+  sessionStorage.setItem(journal.key, journal.journalJson);
+  let resolveByRequest!: (value: unknown) => void;
+  const byRequestResponse = new Promise<unknown>((resolve) => { resolveByRequest = resolve; });
+  let resolveEvidence!: () => void;
+  const evidenceGate = new Promise<void>((resolve) => { resolveEvidence = resolve; });
+  const { fetcher: baseFetcher } = inboundVatWorkpaperFetcher({
+    rows: [correctionRowWithHistory(92, 2)],
+    onByRequest: () => byRequestResponse,
+  });
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("receipt-correction-evidence-files")) await evidenceGate;
+    return baseFetcher(url, init);
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  expect(screen.getByLabelText("Налоговый период рабочей ведомости")).toHaveValue("");
+  fireEvent.click(await screen.findByRole("button", { name: "Сверить рабочую ведомость версии 1" }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => url.includes(`/by-request/${journal.body.request_key}`))).toBe(true));
+
+  resolveEvidence();
+  await waitFor(() => expect(screen.getByLabelText("Налоговый период рабочей ведомости")).toHaveValue("2026-09"));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Сверить рабочую ведомость версии 1" })).toBeEnabled());
+  if (reopen) {
+    fireEvent.click(screen.getByRole("button", { name: /CORR-92/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Сверить рабочую ведомость версии 1" })).toBeEnabled());
+  }
+
+  await act(async () => {
+    resolveByRequest(savedWorkpaper(journal.body));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  });
+  expect(fetcher.mock.calls.filter(([url]) => url.includes(`/by-request/${journal.body.request_key}`))).toHaveLength(1);
+  expect(fetcher.mock.calls.some(([url, init]) => url.includes("receipt-documents")
+    && ["POST", "PUT", "PATCH"].includes(String(init?.method)))).toBe(false);
+  if (reopen) {
+    expect(sessionStorage.getItem(journal.key)).toBe(journal.journalJson);
+    expect(screen.getByRole("button", { name: "Сохранить исправление версии 2" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Сверить рабочую ведомость версии 1" })).toBeEnabled();
+    expect(screen.queryByText(/Сохранена рабочая ведомость № 501/)).not.toBeInTheDocument();
+  } else {
+    expect(await screen.findByText(/Сохранена рабочая ведомость № 501/)).toBeInTheDocument();
+    expect(sessionStorage.getItem(journal.key)).toBeNull();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Сохранить исправление версии 2" })).toBeEnabled());
+  }
+});
+
+it("reconciles a saved older workpaper through by-request without changing the open receipt", async () => {
+  const journal = pendingWorkpaperJournal();
+  sessionStorage.setItem(journal.key, journal.journalJson);
+  const { fetcher, confirmedBodies } = inboundVatWorkpaperFetcher({
+    rows: [correctionRowWithHistory(92, 2)],
+    onByRequest: (key) => key === journal.body.request_key ? savedWorkpaper(journal.body) : undefined,
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  expect(await screen.findByRole("button", { name: "Сверить рабочую ведомость версии 1" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Сверить рабочую ведомость версии 1" }));
+  await waitFor(() => expect(sessionStorage.getItem(journal.key)).toBeNull());
+  expect(await screen.findByText(/Сохранена рабочая ведомость № 501, редакция 1, для версии накладной 1/)).toBeInTheDocument();
+  expect(fetcher.mock.calls.some(([url]) => url.includes(`/by-request/${journal.body.request_key}`))).toBe(true);
+  expect(confirmedBodies).toHaveLength(0);
+  expect(sessionStorage.getItem(journal.key)).toBeNull();
+  expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("CORR-92");
+  expect(screen.getByRole("button", { name: "Сохранить исправление версии 2" })).toBeEnabled();
+  expect(fetcher.mock.calls.some(([url, init]) => url.includes("receipt-documents")
+    && ["POST", "PUT", "PATCH"].includes(String(init?.method)))).toBe(false);
+});
+
+it("clears an absent older journal only after the exact stale-revision 409", async () => {
+  const journal = pendingWorkpaperJournal();
+  sessionStorage.setItem(journal.key, journal.journalJson);
+  const { fetcher, confirmedBodies, saved } = inboundVatWorkpaperFetcher({
+    rows: [correctionRowWithHistory(92, 2)],
+    onConfirm: () => { throw Object.assign(new Error("Workpaper requires the exact current correction draft revision"), { status: 409 }); },
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Сверить рабочую ведомость версии 1" }));
+  expect(await screen.findByText(/Запрос рабочей ведомости для версии 1 не создал запись: сервер подтвердил устаревшую редакцию/)).toBeInTheDocument();
+  expect(fetcher.mock.calls.some(([url]) => url.includes(`/by-request/${journal.body.request_key}`))).toBe(true);
+  expect(confirmedBodies).toEqual([journal.bodyJson]);
+  expect(saved.size).toBe(0);
+  expect(sessionStorage.getItem(journal.key)).toBeNull();
+  expect(screen.getByRole("button", { name: "Сохранить исправление версии 2" })).toBeEnabled();
+});
+
+it("reconciles all older journals in sequence and unlocks only when storage is empty", async () => {
+  const first = pendingWorkpaperJournal(1, "2026-08", "95bd12f3-a45c-4b89-b005-2f9fa22c38a1");
+  const second = pendingWorkpaperJournal(1, "2026-09", "c3f1eb9e-0d8d-4db5-9de6-34d78d5598aa");
+  sessionStorage.setItem(second.key, second.journalJson);
+  sessionStorage.setItem(first.key, first.journalJson);
+  const { fetcher, confirmedBodies } = inboundVatWorkpaperFetcher({
+    rows: [correctionRowWithHistory(92, 2)],
+    onByRequest: (key) => key === first.body.request_key ? savedWorkpaper(first.body) : undefined,
+    onConfirm: () => { throw Object.assign(new Error("Workpaper requires the exact current correction draft revision"), { status: 409 }); },
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  expect(await screen.findByText(new RegExp(first.body.request_key))).toBeInTheDocument();
+  fireEvent.click(await screen.findByRole("button", { name: "Сверить рабочую ведомость версии 1" }));
+  expect(await screen.findByText(/Сохранена рабочая ведомость № 501/)).toBeInTheDocument();
+  expect(sessionStorage.getItem(first.key)).toBeNull();
+  expect(sessionStorage.getItem(second.key)).toBe(second.journalJson);
+  expect(await screen.findByText(new RegExp(second.body.request_key))).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Сохранить исправление версии 2" })).toBeDisabled();
+  expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("CORR-92");
+
+  await waitFor(() => expect(screen.getByRole("button", { name: "Сверить рабочую ведомость версии 1" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Сверить рабочую ведомость версии 1" }));
+  expect(await screen.findByText(/Запрос рабочей ведомости для версии 1 не создал запись: сервер подтвердил устаревшую редакцию/)).toBeInTheDocument();
+  expect(fetcher.mock.calls.some(([url]) => url.includes(`/by-request/${first.body.request_key}`))).toBe(true);
+  expect(fetcher.mock.calls.some(([url]) => url.includes(`/by-request/${second.body.request_key}`))).toBe(true);
+  expect(confirmedBodies).toEqual([second.bodyJson]);
+  expect(sessionStorage.getItem(first.key)).toBeNull();
+  expect(sessionStorage.getItem(second.key)).toBeNull();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Сохранить исправление версии 2" })).toBeEnabled());
+  expect(fetcher.mock.calls.some(([url, init]) => url.includes("receipt-documents")
+    && ["POST", "PUT", "PATCH"].includes(String(init?.method)))).toBe(false);
+});
+
+it("keeps the second older journal hidden behind an ambiguous first journal", async () => {
+  const first = pendingWorkpaperJournal(1, "2026-08", "95bd12f3-a45c-4b89-b005-2f9fa22c38a1");
+  const second = pendingWorkpaperJournal(1, "2026-09", "c3f1eb9e-0d8d-4db5-9de6-34d78d5598aa");
+  sessionStorage.setItem(first.key, first.journalJson);
+  sessionStorage.setItem(second.key, second.journalJson);
+  const { fetcher, confirmedBodies } = inboundVatWorkpaperFetcher({
+    rows: [correctionRowWithHistory(92, 2)],
+    onByRequest: () => { throw new TypeError("Network unavailable"); },
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Сверить рабочую ведомость версии 1" }));
+  expect(await screen.findByText(/Сохранённый ключ и тело оставлены без изменений/)).toBeInTheDocument();
+  expect(screen.getByText(new RegExp(first.body.request_key))).toBeInTheDocument();
+  expect(screen.queryByText(new RegExp(second.body.request_key))).not.toBeInTheDocument();
+  expect(sessionStorage.getItem(first.key)).toBe(first.journalJson);
+  expect(sessionStorage.getItem(second.key)).toBe(second.journalJson);
+  expect(screen.getByRole("button", { name: "Сохранить исправление версии 2" })).toBeDisabled();
+  expect(fetcher.mock.calls.filter(([url]) => url.includes("/by-request/")).map(([url]) => url)).toHaveLength(1);
+  expect(confirmedBodies).toHaveLength(0);
+  expect(fetcher.mock.calls.some(([url, init]) => url.includes("receipt-documents")
+    && ["POST", "PUT", "PATCH"].includes(String(init?.method)))).toBe(false);
+});
+
+it("shows a corrupt next journal after resolving the first even when readiness returns 403", async () => {
+  const first = pendingWorkpaperJournal(1, "2026-08", "95bd12f3-a45c-4b89-b005-2f9fa22c38a1");
+  const second = pendingWorkpaperJournal(1, "2026-09", "c3f1eb9e-0d8d-4db5-9de6-34d78d5598aa");
+  const corruptJournal = "{malformed journal";
+  sessionStorage.setItem(first.key, first.journalJson);
+  sessionStorage.setItem(second.key, corruptJournal);
+  const { fetcher: baseFetcher, confirmedBodies } = inboundVatWorkpaperFetcher({
+    rows: [correctionRowWithHistory(92, 2), correctionRow(93, "CORR-93", 2)],
+    onByRequest: (key) => key === first.body.request_key ? savedWorkpaper(first.body) : undefined,
+  });
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => url.includes("correction-readiness")
+    ? { ok: false, status: 403, json: async () => ({ detail: "Accountant access required" }) }
+    : baseFetcher(url, init));
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  expect(await screen.findByText(/Предпросмотр и подтверждение доступны только при точной VAT-only готовности/)).toBeInTheDocument();
+  expect(fetcher.mock.calls.some(([url]) => url.includes("correction-readiness"))).toBe(true);
+  fireEvent.click(await screen.findByRole("button", { name: "Сверить рабочую ведомость версии 1" }));
+  expect(await screen.findByText((_, element) => element?.getAttribute("role") === "alert"
+    && element.textContent?.includes(second.key) === true)).toBeInTheDocument();
+  expect(sessionStorage.getItem(first.key)).toBeNull();
+  expect(sessionStorage.getItem(second.key)).toBe(corruptJournal);
+  expect(screen.getByRole("button", { name: "Сохранить исправление версии 2" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Предпросмотр рабочей ведомости" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Подтвердить ведомость (только review)" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: /CORR-93/ }));
+  expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("CORR-92");
+  expect(confirmedBodies).toHaveLength(0);
+  expect(fetcher.mock.calls.some(([url, init]) => url.includes("receipt-documents")
+    && ["POST", "PUT", "PATCH"].includes(String(init?.method)))).toBe(false);
+});
+
+it.each(["by-request 403", "by-request 500", "by-request network", "malformed saved response", "other replay conflict"])(
+  "keeps an older journal blocked on %s", async (failureMode) => {
+    const journal = pendingWorkpaperJournal();
+    sessionStorage.setItem(journal.key, journal.journalJson);
+    const { fetcher, confirmedBodies } = inboundVatWorkpaperFetcher({
+      rows: [correctionRowWithHistory(92, 2)],
+      onByRequest: () => {
+        if (failureMode === "by-request 403") throw Object.assign(new Error("Accountant access required"), { status: 403 });
+        if (failureMode === "by-request 500") throw Object.assign(new Error("Temporary server failure"), { status: 500 });
+        if (failureMode === "by-request network") throw new TypeError("Network unavailable");
+        if (failureMode === "malformed saved response") return savedWorkpaper(journal.body, { organizationId: 8 });
+        return undefined;
+      },
+      onConfirm: () => { throw Object.assign(new Error("Different conflict"), { status: 409 }); },
+    });
+    vi.stubGlobal("fetch", fetcher);
+    render(<ProcurementReceiptDrafts org="7" />);
+    fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сверить рабочую ведомость версии 1" }));
+    if (failureMode === "by-request 403")
+      expect(await screen.findByText(/Доступ к восстановлению запрещён \(403\)/)).toBeInTheDocument();
+    else expect(await screen.findByText(/Сохранённый ключ и тело оставлены без изменений/)).toBeInTheDocument();
+    expect(sessionStorage.getItem(journal.key)).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Сохранить исправление версии 2" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Сверить рабочую ведомость версии 1" })).toBeEnabled();
+    expect(fetcher.mock.calls.some(([url, init]) => url.includes("receipt-documents")
+      && ["POST", "PUT", "PATCH"].includes(String(init?.method)))).toBe(false);
+    expect(confirmedBodies).toHaveLength(failureMode === "other replay conflict" ? 1 : 0);
+  },
+);
+
+it("keeps a pending journal when a saved response is foreign or has an unsafe flag", async () => {
+  const evidence = workpaperEvidence();
+  const { fetcher } = inboundVatWorkpaperFetcher({ evidence: { 92: evidence },
+    onConfirm: (body) => savedWorkpaper(body, { organizationId: 8, flags: { signature_verified: true } }),
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  await screen.findByText("История рабочих ведомостей · 2026-09");
+  fireEvent.click(screen.getByRole("button", { name: "Предпросмотр рабочей ведомости" }));
+  await screen.findByText(/Проверенный предпросмотр/);
+  fireEvent.change(screen.getByLabelText("Основание проверки бухгалтером"),
+    { target: { value: "Проверен комплект приложенных документов." } });
+  fireEvent.click(screen.getByRole("button", { name: "Подтвердить ведомость (только review)" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("не подтверждает точный запрос, источник или review-only ограничения");
+  expect(sessionStorage.getItem("inbound-vat-correction-workpaper:v1:7:92:2:2026-09")).not.toBeNull();
+});
+
+it("ignores an old preview after opening the same card again and after A-to-B-to-A", async () => {
+  const oldPreview = deferred<unknown>();
+  const rows = [correctionRow(92, "CORR-92", 2), correctionRow(93, "CORR-93", 2)];
+  let aPreviewCalls = 0;
+  const { fetcher } = inboundVatWorkpaperFetcher({ rows,
+    preview: (body) => {
+      if (Number(body.receipt_id) !== 92) return workpaperPreviewValue(Number(body.receipt_id), 2, String(body.tax_period), { lineId: 603 });
+      aPreviewCalls += 1;
+      return aPreviewCalls === 1 ? oldPreview.promise : workpaperPreviewValue(92, 2, String(body.tax_period), { lineId: 602 });
+    },
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  await screen.findByText("История рабочих ведомостей · 2026-09");
+  fireEvent.click(screen.getByRole("button", { name: "Предпросмотр рабочей ведомости" }));
+  await waitFor(() => expect(fetcher.mock.calls.filter(([url]) => url.includes("/inbound-vat-correction-workpapers/preview"))).toHaveLength(1));
+  fireEvent.click(screen.getByRole("button", { name: /CORR-92/ }));
+  fireEvent.click(screen.getByRole("button", { name: /CORR-93/ }));
+  await screen.findByText("История рабочих ведомостей · 2026-09");
+  fireEvent.click(screen.getByRole("button", { name: /CORR-92/ }));
+  await screen.findByText("История рабочих ведомостей · 2026-09");
+  fireEvent.click(screen.getByRole("button", { name: "Предпросмотр рабочей ведомости" }));
+  expect(await screen.findByText(/Строка № 602 · счёт 18\.01/)).toBeInTheDocument();
+  await act(async () => { oldPreview.resolve(workpaperPreviewValue(92, 2, "2026-09", { lineId: 601 })); await oldPreview.promise; });
+  expect(screen.getByText(/Строка № 602 · счёт 18\.01/)).toBeInTheDocument();
+  expect(screen.queryByText(/Строка № 601 · счёт 18\.01/)).not.toBeInTheDocument();
+});
+
+it("shows a 403 from the workpaper history endpoint without enabling confirmation", async () => {
+  const evidence = workpaperEvidence();
+  const { fetcher } = inboundVatWorkpaperFetcher({ evidence: { 92: evidence } });
+  fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.includes("/inbound-vat-correction-workpapers?") )
+      return { ok: false, status: 403, json: async () => ({ detail: "Accountant or chief access required" }) };
+    return (await (inboundVatWorkpaperFetcher({ evidence: { 92: evidence } }).fetcher(url, init)));
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProcurementReceiptDrafts org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("История ведомостей не подтверждена");
+  expect(screen.getByRole("alert")).toHaveTextContent("403");
+  expect(screen.queryByRole("button", { name: /Провести|Рассчитать вычет/ })).not.toBeInTheDocument();
 });
