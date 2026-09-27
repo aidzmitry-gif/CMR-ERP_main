@@ -155,7 +155,7 @@ function SelectedDocument({ org, dealId, id, onSelect, onClose, onChanged }: { o
     {row && <><DocumentRow row={row} onSelect={onSelect} detail />
       <DealDocumentCard doc={{ ...row, amount: Number(row.amount), draft_edit_token: row.draft_edit_token ?? undefined }} label={`Условия и история документа № ${row.number}`} refresh={async () => { setRevision(n => n + 1); onChanged(); }} />
       {row.kind === "invoice" && <Button variant="secondary" onClick={() => setCancellation(true)}>Аннулирование счёта</Button>}
-      {cancellation && row.kind === "invoice" && <InvoiceCancellation scope={{ org: Number(org), deal: Number(dealId), document: id }} onCancelled={() => { setRevision(n => n + 1); onChanged(); }} />}
+      {cancellation && row.kind === "invoice" && <InvoiceCancellation scope={{ org: Number(org), deal: Number(dealId), document: id }} onCancelled={() => { setRevision(n => n + 1); onChanged(); setNotifications(true); }} />}
       {row.kind === "invoice" && <Button variant="secondary" onClick={() => setShipment(true)}>Фактическая отгрузка и акты</Button>}
       {row.kind === "invoice" && <Button variant="secondary" onClick={() => setNotifications(true)}>Уведомления клиенту</Button>}
       {notifications && row.kind === "invoice" && <InvoiceNotificationRegister organizationId={Number(org)} dealId={dealId} documentId={id} />}

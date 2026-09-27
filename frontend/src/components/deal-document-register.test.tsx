@@ -10,6 +10,28 @@ const page = { organization_id: 7, deal_id: 501, client_identity: { status: "unr
 const organizations = [{ id: 7, name: "Book A", unp: "111" }, { id: 8, name: "Book B", unp: "222" }];
 const ok = (data: unknown) => ({ ok: true, status: 200, json: async () => data });
 it("opens exact cancellation scope and refreshes selected invoice plus register after success",async()=>{let canceled=false;const fetchMock=vi.fn().mockImplementation((url:string)=>{const current={...row,status:canceled?"cancelled":"posted",reserve_status:canceled?"released":"reserved"};return Promise.resolve(ok(url.includes("document-register?")?{...page,items:[current]}:current));});vi.stubGlobal("fetch",fetchMock);render(<DealDocumentRegister dealId="501" org="7"/>);fireEvent.click(await screen.findByRole("button",{name:"Открыть версию ID 100"}));fireEvent.click(await screen.findByRole("button",{name:"Аннулирование счёта"}));expect(screen.getByTestId("cancellation-scope")).toHaveTextContent("7/501/100");canceled=true;fireEvent.click(screen.getByRole("button",{name:"Тестовое подтверждение отмены"}));await screen.findAllByText(/Аннулирован · Резерв снят/);expect(fetchMock.mock.calls.filter(([url])=>url.includes("document-register?")).length).toBe(2);expect(fetchMock.mock.calls.filter(([url])=>url.endsWith("document-register/100")).length).toBe(2);});
+it("opens the invoice notice after confirmed cancellation but never sends automatically", async () => {
+  let canceled = false;
+  const notification = { id: 4, organization_id: 7, deal_id: 501, document_id: 100, document_version: 1,
+    event_id: 9, event_type: "sales.invoice.cancelled", business_key: "cancelled:4", channel: "email",
+    recipient: "buyer@example.com", state: "pending", reason: null, payload: {}, created_at: "2026-09-10T10:00:00Z" };
+  const fetchMock = vi.fn().mockImplementation((url: string) => {
+    if (url.endsWith("invoice-notifications")) return Promise.resolve(ok([notification]));
+    const current = { ...row, status: canceled ? "cancelled" : "posted", reserve_status: canceled ? "released" : "reserved" };
+    return Promise.resolve(ok(url.includes("document-register?") ? { ...page, items: [current] } : current));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<DealDocumentRegister dealId="501" org="7" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Открыть версию ID 100" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Аннулирование счёта" }));
+  expect(screen.queryByLabelText("Уведомления клиенту по счёту")).not.toBeInTheDocument();
+  canceled = true;
+  fireEvent.click(screen.getByRole("button", { name: "Тестовое подтверждение отмены" }));
+  await screen.findAllByText(/Аннулирован · Резерв снят/);
+  expect(await screen.findByLabelText("Уведомления клиенту по счёту")).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "Подготовить письмо" })).toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([url, options]) => url.includes("/emails/") && options?.method === "POST")).toBe(false);
+});
 function deferred() { let resolve!: (v: unknown) => void; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve: (v: unknown) => resolve(v) }; }
 async function selectBook() { await screen.findByRole("option", { name: "Book A · 111" }); fireEvent.change(screen.getByLabelText("Юрлицо реестра"), { target: { value: "7" } }); }
 
