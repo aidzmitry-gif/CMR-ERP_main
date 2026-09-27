@@ -138,6 +138,9 @@ async def test_pg_owned_order_all_edit_actions_replay(issuance_pg):  # noqa: F81
 async def test_pg_atomic_save_has_one_history_receipt_and_line_proof(issuance_pg):  # noqa: F811
     api, factory = issuance_pg
     async with factory() as session:
+        session.add(Counterparty(id=1, name="supplier1", unp="190000001"))
+        session.add(Supplier(id=1, name="supplier1", unp="190000001", status="active",
+                             counterparty_id=1))
         conn = await session.connection()
         await conn.run_sync(lambda c: TransportMethod.metadata.create_all(c,
             tables=[TransportMethod.__table__, PurchaseOrderMilestone.__table__], checkfirst=True))
