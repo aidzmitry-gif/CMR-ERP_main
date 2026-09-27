@@ -267,6 +267,137 @@ async def _store_synthetic_org_rule(url: str, root: Path, organization_id: int) 
         await engine.dispose()
 
 
+async def _store_synthetic_opening_import(url: str, organization_id: int) -> tuple[int, list[int], str, object]:
+    """Post one balanced synthetic opening package and return its recovery identity."""
+    from datetime import date
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from modules.accounting.models import Account, OpeningImportReceipt, Policy
+    from modules.accounting.opening_import import confirm, package_command_digest
+    from modules.accounting.schemas import ImportInput
+
+    cutover = date(2026, 9, 1)
+    engine = create_async_engine(url)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            policy = Policy(
+                organization_id=organization_id,
+                effective_from=date(2026, 1, 1),
+                reference="Synthetic recovery rehearsal policy",
+                inventory_method="specific",
+                allocation_basis="direct_cost",
+                depreciation_method="straight_line",
+                normative_reference="Synthetic recovery rehearsal only",
+                normative_verified=True,
+                approved_by="rehearsal",
+            )
+            session.add(policy)
+            await session.flush()
+            session.add_all([
+                Account(
+                    organization_id=organization_id, code="51", title="Synthetic settlement account",
+                    category="asset", valid_from=date(2026, 1, 1), required_dimensions=[],
+                    currency_tracking=True, quantity_tracking=False, cash=True,
+                    normative_ref="Synthetic recovery rehearsal only",
+                ),
+                Account(
+                    organization_id=organization_id, code="80", title="Synthetic equity account",
+                    category="equity", valid_from=date(2026, 1, 1), required_dimensions=[],
+                    currency_tracking=True, quantity_tracking=False, cash=False,
+                    normative_ref="Synthetic recovery rehearsal only",
+                ),
+            ])
+            await session.flush()
+            request_key = uuid.uuid4()
+            source = f"recovery-opening-{request_key.hex[:20]}"
+            package = ImportInput.model_validate({
+                "batch": f"recovery-{request_key.hex[:20]}",
+                "request_key": str(request_key),
+                "protocol_version": "opening-balance-v1",
+                "source_system": "synthetic-recovery-source",
+                "source_digest": hashlib.sha256(b"synthetic opening balance source").hexdigest(),
+                "cutover_date": cutover.isoformat(),
+                "evidence": "Synthetic local recovery rehearsal; no production or 1C data",
+                "expected_entry_count": 1,
+                "expected_line_count": 2,
+                "expected_debit_byn": "100.00",
+                "expected_credit_byn": "100.00",
+                "entries": [{
+                    "source": source,
+                    "source_version": 1,
+                    "operation": "manual",
+                    "document_date": cutover.isoformat(),
+                    "operation_date": cutover.isoformat(),
+                    "posting_date": cutover.isoformat(),
+                    "policy_id": policy.id,
+                    "rule_version": "manual-v1",
+                    "explanation": "Synthetic opening package for paired restore verification",
+                    "opening": True,
+                    "lines": [
+                        {"account": "51", "side": "debit", "amount": "100.00", "cash_activity": "operating"},
+                        {"account": "80", "side": "credit", "amount": "100.00"},
+                    ],
+                }],
+            })
+            result = await confirm(session, organization_id, package, "rehearsal")
+            await session.commit()
+            receipt = await session.get(OpeningImportReceipt, result["receipt_id"])
+            if (receipt is None or not result["confirmed"] or len(result["entry_ids"]) != 1
+                    or receipt.organization_id != organization_id
+                    or receipt.command_digest != package_command_digest(package)):
+                raise RehearsalError("synthetic opening import did not produce an exact receipt")
+            return receipt.id, list(result["entry_ids"]), receipt.digest, package
+    finally:
+        await engine.dispose()
+
+
+async def _check_restored_opening_import(url: str, organization_id: int, receipt_id: int,
+                                         entry_ids: list[int], expected_digest: str,
+                                         package: object) -> None:
+    from sqlalchemy import func, select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from modules.accounting.models import Entry, OpeningImportReceipt
+    from modules.accounting.opening_import import confirm, package_command_digest
+
+    engine = create_async_engine(url)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            receipt = await session.get(OpeningImportReceipt, receipt_id)
+            if (receipt is None or receipt.organization_id != organization_id
+                    or receipt.digest != expected_digest or receipt.entry_ids != entry_ids
+                    or receipt.command_digest != package_command_digest(package)):
+                raise RehearsalError("restored opening-import receipt identity or digest differs")
+            entries = (await session.scalars(select(Entry).where(
+                Entry.id.in_(entry_ids), Entry.organization_id == organization_id, Entry.opening.is_(True),
+            ).order_by(Entry.id))).all()
+            if (len(entries) != len(entry_ids)
+                    or [entry.id for entry in entries] != entry_ids
+                    or [entry.digest for entry in entries]
+                    != [item["digest"] for item in receipt.snapshot["entries"]]):
+                raise RehearsalError("restored opening ledger entries do not match the receipt snapshot")
+            receipt_count = await session.scalar(select(func.count()).select_from(OpeningImportReceipt).where(
+                OpeningImportReceipt.organization_id == organization_id,
+                OpeningImportReceipt.cutover_date == receipt.cutover_date,
+            ))
+            opening_count = await session.scalar(select(func.count()).select_from(Entry).where(
+                Entry.organization_id == organization_id, Entry.opening.is_(True),
+            ))
+            if receipt_count != 1 or opening_count != len(entry_ids):
+                raise RehearsalError("restored opening import contains duplicate receipts or entries")
+            replay = await confirm(session, organization_id, package, "rehearsal")
+            if replay["receipt_id"] != receipt_id or replay["digest"] != expected_digest:
+                raise RehearsalError("restored opening-import request replay changed its receipt")
+            replay_count = await session.scalar(select(func.count()).select_from(Entry).where(
+                Entry.organization_id == organization_id, Entry.opening.is_(True),
+            ))
+            if replay_count != opening_count:
+                raise RehearsalError("restored opening-import replay created duplicate ledger entries")
+    finally:
+        await engine.dispose()
+
+
 async def _check_restored_org_rule(url: str, root: Path, organization_id: int,
                                    review_id: int, expected_digest: str, *, available: bool) -> None:
     from fastapi import HTTPException
@@ -426,6 +557,9 @@ FROM organization;
         _org_file_id, org_file_sha256, org_storage_filename, org_review_id, org_review_digest = (
             asyncio.run(_store_synthetic_org_rule(source_url, source_files, organization_id))
         )
+        opening_receipt_id, opening_entry_ids, opening_digest, opening_package = asyncio.run(
+            _store_synthetic_opening_import(source_url, organization_id),
+        )
         source_path = source_files / str(organization_id) / storage_filename
         shutil.copytree(source_files, backup_files)
         backup_path = backup_files / str(organization_id) / storage_filename
@@ -441,6 +575,11 @@ FROM organization;
         _run("create generated restored database", ["docker", "exec", container, "createdb", "-U", user, restored_db], secret=password)
         restored_created = True
         _run("restore generated database", ["docker", "exec", container, "pg_restore", "--exit-on-error", "-U", user, "-d", restored_db, dump_path], timeout=180, secret=password)
+
+        asyncio.run(_check_restored_opening_import(
+            restored_url, organization_id, opening_receipt_id, opening_entry_ids,
+            opening_digest, opening_package,
+        ))
 
         asyncio.run(_check_restored_policy(restored_url, restored_files, organization_id,
                                             file_id, file_sha256, available=False))
@@ -483,7 +622,8 @@ FROM organization;
         if "Reconciliation receipts are immutable" not in (immutable_rejection.stdout + immutable_rejection.stderr):
             raise RehearsalError("receipt update was rejected without the immutable reconciliation guard signal")
         print(f"recovery rehearsal passed: alembic_head={expected_head}; reconciliation_receipts=1; "
-              "payroll_files=2; organization_rule_reviews=1; database_only_rejected=true; "
+              f"opening_imports=1; opening_import_entries={len(opening_entry_ids)}; "
+              "opening_import_replay_verified=true; payroll_files=2; organization_rule_reviews=1; database_only_rejected=true; "
               "tamper_rejected=true; paired_restore_verified=true; "
               f"work_schedule_migration_checked={str(args.check_work_schedule_migration).lower()}; "
               f"reconciliation_migration_checked={str(args.check_reconciliation_migration).lower()}")

@@ -6,7 +6,7 @@ real source documents, organization policy, PostgreSQL recovery evidence and
 the accountant's close.  It is therefore an operating checklist, not a claim
 that 1C can already be retired.
 
-Status on 2026-09-26: the Goal graph has **35 of 41** implementation nodes
+Status on 2026-09-27: the Goal graph has **35 of 41** implementation nodes
 marked done. The six open nodes are G03D (document lifecycle), G06C (own
 payroll calculation), G07 (opening balances), G06E (statutory payroll forms),
 G08 (accepted pilot month) and G09 (cutover proof). The **13 requirement rows
@@ -18,9 +18,10 @@ The bounded test-and-fix workflow is recorded in
 [Luna test/fix rules](LUNA-TEST-FIX-RULES.md); its test counts are not operational
 acceptance counts.
 
-Current source branch: `agent/crm-acc-prod009`; `alembic heads` on 2026-09-26
-reports the single development source head `0189`. The fixed first-release candidate
-remains at `0186`; this later manual-document change is not part of that release.
+Current source branch: `agent/crm-acc-prod009`; the fresh isolated recovery
+rehearsal on 2026-09-27 migrated a generated database to the single source head
+`0192`. The fixed first-release candidate remains at `0186`; source changes
+through `0192` are not part of that release.
 Two focused tests on a disposable local
 PostgreSQL 16 database passed for the supplier-contract revocation migration
 and procurement receipt history; the temporary container was removed. The earlier local synthetic PostgreSQL
@@ -40,11 +41,22 @@ current target database or all later source migrations.
 | VAT, ESCHF and foreign trade registers | [input/output VAT components](../../frontend/src/components/erp/accounting-input-vat-register.tsx), [foreign-trade module](../../modules/accounting/foreign_trade_register.py), [ESCHF source/version record](../eschf/sources.json) | Apply the ESCHF form and instruction effective from 13 May 2026, then confirm the matching technical format, provider, signature and portal result against real documents. The [tax authority announcement](https://nalog.gov.by/news/35429/) identifies Regulation No. 14 of 31 March 2026 as replacing the earlier form; the local unsigned candidate and VAT register do not certify external submission. |
 | Production, late costs, repairs, customer property, fixed assets and depreciation | [production cost revision contract](production-output-cost-revisions.md), [repairs module](../../modules/accounting/repair_accounting.py), fixed-asset and production workspaces | Reconcile WIP, production, customer property and depreciation using real policy and source documents. |
 | Payroll and statutory amounts | [payroll imports](../../modules/accounting/payroll_import.py), [statutory registry](../../modules/accounting/payroll_statutory.py), [HR draft and manual register](../../modules/hr/routes.py), [explicit employment binding](../../modules/accounting/payroll_employment.py), [versioned employer rules](../../modules/accounting/payroll_rule_set.py), [private source file registry](../../modules/accounting/payroll_evidence_files.py), [accounting workpaper contract](PAYROLL-WORKPAPER-CONTRACT.md), [accountant workpaper](../../frontend/src/components/erp/accounting-payroll-workpaper.tsx), [accountant payroll control](../../frontend/src/components/erp/accounting-payroll-control.tsx), [production estimate](../../modules/production/routes.py) | For the pilot, import a verified external calculation with its receipt. The HR preview and employee handouts are read-only scenarios from manually supplied inputs; legacy HR rows still have no automatic legal-entity ownership or bank-payment proof. The accounting binding requires an explicit employer/contract and does not verify the contract's contents. A chief-configured rule set fixes the arithmetic method, rounding and complete configured list of rate roles/base modes. New rules explicitly map each percentage rate to a payroll obligation; old unmapped rules and conflicts with the organization's reviewed applicability are visible blockers, but no tariff or legal completeness is inferred. The accountant workpaper previews arithmetic from selected stored contract, timesheet and monthly work-schedule files and explicitly entered salary/hours. It can upload those private files for an explicit employer binding; a chief alone can record an append-only arithmetic review with correction linkage. It verifies stored file bytes and, for an explicitly selected XLSX row, matches entered hours to numeric day cells in the declared work interval. A new chief arithmetic review requires a byte-verified monthly work schedule with a cited norm location. Employee-to-row identity, text day codes, contract salary, schedule approval and statutory applicability still require human verification. A selected numeric cell in a month-labelled XLSX work schedule can now be checked against the entered norm; non-XLSX norm values remain manually reviewed. Exemptions, caps, benefits and unconfigured obligations remain outside it. It cannot post or certify a statutory salary. The accountant control tab shows provisional monthly coverage and differences against posted imports with ledger links; it cannot create or accept a payroll result. The production estimate uses fixed 22-day and premium assumptions and is explicitly nonstatutory. Full ERP payroll calculation and period-versioned compulsory forms remain unimplemented. A verified external payroll system may remain the source during staged 1C transition. |
-| Opening balances, source ownership and 1C reconciliation without duplicate imports | [pilot input packet](PILOT-INPUT-PACKET.md), [strict v6 manifest](PILOT-INPUT-MANIFEST.md), [optional live book check](../../scripts/accounting_pilot_live_preflight.py), opening-import controls and tests. The reconciliation screen downloads a current ERP OSV; preview and new acceptance reject a right-hand CSV that differs from its exact current bytes. | Receive signed real policy, balances, source hashes, external payroll register or documented zero accruals, ownership decision for each section and one closed matched OSV pair. The declared 1C file's origin and completeness still need external proof; the optional live check can compare a declared book and current ERP OSV, but no target DB or real source was checked. No default organization assignment is permitted. |
+| Opening balances, source ownership and 1C reconciliation without duplicate imports | [pilot input packet](PILOT-INPUT-PACKET.md), [strict v6 manifest](PILOT-INPUT-MANIFEST.md), [optional live book check](../../scripts/accounting_pilot_live_preflight.py), opening-import controls and tests. The reconciliation screen downloads a current ERP OSV; preview and new acceptance reject a right-hand CSV that differs from its exact current bytes. A fresh synthetic paired recovery rehearsal at source head `0192` now verifies that an accepted opening-import receipt and its exact ledger-entry IDs/digests survive restore into a separate generated database and that replay does not duplicate them. | Receive signed real policy, balances, source hashes, external payroll register or documented zero accruals, ownership decision for each section and one closed matched OSV pair. The declared 1C file's origin and completeness still need external proof; the optional live check can compare a declared book and current ERP OSV, but no target DB or real source was checked. No default organization assignment is permitted. |
 | Recovery and release | [release readiness](RELEASE-READINESS-2026-09-22.md), [local PostgreSQL checkpoint](POSTGRES-ACCEPTANCE-2026-09-23.md) | Target DB revision inspection, integration to the release baseline, target-specific backup/restore including private payroll files, and release receipt. The local empty-base upgrade and restore do not satisfy the target gate. |
 | Replacement of 1C | All rows above are necessary local groundwork | Two successive accepted monthly closes, quarterly cycle, trial annual reporting, documented reconciliation of every variance, and an authorized production release. |
 
 ## Current local evidence
+
+- On 2026-09-27, a fresh isolated PostgreSQL recovery rehearsal migrated to
+  source head `0192`, imported one synthetic opening package through the real
+  importer, and restored the source database into a separate generated database.
+  The restored receipt, command digest, entry IDs and posting digests matched;
+  replay returned the same receipt and did not add entries. The existing
+  reconciliation receipt and two private payroll files also passed their
+  restore checks. Cleanup verified both generated databases, container and
+  temporary file tree were removed. This is synthetic local evidence only; it
+  does not establish 1C source provenance, actual balances, target recovery or
+  accountant acceptance.
 
 - The read-only legacy finance reconciliation now pairs duplicate payment
   references by exact BYN amount and reports mismatched amounts and malformed

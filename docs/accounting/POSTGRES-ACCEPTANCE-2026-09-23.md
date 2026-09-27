@@ -112,3 +112,22 @@ rejected; paired intact bytes were accepted. The runner removed generated
 databases, container and scratch files. This is local synthetic evidence, not
 a target-database upgrade, recovery of real records, legal-rule verification,
 or accountant acceptance.
+
+## Opening-import paired recovery — 2026-09-27
+
+`py -3 scripts/accounting_recovery_rehearsal.py --image pgvector/pgvector:pg16`
+passed on a fresh local PostgreSQL container after a full migration to source
+head `0192`. The rehearsal posted one synthetic opening-balance package through
+the real importer, dumped the generated source database, and restored it into a
+separate generated database. The restored receipt, package command digest,
+entry IDs and posting digests matched the original. Replaying the exact package
+returned the same receipt and left the opening-entry count unchanged. Existing
+reconciliation-receipt and private-payroll-file restore/tamper checks passed in
+the same run. The runner confirmed removal of both generated databases, the
+container and temporary private-file tree.
+
+`tests/accounting/test_opening_import.py` passed 8/8; the pilot-manifest,
+read-only live-preflight and reconciliation suites passed 45/45. Ruff and
+Python compilation passed. This is synthetic local recovery evidence, not a
+target-database restore, real 1C import, source-authenticity proof or accountant
+acceptance; G07 and the pilot close remain open.
