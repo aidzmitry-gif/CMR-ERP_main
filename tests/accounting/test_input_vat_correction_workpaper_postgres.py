@@ -9,7 +9,7 @@ from datetime import date
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 
 from modules.accounting.models import (
@@ -286,6 +286,88 @@ async def test_pg_inbound_vat_workpaper_scope_immutability_and_concurrent_succes
     assert sorted(status for status, _ in outcomes) == [201, 409], [response.text for _, response in outcomes]
     accepted = next(response.json() for status, response in outcomes if status == 201)
     assert accepted["revision"] == 2 and accepted["supersedes_workpaper_id"] == first["workpaper_id"]
+
+    async with factory() as session:
+        ledger_counts_before = (
+            await session.scalar(select(func.count()).select_from(Entry)),
+            await session.scalar(select(func.count()).select_from(Line)),
+        )
+
+    # Register a synthetic, explicitly pending classification and prove the
+    # workpaper exposes only a verified navigation link on PostgreSQL.
+    api.headers["X-User-Roles"] = "director,chief"
+    register_url = f"/accounting/organizations/{pg_book[0]}/input-vat-register"
+    register_command = {
+        "request_key": str(uuid4()),
+        "entry_id": first["source_entry_id"],
+        "line_id": line["line_id"],
+        "expected_entry_digest": first["source_entry_digest"],
+        "tax_period": first["tax_period"],
+        "invoice_reference": "SYN-PG-INPUT-VAT",
+        "eschf_identifier": "SYN-PG-ESCHF",
+        "deduction_status": "pending",
+        "eschf_status": "provided",
+        "right_basis": "Synthetic PostgreSQL navigation fixture only",
+        "evidence": "Synthetic evidence does not prove deduction eligibility",
+    }
+    register_preview = await api.post(register_url + "/preview", json=register_command)
+    assert register_preview.status_code == 200, register_preview.text
+    register_confirmation = await api.post(
+        register_url + "/confirm",
+        headers={"X-Expected-Principal": "tester"},
+        json={**register_command, "digest": register_preview.json()["digest"]},
+    )
+    assert register_confirmation.status_code == 201, register_confirmation.text
+    registered = register_confirmation.json()
+    assert registered["posted"] is False
+    assert registered["deduction_assessed"] is False
+
+    linked_responses = []
+    for request_key in (first["request_key"], accepted["request_key"]):
+        linked_response = await api.get(base + f"/by-request/{request_key}")
+        assert linked_response.status_code == 200, linked_response.text
+        linked = linked_response.json()
+        assert linked["input_vat_register_links"] == {
+            "status": "complete",
+            "organization_id": pg_book[0],
+            "source_entry_id": first["source_entry_id"],
+            "source_entry_digest": first["source_entry_digest"],
+            "source_line_count": 1,
+            "registered_line_count": 1,
+            "items": [{
+                "register_entry_id": registered["id"],
+                "source_line_id": line["line_id"],
+                "register_digest": registered["digest"],
+                "tax_period": first["tax_period"],
+                "invoice_reference": register_command["invoice_reference"],
+                "eschf_identifier": register_command["eschf_identifier"],
+                "eschf_status": register_command["eschf_status"],
+            }],
+            "statutory_certified": False,
+            "deduction_assessed": False,
+            "posting_available": False,
+        }
+        assert linked["basis_digest"] == first["basis_digest"]
+        assert linked["snapshot_digest"] == first["snapshot_digest"]
+        assert not any(key in json.dumps(linked["input_vat_register_links"])
+                       for key in ("amount", "side", "delta", "vat_delta", "deduction_status"))
+        linked_responses.append(linked)
+
+    history = await api.get(base, params={
+        "receipt_id": first["receipt_id"],
+        "receipt_version": first["receipt_version"],
+        "tax_period": first["tax_period"],
+    })
+    assert history.status_code == 200, history.text
+    assert all(row["input_vat_register_links"] == linked_responses[0]["input_vat_register_links"]
+               for row in history.json())
+
+    async with factory() as session:
+        ledger_counts_after = (
+            await session.scalar(select(func.count()).select_from(Entry)),
+            await session.scalar(select(func.count()).select_from(Line)),
+        )
+    assert ledger_counts_after == ledger_counts_before
 
     async with factory() as session:
         rows = (await session.scalars(select(InboundVatCorrectionWorkpaper).order_by(
