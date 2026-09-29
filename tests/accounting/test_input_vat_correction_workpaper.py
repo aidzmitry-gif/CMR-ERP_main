@@ -8,7 +8,14 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import func, select, update
 
-from modules.accounting.models import Account, Entry, InboundVatCorrectionWorkpaper, Line, Period
+from modules.accounting.models import (
+    Account,
+    Entry,
+    InboundVatCorrectionWorkpaper,
+    InputVatRegisterEntry,
+    Line,
+    Period,
+)
 from modules.procurement.receipt_documents import ReceiptDocument, ReceiptPosting, ReceiptRevision
 from tests.accounting.test_inbound_vat_evidence_files import PDF, XML, payload, seed_vat_correction
 from tests.accounting.test_procurement_receipt_drafts import document
@@ -146,6 +153,12 @@ async def test_vat_correction_workpaper_preview_replay_history_and_read_only(
     assert preview["basis"]["receipt"]["source_entry_id"] == entry_id
     assert preview["basis"]["receipt"]["source_entry_digest"] == "a" * 64
     assert preview["source_account_18_line_count"] == 1
+    assert preview["input_vat_register_links"] == {
+        "status": "none", "organization_id": book[0],
+        "source_entry_id": entry_id, "source_entry_digest": "a" * 64,
+        "source_line_count": 1, "registered_line_count": 0, "items": [],
+        "statutory_certified": False, "deduction_assessed": False, "posting_available": False,
+    }
     line, = preview["basis"]["source_account_18_lines"]
     assert line["account_code"] == "18" and line["amount"] == "20.00"
     assert not any(key in line for key in ("side", "debit", "credit", "delta", "vat_delta"))
@@ -212,6 +225,70 @@ async def test_vat_correction_workpaper_preview_replay_history_and_read_only(
     assert replay_first.status_code == 201 and replay_first.json() == first
     stored = storage / str(book[0]) / (replacement["request_key"].replace("-", "") + ".xml")
     assert hashlib.sha256(stored.read_bytes()).hexdigest() == replacement["sha256"]
+
+    source_line = await db.scalar(select(Line).where(
+        Line.entry_id == entry_id, Line.account_code == "18",
+    ))
+    register_url = f"/accounting/organizations/{book[0]}/input-vat-register"
+    register_command = {
+        "request_key": str(uuid4()), "entry_id": entry_id, "line_id": source_line.id,
+        "expected_entry_digest": "a" * 64, "tax_period": "2026-09",
+        "invoice_reference": "INV-18", "eschf_identifier": "ЭСЧФ-18",
+        "deduction_status": "pending", "eschf_status": "provided",
+        "right_basis": "Синтетическая запись регистра для проверки навигационной связи",
+        "evidence": "Тестовые сведения не подтверждают применимое право на вычет",
+    }
+    register_preview = await client.post(register_url + "/preview", json=register_command)
+    assert register_preview.status_code == 200, register_preview.text
+    register_confirm = await client.post(
+        register_url + "/confirm", headers={"X-Expected-Principal": "tester"},
+        json={**register_command, "digest": register_preview.json()["digest"]},
+    )
+    assert register_confirm.status_code == 201, register_confirm.text
+    register_entry = register_confirm.json()
+    assert register_entry["posted"] is False
+
+    linked = await client.get(url + f"/by-request/{second['request_key']}")
+    assert linked.status_code == 200, linked.text
+    linked_result = linked.json()
+    assert linked_result["input_vat_register_links"] == {
+        "status": "complete", "organization_id": book[0],
+        "source_entry_id": entry_id, "source_entry_digest": "a" * 64,
+        "source_line_count": 1, "registered_line_count": 1,
+        "items": [{
+            "register_entry_id": register_entry["id"], "source_line_id": source_line.id,
+            "register_digest": register_entry["digest"], "tax_period": "2026-09",
+            "invoice_reference": "INV-18", "eschf_identifier": "ЭСЧФ-18", "eschf_status": "provided",
+        }],
+        "statutory_certified": False, "deduction_assessed": False, "posting_available": False,
+    }
+    assert linked_result["basis_digest"] == second["basis_digest"]
+    assert linked_result["snapshot_digest"] == second["snapshot_digest"]
+    assert not any(key in json.dumps(linked_result["input_vat_register_links"])
+                   for key in ("amount", "side", "delta", "vat_delta", "deduction_status"))
+    current_history = await client.get(url, params={
+        "receipt_id": receipt_id, "receipt_version": 1, "tax_period": "2026-09",
+    })
+    assert current_history.status_code == 200, current_history.text
+    assert all(row["input_vat_register_links"] == linked_result["input_vat_register_links"]
+               for row in current_history.json())
+    assert await db.scalar(select(func.count()).select_from(Line)) == ledger_count
+
+    await db.execute(update(InputVatRegisterEntry).where(
+        InputVatRegisterEntry.id == register_entry["id"],
+    ).values(entry_digest="f" * 64))
+    await db.commit()
+    db.expire_all()
+    stale_link = await client.get(url + f"/by-request/{second['request_key']}")
+    assert stale_link.status_code == 409 and "register source binding" in stale_link.text
+    await db.execute(update(InputVatRegisterEntry).where(
+        InputVatRegisterEntry.id == register_entry["id"],
+    ).values(entry_digest="a" * 64))
+    await db.commit()
+    db.expire_all()
+    restored_link = await client.get(url + f"/by-request/{second['request_key']}")
+    assert restored_link.status_code == 200 and restored_link.json()["input_vat_register_links"] == \
+        linked_result["input_vat_register_links"]
 
     original_revision = await db.get(ReceiptRevision, second["snapshot"]["receipt"]["original_revision_id"])
     changed_document = deepcopy(original_revision.document)

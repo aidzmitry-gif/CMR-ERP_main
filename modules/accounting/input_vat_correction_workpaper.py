@@ -18,6 +18,7 @@ from modules.accounting.models import (
     Entry,
     InboundVatCorrectionWorkpaper,
     InboundVatEvidenceFile,
+    InputVatRegisterEntry,
     Line,
     Period,
 )
@@ -246,7 +247,8 @@ async def _prepare(session, org_id: int, data: InboundVatCorrectionWorkpaperInpu
 
 
 async def preview(session, org_id: int, data: InboundVatCorrectionWorkpaperInput) -> dict:
-    return await _prepare(session, org_id, data)
+    result = await _prepare(session, org_id, data)
+    return await _with_input_vat_register_links(session, result, result["basis"])
 
 
 def _result(row: InboundVatCorrectionWorkpaper) -> dict:
@@ -292,6 +294,132 @@ def _result(row: InboundVatCorrectionWorkpaper) -> dict:
         "evidence_bytes_verified_at_review": True,
         **REVIEW_FLAGS,
     }
+
+
+async def _with_input_vat_register_links(session, result: dict, basis: dict) -> dict:
+    """Attach current register navigation without changing the immutable workpaper basis."""
+    source = basis.get("receipt") if isinstance(basis, dict) else None
+    lines = basis.get("source_account_18_lines") if isinstance(basis, dict) else None
+    if not isinstance(source, dict) or not isinstance(lines, list) or not lines:
+        raise HTTPException(409, "Inbound VAT workpaper register links require reconciliation")
+
+    organization_id = result.get("organization_id")
+    entry_id = source.get("source_entry_id")
+    entry_digest = source.get("source_entry_digest")
+    line_ids = [line.get("line_id") if isinstance(line, dict) else None for line in lines]
+    if (not isinstance(organization_id, int) or isinstance(organization_id, bool)
+            or not isinstance(entry_id, int) or isinstance(entry_id, bool)
+            or not isinstance(entry_digest, str) or not re.fullmatch(r"[a-f0-9]{64}", entry_digest)
+            or any(not isinstance(line_id, int) or isinstance(line_id, bool) for line_id in line_ids)
+            or len(set(line_ids)) != len(line_ids)):
+        raise HTTPException(409, "Inbound VAT workpaper register-link identity requires reconciliation")
+
+    entry = await session.scalar(select(Entry).where(
+        Entry.organization_id == organization_id,
+        Entry.id == entry_id,
+        Entry.digest == entry_digest,
+        Entry.source == source.get("source_entry"),
+        Entry.source_version == source.get("source_version"),
+    ))
+    if entry is None:
+        raise HTTPException(409, "Inbound VAT workpaper source posting requires reconciliation")
+
+    source_lines = (await session.scalars(select(Line).where(
+        Line.entry_id == entry_id,
+        Line.id.in_(line_ids),
+    ).order_by(Line.id))).all()
+    expected_lines = {line["line_id"]: line for line in lines}
+    source_lines_by_id = {line.id: line for line in source_lines}
+    if len(source_lines) != len(expected_lines):
+        raise HTTPException(409, "Inbound VAT workpaper source lines require reconciliation")
+    for line in source_lines:
+        expected = expected_lines.get(line.id)
+        if (expected is None or expected.get("account_code") != line.account_code
+                or expected.get("amount") != format(Decimal(line.amount), ".2f")
+                or expected.get("currency") != line.currency
+                or expected.get("account_id") != line.account_id
+                or expected.get("account_title") != line.account_title
+                or expected.get("category") != line.category
+                or expected.get("cash") is not line.cash
+                or expected.get("dimensions") != (line.dimensions or {})
+                or not _is_account_18(line.account_code)):
+            raise HTTPException(409, "Inbound VAT workpaper source line changed; register navigation requires reconciliation")
+
+    rows = (await session.scalars(select(InputVatRegisterEntry).where(
+        InputVatRegisterEntry.organization_id == organization_id,
+        InputVatRegisterEntry.entry_id == entry_id,
+        InputVatRegisterEntry.line_id.in_(line_ids),
+    ).order_by(InputVatRegisterEntry.line_id, InputVatRegisterEntry.id))).all()
+    links = []
+    linked_line_ids = set()
+    for row in rows:
+        source_line = source_lines_by_id.get(row.line_id)
+        command = row.command if isinstance(row.command, dict) else None
+        if row.line_id not in expected_lines or row.line_id in linked_line_ids or source_line is None or command is None:
+            raise HTTPException(409, "Inbound VAT register source binding requires reconciliation")
+        command_for_digest = dict(command)
+        command_digest = command_for_digest.pop("digest", None)
+        register_source = {
+            "entry_id": entry.id,
+            "line_id": source_line.id,
+            "source": entry.source,
+            "source_version": entry.source_version,
+            "entry_digest": entry.digest,
+            "posting_date": entry.posting_date.isoformat(),
+            "document_date": entry.document_date.isoformat(),
+            "operation_date": entry.operation_date.isoformat(),
+            "side": source_line.side,
+            "amount": format(Decimal(source_line.amount), ".2f"),
+            "currency": source_line.currency,
+            "account_code": source_line.account_code,
+        }
+        if (row.entry_digest != entry_digest
+                or row.source != entry.source
+                or row.source_version != entry.source_version
+                or row.posting_date != entry.posting_date
+                or not re.fullmatch(r"[a-f0-9]{64}", row.digest or "")
+                or not isinstance(row.invoice_reference, str) or not row.invoice_reference.strip()
+                or command_digest != row.digest or command.get("request_key") != row.request_key
+                or command.get("entry_id") != entry.id or command.get("line_id") != row.line_id
+                or command.get("expected_entry_digest") != entry_digest
+                or command.get("tax_period") != row.tax_period
+                or command.get("invoice_reference") != row.invoice_reference
+                or command.get("eschf_identifier") != row.eschf_identifier
+                or command.get("deduction_status") != row.deduction_status
+                or command.get("eschf_status") != row.eschf_status
+                or command.get("right_basis") != row.right_basis or command.get("evidence") != row.evidence
+                or row.amount != Decimal(register_source["amount"])
+                or row.currency != register_source["currency"] or row.side != register_source["side"]
+                or _digest({"command": command_for_digest, "source": register_source}) != row.digest):
+            raise HTTPException(409, "Inbound VAT register source binding requires reconciliation")
+        linked_line_ids.add(row.line_id)
+        links.append({
+            "register_entry_id": row.id,
+            "source_line_id": row.line_id,
+            "register_digest": row.digest,
+            "tax_period": row.tax_period,
+            "invoice_reference": row.invoice_reference,
+            "eschf_identifier": row.eschf_identifier,
+            "eschf_status": row.eschf_status,
+        })
+
+    registered_line_count = len(links)
+    source_line_count = len(expected_lines)
+    result["input_vat_register_links"] = {
+        "status": "none" if registered_line_count == 0 else (
+            "complete" if registered_line_count == source_line_count else "partial"
+        ),
+        "organization_id": organization_id,
+        "source_entry_id": entry_id,
+        "source_entry_digest": entry_digest,
+        "source_line_count": source_line_count,
+        "registered_line_count": registered_line_count,
+        "items": links,
+        "statutory_certified": False,
+        "deduction_assessed": False,
+        "posting_available": False,
+    }
+    return result
 
 
 async def _verify_snapshot_evidence(session, org_id: int, snapshot: dict) -> None:
@@ -348,7 +476,8 @@ async def create(session, org_id: int, data: InboundVatCorrectionWorkpaperConfir
             raise HTTPException(409, "Inbound VAT workpaper request key was reused with different content")
         await _verify_snapshot_evidence(session, org_id, existing.snapshot)
         await _verify_snapshot_revisions(session, existing)
-        return _result(existing)
+        result = _result(existing)
+        return await _with_input_vat_register_links(session, result, existing.snapshot)
 
     prepared = await _prepare(session, org_id, InboundVatCorrectionWorkpaperInput(
         receipt_id=data.receipt_id,
@@ -398,7 +527,8 @@ async def create(session, org_id: int, data: InboundVatCorrectionWorkpaperConfir
     )
     session.add(row)
     await session.flush()
-    return _result(row)
+    result = _result(row)
+    return await _with_input_vat_register_links(session, result, row.snapshot)
 
 
 async def by_request(session, org_id: int, request_key: UUID) -> dict:
@@ -410,7 +540,8 @@ async def by_request(session, org_id: int, request_key: UUID) -> dict:
         raise HTTPException(404, "Inbound VAT correction workpaper was not found")
     await _verify_snapshot_evidence(session, org_id, row.snapshot)
     await _verify_snapshot_revisions(session, row)
-    return _result(row)
+    result = _result(row)
+    return await _with_input_vat_register_links(session, result, row.snapshot)
 
 
 async def history(session, org_id: int, receipt_id: int, receipt_version: int,
@@ -425,4 +556,8 @@ async def history(session, org_id: int, receipt_id: int, receipt_version: int,
     for row in rows:
         await _verify_snapshot_evidence(session, org_id, row.snapshot)
         await _verify_snapshot_revisions(session, row)
-    return [_result(row) for row in rows]
+    results = []
+    for row in rows:
+        result = _result(row)
+        results.append(await _with_input_vat_register_links(session, result, row.snapshot))
+    return results
