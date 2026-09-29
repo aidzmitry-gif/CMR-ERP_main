@@ -4,14 +4,11 @@ import asyncio
 import base64
 import hashlib
 import json
-import runpy
 from copy import deepcopy
 from datetime import date
 from uuid import uuid4
 
 import pytest
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 
@@ -29,19 +26,6 @@ from tests.accounting.test_procurement_receipt_drafts import document, source_op
 from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 pytestmark = pytest.mark.integration
-
-
-async def run_migrations(session):
-    def run(connection):
-        with Operations.context(MigrationContext.configure(connection)):
-            for filename in (
-                "0191_accounting_inbound_vat_evidence.py",
-                "0192_accounting_inbound_vat_correction_workpaper.py",
-            ):
-                migration = runpy.run_path(f"migrations/versions/{filename}")
-                migration["upgrade"]()
-
-    await (await session.connection()).run_sync(run)
 
 
 def _digest(value: dict) -> str:
@@ -186,7 +170,6 @@ async def direct_workpaper_values(session, org_id, correction_id: int, template:
 
 async def seed_workpaper_api(api, factory, pg_book):
     async with factory() as session:
-        await run_migrations(session)
         await session.execute(text(
             "SELECT setval(pg_get_serial_sequence('accounting.account','id'), "
             "(SELECT max(id) FROM accounting.account))"
