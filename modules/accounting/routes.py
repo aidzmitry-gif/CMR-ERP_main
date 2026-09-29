@@ -68,6 +68,7 @@ from modules.accounting import (
     statutory_requirements,
     trade_settlement_report,
 )
+from modules.accounting.assembly_estimate import AssemblyEstimateInput
 from modules.accounting.documents import BankDocument, preview_bank
 from modules.accounting.fixed_assets import (
     FixedAssetDepreciationConfirmInput,
@@ -979,6 +980,42 @@ async def queue_reconciliation_issue(org_id: int, data: ReconciliationIssueInput
         )
     except (ValueError, csv.Error, service.AccountingError) as exc:
         raise HTTPException(422, str(exc)) from exc
+@router.post("/organizations/{org_id}/assembly-estimate")
+async def assembly_estimate(org_id: int, data: AssemblyEstimateInput, response: Response, ctx=Depends(member)):
+    from modules.accounting import expenses
+    from modules.accounting.assembly_estimate import calculate
+
+    response.headers["Cache-Control"] = "private, no-store"
+    article_snapshots = {}
+    if data.batch_cost_articles:
+        catalog = await expenses.catalog(ctx[0], org_id)
+        groups = {row["id"]: row for row in catalog["groups"]}
+        articles = {row["id"]: row for row in catalog["articles"]}
+        for binding in data.batch_cost_articles:
+            article = articles.get(binding.article_id)
+            group = groups.get(article["group_id"]) if article else None
+            if not article or not article["active"] or not group or not group["active"]:
+                raise HTTPException(422, "Выберите активную статью расходов выбранной организации")
+            article_snapshots[binding.category] = {
+                "id": article["id"], "code": article["code"], "title": article["title"],
+                "group_title": group["title"],
+            }
+    return {"organization_id": org_id, **calculate(data), "cost_article_snapshots": article_snapshots}
+
+
+@router.get("/organizations/{org_id}/reports/shipment-profit")
+async def shipment_profit_report(org_id: int, start: date, end: date, response: Response,
+                                 offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=100),
+                                 ctx=Depends(member)):
+    from modules.accounting.shipment_profit import report
+
+    response.headers["Cache-Control"] = "private, no-store"
+    try:
+        return await report(ctx[0], org_id, start, end, offset=offset, limit=limit)
+    except service.AccountingError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 
 
 @router.get("/organizations/{org_id}/reconciliation/issues")

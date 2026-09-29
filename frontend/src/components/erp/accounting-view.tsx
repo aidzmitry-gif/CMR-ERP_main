@@ -23,6 +23,8 @@ import { AccountingForeignTrade } from "./accounting-foreign-trade";
 import { AccountingFixedAssets } from "./accounting-fixed-assets";
 import { AccountingRepairs } from "./accounting-repairs";
 import { AccountingProductionCostSources } from "./accounting-production-cost-sources";
+import { AccountingAssemblyEstimate } from "./accounting-assembly-estimate";
+import { AccountingShipmentProfit } from "./accounting-shipment-profit";
 import { AccountingPayrollAccrualImport } from "./accounting-payroll-accrual-import";
 import { AccountingPayrollStatutoryImport } from "./accounting-payroll-statutory-import";
 import { AccountingPayrollControl } from "./accounting-payroll-control";
@@ -126,6 +128,7 @@ const accountingSections: AccountingSection[] = [
     { id: "bank", label: "Банк" }, { id: "bank-import", label: "Импорт выписки" },
     { id: "invoice-settlements", label: "Оплаты счетов" },
   ] },
+    { id: "assembly-estimate", label: "Калькуляция сборки" },
   { id: "payroll", label: "Зарплата", pages: [
     { id: "payroll-control", label: "Контроль зарплаты" }, { id: "payroll-hr-draft", label: "Черновая ведомость HR" },
     { id: "payroll-workpaper", label: "Расчётный лист" },
@@ -147,6 +150,7 @@ const accountingSections: AccountingSection[] = [
     { id: "seller-profiles", label: "Реквизиты продавца" },
   ] },
 ];
+    { id: "shipment-profit", label: "Прибыль по отгрузкам" },
 
 function salesOriginal(org: string, reference: string) {
   const match = /^sales:document:([1-9][0-9]*)$/.exec(reference);
@@ -1189,6 +1193,8 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     {tab === "payroll-accruals" && <AccountingPayrollAccrualImport org={org} month={operationDate.slice(0, 7)} policyId={String(policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id || "")} disabled={locked} onEntry={(id) => void openEntry(id)} onLock={setControlsBusy} />}
     {tab === "payroll-statutory" && <AccountingPayrollStatutoryImport org={org} month={operationDate.slice(0, 7)} policyId={String(policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id || "")} disabled={locked} onEntry={(id) => void openEntry(id)} onLock={setControlsBusy} />}
     {tab === "statutory-requirements" && <AccountingStatutoryRequirements org={org} month={operationDate.slice(0, 7)} disabled={locked} onBusyChange={setControlsBusy} />}
+    {tab === "assembly-estimate" && <AccountingAssemblyEstimate org={org} date={operationDate} />}
+    {tab === "shipment-profit" && <AccountingShipmentProfit org={org} start={start} end={end} onEntry={(id) => void openEntry(id)} />}
     {(tab === "inventory-issue" || tab === "sale") && <AccountingInventoryIssue sale={tab === "sale"} key={`${org}/${tab}`} org={org} accounts={accounts} policyId={policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id} inventoryMethod={policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.inventory_method} date={operationDate} onDate={(value) => changeDate("operation", value)} onBusyChange={setControlsBusy} onPosted={() => void refresh()} onEntry={(id) => void openEntry(id)} />}
     {tab === "bank" && <AccountingBank key={org} org={org} accounts={accounts} policyId={policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id} date={operationDate} onDate={(value) => changeDate("operation", value)} onPosted={() => void refresh()} />}
     {tab === "bank-import" && <AccountingBankImport key={org} org={org} accounts={accounts} policyId={policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id} date={operationDate} onDate={(value) => changeDate("operation", value)} onPosted={() => void refresh()} onEntry={(id) => void openEntry(id)} />}
