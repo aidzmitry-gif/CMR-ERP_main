@@ -490,15 +490,47 @@ async def scenario(url, purpose, *, legacy=False):
             if legacy:
                 async with factory() as session:
                     assert (await session.execute(text("SELECT row_to_json(r)::text FROM accounting.shipment_accounting_receipt r"))).scalars().all() == before_legacy
-            # Synthetic closure marker proves replay bypasses posting/recosting.
-            # It is not an actual July/August close or G11 source reconciliation.
+            # Production output still has its own unresolved primary control;
+            # the output-transfer source does not resolve that different source.
+            # Observe refusal honestly; this proves neither close nor closed replay.
             from modules.accounting.schemas import CloseInput
             async with factory() as session:
                 period = await service.period_for(session, org_id, MONTH)
-                await service.close_period(session, org_id, MONTH, CloseInput(
-                    expected_generation=period.generation,
-                    evidence={step: "Synthetic disposable G12 replay control only" for step in service.CLOSE_STEPS}), ACTOR)
-                await session.commit()
+                pending = (await session.execute(text("""SELECT source,version,month,entry_id
+                    FROM accounting.source_control WHERE organization_id=:org AND month<=:month AND entry_id IS NULL
+                    ORDER BY source,version,id"""), {"org": org_id, "month": MONTH})).mappings().all()
+                assert any(dict(row) == {"source": f"production:output:{output_id}", "version": 1,
+                                         "month": MONTH, "entry_id": None} for row in pending)
+                close_readback = text("""SELECT 'period',p.id,row_to_json(p)::text
+                    FROM accounting.period p WHERE p.organization_id=:org
+                    UNION ALL SELECT 'control',c.id,row_to_json(c)::text
+                    FROM accounting.source_control c WHERE c.organization_id=:org
+                    UNION ALL SELECT 'output_receipt',r.entry_id,row_to_json(r)::text
+                    FROM accounting.production_output_transfer_receipt r WHERE r.organization_id=:org
+                    UNION ALL SELECT 'shipment_receipt',r.id,row_to_json(r)::text
+                    FROM accounting.shipment_accounting_receipt r WHERE r.organization_id=:org
+                    UNION ALL SELECT 'entry',e.id,row_to_json(e)::text
+                    FROM accounting.entry e WHERE e.organization_id=:org
+                    UNION ALL SELECT 'line',l.id,row_to_json(l)::text
+                    FROM accounting.line l JOIN accounting.entry e ON e.id=l.entry_id WHERE e.organization_id=:org
+                    ORDER BY 1,2""")
+                before_close = (await session.execute(close_readback, {"org": org_id})).all()
+                assert period.closed is False
+                refusal_message = "Unposted primary documents prevent closing"
+                try:
+                    await service.close_period(session, org_id, MONTH, CloseInput(
+                        expected_generation=period.generation,
+                        evidence={step: "Synthetic disposable G12 replay control only" for step in service.CLOSE_STEPS}), ACTOR)
+                except service.AccountingError as error:
+                    assert str(error) == refusal_message, str(error)
+                else:
+                    raise AssertionError("Unresolved production primary control unexpectedly allowed close")
+                finally:
+                    await session.rollback()
+                assert (await session.execute(close_readback, {"org": org_id})).all() == before_close, "Refused close changed period, controls, receipts or ledger"
+                assert await session.scalar(text("SELECT closed FROM accounting.period WHERE organization_id=:org AND month=:month"), {"org": org_id, "month": MONTH}) is False
+                close_refusal = {"status": "refused_without_mutation", "message": refusal_message,
+                                 "pending_controls": [dict(row) for row in pending], "pending_count": len(pending)}
             assert await checked(api, "POST", accounting_path + "/confirm", shipment_command, status=201) == saved
             report_path = f"/accounting/organizations/{org_id}/reports/shipment-profit?start=2026-09-01&end=2026-09-30"
             report = await checked(api, "GET", report_path)
@@ -521,7 +553,8 @@ async def scenario(url, purpose, *, legacy=False):
                 "organization_id": org_id, "order_id": order_id, "invoice_id": invoice_id,
                 "goods_account": goods_account, "sql_rejections": sql_rejections, "legacy_upgrade_replay": legacy,
                 "populated_downgrade": downgrade_refusal,
-                "synthetic_closed_period_replay": "passed", "real_period_close": "not_proven"}
+                "close_refusal": close_refusal, "open_period_replay": "passed",
+                "synthetic_closed_period_replay": "not_proven", "real_period_close": "not_proven"}
             print(json.dumps(receipt), flush=True)
             return app, engine, receipt
     except BaseException:
