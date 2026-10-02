@@ -194,6 +194,7 @@ async def sql_shipment_guards(factory, org, act, command, plan):
     from sqlalchemy.exc import DBAPIError
 
     from modules.accounting import service, shipment_preview
+    from modules.accounting.models import Organization
     from modules.accounting.schemas import PostingInput
 
     rejected = []
@@ -207,7 +208,20 @@ async def sql_shipment_guards(factory, org, act, command, plan):
             if case == "wrong_shipment_policy":
                 inputs["policy_id"] += 999999
             elif case == "wrong_shipment_org":
-                target_org += 999999
+                foreign_readback = text("""SELECT 'output_receipt',r.entry_id,row_to_json(r)::text
+                    FROM accounting.production_output_transfer_receipt r WHERE r.organization_id=:org
+                    UNION ALL SELECT 'shipment_receipt',r.id,row_to_json(r)::text
+                    FROM accounting.shipment_accounting_receipt r WHERE r.organization_id=:org
+                    UNION ALL SELECT 'entry',e.id,row_to_json(e)::text
+                    FROM accounting.entry e WHERE e.organization_id=:org
+                    UNION ALL SELECT 'line',l.id,row_to_json(l)::text
+                    FROM accounting.line l JOIN accounting.entry e ON e.id=l.entry_id WHERE e.organization_id=:org
+                    ORDER BY 1,2""")
+                before_foreign = (await session.execute(foreign_readback, {"org": org})).all()
+                other = Organization(name="G12 synthetic foreign receipt", unp="999000002")
+                session.add(other)
+                await session.flush()
+                target_org = other.id
             elif case == "arbitrary_43_mapping":
                 snapshot["mapping"][0]["account"] = "43.999"
                 inputs["allocations"][0]["account"] = "43.999"
@@ -236,11 +250,20 @@ async def sql_shipment_guards(factory, org, act, command, plan):
                      "entry": snapshot["pages"][0]["entry_id"], "actor": ACTOR})
             except DBAPIError as error:
                 assert getattr(error.orig, "sqlstate", None) == "P0001", (case, str(error)[:500])
+                if case == "wrong_shipment_org":
+                    assert error.orig.diag.message_primary == "Financial entry must belong to the same organization and root transaction", str(error)[:500]
                 rejected.append(case)
             else:
                 raise AssertionError(f"Direct SQL accepted {case}")
             finally:
                 await session.rollback()
+            if case == "wrong_shipment_org":
+                temporary_entries = [page["entry_id"] for page in snapshot["pages"]]
+                assert await session.scalar(text("SELECT count(*) FROM accounting.organization WHERE id=:org"), {"org": target_org}) == 0
+                assert await session.scalar(text("SELECT count(*) FROM accounting.entry WHERE id=ANY(:ids)"), {"ids": temporary_entries}) == 0
+                assert await session.scalar(text("SELECT count(*) FROM accounting.line WHERE entry_id=ANY(:ids)"), {"ids": temporary_entries}) == 0
+                assert await session.scalar(text("SELECT count(*) FROM accounting.shipment_accounting_receipt WHERE organization_id=:org OR anchor_entry_id=ANY(:ids)"), {"org": target_org, "ids": temporary_entries}) == 0
+                assert (await session.execute(foreign_readback, {"org": org})).all() == before_foreign, "Foreign receipt rollback changed original receipts or ledger"
     return rejected
 
 
