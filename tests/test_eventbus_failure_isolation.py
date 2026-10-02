@@ -21,6 +21,7 @@ INCOMING = "telephony.call.incoming"
 ANSWERED = "telephony.call.answered"
 ENDED = "telephony.call.ended"
 OWNER = "SYNTHETIC-OWNER"
+OWNER_ID = 7901
 
 
 @pytest_asyncio.fixture(params=["sqlite", "postgresql"])
@@ -67,7 +68,7 @@ def _ctx(session, bus):
 async def _seed(factory, events, *, owned_calls=()):
     async with factory() as session:
         session.add_all([
-            CallLog(call_id=key, direction="in", owner=OWNER, status="ringing")
+            CallLog(call_id=key, direction="in", owner=OWNER, owner_id=OWNER_ID, status="ringing")
             for key in owned_calls
         ])
         session.add_all([OutboxEvent(event_type=kind, payload=payload) for kind, payload in events])
@@ -148,7 +149,7 @@ async def test_sse_publishes_distinct_snapshots_only_after_commit(relay_factory,
     await _seed(relay_factory, [
         (INCOMING, {"call_id": "A"}), (ANSWERED, {"call_id": "A"}), (ENDED, {"call_id": "A"}),
     ], owned_calls=("A",))
-    queue = calls.subscribe(OWNER)
+    queue = calls.subscribe(OWNER_ID)
     try:
         async with relay_factory() as session:
             real_commit = session.commit
@@ -165,7 +166,8 @@ async def test_sse_publishes_distinct_snapshots_only_after_commit(relay_factory,
             assert await bus.relay_once(session, _ctx(session, bus)) == 1
             assert queue.empty()
     finally:
-        calls.unsubscribe(OWNER, queue)
+        calls.unsubscribe(OWNER_ID, queue)
+    assert not calls.has_subscriber(OWNER_ID)
 
 
 async def test_failed_phone_discards_sse_and_derived_events(relay_factory):
@@ -180,7 +182,7 @@ async def test_failed_phone_discards_sse_and_derived_events(relay_factory):
     await _seed(relay_factory, [
         (ENDED, {"call_id": "A"}), (ANSWERED, {"call_id": "B"}),
     ], owned_calls=("A", "B"))
-    queue = calls.subscribe(OWNER)
+    queue = calls.subscribe(OWNER_ID)
     try:
         async with relay_factory() as session:
             assert await bus.relay_once(session, _ctx(session, bus)) == 1
@@ -195,7 +197,8 @@ async def test_failed_phone_discards_sse_and_derived_events(relay_factory):
             assert await bus.relay_once(session, _ctx(session, bus)) == 0
             assert queue.empty()
     finally:
-        calls.unsubscribe(OWNER, queue)
+        calls.unsubscribe(OWNER_ID, queue)
+    assert not calls.has_subscriber(OWNER_ID)
 
 
 @pytest.mark.parametrize("failure", ["finance", "commit", "cancel"])
@@ -216,7 +219,7 @@ async def test_outer_failure_rolls_back_phone_and_suppresses_sse(relay_factory, 
     if failure != "commit":
         events.extend([(failure_type, {"call_id": "B"}), ("finance.payment.paid", {})])
     await _seed(relay_factory, events, owned_calls=("A",))
-    queue = calls.subscribe(OWNER)
+    queue = calls.subscribe(OWNER_ID)
     try:
         async with relay_factory() as session:
             if failure == "commit":
@@ -237,7 +240,8 @@ async def test_outer_failure_rolls_back_phone_and_suppresses_sse(relay_factory, 
                 OutboxEvent.processed_at.is_not(None),
             )) == 0
     finally:
-        calls.unsubscribe(OWNER, queue)
+        calls.unsubscribe(OWNER_ID, queue)
+    assert not calls.has_subscriber(OWNER_ID)
 
 
 async def test_preexisting_dirty_flush_error_propagates(relay_factory, caplog):

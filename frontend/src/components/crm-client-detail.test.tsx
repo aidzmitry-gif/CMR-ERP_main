@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CrmClientDetail } from "./crm-client-detail";
-import { createDeal, type DealInput } from "@/lib/api";
+import { callLinkDeal, createDeal, fetchCallsResult, type DealInput, type FetchCallsResult } from "@/lib/api";
 import ClientPage from "@/app/crm/clients/[id]/page";
 import type { ReactNode } from "react";
 
@@ -12,8 +12,8 @@ vi.mock("@/components/kanban/create-deal-modal", () => ({ CreateDealModal: ({ cl
   client: { id: number }; onClose: () => void; onCreate: (input: DealInput) => Promise<boolean>;
 }) => <div>Deal for {client.id}<button onClick={onClose}>Close draft</button>
   <button onClick={() => void onCreate({ number: "test", title: "test", counterparty: "test", amount: 0, priority: "Средний", stage: "new", owner: "" })}>Save draft</button></div> }));
-vi.mock("@/lib/api", () => ({ createDeal: vi.fn() }));
-beforeEach(() => vi.unstubAllGlobals());
+vi.mock("@/lib/api", () => ({ createDeal: vi.fn(), callLinkDeal: vi.fn(), fetchCallsResult: vi.fn() }));
+beforeEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe("CrmClientDetail", () => {
   it("shows document versions and links without inventing unavailable originals", async () => {
@@ -89,8 +89,71 @@ describe("CrmClientDetail", () => {
     expect(await screen.findByRole("heading", { name: "Standalone buyer" })).toBeInTheDocument();
     expect(screen.getByText("Contacts of 12")).toBeInTheDocument();
     expect(screen.getByText("Сделок пока нет.")).toBeInTheDocument();
+    expect(fetchCallsResult).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Новая сделка клиента" }));
     expect(screen.getByText("Deal for 12")).toBeInTheDocument();
+  });
+
+  it("requires an explicit choice among this client's deals and posts that exact deal ID", async () => {
+    const call = { id: 51, call_id: "synthetic-51", direction: "in", phone_e164: null, owner: "Тест", status: "ended", result: "Проверка связи", deal_id: null, counterparty_id: 300, started_at: "2026-09-01T10:00:00" };
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => Promise.resolve(Response.json(
+      url.endsWith("/deals") ? [
+        { id: 7, number: "D7", title: "Первая сделка" },
+        { id: 8, number: "D8", title: "Вторая сделка" },
+      ] : url.endsWith("/documents") ? [] : { id: 12, name: "Buyer", owner_id: 34, unp: null, source: "crm", counterparty_id: 300 },
+    ))));
+    vi.mocked(fetchCallsResult).mockResolvedValueOnce({ ok: true, rows: [call] })
+      .mockResolvedValue({ ok: true, rows: [{ ...call, deal_id: 8 }] });
+    vi.mocked(callLinkDeal).mockResolvedValue(true);
+
+    render(<CrmClientDetail clientId={12} />);
+    const history = await screen.findByRole("region", { name: "История звонков клиента" });
+    const select = await within(history).findByRole("combobox", { name: "Сделка для звонка 51" });
+    expect(select).toHaveValue("");
+    expect(within(select).getAllByRole("option")).toHaveLength(3);
+    expect(within(select).getByRole("option", { name: "D7 — Первая сделка" })).toBeInTheDocument();
+    expect(within(select).getByRole("option", { name: "D8 — Вторая сделка" })).toBeInTheDocument();
+    const confirm = within(history).getByRole("button", { name: "Привязать звонок 51 к сделке" });
+    expect(confirm).toBeDisabled();
+    expect(callLinkDeal).not.toHaveBeenCalled();
+
+    fireEvent.change(select, { target: { value: "8" } });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(callLinkDeal).toHaveBeenCalledWith(51, { deal_id: 8 }));
+    expect(await within(history).findByRole("link", { name: "Сделка D8" })).toHaveAttribute("href", "/crm/deals/8");
+  });
+
+  it("keeps call history load errors distinct from an empty client history", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => Promise.resolve(Response.json(
+      url.endsWith("/deals") || url.endsWith("/documents") ? []
+        : { id: 12, name: "Buyer", owner_id: 34, unp: null, source: "crm", counterparty_id: 300 },
+    ))));
+    vi.mocked(fetchCallsResult).mockResolvedValue({ ok: false, error: "Не удалось загрузить журнал звонков." });
+    render(<CrmClientDetail clientId={12} />);
+
+    const history = await screen.findByRole("region", { name: "История звонков клиента" });
+    expect(await within(history).findByRole("alert")).toHaveTextContent("Не удалось загрузить журнал звонков");
+    expect(within(history).queryByText("Звонков у клиента пока нет.")).not.toBeInTheDocument();
+  });
+
+  it("ignores a late call response after navigating to another client", async () => {
+    let finishOld!: (value: FetchCallsResult) => void;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      const id = Number(url.split("/")[4]);
+      return Promise.resolve(Response.json(url.endsWith("/deals") || url.endsWith("/documents") ? []
+        : { id, name: `Buyer ${id}`, owner_id: 34, unp: null, source: "crm", counterparty_id: id + 100 }));
+    }));
+    vi.mocked(fetchCallsResult).mockImplementation(({ counterparty_id } = {}) => counterparty_id === 112
+      ? new Promise<FetchCallsResult>((resolve) => { finishOld = resolve; })
+      : Promise.resolve({ ok: true, rows: [{ id: 2, call_id: "synthetic-2", direction: "in", phone_e164: null, owner: "Тест", status: "ended", result: "CLIENT-B-ONLY", deal_id: null, counterparty_id: 113, started_at: "2026-09-01T10:00:00" }] }));
+
+    const view = render(<CrmClientDetail clientId={12} />);
+    await screen.findByRole("region", { name: "История звонков клиента" });
+    await waitFor(() => expect(fetchCallsResult).toHaveBeenCalledWith({ counterparty_id: 112 }, expect.any(AbortSignal)));
+    view.rerender(<CrmClientDetail clientId={13} />);
+    expect(await screen.findByText("CLIENT-B-ONLY")).toBeInTheDocument();
+    await act(async () => finishOld({ ok: true, rows: [{ id: 1, call_id: "synthetic-1", direction: "in", phone_e164: null, owner: "Тест", status: "ended", result: "CLIENT-A-ONLY", deal_id: null, counterparty_id: 112, started_at: "2026-09-01T09:00:00" }] }));
+    expect(screen.queryByText("CLIENT-A-ONLY")).not.toBeInTheDocument();
   });
 
   it("does not turn an inaccessible client into empty editable data", async () => {

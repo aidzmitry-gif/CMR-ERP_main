@@ -1,6 +1,6 @@
 """Legacy deal contact endpoints cannot bypass branch contact ownership."""
-from core.domain.models import Contact, Counterparty, CounterpartyBranch
-from modules.sales.models import Deal
+from core.domain.models import Contact, Counterparty, CounterpartyBranch, User
+from modules.sales.models import CrmClient, Deal
 
 
 async def test_branch_phone_resolves_only_its_deal_and_shared_phone_is_ambiguous(session):
@@ -13,10 +13,19 @@ async def test_branch_phone_resolves_only_its_deal_and_shared_phone_is_ambiguous
     session.add_all([first, second])
     await session.flush()
     contact = Contact(counterparty_id=cp.id, branch_id=first.id, full_name="Branch contact", phone="+375291234567")
-    target = Deal(number="CALL-B1", title="First", counterparty_id=cp.id, branch_id=first.id, counterparty=cp.name, owner="First owner")
+    owners = [User(username=f"branch-call-{i}", full_name=name, employee_id=710+i,
+                   department="Продажи", role="sales", status="active")
+              for i, name in enumerate(["First owner", "Head owner", "Second owner"])]
+    session.add_all(owners)
+    client = CrmClient(name=cp.name, name_key="branch-call", counterparty_id=cp.id,
+                       owner_id=owners[0].employee_id, request_key="branch-call",
+                       request_hash="a" * 64, created_by="test")
+    session.add(client)
+    await session.flush()
+    target = Deal(number="CALL-B1", title="First", counterparty_id=cp.id, branch_id=first.id, counterparty=cp.name, crm_client_id=client.id, owner_id=owners[0].employee_id, owner="First owner")
     session.add_all([contact, target,
-        Deal(number="CALL-H", title="Head", counterparty_id=cp.id, counterparty=cp.name, owner="Head owner"),
-        Deal(number="CALL-B2", title="Second", counterparty_id=cp.id, branch_id=second.id, counterparty=cp.name, owner="Second owner")])
+        Deal(number="CALL-H", title="Head", counterparty_id=cp.id, counterparty=cp.name, crm_client_id=client.id, owner_id=owners[1].employee_id, owner="Head owner"),
+        Deal(number="CALL-B2", title="Second", counterparty_id=cp.id, branch_id=second.id, counterparty=cp.name, crm_client_id=client.id, owner_id=owners[2].employee_id, owner="Second owner")])
     await session.flush()
     result = await resolve_owner(session, contact.phone)
     assert result["deal_id"] == target.id and result["owner"] == "First owner"

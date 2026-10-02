@@ -2,6 +2,7 @@
 
 import clsx from "clsx";
 import { CheckSquare, Clock, ListTodo, Plus } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   completeDealTask,
@@ -20,14 +21,65 @@ const KIND_LABEL: Record<string, string> = {
   other: "Задача",
 };
 
+const STATUS_LABEL: Record<string, string> = {
+  open: "Открыта",
+  in_progress: "В работе",
+  awaiting_control: "Ждёт контроля",
+  postponed: "Отложена",
+  done: "Выполнена",
+  canceled: "Отменена",
+  declined: "Отклонена",
+};
+const ACTIVE_STATUSES = new Set(["open", "in_progress", "awaiting_control", "postponed"]);
+
+function visibleDealIds(task: DealTaskView): number[] {
+  const ids = task.crm_links?.length
+    ? task.crm_links.map((link) => link.deal_id)
+    : [task.deal_id];
+  return [...new Set(ids.filter((id): id is number =>
+    typeof id === "number" && Number.isSafeInteger(id) && id > 0))];
+}
+
 function fmtDue(due: string | null): string {
   if (!due) return "без срока";
-  return new Date(/(?:Z|[+-]\d{2}:\d{2})$/i.test(due) ? due : `${due}Z`).toLocaleString("ru-RU", {
+  const parsed = new Date(/(?:Z|[+-]\d{2}:\d{2})$/i.test(due) ? due : `${due}Z`);
+  return Number.isNaN(parsed.getTime()) ? due : parsed.toLocaleString("ru-RU", {
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+export function TaskSummary({ task, busy = false, onDone }: {
+  task: DealTaskView; busy?: boolean; onDone?: (id: number) => void;
+}) {
+  const done = task.status === "done";
+  const links = visibleDealIds(task);
+  const hidden = task.hidden_link_count ?? 0;
+  return <li className={clsx("rounded-lg px-3 py-2", task.overdue ? "bg-red-50" : "bg-sunken")}>
+    <div className="flex items-start gap-2">
+      <div className="min-w-0 flex-1">
+        <div className={clsx("break-words text-sm", done ? "text-faint line-through" : "text-muted")}>{task.title}</div>
+        <div className={clsx("mt-1 inline-flex flex-wrap items-center gap-1 text-xs", task.overdue ? "font-semibold text-red-600" : "text-faint")}>
+          <Clock size={11} /> {KIND_LABEL[task.kind] ?? task.kind} · {fmtDue(task.due_at)}
+          {task.overdue ? " · просрочено" : ""} · {STATUS_LABEL[task.status] ?? "Статус не указан"}
+        </div>
+        {task.description && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-ink">{task.description}</p>}
+        {(links.length > 0 || hidden > 0) && <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted">
+          {links.map((id) => <Link key={id} href={`/crm/deals/${id}`} className="underline">Сделка {id}</Link>)}
+          {hidden > 0 && <span>Скрытых связей: {hidden}</span>}
+        </div>}
+        {links.length === 0 && hidden === 0 && <span className="mt-1 block text-xs text-muted">Без привязки к сделке</span>}
+      </div>
+      {task.imported && <span className="shrink-0 text-xs text-muted">Импорт · только чтение</span>}
+      {!task.imported && done && <span className="shrink-0 text-xs font-medium text-green-600">✓ готово</span>}
+      {!task.imported && ACTIVE_STATUSES.has(task.status) && onDone && <button
+        type="button" onClick={() => onDone(task.id)} disabled={busy} title="Выполнено"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-faint hover:bg-green-50 hover:text-green-600 disabled:opacity-60"
+      ><CheckSquare size={16} /></button>}
+    </div>
+  </li>;
 }
 
 /** Блок «Задачи» на экране сделки (SALES-41): список с подсветкой просрочки,
@@ -38,14 +90,30 @@ export function DealTasks({ dealId }: { dealId: string }) {
   const [due, setDue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [revision, setRevision] = useState(0);
 
   async function refresh() {
-    setTasks(await fetchDealTasks(dealId));
+    try {
+      setTasks(await fetchDealTasks(dealId));
+      setLoadError(false);
+    } catch {
+      // A successful create/complete must not be reported as a failed mutation
+      // solely because the follow-up list request failed.
+      setLoadError(true);
+    }
   }
 
   useEffect(() => {
-    void fetchDealTasks(dealId).then(setTasks);
-  }, [dealId]);
+    let live = true;
+    void fetchDealTasks(dealId).then((rows) => {
+      if (live) { setTasks(rows); setLoadError(false); setLoading(false); }
+    }).catch(() => {
+      if (live) { setLoadError(true); setLoading(false); }
+    });
+    return () => { live = false; };
+  }, [dealId, revision]);
 
   async function onAdd() {
     if (!title.trim()) return;
@@ -84,65 +152,26 @@ export function DealTasks({ dealId }: { dealId: string }) {
     }
   }
 
-  const openCount = tasks.filter((t) => t.status === "open").length;
+  const openCount = tasks.filter((t) => ACTIVE_STATUSES.has(t.status)).length;
 
   return (
     <div className="mt-4 rounded-xl border border-line p-4">
       <div className="flex items-center gap-2 font-semibold text-ink">
         <ListTodo size={18} className="text-accent-ink" />
         Задачи <span className="font-medium text-accent-ink">({openCount} откр.)</span>
+        <Link href="/crm/tasks" className="ml-auto text-xs font-normal text-accent-ink underline">Все задачи</Link>
       </div>
 
       {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
 
-      <ul className="mt-3 space-y-2">
+      {loading && <p role="status" className="mt-3 text-sm text-muted">Загрузка задач…</p>}
+      {loadError && <p role="alert" className="mt-3 text-sm text-red-600">Не удалось загрузить задачи. <button type="button" className="underline" onClick={() => {
+        setLoading(true); setLoadError(false); setRevision((value) => value + 1);
+      }}>Повторить загрузку</button></p>}
+      {!loading && !loadError && <ul className="mt-3 space-y-2">
         {tasks.length === 0 && <li className="text-sm text-muted">Задач пока нет</li>}
-        {tasks.map((t) => {
-          const done = t.status === "done";
-          return (
-            <li
-              key={t.id}
-              className={clsx(
-                "flex items-center gap-2 rounded-lg px-3 py-2",
-                t.overdue ? "bg-red-50" : "bg-sunken",
-              )}
-            >
-              <div className="min-w-0 flex-1">
-                <div
-                  className={clsx(
-                    "truncate text-sm",
-                    done ? "text-faint line-through" : "text-muted",
-                  )}
-                >
-                  {t.title}
-                </div>
-                <span
-                  className={clsx(
-                    "inline-flex items-center gap-1 text-xs",
-                    t.overdue ? "font-semibold text-red-600" : "text-faint",
-                  )}
-                >
-                  <Clock size={11} />
-                  {KIND_LABEL[t.kind] ?? t.kind} · {fmtDue(t.due_at)}
-                  {t.overdue ? " · просрочено" : ""}
-                </span>
-              </div>
-              {done ? (
-                <span className="shrink-0 text-xs font-medium text-green-600">✓ готово</span>
-              ) : (
-                <button
-                  onClick={() => onDone(t.id)}
-                  disabled={busy}
-                  title="Выполнено"
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-faint hover:bg-green-50 hover:text-green-600 disabled:opacity-60"
-                >
-                  <CheckSquare size={16} />
-                </button>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+        {tasks.map((task) => <TaskSummary key={task.id} task={task} busy={busy} onDone={onDone} />)}
+      </ul>}
 
       <div className="mt-3 flex items-center gap-2">
         <input

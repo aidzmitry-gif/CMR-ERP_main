@@ -4,11 +4,99 @@ import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { DealContacts } from "@/components/deal-contacts";
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
-import { createDeal } from "@/lib/api";
+import { callLinkDeal, createDeal, fetchCallsResult, type CallRow } from "@/lib/api";
 
-type Client = { id: number; name: string; owner_id: number; unp: string | null; source: "crm" };
+type Client = { id: number; name: string; owner_id: number; unp: string | null; source: "crm"; counterparty_id?: number | null };
 type LinkedDeal = { id: number; number: string; title: string };
 type ClientDocument = { id: number; deal_id: number; deal_number: string; number: string; kind: string; version: number; original_state: string };
+
+function ClientCallHistory({ counterpartyId, deals }: { counterpartyId: number | null | undefined; deals: LinkedDeal[] }) {
+  const [revision, setRevision] = useState(0);
+  const [loaded, setLoaded] = useState<{ counterpartyId: number; revision: number; rows?: CallRow[]; error?: string } | null>(null);
+  const [selected, setSelected] = useState<Record<number, string>>({});
+  const [savingCallIds, setSavingCallIds] = useState<number[]>([]);
+  const [failedCallIds, setFailedCallIds] = useState<number[]>([]);
+  const state = loaded && counterpartyId != null && loaded.counterpartyId === counterpartyId && loaded.revision === revision ? loaded : null;
+
+  useEffect(() => {
+    if (counterpartyId == null) return;
+    let current = true;
+    const controller = new AbortController();
+    void fetchCallsResult({ counterparty_id: counterpartyId }, controller.signal).then((result) => {
+      if (!current) return;
+      if (!result.ok) {
+        setLoaded({ counterpartyId, revision, error: result.error });
+      } else if (result.rows.some((call) => call.counterparty_id !== counterpartyId)) {
+        setLoaded({ counterpartyId, revision, error: "Сервер вернул звонки другого клиента." });
+      } else {
+        setLoaded({ counterpartyId, revision, rows: result.rows });
+      }
+    });
+    return () => { current = false; controller.abort(); };
+  }, [counterpartyId, revision]);
+
+  async function linkCall(callId: number) {
+    const dealId = Number(selected[callId]);
+    if (savingCallIds.includes(callId) || !Number.isSafeInteger(dealId) || !deals.some((deal) => deal.id === dealId)) return;
+    setSavingCallIds((ids) => [...ids, callId]);
+    setFailedCallIds((ids) => ids.filter((id) => id !== callId));
+    const linked = await callLinkDeal(callId, { deal_id: dealId });
+    setSavingCallIds((ids) => ids.filter((id) => id !== callId));
+    if (!linked) {
+      setFailedCallIds((ids) => [...ids, callId]);
+      return;
+    }
+    setFailedCallIds((ids) => ids.filter((id) => id !== callId));
+    setSelected((values) => { const next = { ...values }; delete next[callId]; return next; });
+    setRevision((value) => value + 1);
+  }
+
+  return <section className="space-y-3 rounded-xl border border-line p-4" aria-label="История звонков клиента">
+    <div className="flex items-center justify-between gap-2">
+      <h2 className="font-semibold">История звонков</h2>
+      {counterpartyId != null && <button type="button" className="text-sm underline" onClick={() => setRevision((value) => value + 1)}>Обновить звонки</button>}
+    </div>
+    {counterpartyId == null && <p className="text-sm text-muted">История звонков появится после привязки клиента к контрагенту.</p>}
+    {counterpartyId != null && !state && <p role="status">Загрузка звонков клиента…</p>}
+    {state?.error && <p role="alert">{state.error} <button type="button" className="underline" onClick={() => setRevision((value) => value + 1)}>Повторить</button></p>}
+    {state?.rows?.length === 0 && <p className="text-sm text-muted">Звонков у клиента пока нет.</p>}
+    {!!state?.rows?.length && <ul className="space-y-3">{state.rows.map((call) => {
+      const linkedDeal = deals.find((deal) => deal.id === call.deal_id);
+      const isUnlinked = call.deal_id === null;
+      return <li key={call.id} className="space-y-2 border-t border-line pt-3 text-sm first:border-0 first:pt-0">
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          <span>{call.started_at.slice(0, 16).replace("T", " ")}</span>
+          <span>{call.direction === "out" ? "Исходящий" : "Входящий"}</span>
+          <span>{call.phone_e164 ?? "—"}</span>
+          <span>{call.result || call.status}</span>
+          {linkedDeal ? <Link className="underline" href={`/crm/deals/${linkedDeal.id}`}>Сделка {linkedDeal.number}</Link>
+            : call.deal_id != null ? <span className="text-muted">Сделка привязана</span>
+              : !isUnlinked ? <span className="text-muted">Привязка сделки не указана</span> : null}
+        </div>
+        {isUnlinked && (deals.length > 0 ? <div className="flex flex-wrap items-center gap-2">
+          <select
+            aria-label={`Сделка для звонка ${call.id}`}
+            className="max-w-full rounded border border-line bg-surface px-2 py-1"
+            value={selected[call.id] ?? ""}
+            onChange={(event) => setSelected((values) => ({ ...values, [call.id]: event.target.value }))}
+          >
+            <option value="">Выберите сделку</option>
+            {deals.map((deal) => <option key={deal.id} value={deal.id}>{deal.number} — {deal.title}</option>)}
+          </select>
+          <button
+            type="button"
+            className="rounded bg-accent px-3 py-1.5 text-sm text-white disabled:opacity-50"
+            disabled={!selected[call.id] || savingCallIds.includes(call.id)}
+            onClick={() => void linkCall(call.id)}
+          >
+            {savingCallIds.includes(call.id) ? "Привязка…" : `Привязать звонок ${call.id} к сделке`}
+          </button>
+          {failedCallIds.includes(call.id) && <span role="alert">Не удалось привязать звонок. Повторите попытку.</span>}
+        </div> : <p className="text-muted">У клиента нет доступных сделок для привязки.</p>)}
+      </li>;
+    })}</ul>}
+  </section>;
+}
 
 function ClientDocuments({ clientId }: { clientId: number }) {
   const [revision, setRevision] = useState(0);
@@ -66,6 +154,8 @@ export function CrmClientDetail({ clientId }: { clientId: number }) {
         if (client?.id !== clientId || client.source !== "crm" || typeof client.name !== "string"
           || (client.unp !== null && typeof client.unp !== "string")
           || !Number.isSafeInteger(client.owner_id) || client.owner_id <= 0
+          || (client.counterparty_id !== undefined && client.counterparty_id !== null
+            && (!Number.isSafeInteger(client.counterparty_id) || client.counterparty_id <= 0))
           || !Array.isArray(deals) || !deals.every((deal) => deal && Number.isSafeInteger(deal.id) && deal.id > 0 && typeof deal.number === "string" && typeof deal.title === "string")) {
           throw new Error("Сервер вернул некорректные данные клиента.");
         }
@@ -85,6 +175,7 @@ export function CrmClientDetail({ clientId }: { clientId: number }) {
       <h1 className="text-xl font-semibold">{state.client.name}</h1>
       <p className="text-sm text-muted">УНП: {state.client.unp ?? "Не указан"}</p>
       <DealContacts key={`contacts:${clientId}`} clientId={clientId} />
+      <ClientCallHistory key={`calls:${clientId}:${state.client.counterparty_id ?? "none"}`} counterpartyId={state.client.counterparty_id} deals={state.deals ?? []} />
       <ClientDocuments key={`documents:${clientId}`} clientId={clientId} />
       <div className="space-y-3 rounded-xl border border-line p-4">
         <h2 className="font-semibold">Сделки клиента</h2>

@@ -436,6 +436,44 @@ export interface DealInput {
   next_step?: string;
 }
 
+export type LinkedCrmClient = {
+  id: number;
+  name: string;
+  owner_id: number;
+  counterparty_id: number;
+};
+
+/** Resolve a visible MDM counterparty to the owner's CRM relationship before creating a deal. */
+export async function linkCrmClientToCounterparty(
+  counterpartyId: number, requestKey: string, ownerId?: number,
+): Promise<LinkedCrmClient | null> {
+  if (!Number.isSafeInteger(counterpartyId) || counterpartyId <= 0) return null;
+  try {
+    const response = await fetch("/api/sales/clients", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ counterparty_id: counterpartyId, request_key: requestKey,
+        ...(ownerId ? { owner_id: ownerId } : {}) }),
+    });
+    if (!response.ok) return null;
+    const value: unknown = await response.json();
+    if (!value || typeof value !== "object") return null;
+    const client = value as Record<string, unknown>;
+    if (client.source !== "crm" || !Number.isSafeInteger(client.id) || (client.id as number) <= 0
+      || typeof client.name !== "string" || !client.name.trim()
+      || !Number.isSafeInteger(client.owner_id) || (client.owner_id as number) <= 0
+      || client.counterparty_id !== counterpartyId) return null;
+    return {
+      id: client.id as number,
+      name: client.name,
+      owner_id: client.owner_id as number,
+      counterparty_id: counterpartyId,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Минимальная запись CRM-реестра, безопасная для выбора владельца сделки. */
 export interface CrmStaffMember {
   employee_id: number;
@@ -650,25 +688,39 @@ export async function deleteDealItemIfCurrent(itemId: number, editToken: string)
 
 export interface DealTaskView {
   id: number;
-  deal_id: number;
+  deal_id: number | null;
   title: string;
   kind: string;
+  description?: string | null;
+  description_in_bbcode?: boolean | null;
+  source_responsible_id?: string | null;
+  source_status_code?: string | null;
   assignee_id: number | null;
   due_at: string | null;
-  status: string; // open | done | canceled
+  status: string; // open | in_progress | awaiting_control | postponed | done | declined; manual canceled remains possible
   result: string | null;
   overdue: boolean;
+  imported?: boolean;
+  crm_links?: Array<{ ordinal: number; deal_id: number | null }>;
+  hidden_link_count?: number;
 }
 
 /** Задачи сделки (открытые — первыми; overdue — флаг просрочки). */
 export async function fetchDealTasks(dealId: string): Promise<DealTaskView[]> {
-  try {
-    const res = await fetch(`/api/sales/deals/${dealId}/tasks`, { cache: "no-store" });
-    if (!res.ok) return [];
-    return (await res.json()) as DealTaskView[];
-  } catch {
-    return [];
-  }
+  const res = await fetch(`/api/sales/deals/${encodeURIComponent(dealId)}/tasks`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Task list HTTP ${res.status}`);
+  const rows: unknown = await res.json();
+  if (!Array.isArray(rows)) throw new Error("Invalid task list");
+  return rows as DealTaskView[];
+}
+
+/** Общий список CRM, включая задачи без сделки; пустая страница отличается от ошибки. */
+export async function fetchAllCrmTasks(offset: number, limit = 50): Promise<DealTaskView[]> {
+  const res = await fetch(`/api/sales/tasks?limit=${limit}&offset=${offset}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Task list HTTP ${res.status}`);
+  const rows: unknown = await res.json();
+  if (!Array.isArray(rows)) throw new Error("Invalid task list");
+  return rows as DealTaskView[];
 }
 
 /** Поставить задачу по сделке. */
@@ -1345,6 +1397,10 @@ export interface CallRow {
   result?: string | null;
   comment?: string | null;
   deal_id?: number | null;
+  counterparty_id?: number | null;
+  contact_id?: number | null;
+  /** CRM client link is supplied only when the server resolves one unambiguous visible client. */
+  crm_client_id?: number | null;
   duration_sec?: number | null;
   recording_url?: string | null;
   started_at: string;
@@ -1355,13 +1411,10 @@ export interface CallRow {
  * EventSource ходит на /api-прокси (он добавляет роль из cookie + стримит SSE).
  * Возвращает функцию отписки.
  */
-export function subscribeCalls(owner: string | undefined, onCard: (card: CallCard) => void): () => void {
+export function subscribeCalls(onCard: (card: CallCard) => void): () => void {
   // SSR / тестовая среда (jsdom) без EventSource — подписка не нужна, возвращаем no-op.
   if (typeof EventSource === "undefined") return () => {};
-  const url = owner
-    ? `/api/sales/calls/stream?owner=${encodeURIComponent(owner)}`
-    : "/api/sales/calls/stream";
-  const es = new EventSource(url);
+  const es = new EventSource("/api/sales/calls/stream");
   es.onmessage = (e) => {
     try {
       onCard(JSON.parse(e.data) as CallCard);
@@ -1385,23 +1438,81 @@ async function postCall(url: string, body: unknown): Promise<boolean> {
   }
 }
 
-/** Журнал звонков с фильтрами (клиент, через /api). */
-export async function fetchCalls(
-  params: { status?: string; owner?: string; date?: string; deal_id?: number | string } = {},
-): Promise<CallRow[]> {
+export type FetchCallsParams = {
+  status?: string;
+  owner?: string;
+  date?: string;
+  deal_id?: number | string;
+  counterparty_id?: number;
+  unlinked?: boolean;
+};
+
+export type FetchCallsResult = { ok: true; rows: CallRow[] } | { ok: false; error: string };
+
+function positiveOptionalId(value: unknown): boolean {
+  return value === undefined || value === null || (Number.isSafeInteger(value) && (value as number) > 0);
+}
+
+function isCallRow(value: unknown): value is CallRow {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return Number.isSafeInteger(row.id) && (row.id as number) > 0
+    && typeof row.call_id === "string" && typeof row.direction === "string"
+    && (typeof row.phone_e164 === "string" || row.phone_e164 === null)
+    && typeof row.owner === "string" && typeof row.status === "string"
+    && typeof row.started_at === "string"
+    && (row.result === undefined || row.result === null || typeof row.result === "string")
+    && (row.comment === undefined || row.comment === null || typeof row.comment === "string")
+    && positiveOptionalId(row.deal_id) && positiveOptionalId(row.counterparty_id)
+    && positiveOptionalId(row.contact_id) && positiveOptionalId(row.crm_client_id)
+    && (row.duration_sec === undefined || row.duration_sec === null
+      || (typeof row.duration_sec === "number" && Number.isFinite(row.duration_sec) && row.duration_sec >= 0))
+    && (row.recording_url === undefined || row.recording_url === null || typeof row.recording_url === "string");
+}
+
+/** Журнал звонков с фильтрами (клиент, через /api); сохраняет ошибку отдельно от пустого результата. */
+export async function fetchCallsResult(
+  params: FetchCallsParams = {},
+  signal?: AbortSignal,
+): Promise<FetchCallsResult> {
   try {
+    if (params.counterparty_id != null && (!Number.isSafeInteger(params.counterparty_id) || params.counterparty_id <= 0)) {
+      return { ok: false, error: "Не удалось загрузить журнал звонков." };
+    }
     const q = new URLSearchParams();
     if (params.status) q.set("status", params.status);
     if (params.owner) q.set("owner", params.owner);
     if (params.date) q.set("date", params.date);
     if (params.deal_id != null && params.deal_id !== "") q.set("deal_id", String(params.deal_id));
+    if (params.counterparty_id != null) q.set("counterparty_id", String(params.counterparty_id));
+    if (params.unlinked) q.set("unlinked", "true");
     const qs = q.toString();
-    const res = await fetch(`/api/sales/calls${qs ? `?${qs}` : ""}`, { cache: "no-store" });
-    if (!res.ok) throw new Error(String(res.status));
-    return (await res.json()) as CallRow[];
+    const res = await fetch(`/api/sales/calls${qs ? `?${qs}` : ""}`, {
+      cache: "no-store",
+      ...(signal ? { signal } : {}),
+    });
+    if (!res.ok) return { ok: false, error: "Не удалось загрузить журнал звонков." };
+    const value: unknown = await res.json();
+    if (!Array.isArray(value) || !value.every(isCallRow)) {
+      return { ok: false, error: "Сервер вернул некорректные данные звонков." };
+    }
+    const rows = value as CallRow[];
+    if (params.counterparty_id != null && rows.some((row) => row.counterparty_id !== params.counterparty_id)) {
+      return { ok: false, error: "Сервер вернул звонки другого клиента." };
+    }
+    if (params.unlinked && rows.some((row) => row.deal_id !== null)) {
+      return { ok: false, error: "Сервер вернул звонки с уже привязанными сделками." };
+    }
+    return { ok: true, rows };
   } catch {
-    return [];
+    return { ok: false, error: "Не удалось загрузить журнал звонков." };
   }
+}
+
+/** Backward-compatible list helper; strict call-review views use fetchCallsResult. */
+export async function fetchCalls(params: FetchCallsParams = {}): Promise<CallRow[]> {
+  const result = await fetchCallsResult(params);
+  return result.ok ? result.rows : [];
 }
 
 /** Звонки сделки (SSR → backend напрямую; для ленты карточки сделки). */

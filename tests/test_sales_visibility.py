@@ -1,10 +1,14 @@
 """Regression contract for server-enforced per-employee deal visibility."""
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime
+from types import SimpleNamespace
+
 import pytest
 
-from core.domain.models import User
-from modules.sales.models import CallLog
+from core.domain.models import Counterparty, User
+from modules.sales.models import CallLog, CrmClient, CrmTimelineAttachment, CrmTimelineComment
 
 
 def _sales_headers(username: str) -> dict[str, str]:
@@ -18,6 +22,81 @@ async def _create(api, number: str, **extra) -> dict:
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+@pytest.mark.asyncio
+async def test_timeline_comments_follow_deal_visibility(api, session, tmp_path, monkeypatch):
+    from modules.sales import timeline_storage
+
+    monkeypatch.setattr(timeline_storage, "storage_root", lambda: tmp_path)
+    session.add_all([
+        User(username="timeline-owner", full_name="Owner", employee_id=311,
+             department="Продажи", role="sales", status="active", deal_visibility="own"),
+        User(username="timeline-other", full_name="Other", employee_id=312,
+             department="Продажи", role="sales", status="active"),
+    ])
+    await session.commit()
+    own = await _create(api, "COMMENT-VIS-OWN", owner_id=311)
+    other = await _create(api, "COMMENT-VIS-OTHER", owner_id=312)
+    own_comment = CrmTimelineComment(
+        entity_type="deal", deal_id=own["id"], body="own comment",
+        author_display="Owner", created_at=datetime(2025, 1, 1),
+    )
+    other_comment = CrmTimelineComment(
+        entity_type="deal", deal_id=other["id"], body="private comment",
+        author_display="Other", created_at=datetime(2025, 1, 1),
+    )
+    session.add_all([
+        own_comment,
+        other_comment,
+    ])
+    await session.flush()
+    stored = timeline_storage.store_attachment([b"private file"], root=tmp_path)
+    session.add_all([
+        CrmTimelineAttachment(
+            comment_id=own_comment.id, source_ref="test:own:attachment",
+            sha256=stored.sha256, size_bytes=stored.size_bytes, filename="own.txt",
+            content_type="text/plain", storage_path=stored.storage_path,
+        ),
+        CrmTimelineAttachment(
+            comment_id=other_comment.id, source_ref="test:other:attachment",
+            sha256=stored.sha256, size_bytes=stored.size_bytes, filename="other.txt",
+            content_type="text/plain", storage_path=stored.storage_path,
+        ),
+    ])
+    await session.commit()
+    headers = _sales_headers("timeline-owner")
+    own_response = await api.get(f"/sales/deals/{own['id']}/timeline/comments", headers=headers)
+    assert own_response.status_code == 200
+    assert [row["body"] for row in own_response.json()] == ["own comment"]
+    own_attachments = await api.get(
+        f"/sales/deals/{own['id']}/timeline/comments/{own_comment.id}/attachments",
+        headers=headers,
+    )
+    assert own_attachments.status_code == 200 and len(own_attachments.json()) == 1
+    own_download = await api.get(
+        f"/sales/deals/{own['id']}/timeline/comments/{own_comment.id}/attachments/"
+        f"{own_attachments.json()[0]['id']}/download",
+        headers=headers,
+    )
+    assert own_download.status_code == 200 and own_download.content == b"private file"
+    assert (await api.get(
+        f"/sales/deals/{other['id']}/timeline/comments/{other_comment.id}/attachments",
+        headers=headers,
+    )).status_code == 404
+    assert (await api.get(
+        f"/sales/deals/{other['id']}/timeline/comments/{other_comment.id}/attachments/"
+        f"{own_attachments.json()[0]['id']}/download",
+        headers=headers,
+    )).status_code == 404
+    assert (await api.get(f"/sales/deals/{other['id']}/timeline/comments",
+                          headers=headers)).status_code == 404
+    assert (await api.get(f"/sales/deals/{own['id']}/timeline/comments",
+                          headers={"X-User": "timeline-owner", "X-User-Roles": "hr"})).status_code == 403
+    assert (await api.get(
+        f"/sales/deals/{own['id']}/timeline/comments/{own_comment.id}/attachments",
+        headers={"X-User": "timeline-owner", "X-User-Roles": "hr"},
+    )).status_code == 403
 
 
 @pytest.mark.asyncio
@@ -66,6 +145,55 @@ async def test_calls_follow_deal_scope_and_unlinked_confirmed_owner(api, session
     assert from_visible.status_code == 200, from_visible.text
     linked_deal = await api.get(f"/sales/deals/{from_visible.json()['deal_id']}", headers=headers)
     assert linked_deal.status_code == 200 and linked_deal.json()["owner_id"] == 301
+
+
+@pytest.mark.asyncio
+async def test_call_review_filters_and_client_link_use_distinct_authorized_ids(api, session):
+    session.add_all([
+        User(username="review-owner", full_name="Owner", employee_id=321,
+             department="Продажи", role="sales", status="active", deal_visibility="own"),
+        User(username="review-other", full_name="Other", employee_id=322,
+             department="Продажи", role="sales", status="active", deal_visibility="own"),
+    ])
+    session.add(Counterparty(name="Unrelated master", unp="987654321"))
+    await session.flush()
+    cp = Counterparty(name="Synthetic 1C company", unp="123456789")
+    session.add(cp)
+    await session.flush()
+    own_client = CrmClient(name=cp.name, name_key="review-owner-company", owner_id=321,
+                           counterparty_id=cp.id, request_key="review-owner-key",
+                           request_hash="owner-hash", created_by="test")
+    other_client = CrmClient(name=cp.name, name_key="review-other-company", owner_id=322,
+                             counterparty_id=cp.id, request_key="review-other-key",
+                             request_hash="other-hash", created_by="test")
+    session.add_all([own_client, other_client])
+    await session.commit()
+    assert cp.id != own_client.id
+    deal = await _create(api, "REVIEW-LINKED", owner_id=321)
+    calls = [
+        CallLog(call_id="REVIEW-UNLINKED-OWN", counterparty_id=cp.id, owner_id=321),
+        CallLog(call_id="REVIEW-LINKED-OWN", counterparty_id=cp.id,
+                owner_id=321, deal_id=deal["id"]),
+        CallLog(call_id="REVIEW-UNLINKED-OTHER", counterparty_id=cp.id, owner_id=322),
+        CallLog(call_id="REVIEW-UNRELATED", owner_id=321),
+    ]
+    session.add_all(calls)
+    await session.commit()
+
+    owner_headers = _sales_headers("review-owner")
+    own = await api.get(f"/sales/calls?counterparty_id={cp.id}&unlinked=true",
+                        headers=owner_headers)
+    assert own.status_code == 200, own.text
+    assert [row["id"] for row in own.json()] == [calls[0].id]
+    assert own.json()[0]["crm_client_id"] == own_client.id
+    all_scope = await api.get(f"/sales/calls?counterparty_id={cp.id}&unlinked=true")
+    assert all_scope.status_code == 200
+    assert {row["id"] for row in all_scope.json()} == {calls[0].id, calls[2].id}
+    assert all(row["crm_client_id"] is None for row in all_scope.json())
+    assert (await api.get("/sales/calls?counterparty_id=0")).status_code == 422
+    assert (await api.get(
+        "/sales/calls?counterparty_id=9223372036854775808"
+    )).status_code == 422
 
 
 @pytest.mark.asyncio
@@ -253,3 +381,89 @@ async def test_own_funnels_have_only_visible_counts_and_open_boards(api, session
                            headers={"X-User": "contact-hr", "X-User-Roles": "hr"})
     assert denied.status_code == 403
     assert "sales.deal.read" in denied.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_calls_stream_uses_authenticated_employee_and_rejects_owner_override(api, session):
+    from starlette.requests import Request
+
+    from core.services.auth import CurrentUser
+    from core.services.crm_access import CrmAccess
+    from modules.sales.access import _OWN_ROUTE_NAMES, deny_unscoped_own_routes
+    from modules.sales.calls import _push_card, has_subscriber
+    from modules.sales.routes import calls_stream
+
+    employee_id = 614
+    session.add(User(
+        username="call-stream-owner", full_name="Shared Name", employee_id=employee_id,
+        department="Продажи", role="sales", status="active", deal_visibility="own",
+    ))
+    await session.commit()
+
+    response = await api.get(
+        "/sales/calls/stream?owner=Other%20Seller",
+        headers=_sales_headers("call-stream-owner"),
+    )
+    assert response.status_code == 400
+    assert response.headers.get("content-type") != "text/event-stream"
+    assert "Shared Name" not in response.text
+    assert "calls_stream" in _OWN_ROUTE_NAMES
+
+    session.add(User(
+        username="call-stream-unlinked", full_name="Unlinked Seller", employee_id=None,
+        department="Продажи", role="sales", status="active", deal_visibility="all",
+    ))
+    await session.commit()
+    for headers in (
+        _sales_headers("call-stream-unlinked"),
+        {"X-User": "unlinked-super", "X-User-Roles": "admin"},
+    ):
+        denied = await asyncio.wait_for(api.get("/sales/calls/stream", headers=headers), timeout=1)
+        assert denied.status_code == 403
+        assert denied.headers.get("content-type") != "text/event-stream"
+        assert "Shared Name" not in denied.text
+
+    request = Request({"type": "http", "route": SimpleNamespace(name="calls_stream")})
+    await deny_unscoped_own_routes(request, CrmAccess("own", employee_id))
+
+    stream_response = await calls_stream(
+        owner=None,
+        user=CurrentUser(username="call-stream-owner", roles=["sales"]),
+        access=CrmAccess("own", employee_id),
+    )
+    stream = stream_response.body_iterator
+    try:
+        assert await stream.__anext__() == ": connected\n\n"
+        call = CallLog(
+            id=3001, call_id="STREAM-OWN", direction="in", owner="Shared Name",
+            owner_id=employee_id, status="ringing",
+        )
+        assert _push_card(call) is True
+        event = await asyncio.wait_for(stream.__anext__(), timeout=1)
+        assert "STREAM-OWN" in event
+    finally:
+        await stream.aclose()
+    assert not has_subscriber(employee_id)
+
+
+@pytest.mark.parametrize("roles", [["sales"], ["admin"]])
+async def test_calls_stream_denies_users_without_employee_link(roles, monkeypatch):
+    from fastapi import HTTPException
+
+    from core.services.auth import CurrentUser
+    from core.services.crm_access import CrmAccess
+    from modules.sales import calls
+    from modules.sales.routes import calls_stream
+
+    monkeypatch.setattr(calls, "subscribe", lambda _employee_id: pytest.fail(
+        "users without an employee link must be rejected before stream registration"
+    ))
+
+    with pytest.raises(HTTPException) as error:
+        await calls_stream(
+            owner=None,
+            user=CurrentUser(username="unlinked", roles=roles),
+            access=CrmAccess("all", None),
+        )
+
+    assert error.value.status_code == 403

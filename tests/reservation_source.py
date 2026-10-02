@@ -15,6 +15,20 @@ def event_context(session):
     return EventContext(session, SimpleNamespace(sales_source=SalesReservationSource(), accounting=AccountingService()))
 
 
+async def issued_invoice_for_shipments(api, session):
+    """Use the trusted issuance flow when the caller verifies the immutable buyer."""
+    from tests.test_invoice_issuance import command, create, seed
+
+    ids, base = await seed(api, session, qty="5")
+    payload, _ = await command(api, ids, base)
+    response = await create(api, ids, payload)
+    assert response.status_code == 201, response.text
+    facts = await SalesReservationSource().invoice_reservation(
+        session, response.json()["document"]["id"],
+    )
+    return ids["org"], facts
+
+
 async def invoice(session, document_id, items, organization_id=777, *, released=False):
     if await session.get(Organization, organization_id) is None:
         session.add(Organization(id=organization_id, name=f"Synthetic book {organization_id}",

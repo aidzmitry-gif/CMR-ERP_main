@@ -6,6 +6,32 @@ vi.mock("./accounting-controls", () => ({ AccountingControls: ({ onChanged, init
 
 import { AccountingView } from "./accounting-view";
 
+it("opens the assembly calculator from the accounting document navigation", async () => {
+  render(<AccountingView />);
+  await screen.findByText(/включительно: 0\./);
+  openPage("Документы", "Калькуляция сборки");
+  expect(await screen.findByRole("region", { name: "Предварительная калькуляция сборки" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Рассчитать", exact: true })).toBeInTheDocument();
+});
+
+it("opens shipment profit with the selected accounting organization", async () => {
+  const original = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+    if (!url.includes("/reports/shipment-profit?")) return original(url, init);
+    const params = new URL(url, "http://localhost").searchParams;
+    return respond({ organization_id: 1, start: params.get("start"), end: params.get("end"),
+      offset: 0, basis: "at_posting", rows: [], has_more: false,
+      page_subtotal: { revenue_net_byn: "0.00", cogs_byn: "0.00", gross_profit_byn: "0.00", margin_percent: null } });
+  });
+  render(<AccountingView />);
+  await screen.findByText(/включительно: 0\./);
+  openPage("Отчёты", "Прибыль по отгрузкам");
+  expect(await screen.findByRole("region", { name: "Валовая прибыль по отгрузкам" })).toBeInTheDocument();
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) =>
+    String(url).includes("/accounting/organizations/1/reports/shipment-profit?"))).toBe(true));
+  expect(await screen.findByText("За выбранный период проведённых отгрузок нет.")).toBeInTheDocument();
+});
+
 const report = { organization_id: 1, status: "preliminary", pending_documents: 0,
   trial_balance: [{ account: "41", title: "Товары", currency: "BYN", dimensions: {}, opening: "0.00", debit: "100.00", credit: "0.00", closing: "100.00", off_balance: false }],
   movements: [{ entry_id: 5, source: "Поступление 1", date: "2026-09-01", account: "41", side: "debit", amount: "100.00" }],

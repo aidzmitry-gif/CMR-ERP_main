@@ -50,6 +50,35 @@ async def test_sale_preview_balanced_net_income_cost_and_no_writes(client, db, b
     assert (await client.post("/accounting/organizations/999/sales/posting-preview", json=data)).status_code == 403
 
 
+async def test_sale_omits_optional_empty_buyer_unp_from_ledger(client, db, book, posting):
+    data = await setup_sale(db, book, posting)
+    buyer = Counterparty(name="Buyer without UNP")
+    db.add(buyer)
+    await db.flush()
+    data["buyer_dimensions"].update({
+        "counterparty_id": str(buyer.id), "counterparty": buyer.legal_name or buyer.name,
+        "counterparty_unp": buyer.unp or "", "counterparty_revision": str(buyer.revision),
+    })
+    await db.commit()
+    base = f"/accounting/organizations/{book[0]}/sales"
+    response = await client.post(base + "/posting-preview", json=data)
+    assert response.status_code == 200, response.text
+    preview = response.json()
+    assert preview["posting"]["lines"][0]["dimensions"]["counterparty_id"] == str(buyer.id)
+    assert "counterparty_unp" not in preview["posting"]["lines"][0]["dimensions"]
+    assert data["buyer_dimensions"]["counterparty_unp"] == ""
+    assert (await client.post("/accounting/organizations/999/sales/posting-preview", json=data)).status_code == 403
+    payload = {**data, "basis_digest": preview["cost"]["basis_digest"], "digest": preview["digest"]}
+    first = await client.post(base + "/confirm", json=payload)
+    repeated = await client.post(base + "/confirm", json=payload)
+    assert first.status_code == repeated.status_code == 201
+    assert repeated.json()["id"] == first.json()["id"]
+    saved = await db.get(models.InventorySaleReceipt, first.json()["id"])
+    assert saved.command["buyer_dimensions"]["counterparty_unp"] == ""
+    assert "counterparty_unp" not in saved.posting["lines"][0]["dimensions"]
+    assert await db.scalar(select(func.count()).select_from(models.InventorySaleReceipt)) == 1
+
+
 async def test_sale_buyer_must_be_current_directory_record_and_replay_preserves_history(client, db, book, posting):
     data = await setup_sale(db, book, posting)
     base = f"/accounting/organizations/{book[0]}/sales"

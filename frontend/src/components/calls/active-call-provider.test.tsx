@@ -22,14 +22,14 @@ function DirtyDocument() {
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 it("does not jump from an unsaved receipt to a deal in the incoming-call popup", async () => {
-  mocks.subscribeCalls.mockImplementation((_owner, onCard) => {
+  mocks.subscribeCalls.mockImplementation((onCard) => {
     onCard({ id: 1, call_id: "c1", direction: "in", phone: "+375291112233",
       owner: "Иванов", deal_id: 7, status: "ringing" });
     return () => {};
   });
   const confirm = vi.fn(() => false);
   vi.stubGlobal("confirm", confirm);
-  render(<ActiveCallProvider owner="Иванов"><DirtyDocument /></ActiveCallProvider>);
+  render(<ActiveCallProvider><DirtyDocument /></ActiveCallProvider>);
   fireEvent.click(await screen.findByRole("button", { name: /Сделка #7/ }));
   expect(confirm).toHaveBeenCalledTimes(1);
   expect(mocks.push).not.toHaveBeenCalled();
@@ -40,13 +40,13 @@ it("does not jump from an unsaved receipt to a deal in the incoming-call popup",
 });
 
 it("does not create a lead before the user accepts leaving an unsaved receipt", async () => {
-  mocks.subscribeCalls.mockImplementation((_owner, onCard) => {
+  mocks.subscribeCalls.mockImplementation((onCard) => {
     onCard({ id: 2, call_id: "c2", direction: "in", phone: "+375291112233",
       owner: "", deal_id: null, status: "ringing" });
     return () => {};
   });
   vi.stubGlobal("confirm", vi.fn(() => false));
-  render(<ActiveCallProvider owner="Иванов"><DirtyDocument /></ActiveCallProvider>);
+  render(<ActiveCallProvider><DirtyDocument /></ActiveCallProvider>);
   fireEvent.click(await screen.findByRole("button", { name: "Создать лид" }));
   expect(mocks.createLead).not.toHaveBeenCalled();
   expect(mocks.push).not.toHaveBeenCalled();

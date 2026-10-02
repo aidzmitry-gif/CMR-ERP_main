@@ -21,12 +21,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from core.db.base import Base
+from core.domain.models import Counterparty
 from modules.accounting.models import Organization
 from modules.accounting.service import lock_organization
 from modules.sales.accounting_ownership import DealOwnership
 from modules.sales.deal_loss import DealLossRequest, DealLossResolution
 from modules.sales.invoice_issuance import InvoiceIssuanceReceipt
-from modules.sales.models import Deal, DealDocument, Stage
+from modules.sales.models import CrmClient, CrmClientContact, Deal, DealDocument, Stage
 from modules.sales.reservation_source import SalesReservationSource
 from modules.wms.invoice_remainder import RemainderRelease, RemainderReleaseLine
 from modules.wms.invoice_reservations import (
@@ -63,7 +64,8 @@ class Proof(ProofBase):
 
 
 SCOPES = ("wms_issue", "wms_pick", "logistics_shipment", "accounting_issue", "legacy_fulfillment")
-TABLES = [m.__table__ for m in (Organization, Deal, DealDocument, Stage, DealLossRequest, DealLossResolution,
+TABLES = [m.__table__ for m in (Organization, Counterparty, CrmClient, CrmClientContact,
+    Deal, DealDocument, Stage, DealLossRequest, DealLossResolution,
     InvoiceIssuanceReceipt, DealOwnership, Location,
     StockMovement, Task, ReservationVersion, InvoiceReservation, ReservationEventState,
     ReservationPick, InvoiceReservationRelease, InvoiceReservationReleaseLine, PhysicalShipmentAct, PhysicalShipmentLine, RemainderRelease, RemainderReleaseLine, Proof)]

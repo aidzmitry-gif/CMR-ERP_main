@@ -57,6 +57,65 @@ async def test_replay_payload_conflict_and_normalized_duplicates(api, session):
     assert (await api.post("/sales/clients", headers=FOREIGN, json=payload(name="Same buyer", unp="123456789"))).status_code == 201
 
 
+async def test_counterparty_link_uses_active_master_record_and_reuses_per_owner(api, session):
+    await seed(session)
+    cp = Counterparty(name="1C master buyer", unp="123456789")
+    session.add(cp)
+    await session.commit()
+    denied = await api.post("/sales/clients", headers=OWN,
+                            json={"counterparty_id": cp.id, "request_key": "link-request-0"})
+    assert denied.status_code == 422  # Own-only visibility cannot be bypassed by guessing an ID.
+    session.add_all([
+        Deal(number="LINK-OWN", title="Existing relationship", counterparty=cp.name, owner_id=491),
+        Deal(number="LINK-FOREIGN", title="Other relationship", counterparty=cp.name, owner_id=492),
+    ])
+    await session.commit()
+    data = {"counterparty_id": cp.id, "name": "Forged name", "unp": "999999999",
+            "request_key": "link-request-1"}
+    first = await api.post("/sales/clients", headers=OWN, json=data)
+    assert first.status_code == 201, first.text
+    client = first.json()
+    assert client == {"id": client["id"], "name": cp.name, "unp": cp.unp,
+                      "owner_id": 491, "counterparty_id": cp.id, "source": "crm"}
+    assert (await api.post("/sales/clients", headers=OWN, json=data)).json() == client
+    reused = await api.post("/sales/clients", headers=OWN,
+                            json={"counterparty_id": cp.id, "request_key": "link-request-2"})
+    assert reused.status_code == 201 and reused.json() == client
+    assert (await api.post("/sales/clients", headers=OWN,
+                           json={"counterparty_id": cp.id + 1, "request_key": "link-request-1"})).status_code == 409
+    foreign = await api.post("/sales/clients", headers=FOREIGN,
+                             json={"counterparty_id": cp.id, "request_key": "link-request-1"})
+    assert foreign.status_code == 201 and foreign.json()["id"] != client["id"]
+    assert foreign.json()["owner_id"] == 492
+    assert (await api.get(f"/sales/clients/{client['id']}", headers=FOREIGN)).status_code == 404
+    assert await session.scalar(select(func.count()).select_from(CrmClient)) == 2
+    await session.refresh(cp)
+    assert cp.name == "1C master buyer" and cp.unp == "123456789" and cp.is_active
+
+
+async def test_counterparty_link_rejects_unknown_archived_and_unlinked_name_collision(api, session):
+    await seed(session)
+    active = Counterparty(name="Existing name", unp="123456789")
+    archived = Counterparty(name="Archived buyer", unp="987654321", is_active=False)
+    session.add_all([active, archived])
+    await session.flush()
+    session.add(Deal(number="LINK-COLLISION", title="Existing relationship",
+                     counterparty=active.name, owner_id=491))
+    await session.commit()
+    for value in (0, "1", active.id + archived.id + 100, archived.id):
+        response = await api.post("/sales/clients", headers=OWN,
+                                  json={"counterparty_id": value, "request_key": "link-request-1"})
+        assert response.status_code == 422, response.text
+    unlinked = await api.post("/sales/clients", headers=OWN,
+                              json=payload(name=active.name, unp=active.unp))
+    assert unlinked.status_code == 201
+    conflict = await api.post("/sales/clients", headers=OWN,
+                              json={"counterparty_id": active.id, "request_key": "link-request-2"})
+    assert conflict.status_code == 409
+    assert (await api.get(f"/sales/clients/{unlinked.json()['id']}", headers=OWN)).json()["counterparty_id"] is None
+    assert await session.scalar(select(func.count()).select_from(CrmClient)) == 1
+
+
 @pytest.mark.parametrize("changes,status", [({"owner_id":492},403), ({"counterparty_id":1},422),
     ({"name":"   "},422), ({"unp":"123"},422), ({"request_key":"bad"},422)])
 async def test_invalid_or_forged_inputs(api, session, changes, status):

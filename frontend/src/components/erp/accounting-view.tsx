@@ -121,6 +121,7 @@ const accountingSections: AccountingSection[] = [
   { id: "documents", label: "Документы", pages: [
     { id: "crm-sales", label: "Продажи CRM" }, { id: "inventory-issue", label: "Списание запасов" },
     { id: "entry", label: "Ручная операция" }, { id: "production", label: "Производство" },
+    { id: "assembly-estimate", label: "Калькуляция сборки" },
     { id: "repairs", label: "Ремонты" }, { id: "fixed-assets", label: "ОС и амортизация" },
     { id: "sale", label: "Исключение: продажа вне CRM" },
   ], hiddenTabs: ["shipment-preview"] },
@@ -128,7 +129,6 @@ const accountingSections: AccountingSection[] = [
     { id: "bank", label: "Банк" }, { id: "bank-import", label: "Импорт выписки" },
     { id: "invoice-settlements", label: "Оплаты счетов" },
   ] },
-    { id: "assembly-estimate", label: "Калькуляция сборки" },
   { id: "payroll", label: "Зарплата", pages: [
     { id: "payroll-control", label: "Контроль зарплаты" }, { id: "payroll-hr-draft", label: "Черновая ведомость HR" },
     { id: "payroll-workpaper", label: "Расчётный лист" },
@@ -143,6 +143,7 @@ const accountingSections: AccountingSection[] = [
     { id: "reports", label: "ОСВ и отчёты" }, { id: "trade-settlements", label: "Расчёты 60/62" },
     { id: "reconciliation", label: "Сверка ОСВ" },
     { id: "expenses", label: "Контроль расходов" },
+    { id: "shipment-profit", label: "Прибыль по отгрузкам" },
   ] },
   { id: "closing", label: "Закрытие месяца", pages: [
     { id: "controls", label: "Управление книгой" }, { id: "accounts", label: "План счетов" },
@@ -150,7 +151,6 @@ const accountingSections: AccountingSection[] = [
     { id: "seller-profiles", label: "Реквизиты продавца" },
   ] },
 ];
-    { id: "shipment-profit", label: "Прибыль по отгрузкам" },
 
 function salesOriginal(org: string, reference: string) {
   const match = /^sales:document:([1-9][0-9]*)$/.exec(reference);

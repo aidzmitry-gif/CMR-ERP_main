@@ -6,7 +6,7 @@ from modules.accounting import service
 from modules.accounting.closing_commands import actual_posting, checksum
 from modules.accounting.late_cost_trace import trace_specific_lot
 from modules.accounting.models import Entry, InventorySaleReceipt, Line, ShipmentAccountingReceipt
-from modules.accounting.purchases import PurchaseDocument
+from modules.accounting.purchases import purchase_from_receipt_basis
 
 
 async def verified_shipment_entries(session, organization_id, entry_ids: set[int]):
@@ -51,15 +51,14 @@ async def expense_basis(session, organization_id, expense_id, expected_version, 
         key = (link["receipt_id"], link["version"])
         if key not in verified:
             basis = await procurement.posted_receipt_basis(session, organization_id, *key)
-            document = PurchaseDocument.model_validate(basis["document"])
-            expected = document.posting()
+            document, expected = purchase_from_receipt_basis(basis)
             entry = await session.get(Entry, basis["entry_id"])
             if (entry is None or entry.organization_id != organization_id or entry.actor != basis["actor"]
                 or entry.digest != basis["digest"] or entry.digest != service.digest(expected)
                 or (await actual_posting(session, entry)).model_dump() != expected.model_dump()):
                 raise service.AccountingError("Receipt source does not match its actual accounting package")
-            verified[key] = (basis, document)
-        basis, document = verified[key]
+            verified[key] = (basis, document, expected)
+        basis, document, expected = verified[key]
         index = link["line_number"] - 1
         if (not 0 <= index < len(document.items) or basis["entry_id"] != link["entry_id"]
             or basis["digest"] != link["posting_digest"]):
@@ -67,7 +66,7 @@ async def expense_basis(session, organization_id, expense_id, expected_version, 
         # Purchase rule emits inventory then optional VAT per primary line.
         ledger_line = 1 + sum(1 + int(item.vat_amount > 0) for item in document.items[:index])
         links.append({**link, "acquisition_line": ledger_line, "account": document.items[index].account,
-                      "inventory_dimensions": document.posting().lines[ledger_line - 1].dimensions})
+                      "inventory_dimensions": expected.lines[ledger_line - 1].dimensions})
     return {**source, "receipt_sources": links, "acquisitions_verified": True,
             "disposals_verified": False, "posted": False, "final_cost_certified": False}
 

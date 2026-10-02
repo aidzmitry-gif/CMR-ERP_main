@@ -45,7 +45,7 @@ async def load_expense_pools(session, organization_id, expense_id, version, on, 
         Policy,
     )
     from modules.accounting.production_material_cost import verify_material_issue_receipt
-    from modules.accounting.purchases import PurchaseDocument
+    from modules.accounting.purchases import purchase_from_receipt_basis
     from modules.accounting.zero_value_disposals import available_authenticated_zero_value_disposals
 
     source = await expense_basis(session, organization_id, expense_id, version, procurement)
@@ -78,7 +78,7 @@ async def load_expense_pools(session, organization_id, expense_id, version, on, 
                 raise AccountingError("Pool purchase needs its primary procurement receipt")
             basis = await procurement.posted_receipt_basis(
                 session, organization_id, int(entry.source[len(prefix):]), entry.source_version)
-            expected = PurchaseDocument.model_validate(basis["document"]).posting()
+            _, expected = purchase_from_receipt_basis(basis)
             if (basis["entry_id"] != entry.id or basis["actor"] != entry.actor or basis["digest"] != entry.digest
                     or service.digest(expected) != entry.digest or posting.model_dump() != expected.model_dump()):
                 raise AccountingError("Pool purchase differs from its authenticated primary receipt")

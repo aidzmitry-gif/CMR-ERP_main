@@ -92,6 +92,17 @@ class PurchaseDocument(Input):
                             explanation=self.explanation, lines=lines)
 
 
+def purchase_from_receipt_basis(basis):
+    """Rebuild a posting from the procurement gateway's frozen receipt identity."""
+    document = PurchaseDocument.model_validate({
+        key: value for key, value in basis["document"].items()
+        if key not in {"warehouse_id", "warehouse_title"}
+    })
+    return document, document.posting(
+        verified_counterparty_id=basis.get("verified_counterparty_id"),
+    )
+
+
 async def preview_purchase(session, org_id, document: PurchaseDocument, *, verified_counterparty_id=None):
     posting = document.posting(verified_counterparty_id=verified_counterparty_id)
     accounts, policy = await service.preview_posting(session, org_id, posting, inventory_purchase=True)

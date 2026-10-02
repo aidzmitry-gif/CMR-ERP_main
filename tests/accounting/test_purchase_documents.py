@@ -40,6 +40,23 @@ async def seed_legacy_purchase(db, book, data):
     return entry
 
 
+@pytest.mark.parametrize("counterparty_id", [None, 7])
+def test_receipt_basis_preserves_frozen_identity_and_purchase_digest(counterparty_id):
+    original = purchases.PurchaseDocument.model_validate(purchase((1, 1)))
+    basis = {"document": {**original.model_dump(mode="json"),
+                           "warehouse_id": 1, "warehouse_title": "Historical warehouse"}}
+    if counterparty_id is not None:
+        basis["verified_counterparty_id"] = counterparty_id
+    document, posting = purchases.purchase_from_receipt_basis(basis)
+    assert document == original
+    assert service.digest(posting) == service.digest(original.posting(
+        verified_counterparty_id=counterparty_id))
+    assert posting.rule_version == ("purchase-byn-v1" if counterparty_id is None else "purchase-byn-v2")
+    basis["document"]["unexpected_field"] = "must not be discarded"
+    with pytest.raises(ValueError, match="extra_forbidden"):
+        purchases.purchase_from_receipt_basis(basis)
+
+
 async def test_generic_manual_posting_cannot_create_an_inventory_purchase(db, purchase_book):
     document = purchases.PurchaseDocument.model_validate(purchase(purchase_book))
     posting = document.posting()

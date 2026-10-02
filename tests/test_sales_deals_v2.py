@@ -308,6 +308,421 @@ async def test_stage_history_recorded(api):
     assert ("qual", "price_req") in transitions
 
 
+async def test_stage_history_orders_imported_event_before_later_local_event(api, session):
+    from modules.sales.models import DealStageEvent
+
+    deal = await _new_deal(api, "H-MIXED", stage="new")
+    session.add(DealStageEvent(
+        deal_id=deal["id"], from_stage="new", to_stage="qual",
+        changed_at=datetime(2026, 1, 1, 9),
+    ))
+    await session.flush()
+    session.add(DealStageEvent(
+        deal_id=deal["id"], source_ref="bitrix:deal-stage:30:80",
+        from_stage=None, to_stage="new", changed_at=datetime(2024, 11, 2, 7),
+    ))
+    await session.commit()
+
+    history = (await api.get(f"/sales/deals/{deal['id']}/history")).json()
+    stages = [event["to_stage"] for event in history]
+    assert stages.index("new") < stages.index("qual")
+
+
+async def test_deal_timeline_comments_are_chronological_and_owner_scoped(api, session):
+    from modules.sales.models import CrmTimelineComment
+
+    deal = await _new_deal(api, "C-TIMELINE")
+    other = await _new_deal(api, "C-OTHER")
+    session.add_all([
+        CrmTimelineComment(
+            entity_type="deal", deal_id=deal["id"], source_ref="bitrix:timeline-comment:deal:8",
+            source_entity_id=str(deal["id"]), body="second", author_display="Manager",
+            created_at=datetime(2025, 1, 2, 9),
+        ),
+        CrmTimelineComment(
+            entity_type="deal", deal_id=deal["id"], source_ref="bitrix:timeline-comment:deal:7",
+            source_entity_id=str(deal["id"]), body="<script>text only</script>", author_display="Manager",
+            created_at=datetime(2025, 1, 1, 9),
+        ),
+        CrmTimelineComment(
+            entity_type="deal", deal_id=other["id"], source_ref="bitrix:timeline-comment:deal:9",
+            source_entity_id=str(other["id"]), body="other", author_display="Manager",
+            created_at=datetime(2025, 1, 1, 9),
+        ),
+    ])
+    await session.commit()
+
+    response = await api.get(f"/sales/deals/{deal['id']}/timeline/comments")
+    assert response.status_code == 200
+    assert [row["body"] for row in response.json()] == ["<script>text only</script>", "second"]
+    assert all(set(row) == {"id", "body", "author_display", "created_at"}
+               for row in response.json())
+    assert (await api.get("/sales/deals/999999/timeline/comments")).status_code == 404
+
+
+def test_timeline_attachment_storage_is_streamed_and_content_addressed(tmp_path):
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from modules.sales import timeline_storage
+
+    storage_root = tmp_path.parent / f"timeline-{tmp_path.name[:8]}"
+    if os.name == "nt":
+        storage_root = Path("\\\\?\\" + str(storage_root.resolve()))
+    storage_root.mkdir()
+    stored = timeline_storage.store_attachment(
+        (chunk for chunk in (b"small ", b"chunks")), root=storage_root, max_size_bytes=12
+    )
+    repeated = timeline_storage.store_attachment(
+        (chunk for chunk in (b"small ", b"chunks")), root=storage_root, max_size_bytes=12
+    )
+    assert repeated == stored
+    assert (storage_root / stored.storage_path).read_bytes() == b"small chunks"
+    assert timeline_storage.verify_attachment(
+        SimpleNamespace(
+            sha256=stored.sha256,
+            storage_path=stored.storage_path,
+            size_bytes=stored.size_bytes,
+        ),
+        root=storage_root,
+    ) == (storage_root / stored.storage_path).resolve()
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        concurrent = list(pool.map(
+            lambda _: timeline_storage.store_attachment([b"concurrent"], root=storage_root),
+            range(4),
+        ))
+    assert all(item == concurrent[0] for item in concurrent)
+    assert {path.name for path in storage_root.rglob("*") if path.is_file()} == {
+        stored.sha256, concurrent[0].sha256,
+    }
+    assert len(list((storage_root / ".staging").glob(".timeline-*"))) == 0
+
+    with pytest.raises(timeline_storage.AttachmentRejected):
+        timeline_storage.store_attachment((b"123", b"456"), root=storage_root, max_size_bytes=5)
+    with pytest.raises(timeline_storage.AttachmentRejected):
+        timeline_storage.store_attachment(
+            [], root=storage_root, max_size_bytes=timeline_storage.MAX_ATTACHMENT_BYTES + 1
+        )
+    assert not list((storage_root / ".staging").glob(".timeline-*"))
+
+
+def test_timeline_attachment_storage_fails_closed_on_corrupt_digest_path(tmp_path, monkeypatch):
+    import hashlib
+    from pathlib import Path
+
+    from modules.sales import timeline_storage
+
+    stored = timeline_storage.store_attachment([b"original"], root=tmp_path)
+    (tmp_path / stored.storage_path).write_bytes(b"tampered")
+    with pytest.raises(timeline_storage.AttachmentRejected):
+        timeline_storage.store_attachment([b"original"], root=tmp_path)
+
+    retry_root = tmp_path / "retry-root"
+    retry_root.mkdir()
+    retry_payload = b"retry after fsync failure"
+    retry_digest = hashlib.sha256(retry_payload).hexdigest()
+    resolved_retry_root = retry_root.resolve()
+    digest_directory = resolved_retry_root / retry_digest[:2] / retry_digest[2:4]
+    sync_calls = []
+    fail_once = True
+
+    def fail_root_sync_after_install(path):
+        nonlocal fail_once
+        path = Path(path)
+        sync_calls.append(path)
+        if path == resolved_retry_root and digest_directory.exists() and fail_once:
+            fail_once = False
+            raise OSError("simulated root directory fsync failure")
+
+    monkeypatch.setattr(timeline_storage, "_sync_directory", fail_root_sync_after_install)
+    with pytest.raises(timeline_storage.AttachmentRejected):
+        timeline_storage.store_attachment([retry_payload], root=retry_root)
+    assert fail_once is False
+
+    retry_sync_start = len(sync_calls)
+    retried = timeline_storage.store_attachment([retry_payload], root=retry_root)
+    assert retried.sha256 == retry_digest
+    expected_ancestors = set()
+    directory = digest_directory.resolve()
+    while True:
+        expected_ancestors.add(directory)
+        if directory.parent == directory:
+            break
+        directory = directory.parent
+    assert expected_ancestors <= set(sync_calls[retry_sync_start:])
+
+
+def test_timeline_attachment_model_uses_bigint_and_restrictive_comment_fk():
+    from sqlalchemy import BigInteger
+
+    from modules.sales.models import CrmTimelineAttachment
+
+    table = CrmTimelineAttachment.__table__
+    assert isinstance(table.c.size_bytes.type, BigInteger)
+    foreign_key = next(iter(table.c.comment_id.foreign_keys))
+    assert foreign_key.target_fullname == "sales.crm_timeline_comment.id"
+    assert foreign_key.ondelete is None
+    assert table.c.source_ref.nullable is False
+    assert any(constraint.name == "uq_crm_timeline_attachment_source_ref"
+               for constraint in table.constraints)
+
+
+async def test_deal_task_source_ref_allows_manual_rows_and_rejects_duplicate_sources(api, session):
+    from sqlalchemy import func, select
+    from sqlalchemy.exc import IntegrityError
+
+    from modules.sales.models import DealTask
+
+    table = DealTask.__table__
+    assert table.c.source_ref.nullable is True
+    assert table.c.source_ref.type.length == 128
+    assert any(constraint.name == "uq_deal_task_source_ref"
+               for constraint in table.constraints)
+
+    deal = await _new_deal(api, "DEAL-TASK-SOURCE-REF")
+    session.add_all([
+        DealTask(deal_id=deal["id"], title="Manual task A", source_ref=None),
+        DealTask(deal_id=deal["id"], title="Manual task B", source_ref=None),
+    ])
+    await session.commit()
+    assert await session.scalar(
+        select(func.count()).select_from(DealTask).where(DealTask.source_ref.is_(None))
+    ) == 2
+
+    session.add(DealTask(
+        deal_id=deal["id"], title="Imported task", source_ref="bitrix:task:9001",
+    ))
+    await session.commit()
+    session.add(DealTask(
+        deal_id=deal["id"], title="Duplicate imported task", source_ref="bitrix:task:9001",
+    ))
+    with pytest.raises(IntegrityError):
+        await session.flush()
+    await session.rollback()
+    assert await session.scalar(select(func.count()).select_from(DealTask)) == 3
+
+
+async def test_deal_task_fidelity_supports_unbound_tasks_and_ordered_crm_links(api, session):
+    from sqlalchemy import func, select
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy import Boolean, Text
+
+    from modules.sales.models import DealTask, DealTaskCrmLink
+
+    task_table = DealTask.__table__
+    link_table = DealTaskCrmLink.__table__
+    assert task_table.c.deal_id.nullable is True
+    assert isinstance(task_table.c.description.type, Text)
+    assert isinstance(task_table.c.description_in_bbcode.type, Boolean)
+    assert task_table.c.source_responsible_id.type.length == 64
+    assert task_table.c.source_status_code.type.length == 16
+    assert isinstance(link_table.c.raw_binding.type, Text)
+    assert link_table.c.raw_binding.nullable is True
+    assert link_table.c.deal_id.nullable is True
+    assert any(
+        constraint.name == "uq_deal_task_crm_link_task_ordinal"
+        for constraint in link_table.constraints
+    )
+
+    deal = await _new_deal(api, "DEAL-TASK-FIDELITY")
+    unbound_task = DealTask(
+        deal_id=None,
+        title="Unbound source task",
+        description="Long source description",
+        description_in_bbcode=False,
+        source_responsible_id="9001",
+        source_status_code="5",
+    )
+    linked_task = DealTask(deal_id=deal["id"], title="Multi-link source task")
+    session.add_all([unbound_task, linked_task])
+    await session.flush()
+    linked_task_id = linked_task.id
+    session.add_all([
+        DealTaskCrmLink(
+            task_id=linked_task_id,
+            ordinal=0,
+            raw_binding="D_" + "x" * 700,
+            entity_type="DEAL",
+            source_id="101",
+            deal_id=deal["id"],
+        ),
+        DealTaskCrmLink(
+            task_id=linked_task_id,
+            ordinal=1,
+            raw_binding="L_202",
+            entity_type="LEAD",
+            source_id="202",
+            deal_id=None,
+        ),
+    ])
+    await session.commit()
+
+    assert await session.scalar(
+        select(func.count()).select_from(DealTask).where(DealTask.deal_id.is_(None))
+    ) == 1
+    assert await session.scalar(
+        select(func.count()).select_from(DealTaskCrmLink).where(
+            DealTaskCrmLink.task_id == linked_task_id
+        )
+    ) == 2
+    persisted = await session.scalar(
+        select(DealTaskCrmLink.raw_binding).where(
+            DealTaskCrmLink.task_id == linked_task_id,
+            DealTaskCrmLink.ordinal == 0,
+        )
+    )
+    assert persisted == "D_" + "x" * 700
+
+    session.add(DealTaskCrmLink(
+        task_id=linked_task_id,
+        ordinal=1,
+        raw_binding="duplicate ordinal",
+    ))
+    with pytest.raises(IntegrityError):
+        await session.flush()
+    await session.rollback()
+    assert await session.scalar(
+        select(func.count()).select_from(DealTaskCrmLink).where(
+            DealTaskCrmLink.task_id == linked_task_id
+        )
+    ) == 2
+
+
+async def test_timeline_attachment_source_ref_is_unique(api, session):
+    from sqlalchemy.exc import IntegrityError
+
+    from modules.sales.models import CrmTimelineAttachment, CrmTimelineComment
+
+    deal = await _new_deal(api, "TIMELINE-ATTACHMENT-UNIQUE")
+    comment = CrmTimelineComment(
+        entity_type="deal", deal_id=deal["id"], body="comment", author_display="",
+        created_at=datetime(2025, 1, 1),
+    )
+    session.add(comment)
+    await session.flush()
+    common = {
+        "comment_id": comment.id, "source_ref": "bitrix:timeline-file:unique",
+        "sha256": "0" * 64, "size_bytes": 0, "filename": "file.bin",
+        "content_type": "application/octet-stream", "storage_path": "00/00/" + "0" * 64,
+    }
+    session.add_all([CrmTimelineAttachment(**common), CrmTimelineAttachment(**common)])
+    with pytest.raises(IntegrityError):
+        await session.flush()
+    await session.rollback()
+
+
+async def test_timeline_attachment_api_lists_private_metadata_and_streams_verified_file(
+    api, session, tmp_path, monkeypatch
+):
+    import asyncio
+    import tempfile
+
+    from modules.sales import routes as sales_routes
+    from modules.sales import timeline_storage
+    from modules.sales.models import CrmTimelineAttachment, CrmTimelineComment
+
+    monkeypatch.setattr(timeline_storage, "storage_root", lambda: tmp_path)
+    deal = await _new_deal(api, "TIMELINE-ATTACHMENT")
+    comment = CrmTimelineComment(
+        entity_type="deal", deal_id=deal["id"], source_ref="bitrix:timeline-comment:deal:50",
+        source_entity_id=str(deal["id"]), body="file attached", author_display="Manager",
+        created_at=datetime(2025, 1, 1),
+    )
+    session.add(comment)
+    await session.flush()
+    stored = timeline_storage.store_attachment([b"private attachment bytes"], root=tmp_path)
+    attachment = CrmTimelineAttachment(
+        comment_id=comment.id, source_ref="bitrix:timeline-file:50:1",
+        sha256=stored.sha256, size_bytes=stored.size_bytes,
+        filename="../../report\r\nX-Injected: yes.pdf", content_type="text/html",
+        storage_path=stored.storage_path,
+    )
+    session.add(attachment)
+    await session.commit()
+
+    base = f"/sales/deals/{deal['id']}/timeline/comments/{comment.id}/attachments"
+    listed = await api.get(base)
+    assert listed.status_code == 200, listed.text
+    assert listed.json() == [{
+        "id": attachment.id,
+        "filename": "reportX-Injected: yes.pdf",
+        "content_type": attachment.content_type,
+        "size_bytes": stored.size_bytes,
+    }]
+    assert "storage_path" not in listed.text and "source_ref" not in listed.text
+    assert "sha256" not in listed.text
+
+    source_path = tmp_path / stored.storage_path
+    original_snapshot = timeline_storage.snapshot_attachment
+    snapshots = []
+
+    def snapshot_then_mutate_source(item):
+        snapshot = original_snapshot(item)
+        snapshots.append(snapshot)
+        if item.id == attachment.id:
+            source_path.write_bytes(b"source changed after snapshot verification")
+        return snapshot
+
+    monkeypatch.setattr(timeline_storage, "snapshot_attachment", snapshot_then_mutate_source)
+
+    downloaded = await api.get(f"{base}/{attachment.id}/download")
+    assert downloaded.status_code == 200, downloaded.text
+    assert downloaded.content == b"private attachment bytes"
+    assert snapshots[-1].closed
+    assert downloaded.headers["cache-control"] == "private, no-store"
+    assert downloaded.headers["x-content-type-options"] == "nosniff"
+    disposition = downloaded.headers["content-disposition"]
+    assert "attachment" in disposition and "filename*=utf-8''report" in disposition
+    assert "X-Injected" in disposition and "\r" not in disposition and "\n" not in disposition
+    assert downloaded.headers["content-type"].startswith("text/html")
+
+    mismatch = await api.get(
+        f"/sales/deals/{deal['id']}/timeline/comments/{comment.id + 1}/attachments/{attachment.id}/download"
+    )
+    assert mismatch.status_code == 404
+
+    unsafe_path = CrmTimelineAttachment(
+        comment_id=comment.id, source_ref="bitrix:timeline-file:50:2",
+        sha256=stored.sha256, size_bytes=stored.size_bytes, filename="unsafe.txt",
+        content_type="text/plain", storage_path="../../outside-file",
+    )
+    session.add(unsafe_path)
+    await session.commit()
+    rejected_path = await api.get(f"{base}/{unsafe_path.id}/download")
+    assert rejected_path.status_code == 404
+    assert "outside-file" not in rejected_path.text
+
+    (tmp_path / stored.storage_path).write_bytes(b"corrupt")
+    corrupted = await api.get(f"{base}/{attachment.id}/download")
+    assert corrupted.status_code == 404
+    assert "corrupt" not in corrupted.text and stored.sha256 not in corrupted.text
+
+    cancelled_snapshot = tempfile.TemporaryFile(mode="w+b")
+    cancelled_snapshot.write(b"stream then cancel")
+    cancelled_snapshot.seek(0)
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def cancel_during_body(message):
+        if message["type"] == "http.response.body" and message.get("body"):
+            raise asyncio.CancelledError
+
+    response = sales_routes._TimelineAttachmentStreamingResponse(
+        cancelled_snapshot, media_type="application/octet-stream"
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await response(
+            {"type": "http", "asgi": {"spec_version": "2.4"}},
+            receive,
+            cancel_during_body,
+        )
+    assert cancelled_snapshot.closed
+
+
 async def test_stage_change_updates_stage_changed_at(session, api):
     from modules.sales.models import Deal
 

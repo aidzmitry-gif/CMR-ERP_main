@@ -99,7 +99,10 @@ def commercial_lines(document):
             if key in dimensions and dimensions[key] != value:
                 raise service.AccountingError("Conflicting VAT metadata")
             dimensions[key] = value
-    lines = [LineInput(account=document.buyer_account, side="debit", amount=gross, dimensions=document.buyer_dimensions),
+    buyer_dimensions = dict(document.buyer_dimensions)
+    if not buyer_dimensions.get("counterparty_unp", "").strip():
+        buyer_dimensions.pop("counterparty_unp", None)
+    lines = [LineInput(account=document.buyer_account, side="debit", amount=gross, dimensions=buyer_dimensions),
              LineInput(account=document.revenue_account, side="credit", amount=gross, dimensions=revenue_dimensions)]
     # Preserve readable VAT evidence on revenue even when tax rounds to zero.
     if vat:

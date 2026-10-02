@@ -27,6 +27,17 @@ async def prepared(api, session):
     return org, facts
 
 
+async def prepared_issued(api, session):
+    from tests.reservation_source import issued_invoice_for_shipments
+
+    org, facts = await issued_invoice_for_shipments(api, session)
+    assert facts["document_id"] == 1
+    await apply(session, 1, [(line["sku_code"], "W", Decimal(line["qty"]))
+                             for line in facts["lines"]], organization_id=org, release=False)
+    await session.commit()
+    return org, facts
+
+
 def endpoint(org):
     return f"/wms/organizations/{org}/invoices/1/physical-shipments"
 
@@ -82,11 +93,13 @@ async def test_wms_register_projection_keeps_internal_act_distinct_from_tn_ttn(a
     assert projection["tn_ttn_status"] == "not_certified"
     assert projection["items"][0]["act_id"] == created.json()["act_id"]
     assert projection["items"][0]["status"] == "verified_internal_act"
+    assert projection["items"][0]["document_url"] == (
+        f"/api/wms/organizations/{org}/physical-shipments/by-key/{body['source_key']}/document")
     assert projection["items"][0]["tn_ttn_status"] == "not_certified"
 
 
 async def test_accounting_tn_ttn_draft_is_source_bound_and_never_certified(api, session):
-    org, facts = await prepared(api, session)
+    org, facts = await prepared_issued(api, session)
     body = await request(api, org, facts)
     created = await api.post(endpoint(org), json=body)
     assert created.status_code == 201, created.text
@@ -107,7 +120,7 @@ async def test_accounting_tn_ttn_draft_is_source_bound_and_never_certified(api, 
 
 
 async def test_accounting_tn_ttn_draft_uses_only_matching_explicit_policy(api, session):
-    org, facts = await prepared(api, session)
+    org, facts = await prepared_issued(api, session)
     body = await request(api, org, facts)
     created = await api.post(endpoint(org), json=body)
     assert created.status_code == 201, created.text

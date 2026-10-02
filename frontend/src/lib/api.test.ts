@@ -32,6 +32,7 @@ import {
   fetchBoardStages,
   fetchBranding,
   fetchCalls,
+  fetchCallsResult,
   fetchCrmStaff,
   fetchChats,
   fetchContacts,
@@ -866,6 +867,23 @@ describe("api client — телефония", () => {
     expect(await fetchCalls()).toEqual([]);
   });
 
+  it("fetchCallsResult фильтрует по контрагенту и сохраняет безопасную ссылку на CRM-клиента", async () => {
+    const row = { id: 8, call_id: "synthetic-8", direction: "in", phone_e164: null, owner: "Тест", status: "ended", deal_id: null, counterparty_id: 42, crm_client_id: 17, started_at: "2026-09-01T10:00:00" };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => [row] });
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await fetchCallsResult({ counterparty_id: 42, unlinked: true })).toEqual({ ok: true, rows: [row] });
+    expect(fetchMock).toHaveBeenCalledWith("/api/sales/calls?counterparty_id=42&unlinked=true", expect.objectContaining({ cache: "no-store" }));
+  });
+
+  it("fetchCallsResult fails closed if the server returns another counterparty's call", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => [
+      { id: 8, call_id: "synthetic-8", direction: "in", phone_e164: null, owner: "Тест", status: "ended", deal_id: null, counterparty_id: 43, started_at: "2026-09-01T10:00:00" },
+    ] }));
+
+    expect(await fetchCallsResult({ counterparty_id: 42 })).toEqual({ ok: false, error: "Сервер вернул звонки другого клиента." });
+  });
+
   it("callComment/callResult/callLinkDeal/triggerIncomingCall шлют POST с телом на верный путь", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
     vi.stubGlobal("fetch", fetchMock);
@@ -894,12 +912,12 @@ describe("api client — телефония", () => {
   });
 
   it("subscribeCalls — no-op без EventSource (jsdom не предоставляет), не бросает", () => {
-    const unsubscribe = subscribeCalls("Иванов", () => {});
+    const unsubscribe = subscribeCalls(() => {});
     expect(typeof unsubscribe).toBe("function");
     expect(() => unsubscribe()).not.toThrow();
   });
 
-  it("subscribeCalls строит URL с owner и без; onmessage парсит карточку", () => {
+  it("subscribeCalls использует URL потока без owner и разбирает карточки", () => {
     const instances: { url: string; onmessage: ((e: { data: string }) => void) | null; close: () => void }[] = [];
     class FakeEventSource {
       onmessage: ((e: { data: string }) => void) | null = null;
@@ -911,8 +929,8 @@ describe("api client — телефония", () => {
     vi.stubGlobal("EventSource", FakeEventSource as unknown as typeof EventSource);
 
     const cards: { id: number }[] = [];
-    const unsub = subscribeCalls("Иванов", (c) => cards.push(c as unknown as { id: number }));
-    expect(instances[0].url).toBe("/api/sales/calls/stream?owner=%D0%98%D0%B2%D0%B0%D0%BD%D0%BE%D0%B2");
+    const unsub = subscribeCalls((c) => cards.push(c as unknown as { id: number }));
+    expect(instances[0].url).toBe("/api/sales/calls/stream");
     instances[0].onmessage?.({ data: JSON.stringify({ id: 1 }) });
     expect(cards).toEqual([{ id: 1 }]);
     // «шум» потока (heartbeat/невалидный JSON) — не бросает и не добавляет карточку
@@ -921,7 +939,7 @@ describe("api client — телефония", () => {
     unsub();
     expect(instances[0].close).toHaveBeenCalled();
 
-    subscribeCalls(undefined, () => {});
+    subscribeCalls(() => {});
     expect(instances[1].url).toBe("/api/sales/calls/stream");
   });
 });
