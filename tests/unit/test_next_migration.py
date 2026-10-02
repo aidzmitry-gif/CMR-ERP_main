@@ -116,7 +116,8 @@ def test_joint_revision_is_the_only_head_and_merges_exact_frozen_parents():
     assert not duplicates, f"Duplicate migration revisions: {sorted(duplicates)}"
     assert not parents - set(definitions), f"Missing migration parents: {sorted(parents - set(definitions))}"
     assert {revision.revision for revision in scripts.walk_revisions()} == set(definitions)
-    assert scripts.get_heads() == ["crm_rel_001_finished_goods_01"]
+    assert scripts.get_heads() == ["crm_rel_001_output_source_01"]
+    assert scripts.get_revision("crm_rel_001_output_source_01").down_revision == "crm_rel_001_finished_goods_01"
     assert scripts.get_revision("crm_rel_001_finished_goods_01").down_revision == "crm_rel_001_joint_01"
     joint = scripts.get_revision("crm_rel_001_joint_01")
     assert joint.down_revision == ("0192", "crm_live_deal_task_fidelity_01")
@@ -204,3 +205,24 @@ def test_finished_goods_migration_preserves_frozen_contract_and_blocks_lossy_dow
         module.downgrade()
     assert "Cannot downgrade finished-goods shipment history" in output.getvalue()
     assert "DELETE" not in output.getvalue()
+
+
+def test_output_source_migration_preserves_generic_guard_and_existing_production_guard():
+    scripts = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
+    module = scripts.get_revision("crm_rel_001_output_source_01").module
+    sql = module.definitions()
+    old = module.frozen_guard()
+    new = sql[sql.index("CREATE OR REPLACE FUNCTION accounting.guard_source_control("):]
+    branch = ("  IF NEW.entry_id IS NOT NULL AND NEW.source LIKE 'production:output:%'\n"
+              "     AND EXISTS (SELECT 1 FROM accounting.entry e WHERE e.id=NEW.entry_id AND e.source<>NEW.source) THEN\n"
+              "    PERFORM accounting.validate_output_source_completion(NEW.organization_id,NEW.source,NEW.version,NEW.month,NEW.entry_id);\n"
+              "  ELSIF NEW.entry_id IS NOT NULL AND NOT EXISTS (")
+    assert new.replace(branch, "  IF NEW.entry_id IS NOT NULL AND NOT EXISTS (") == old
+    assert "production.guard_output_source_control" not in sql
+    assert "validate_shipment_output_layer(org,target_entry,debit.id,debit.account_code" in sql
+    assert "ids IS DISTINCT FROM native_ids OR ids IS DISTINCT FROM basis_ids" in sql
+    assert "complete_output_receipt_sources" in sql
+    assert "Cannot downgrade output-source completion with linked production history" in __import__("inspect").getsource(module.downgrade)
+
+    assert "AND e.organization_id=NEW.organization_id AND e.source=NEW.source" in module.VALIDATOR
+    assert "AND e.source_version=NEW.version AND to_char(e.posting_date,'YYYY-MM')=NEW.month" in module.VALIDATOR

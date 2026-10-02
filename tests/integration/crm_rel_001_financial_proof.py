@@ -67,6 +67,9 @@ def refused_populated_downgrade(url):
         "accounting.validate_shipment_output_layer(integer,integer,integer,text,date,integer)",
         "accounting.validate_shipment_costs(integer)",
         "accounting.validate_shipment_receipt(integer)",
+        "accounting.guard_source_control()",
+        "accounting.validate_output_source_completion(integer,text,integer,text,integer)",
+        "accounting.check_output_source_completion()",
     )
 
     def readback():
@@ -79,7 +82,7 @@ def refused_populated_downgrade(url):
             state = {"head": connection.execute("SELECT version_num FROM alembic_version ORDER BY version_num").fetchall()}
             for table, order in (("shipment_accounting_receipt", "id"),
                                  ("production_output_transfer_receipt", "entry_id"),
-                                 ("entry", "id"), ("line", "id")):
+                                 ("entry", "id"), ("line", "id"), ("source_control", "id")):
                 state[table] = connection.execute(
                     f"SELECT row_to_json(r)::text FROM accounting.{table} r ORDER BY {order}"
                 ).fetchall()
@@ -101,10 +104,187 @@ def refused_populated_downgrade(url):
     if url.password:
         detail = detail.replace(url.password, "<redacted>")
     assert result.returncode != 0, "Populated43 downgrade unexpectedly succeeded"
-    assert "Cannot downgrade finished-goods shipment history" in detail, detail[-1500:]
+    assert "Cannot downgrade output-source completion with linked production history" in detail, detail[-1500:]
     assert readback() == before, "Refused downgrade changed head, receipts, ledger or function definitions"
     return {"status": "refused_without_mutation", "head": HEAD,
-            "exact_readback": "head/receipts/entries/lines/three_functions"}
+            "exact_readback": "head/receipts/entries/lines/controls/six_functions"}
+
+
+async def original_output_completion_repro(factory, org, output_id, entry_id):
+    """The frozen generic guard rejects this legitimate differing-source link."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    async with factory() as session:
+        source = f"production:output:{output_id}"
+        before = (await session.execute(text("SELECT row_to_json(c)::text FROM accounting.source_control c WHERE organization_id=:org AND source=:source"),
+                                        {"org": org, "source": source})).scalar_one()
+        try:
+            await session.execute(text("UPDATE accounting.source_control SET entry_id=:entry WHERE organization_id=:org AND source=:source"),
+                                  {"entry": entry_id, "org": org, "source": source})
+        except DBAPIError as error:
+            assert error.orig.sqlstate == "P0001"
+            assert error.orig.diag.message_primary == "Source completeness requires its matching posted entry"
+        else:
+            raise AssertionError("Frozen generic source guard did not reproduce its mismatch")
+        finally:
+            await session.rollback()
+        assert (await session.execute(text("SELECT row_to_json(c)::text FROM accounting.source_control c WHERE organization_id=:org AND source=:source"),
+                                      {"org": org, "source": source})).scalar_one() == before
+    return "frozen_guard_refused_without_mutation"
+
+
+async def sql_pending_completion_proof(factory, org, policy_id, output_ids, entry_id):
+    """Real service/native guards; every probe rolls back to the immutable package."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    from modules.accounting import service
+    from modules.accounting.schemas import CloseInput, PostingInput
+
+    assert len(output_ids) == 2
+    async with factory() as session:
+        readback = text("""SELECT 'control',row_to_json(c)::text FROM accounting.source_control c WHERE organization_id=:org
+            UNION ALL SELECT 'period',row_to_json(p)::text FROM accounting.period p WHERE organization_id=:org
+            UNION ALL SELECT 'organization',row_to_json(o)::text FROM accounting.organization o WHERE id=:org
+            UNION ALL SELECT 'entry',row_to_json(e)::text FROM accounting.entry e WHERE organization_id=:org
+            UNION ALL SELECT 'line',row_to_json(l)::text FROM accounting.line l JOIN accounting.entry e ON e.id=l.entry_id WHERE e.organization_id=:org
+            UNION ALL SELECT 'receipt',row_to_json(r)::text FROM accounting.production_output_transfer_receipt r WHERE organization_id=:org
+            ORDER BY 1,2""")
+        before = (await session.execute(readback, {"org": org})).all()
+        pending = (await session.execute(text("SELECT source,version,month,entry_id FROM accounting.source_control WHERE organization_id=:org AND source LIKE 'production:output:%' ORDER BY source"), {"org": org})).all()
+        assert sorted(tuple(row) for row in pending) == sorted((f"production:output:{doc}", 1, MONTH, None) for doc in output_ids)
+        assert (await session.execute(text("SELECT amount,quantity FROM accounting.line WHERE entry_id=:entry AND side='debit'"), {"entry": entry_id})).one() == (Decimal("177"), Decimal("10"))
+        source = f"production:output:{output_ids[0]}"
+        rejected = []
+        for case in ("matching_source", "matching_wrong_org", "matching_wrong_version", "matching_wrong_month"):
+            transaction = await session.begin_nested()
+            try:
+                posting_day = "2026-10-12" if case == "matching_wrong_month" else DAY
+                posting = PostingInput(source=source, source_version=2 if case == "matching_wrong_version" else 1,
+                    operation="manual", document_date=posting_day, operation_date=posting_day, posting_date=posting_day,
+                    policy_id=policy_id, rule_version="g13-rollback-regression", explanation="Rolled-back matching-source regression",
+                    lines=[{"account": "20", "side": "debit", "amount": "1.00", "dimensions": {"department": "SHOP", "order": "G04-ORDER"}},
+                           {"account": "60", "side": "credit", "amount": "1.00"}])
+                native_entry = await service.post(session, org, posting, ACTOR)
+                assert await session.scalar(text("SELECT count(*) FROM accounting.production_output_transfer_receipt WHERE entry_id=:entry"), {"entry": native_entry.id}) == 0
+                values = {"org": org, "source": source, "entry": native_entry.id,
+                          "target_org": org + 999999 if case == "matching_wrong_org" else org}
+                update = text("UPDATE accounting.source_control SET entry_id=:entry,organization_id=:target_org WHERE organization_id=:org AND source=:source")
+                if case == "matching_source":
+                    await session.execute(update, values)
+                    await session.execute(text("SET CONSTRAINTS accounting.complete_output_receipt_sources IMMEDIATE"))
+                    assert await session.scalar(text("SELECT entry_id FROM accounting.source_control WHERE organization_id=:org AND source=:source"), values) == native_entry.id
+                    nested = await session.begin_nested()
+                    try:
+                        try:
+                            await session.execute(update, values)
+                        except DBAPIError as error:
+                            assert error.orig.sqlstate == "P0001"
+                            rejected.append("matching_resolved_rewrite")
+                        else:
+                            raise AssertionError("Resolved matching-source control was rewritten")
+                    finally:
+                        await nested.rollback()
+                else:
+                    try:
+                        await session.execute(update, values)
+                    except DBAPIError as error:
+                        assert error.orig.sqlstate == "P0001", (case, str(error)[:500])
+                        rejected.append(case)
+                    else:
+                        raise AssertionError(f"Matching-source guard accepted {case}")
+            finally:
+                await transaction.rollback()
+            assert (await session.execute(readback, {"org": org})).all() == before
+        transaction = await session.begin_nested()
+        try:
+            await session.execute(text("UPDATE accounting.source_control SET entry_id=:entry WHERE organization_id=:org AND source=:source"),
+                                  {"org": org, "source": source, "entry": entry_id})
+            try:
+                await session.execute(text("SET CONSTRAINTS accounting.complete_output_receipt_sources IMMEDIATE"))
+            except DBAPIError as error:
+                assert error.orig.sqlstate == "P0001"
+                assert error.orig.diag.message_primary == "Output source completion must resolve the entire receipt document set"
+                rejected.append("partial_receipt_completion")
+            else:
+                raise AssertionError("Partial two-document completion was accepted")
+        finally:
+            await transaction.rollback()
+        assert (await session.execute(readback, {"org": org})).all() == before
+        period = await service.period_for(session, org, MONTH)
+        try:
+            await service.close_period(session, org, MONTH, CloseInput(expected_generation=period.generation,
+                evidence={step: "Synthetic reviewed pending-control refusal" for step in service.CLOSE_STEPS}), ACTOR)
+        except service.AccountingError as error:
+            assert str(error) == "Unposted primary documents prevent closing"
+            rejected.append("pending_controls_prevent_close")
+        else:
+            raise AssertionError("Pending physical controls allowed closing")
+        await session.rollback()
+        assert (await session.execute(readback, {"org": org})).all() == before
+        return rejected
+
+
+async def sql_completion_guards(factory, org, output_id, entry_id):
+    """Exercise the receipt-bound native alternative without changing history."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    async with factory() as session:
+        readback = text("""SELECT 'control',c.id,row_to_json(c)::text FROM accounting.source_control c
+            WHERE c.organization_id=:org
+            UNION ALL SELECT 'entry',e.id,row_to_json(e)::text FROM accounting.entry e WHERE e.organization_id=:org
+            UNION ALL SELECT 'line',l.id,row_to_json(l)::text FROM accounting.line l JOIN accounting.entry e
+              ON e.id=l.entry_id WHERE e.organization_id=:org
+            UNION ALL SELECT 'receipt',r.entry_id,row_to_json(r)::text
+              FROM accounting.production_output_transfer_receipt r WHERE r.organization_id=:org ORDER BY 1,2""")
+        before = (await session.execute(readback, {"org": org})).all()
+        query = text("SELECT accounting.validate_output_source_completion(:org,:source,:version,:month,:entry)")
+        params = {"org": org, "source": f"production:output:{output_id}", "version": 1,
+                  "month": MONTH, "entry": entry_id}
+        await session.execute(query, params)
+        rejected = []
+        cases = {"completion_wrong_org": {"org": org + 999999},
+                 "completion_wrong_version": {"version": 2},
+                 "completion_cross_month": {"month": "2026-10"},
+                 "completion_outside_receipt": {"source": f"production:output:{output_id + 999999}"},
+                 "completion_unreceipted_entry": {"entry": entry_id + 999999}}
+        for label, changes in cases.items():
+            transaction = await session.begin_nested()
+            try:
+                try:
+                    await session.execute(query, {**params, **changes})
+                except DBAPIError as error:
+                    assert error.orig.sqlstate == "P0001", (label, str(error)[:500])
+                    rejected.append(label)
+                else:
+                    raise AssertionError(f"Completion SQL accepted {label}")
+            finally:
+                await transaction.rollback()
+        for label in ("completion_resolved_rewrite", "completion_nonproduction_source"):
+            transaction = await session.begin_nested()
+            try:
+                if label == "completion_nonproduction_source":
+                    await session.execute(text("""INSERT INTO accounting.source_control
+                        (organization_id,source,version,month,entry_id)
+                        VALUES (:org,'g13:synthetic-nonproduction',1,:month,NULL)"""), params)
+                source = params["source"] if label == "completion_resolved_rewrite" else "g13:synthetic-nonproduction"
+                try:
+                    await session.execute(text("UPDATE accounting.source_control SET entry_id=:entry WHERE organization_id=:org AND source=:source"),
+                                          {**params, "source": source})
+                except DBAPIError as error:
+                    assert error.orig.sqlstate == "P0001", (label, str(error)[:500])
+                    if label == "completion_nonproduction_source":
+                        assert error.orig.diag.message_primary == "Source completeness requires its matching posted entry"
+                    rejected.append(label)
+                else:
+                    raise AssertionError(f"Completion SQL accepted {label}")
+            finally:
+                await transaction.rollback()
+        assert (await session.execute(readback, {"org": org})).all() == before
+        await session.rollback()
+        return rejected
 
 
 async def sql_output_guards(factory, org, policy_id, entry_id):
@@ -364,31 +544,37 @@ async def scenario(url, purpose, *, legacy=False):
                 assert await session.scalar(select(func.count()).select_from(StockMovement)) == 0
 
             production_path = f"/production/organizations/{org_id}"
-            output_command = {"request_id": str(uuid4()), "order_id": order_id,
-                "expected_order_digest": digest, "operation_date": DAY, "sku_code": sku.code,
-                "quantity": "10.00", "warehouse": "W", "location_id": place_id,
-                "lot": "G04-LOT", "evidence": "Synthetic G04 physical output"}
-            document = await checked(api, "POST", production_path + "/output-documents", output_command)
-            assert await checked(api, "POST", production_path + "/output-documents", output_command) == document
-            output_path = production_path + "/output-documents/" + output_command["request_id"]
-            confirmation = {"expected_digest": document["digest"]}
-            await checked(api, "POST", output_path + "/confirm", confirmation)
-            await checked(api, "POST", output_path + "/confirm", confirmation)
             bus, services = app.state.core.event_bus, app.state.core.services
-            assert await bus.relay_pending(factory, services, event_types=("production.output.confirmed",)) == 1
+            for quantity in ("4.00", "6.00"):
+                output_command = {"request_id": str(uuid4()), "order_id": order_id,
+                    "expected_order_digest": digest, "operation_date": DAY, "sku_code": sku.code,
+                    "quantity": quantity, "warehouse": "W", "location_id": place_id,
+                    "lot": "G04-LOT", "evidence": "Synthetic G13 partial physical output"}
+                document = await checked(api, "POST", production_path + "/output-documents", output_command)
+                assert await checked(api, "POST", production_path + "/output-documents", output_command) == document
+                output_path = production_path + "/output-documents/" + output_command["request_id"]
+                confirmation = {"expected_digest": document["digest"]}
+                await checked(api, "POST", output_path + "/confirm", confirmation)
+                await checked(api, "POST", output_path + "/confirm", confirmation)
+            assert await bus.relay_pending(factory, services, event_types=("production.output.confirmed",)) == 2
             assert await bus.relay_pending(factory, services, event_types=("production.output.confirmed",)) == 0
             async with factory() as session:
-                receipt = await session.scalar(select(Receipt))
-                line = await session.scalar(select(ReceiptLine))
-                assert line.expected_qty == Decimal("10") and receipt.organization_id == org_id
-                receipt_id, line_id = receipt.id, line.id
-                output_id = await session.scalar(select(OutputDocument.id))
+                receipts = (await session.scalars(select(Receipt).order_by(Receipt.id))).all()
+                lines = (await session.scalars(select(ReceiptLine).order_by(ReceiptLine.id))).all()
+                assert len(receipts) == len(lines) == 2
+                assert sorted(line.expected_qty for line in lines) == [Decimal("4"), Decimal("6")]
+                assert all(receipt.organization_id == org_id for receipt in receipts)
+                receipt_facts = [(receipt.id, [(line.id, str(line.expected_qty)) for line in lines if line.receipt_id == receipt.id]) for receipt in receipts]
+                output_ids = (await session.scalars(select(OutputDocument.id).order_by(OutputDocument.id))).all()
+                assert len(output_ids) == 2
+                output_id = output_ids[0]
                 assert await session.scalar(select(func.count()).select_from(StockMovement)) == 0
-            receipt_path = f"/wms/receipts/{receipt_id}"
-            detail = await checked(api, "GET", receipt_path)
-            await checked(api, "POST", receipt_path + "/qc", {"expected_revision": detail["qc_revision"],
-                "decisions": [{"line_id": line_id, "accepted_qty": "10.00", "rejected_qty": "0.00", "reject_reason": ""}]})
-            await checked(api, "POST", receipt_path + "/accept")
+            for receipt_id, receipt_lines in receipt_facts:
+                receipt_path = f"/wms/receipts/{receipt_id}"
+                detail = await checked(api, "GET", receipt_path)
+                await checked(api, "POST", receipt_path + "/qc", {"expected_revision": detail["qc_revision"],
+                    "decisions": [{"line_id": line_id, "accepted_qty": quantity, "rejected_qty": "0.00", "reject_reason": ""} for line_id, quantity in receipt_lines]})
+                await checked(api, "POST", receipt_path + "/accept")
 
             completion_path = production_path + f"/orders/{order_id}/completion"
             completion_preview = await checked(api, "GET", completion_path + "-preview")
@@ -401,7 +587,7 @@ async def scenario(url, purpose, *, legacy=False):
                 assert completed_order.stage == "done"
                 assert completed_order.made_qty == 10 and completed_order.progress == 100
                 assert await session.scalar(text("SELECT count(*) FROM production.order_completion")) == 1
-                assert await session.scalar(select(func.count()).select_from(StockMovement)) == 1
+                assert await session.scalar(select(func.count()).select_from(StockMovement)) == 2
 
             async with factory() as session:
                 wip = PostingInput(source="g04:synthetic-reviewed-wip", source_version=1, operation="manual",
@@ -414,14 +600,35 @@ async def scenario(url, purpose, *, legacy=False):
                 await session.commit()
             transfer_path = f"/accounting/organizations/{org_id}/periods/{MONTH}/production-output-transfer"
             transfer = {"policy_id": policy_id, "order_id": order_id, "analytical_order": "G04-ORDER",
-                        "department": "SHOP", "warehouse": "W", "posting_date": DAY, "output_document_ids": [output_id]}
+                        "department": "SHOP", "warehouse": "W", "posting_date": DAY, "output_document_ids": output_ids}
             preview = await checked(api, "POST", transfer_path + "-preview", transfer)
             assert preview["candidate_transfer_byn"] == "177.00" and preview["final_cost_certified"] is False
             transfer_command = {**transfer, "basis_digest": preview["basis_digest"], "digest": preview["digest"]}
-            posted = await checked(api, "POST", transfer_path + "-confirm", transfer_command, status=201)
-            replayed = await checked(api, "POST", transfer_path + "-confirm", transfer_command, status=201)
-            assert replayed["entry_id"] == posted["entry_id"]
-            sql_rejections = [] if legacy else await sql_output_guards(factory, org_id, policy_id, posted["entry_id"])
+            original_guard_repro = None
+            # Authentic service posting + reviewed immutable receipt, deliberately
+            # pending so native atomic completion can be proved before API replay.
+            from modules.accounting.models import ProductionOutputTransferReceipt
+            async with factory() as session:
+                historical_posting = PostingInput.model_validate(preview["posting_document"])
+                historical_entry = await service.post(session, org_id, historical_posting, ACTOR,
+                                                       production_output_transfer=True)
+                session.add(ProductionOutputTransferReceipt(entry_id=historical_entry.id, organization_id=org_id,
+                    order_id=order_id, month=MONTH, command=transfer_command, basis=preview,
+                    posting=historical_posting.model_dump(mode="json"), basis_digest=preview["basis_digest"],
+                    digest=preview["digest"], actor=ACTOR))
+                await session.commit()
+                posted = {"entry_id": historical_entry.id}
+            sql_rejections = []
+            if legacy:
+                original_guard_repro = await original_output_completion_repro(factory, org_id, output_id, posted["entry_id"])
+            else:
+                sql_rejections += await sql_pending_completion_proof(factory, org_id, policy_id, output_ids, posted["entry_id"])
+                confirmed = await checked(api, "POST", transfer_path + "-confirm", transfer_command, status=201)
+                assert confirmed["entry_id"] == posted["entry_id"]
+                replayed = await checked(api, "POST", transfer_path + "-confirm", transfer_command, status=201)
+                assert replayed["entry_id"] == posted["entry_id"]
+                sql_rejections += await sql_output_guards(factory, org_id, policy_id, posted["entry_id"])
+                sql_rejections += await sql_completion_guards(factory, org_id, output_id, posted["entry_id"])
 
             # Reuse the exact issuance/buyer binding contract of test_invoice_issuance.seed,
             # with stock supplied by the actual production receipt rather than a fake movement.
@@ -485,22 +692,41 @@ async def scenario(url, purpose, *, legacy=False):
                 async with factory() as session:
                     before_legacy = (await session.execute(text("SELECT row_to_json(r)::text FROM accounting.shipment_accounting_receipt r"))).scalars().all()
                 await asyncio.to_thread(upgrade, url, HEAD)
+                sql_rejections += await sql_pending_completion_proof(factory, org_id, policy_id, output_ids, posted["entry_id"])
+                completion = await checked(api, "POST", transfer_path + "-confirm", transfer_command, status=201)
+                assert completion["entry_id"] == posted["entry_id"]
+                assert (await checked(api, "POST", transfer_path + "-confirm", transfer_command, status=201))["entry_id"] == posted["entry_id"]
+                sql_rejections += await sql_completion_guards(factory, org_id, output_id, posted["entry_id"])
             repeated = await checked(api, "POST", accounting_path + "/confirm", shipment_command, status=201)
             assert repeated == saved
             if legacy:
                 async with factory() as session:
                     assert (await session.execute(text("SELECT row_to_json(r)::text FROM accounting.shipment_accounting_receipt r"))).scalars().all() == before_legacy
-            # Production output still has its own unresolved primary control;
-            # the output-transfer source does not resolve that different source.
-            # Observe refusal honestly; this proves neither close nor closed replay.
+            # Existing authenticated VAT review APIs supply the synthetic tax
+            # prerequisite without monetary posting or fabricated SQL markers.
+            async with factory() as session:
+                vat_line = (await session.execute(text("""SELECT e.id entry_id,e.digest,l.id line_id
+                    FROM accounting.entry e JOIN accounting.line l ON l.entry_id=e.id
+                    WHERE e.organization_id=:org AND l.account_code='90.2' AND l.side='debit'"""), {"org": org_id})).mappings().one()
+            vat_base = {"request_key": str(uuid4()), "entry_id": vat_line["entry_id"], "line_id": vat_line["line_id"],
+                "expected_entry_digest": vat_line["digest"], "tax_period": MONTH,
+                "invoice_reference": f"Synthetic issued invoice {invoice_id}", "tax_treatment": "standard",
+                "eschf_identifier": "SYNTHETIC-G13-ESCHF", "eschf_status": "provided",
+                "treatment_basis": "Disposable fixture: synthetic standard VAT20 for net300",
+                "evidence": "Synthetic reviewed source, not a live tax document"}
+            vat_root = f"/accounting/organizations/{org_id}/output-vat-register"
+            vat_review = await checked(api, "POST", vat_root + "/preview", vat_base)
+            await checked(api, "POST", vat_root + "/confirm", {**vat_base, "digest": vat_review["digest"]}, status=201)
+            closing_review = await checked(api, "GET", f"/accounting/organizations/{org_id}/periods/{MONTH}/closing-controls")
             from modules.accounting.schemas import CloseInput
             async with factory() as session:
                 period = await service.period_for(session, org_id, MONTH)
                 pending = (await session.execute(text("""SELECT source,version,month,entry_id
                     FROM accounting.source_control WHERE organization_id=:org AND month<=:month AND entry_id IS NULL
                     ORDER BY source,version,id"""), {"org": org_id, "month": MONTH})).mappings().all()
-                assert any(dict(row) == {"source": f"production:output:{output_id}", "version": 1,
-                                         "month": MONTH, "entry_id": None} for row in pending)
+                assert not pending
+                completed_controls = (await session.execute(text("SELECT source,version,month,entry_id FROM accounting.source_control WHERE organization_id=:org AND source LIKE 'production:output:%' ORDER BY source"), {"org": org_id})).all()
+                assert sorted(tuple(row) for row in completed_controls) == sorted((f"production:output:{doc}", 1, MONTH, posted["entry_id"]) for doc in output_ids)
                 close_readback = text("""SELECT 'period',p.id,row_to_json(p)::text
                     FROM accounting.period p WHERE p.organization_id=:org
                     UNION ALL SELECT 'control',c.id,row_to_json(c)::text
@@ -516,22 +742,34 @@ async def scenario(url, purpose, *, legacy=False):
                     ORDER BY 1,2""")
                 before_close = (await session.execute(close_readback, {"org": org_id})).all()
                 assert period.closed is False
-                refusal_message = "Unposted primary documents prevent closing"
-                try:
-                    await service.close_period(session, org_id, MONTH, CloseInput(
-                        expected_generation=period.generation,
-                        evidence={step: "Synthetic disposable G12 replay control only" for step in service.CLOSE_STEPS}), ACTOR)
-                except service.AccountingError as error:
-                    assert str(error) == refusal_message, str(error)
-                else:
-                    raise AssertionError("Unresolved production primary control unexpectedly allowed close")
-                finally:
-                    await session.rollback()
-                assert (await session.execute(close_readback, {"org": org_id})).all() == before_close, "Refused close changed period, controls, receipts or ledger"
-                assert await session.scalar(text("SELECT closed FROM accounting.period WHERE organization_id=:org AND month=:month"), {"org": org_id, "month": MONTH}) is False
-                close_refusal = {"status": "refused_without_mutation", "message": refusal_message,
-                                 "pending_controls": [dict(row) for row in pending], "pending_count": len(pending)}
+                await service.close_period(session, org_id, MONTH, CloseInput(
+                    expected_generation=period.generation,
+                    evidence={step: "Synthetic disposable G13 reviewed control only" for step in service.CLOSE_STEPS}), ACTOR)
+                await session.commit()
+                assert await session.scalar(text("SELECT closed FROM accounting.period WHERE organization_id=:org AND month=:month"), {"org": org_id, "month": MONTH}) is True
+                closed_readback = (await session.execute(close_readback, {"org": org_id})).all()
+                assert [row for row in closed_readback if row[0] != "period"] == [row for row in before_close if row[0] != "period"]
             assert await checked(api, "POST", accounting_path + "/confirm", shipment_command, status=201) == saved
+            assert (await checked(api, "POST", transfer_path + "-confirm", transfer_command, status=201))["entry_id"] == posted["entry_id"]
+            async with factory() as session:
+                assert (await session.execute(close_readback, {"org": org_id})).all() == closed_readback
+                from sqlalchemy.exc import DBAPIError
+
+                transaction = await session.begin_nested()
+                try:
+                    try:
+                        await session.execute(text("SELECT accounting.validate_output_source_completion(:org,:source,:version,:month,:entry)"),
+                            {"org": org_id, "source": f"production:output:{output_id}", "version": 1,
+                             "month": MONTH, "entry": posted["entry_id"]})
+                    except DBAPIError as error:
+                        assert error.orig.sqlstate == "P0001"
+                        assert error.orig.diag.message_primary == "Pending output sources cannot be completed in a closed or missing period"
+                        sql_rejections.append("completion_closed_period")
+                    else:
+                        raise AssertionError("Closed period accepted pending-source validator")
+                finally:
+                    await transaction.rollback()
+                assert (await session.execute(close_readback, {"org": org_id})).all() == closed_readback
             report_path = f"/accounting/organizations/{org_id}/reports/shipment-profit?start=2026-09-01&end=2026-09-30"
             report = await checked(api, "GET", report_path)
             assert report["basis"] == "at_posting" and len(report["rows"]) == 1
@@ -543,18 +781,22 @@ async def scenario(url, purpose, *, legacy=False):
             assert (await api.get(report_path.replace(str(org_id) + "/reports", "999999/reports"))).status_code in {403, 404}
             async with factory() as session:
                 assert await session.scalar(text("SELECT sum(CASE WHEN kind='in' THEN qty ELSE -qty END) FROM wms.stock_movement")) == 0
-                assert await session.scalar(select(func.count()).select_from(StockMovement)) == 2
+                assert await session.scalar(select(func.count()).select_from(StockMovement)) == 3
                 assert await session.scalar(text("SELECT sum(CASE WHEN side='debit' THEN amount ELSE -amount END) FROM accounting.line")) == 0
                 assert await session.scalar(text("SELECT sum(CASE WHEN side='debit' THEN quantity ELSE -quantity END) FROM accounting.line WHERE account_code=:account"), {"account": goods_account}) == 0
                 assert await session.scalar(text("SELECT count(*) FROM accounting.shipment_accounting_receipt")) == 1
+                assert await session.scalar(text("SELECT count(*) FROM accounting.production_output_transfer_receipt")) == 1
+                assert await session.scalar(text("SELECT count(*) FROM accounting.entry WHERE operation='production_output_transfer'")) == 1
+                assert (await session.execute(text("SELECT amount,quantity FROM accounting.line WHERE entry_id=:entry AND side='debit'"), {"entry": posted["entry_id"]})).one() == (Decimal("177"), Decimal("10"))
             receipt = {"status": "passed", "purpose": purpose, "head": HEAD, "oracle": expected,
                 "report": report["page_subtotal"], "basis": "at_posting", "stock_remaining": "0", "replay": "passed",
                 "unknown_cost": "passed", "org_scope": "passed", "browser": "pending_primary",
                 "organization_id": org_id, "order_id": order_id, "invoice_id": invoice_id,
                 "goods_account": goods_account, "sql_rejections": sql_rejections, "legacy_upgrade_replay": legacy,
                 "populated_downgrade": downgrade_refusal,
-                "close_refusal": close_refusal, "open_period_replay": "passed",
-                "synthetic_closed_period_replay": "not_proven", "real_period_close": "not_proven"}
+                "original_guard_repro": original_guard_repro, "output_primary_completion": "passed", "output_documents": output_ids, "matching_source_regression": "passed",
+                "closing_review_codes": [item["code"] for item in closing_review["review_items"]],
+                "synthetic_closed_period_replay": "passed", "synthetic_period_close": "passed", "real_period_close": "not_proven"}
             print(json.dumps(receipt), flush=True)
             return app, engine, receipt
     except BaseException:

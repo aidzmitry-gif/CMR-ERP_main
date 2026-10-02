@@ -9,12 +9,20 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import date
+from decimal import Decimal
 
 from pydantic import Field, ValidationError, field_validator
 from sqlalchemy import select
 
 from modules.accounting import service
-from modules.accounting.models import Entry, Line, Policy, ProductionOutputTransferReceipt
+from modules.accounting.models import (
+    Entry,
+    Line,
+    Period,
+    Policy,
+    ProductionOutputTransferReceipt,
+    SourceControl,
+)
 from modules.accounting.production_cost_policy import validate_accounts
 from modules.accounting.production_output_cost import preview_output_cost_basis
 from modules.accounting.schemas import Input, LineInput, PostingInput, ProductionCostPolicyInput
@@ -289,6 +297,80 @@ async def prepare_output_transfer(
     }
 
 
+async def complete_output_sources(session, org_id, month, receipt, entry):
+    """Resolve only this immutable receipt's physical-output controls, without posting."""
+    import hashlib
+    import json
+
+    from modules.accounting.closing_commands import actual_posting
+    from modules.production.output_documents import OutputConfirmation, OutputDocument
+
+    try:
+        command = ProductionOutputTransferConfirmInput.model_validate(receipt.command)
+        expected = PostingInput.model_validate(receipt.posting)
+        documents = receipt.basis["output"]["documents"]
+        ids = command.output_document_ids
+        if (receipt.organization_id != org_id or receipt.entry_id != entry.id
+                or receipt.month != month or entry.organization_id != org_id
+                or entry.posting_date.strftime("%Y-%m") != month
+                or entry.source != _posting_source(org_id, receipt.order_id)
+                or entry.source_version != 1 or entry.operation != "production_output_transfer"
+                or entry.actor != receipt.actor or command.order_id != receipt.order_id
+                or command.basis_digest != receipt.basis_digest or command.digest != receipt.digest
+                or receipt.basis["basis_digest"] != receipt.basis_digest
+                or entry.digest != receipt.digest or service.digest(expected) != receipt.digest
+                or (await actual_posting(session, entry)).model_dump() != expected.model_dump()
+                or sorted(item["document_id"] for item in documents) != sorted(ids)):
+            raise AccountingError("Output source completion requires its exact immutable transfer receipt")
+        rows = (await session.execute(select(OutputDocument, OutputConfirmation).join(
+            OutputConfirmation, OutputConfirmation.document_id == OutputDocument.id).where(
+            OutputDocument.organization_id == org_id, OutputDocument.order_id == receipt.order_id,
+            OutputConfirmation.organization_id == org_id, OutputConfirmation.order_id == receipt.order_id,
+        ).order_by(OutputDocument.id))).all()
+        if sorted(d.id for d, _ in rows) != sorted(ids):
+            raise AccountingError("Output source completion requires all and only confirmed receipt documents")
+        saved = {item["document_id"]: item for item in documents}
+        for document, confirmation in rows:
+            item = saved[document.id]
+            snapshot_digest = hashlib.sha256(json.dumps(document.snapshot, sort_keys=True,
+                ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+            if (document.digest != snapshot_digest or confirmation.digest != document.digest
+                    or confirmation.quantity != Decimal(document.command["quantity"])
+                    or document.command["operation_date"][:7] != month
+                    or document.command["order_id"] != receipt.order_id
+                    or item["request_id"] != document.request_id
+                    or item["operation_date"] != document.command["operation_date"]
+                    or item["sku_code"] != document.command["sku_code"]
+                    or item["lot"] != document.command["lot"] or item["state"] != "accepted"
+                    or Decimal(item["quantity"]) != confirmation.quantity
+                    or Decimal(item["accepted_quantity"]) != confirmation.quantity
+                    or Decimal(item["rejected_quantity"]) != 0):
+                raise AccountingError("Output source completion document identity or month differs")
+        sources = {f"production:output:{document_id}" for document_id in ids}
+        controls = (await session.scalars(select(SourceControl).where(
+            SourceControl.organization_id == org_id, SourceControl.source.in_(sources),
+        ).order_by(SourceControl.source).with_for_update())).all()
+        if {control.source for control in controls} != sources:
+            raise AccountingError("Output source completion is missing its physical controls")
+        for control in controls:
+            if control.version != 1 or control.month != month or control.entry_id not in {None, entry.id}:
+                raise AccountingError("Output source completion conflicts with recorded control identity")
+        pending = [control for control in controls if control.entry_id is None]
+        if pending:
+            period = await session.scalar(select(Period).where(
+                Period.organization_id == org_id, Period.month == month,
+            ).with_for_update())
+            if period is None or period.closed:
+                raise AccountingError("Pending output sources cannot be completed in a closed or missing period")
+            for control in pending:
+                control.entry_id = entry.id
+            await session.flush()
+    except (AttributeError, KeyError, TypeError, ValidationError, ValueError) as exc:
+        if isinstance(exc, AccountingError):
+            raise
+        raise AccountingError("Output source completion package is malformed") from exc
+
+
 async def confirm_output_transfer(
     session,
     org_id: int,
@@ -322,6 +404,7 @@ async def confirm_output_transfer(
             or receipt.command != data.model_dump(mode="json")
         ):
             raise AccountingError("Output transfer already exists with different content")
+        await complete_output_sources(session, org_id, month, receipt, existing)
         return existing
     if production is None or warehouse_gateway is None:
         raise AccountingError("Production and warehouse reconciliation services are unavailable")
@@ -345,9 +428,9 @@ async def confirm_output_transfer(
             or existing_receipt.command != data.model_dump(mode="json")
         ):
             raise AccountingError("Output transfer already exists with different content")
+        await complete_output_sources(session, org_id, month, existing_receipt, entry)
         return entry
-    session.add(
-        ProductionOutputTransferReceipt(
+    receipt = ProductionOutputTransferReceipt(
             entry_id=entry.id,
             organization_id=org_id,
             order_id=data.order_id,
@@ -358,7 +441,8 @@ async def confirm_output_transfer(
             basis_digest=data.basis_digest,
             digest=data.digest,
             actor=actor,
-        )
     )
+    session.add(receipt)
     await session.flush()
+    await complete_output_sources(session, org_id, month, receipt, entry)
     return entry
