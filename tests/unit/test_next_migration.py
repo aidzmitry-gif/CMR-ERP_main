@@ -1,3 +1,5 @@
+import ast
+from collections import Counter
 from io import StringIO
 from pathlib import Path
 
@@ -8,7 +10,6 @@ from alembic.script import ScriptDirectory
 from sqlalchemy.dialects import postgresql
 
 from scripts import coordination_hook, next_migration
-
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -97,11 +98,42 @@ def test_deal_task_source_ref_revision_remains_reversible():
     assert "DROP COLUMN source_ref" in downgrade_sql
 
 
-def test_deal_task_fidelity_revision_is_single_head_and_reversible():
+def test_joint_revision_is_the_only_head_and_merges_exact_frozen_parents():
+    config = Config(str(ROOT / "alembic.ini"))
+    scripts = ScriptDirectory.from_config(config)
+    definitions = []
+    parents = set()
+    for path in (ROOT / "migrations" / "versions").glob("*.py"):
+        values = {}
+        for node in ast.parse(path.read_text(encoding="utf-8-sig")).body:
+            if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
+                if node.targets[0].id in {"revision", "down_revision"}:
+                    values[node.targets[0].id] = ast.literal_eval(node.value)
+        definitions.append(values["revision"])
+        down = values["down_revision"]
+        parents.update(down if isinstance(down, (tuple, list)) else [down] if down else [])
+    duplicates = {revision for revision, count in Counter(definitions).items() if count > 1}
+    assert not duplicates, f"Duplicate migration revisions: {sorted(duplicates)}"
+    assert not parents - set(definitions), f"Missing migration parents: {sorted(parents - set(definitions))}"
+    assert {revision.revision for revision in scripts.walk_revisions()} == set(definitions)
+    assert scripts.get_heads() == ["crm_rel_001_joint_01"]
+    joint = scripts.get_revision("crm_rel_001_joint_01")
+    assert joint.down_revision == ("0192", "crm_live_deal_task_fidelity_01")
+    for operation in (joint.module.upgrade, joint.module.downgrade):
+        output = StringIO()
+        context = MigrationContext.configure(
+            dialect=postgresql.dialect(),
+            opts={"as_sql": True, "output_buffer": output},
+        )
+        with Operations.context(context):
+            operation()
+        assert output.getvalue() == ""
+
+
+def test_deal_task_fidelity_revision_remains_reversible_with_its_data_loss_guard():
     config = Config(str(ROOT / "alembic.ini"))
     scripts = ScriptDirectory.from_config(config)
     revision_id = "crm_live_deal_task_fidelity_01"
-    assert scripts.get_heads() == [revision_id]
     revision = scripts.get_revision(revision_id)
     assert revision is not None
     assert revision.down_revision == "crm_live_deal_task_source_ref_01"
