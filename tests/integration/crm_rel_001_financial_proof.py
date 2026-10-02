@@ -140,6 +140,7 @@ async def sql_pending_completion_proof(factory, org, policy_id, output_ids, entr
     from sqlalchemy.exc import DBAPIError
 
     from modules.accounting import service
+    from modules.accounting.models import Organization
     from modules.accounting.schemas import CloseInput, PostingInput
 
     assert len(output_ids) == 2
@@ -150,6 +151,8 @@ async def sql_pending_completion_proof(factory, org, policy_id, output_ids, entr
             UNION ALL SELECT 'entry',row_to_json(e)::text FROM accounting.entry e WHERE organization_id=:org
             UNION ALL SELECT 'line',row_to_json(l)::text FROM accounting.line l JOIN accounting.entry e ON e.id=l.entry_id WHERE e.organization_id=:org
             UNION ALL SELECT 'receipt',row_to_json(r)::text FROM accounting.production_output_transfer_receipt r WHERE organization_id=:org
+            UNION ALL SELECT 'shipment_receipt',row_to_json(r)::text FROM accounting.shipment_accounting_receipt r WHERE organization_id=:org
+            UNION ALL SELECT 'root_basis',row_to_json(b)::text FROM accounting.period_root_basis b WHERE organization_id=:org
             ORDER BY 1,2""")
         before = (await session.execute(readback, {"org": org})).all()
         pending = (await session.execute(text("SELECT source,version,month,entry_id FROM accounting.source_control WHERE organization_id=:org AND source LIKE 'production:output:%' ORDER BY source"), {"org": org})).all()
@@ -159,6 +162,7 @@ async def sql_pending_completion_proof(factory, org, policy_id, output_ids, entr
         rejected = []
         for case in ("matching_source", "matching_wrong_org", "matching_wrong_version", "matching_wrong_month"):
             transaction = await session.begin_nested()
+            temporary_org = None
             try:
                 posting_day = "2026-10-12" if case == "matching_wrong_month" else DAY
                 posting = PostingInput(source=source, source_version=2 if case == "matching_wrong_version" else 1,
@@ -168,8 +172,13 @@ async def sql_pending_completion_proof(factory, org, policy_id, output_ids, entr
                            {"account": "60", "side": "credit", "amount": "1.00"}])
                 native_entry = await service.post(session, org, posting, ACTOR)
                 assert await session.scalar(text("SELECT count(*) FROM accounting.production_output_transfer_receipt WHERE entry_id=:entry"), {"entry": native_entry.id}) == 0
+                if case == "matching_wrong_org":
+                    other = Organization(name="G13 synthetic foreign control", unp="999000003")
+                    session.add(other)
+                    await session.flush()
+                    temporary_org = other.id
                 values = {"org": org, "source": source, "entry": native_entry.id,
-                          "target_org": org + 999999 if case == "matching_wrong_org" else org}
+                          "target_org": temporary_org if case == "matching_wrong_org" else org}
                 update = text("UPDATE accounting.source_control SET entry_id=:entry,organization_id=:target_org WHERE organization_id=:org AND source=:source")
                 if case == "matching_source":
                     await session.execute(update, values)
@@ -191,11 +200,15 @@ async def sql_pending_completion_proof(factory, org, policy_id, output_ids, entr
                         await session.execute(update, values)
                     except DBAPIError as error:
                         assert error.orig.sqlstate == "P0001", (case, str(error)[:500])
+                        if case == "matching_wrong_org":
+                            assert error.orig.diag.message_primary == "Resolved source completeness is immutable"
                         rejected.append(case)
                     else:
                         raise AssertionError(f"Matching-source guard accepted {case}")
             finally:
                 await transaction.rollback()
+            if temporary_org is not None:
+                assert (await session.execute(readback, {"org": temporary_org})).all() == [], "Foreign control probe left organization, root basis, receipts or ledger"
             assert (await session.execute(readback, {"org": org})).all() == before
         transaction = await session.begin_nested()
         try:
