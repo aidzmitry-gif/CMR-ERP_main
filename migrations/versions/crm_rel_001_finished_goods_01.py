@@ -51,7 +51,7 @@ HELPER = """
 CREATE OR REPLACE FUNCTION accounting.validate_shipment_output_layer(
   org integer, output_id integer, output_line integer, account text, cutoff date, excluded_entry integer
 ) RETURNS void LANGUAGE plpgsql AS $$
-DECLARE receipt accounting.production_output_transfer_receipt; e accounting.entry; origin accounting.line;
+DECLARE receipt accounting.production_output_transfer_receipt; output_entry accounting.entry; origin accounting.line;
         p accounting.policy; basis jsonb; posting jsonb; wip text; order_key text; order_value text;
         required_keys jsonb; source_rows jsonb; source_cost numeric; expected_source jsonb;
         live_trace jsonb; saved_trace jsonb; revision_row accounting.production_output_cost_revision;
@@ -60,20 +60,20 @@ DECLARE receipt accounting.production_output_transfer_receipt; e accounting.entr
 BEGIN
   SELECT * INTO receipt FROM accounting.production_output_transfer_receipt
     WHERE organization_id=org AND entry_id=output_id;
-  SELECT * INTO e FROM accounting.entry WHERE id=output_id;
+  SELECT * INTO output_entry FROM accounting.entry WHERE id=output_id;
   SELECT * INTO origin FROM accounting.line WHERE id=output_line AND entry_id=output_id;
-  IF receipt.entry_id IS NULL OR e.id IS NULL OR origin.id IS NULL THEN
+  IF receipt.entry_id IS NULL OR output_entry.id IS NULL OR origin.id IS NULL THEN
     RAISE EXCEPTION 'Shipment finished goods require an immutable output receipt';
   END IF;
   basis:=receipt.basis::jsonb; posting:=receipt.posting::jsonb;
-  SELECT * INTO p FROM accounting.policy WHERE organization_id=org AND effective_from<=e.posting_date
+  SELECT * INTO p FROM accounting.policy WHERE organization_id=org AND effective_from<=output_entry.posting_date
     ORDER BY effective_from DESC LIMIT 1;
-  IF e.organization_id IS DISTINCT FROM org OR e.posting_date>cutoff OR e.id>=excluded_entry
-     OR e.operation IS DISTINCT FROM 'production_output_transfer' OR e.source_version IS DISTINCT FROM 1
-     OR e.source IS DISTINCT FROM 'production:output-transfer:'||org||':'||receipt.order_id
-     OR e.actor IS DISTINCT FROM receipt.actor OR e.opening OR e.correction_of IS NOT NULL
-     OR e.rule_version IS DISTINCT FROM 'production-output-transfer-v1'
-     OR p.id IS NULL OR p.id IS DISTINCT FROM e.policy_id
+  IF output_entry.organization_id IS DISTINCT FROM org OR output_entry.posting_date>cutoff OR output_entry.id>=excluded_entry
+     OR output_entry.operation IS DISTINCT FROM 'production_output_transfer' OR output_entry.source_version IS DISTINCT FROM 1
+     OR output_entry.source IS DISTINCT FROM 'production:output-transfer:'||org||':'||receipt.order_id
+     OR output_entry.actor IS DISTINCT FROM receipt.actor OR output_entry.opening OR output_entry.correction_of IS NOT NULL
+     OR output_entry.rule_version IS DISTINCT FROM 'production-output-transfer-v1'
+     OR p.id IS NULL OR p.id IS DISTINCT FROM output_entry.policy_id
      OR p.production_costing->>'finished_goods_account' IS DISTINCT FROM account
      OR basis->>'organization_id' IS DISTINCT FROM org::text OR basis->>'policy_id' IS DISTINCT FROM p.id::text
      OR receipt.command->>'policy_id' IS DISTINCT FROM p.id::text
@@ -85,8 +85,8 @@ BEGIN
      OR receipt.command->>'basis_digest' IS DISTINCT FROM receipt.basis_digest
      OR basis->>'basis_digest' IS DISTINCT FROM receipt.basis_digest
      OR receipt.command->>'digest' IS DISTINCT FROM receipt.digest
-     OR e.digest IS DISTINCT FROM receipt.digest OR accounting.financial_sha(posting) IS DISTINCT FROM receipt.digest
-     OR accounting.posting_body_projection(accounting.financial_posting_body(e.id),false)
+     OR output_entry.digest IS DISTINCT FROM receipt.digest OR accounting.financial_sha(posting) IS DISTINCT FROM receipt.digest
+     OR accounting.posting_body_projection(accounting.financial_posting_body(output_entry.id),false)
         IS DISTINCT FROM accounting.posting_body_projection(posting,false) THEN
     RAISE EXCEPTION 'Shipment output receipt provenance differs from its complete posting';
   END IF;
