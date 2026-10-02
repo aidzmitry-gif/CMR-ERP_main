@@ -130,6 +130,8 @@ async def sql_output_guards(factory, org, policy_id, entry_id):
                     await session.execute(query, {**params, **values})
                 except DBAPIError as error:
                     assert getattr(error.orig, "sqlstate", None) == "P0001", (label, str(error)[:500])
+                    if label == "stale_wip_source":
+                        assert error.orig.diag.message_primary == "Shipment output WIP source basis is stale", str(error)[:500]
                     rejected.append(label)
                 else:
                     raise AssertionError(f"Direct SQL accepted {label}")
@@ -151,6 +153,16 @@ async def sql_output_guards(factory, org, policy_id, entry_id):
                 FROM accounting.policy WHERE id=:policy"""), {"day": date.fromisoformat(DAY), "policy": policy_id})
         await reject("wrong_effective_output_policy", {}, wrong_policy)
 
+        async def original_state():
+            return {
+                "receipt": (await session.execute(text("SELECT row_to_json(r)::text FROM accounting.production_output_transfer_receipt r WHERE r.organization_id=:org ORDER BY r.entry_id"), {"org": org})).scalars().all(),
+                "entries": (await session.execute(text("SELECT row_to_json(e)::text FROM accounting.entry e WHERE e.organization_id=:org ORDER BY e.id"), {"org": org})).scalars().all(),
+                "lines": (await session.execute(text("SELECT row_to_json(l)::text FROM accounting.line l JOIN accounting.entry e ON e.id=l.entry_id WHERE e.organization_id=:org ORDER BY l.id"), {"org": org})).scalars().all(),
+            }
+
+        before_stale = await original_state()
+        clone_entries = []
+
         async def stale_source():
             wip = await session.scalar(text("SELECT e.id FROM accounting.entry e JOIN accounting.line l ON l.entry_id=e.id WHERE e.organization_id=:org AND l.account_code='20' AND l.side='debit' ORDER BY e.id LIMIT 1"), {"org": org})
             fresh = await session.scalar(text("""INSERT INTO accounting.entry
@@ -159,12 +171,19 @@ async def sql_output_guards(factory, org, policy_id, entry_id):
                 SELECT organization_id,'g12:synthetic-stale-wip',1,'manual',document_date,operation_date,posting_date,
                  policy_id,rule_version,'Synthetic direct SQL stale source',opening,actor,digest
                 FROM accounting.entry WHERE id=:wip RETURNING id"""), {"wip": wip})
+            clone_entries.append(fresh)
             await session.execute(text("""INSERT INTO accounting.line
-                (entry_id,account_id,account_code,side,amount,currency,dimensions,quantity,category,cash)
-                SELECT :fresh,account_id,account_code,side,amount,currency,dimensions,quantity,category,cash
+                (entry_id,account_id,account_code,account_title,side,amount,currency,dimensions,quantity,category,cash,
+                 original_amount,rate,rate_scale,rate_date,rate_source,cash_activity)
+                SELECT :fresh,account_id,account_code,account_title,side,amount,currency,dimensions,quantity,category,cash,
+                 original_amount,rate,rate_scale,rate_date,rate_source,cash_activity
                 FROM accounting.line WHERE entry_id=:wip"""), {"fresh": fresh, "wip": wip})
             params["boundary"] = await session.scalar(text("SELECT nextval(pg_get_serial_sequence('accounting.entry','id'))"))
         await reject("stale_wip_source", {}, stale_source)
+        assert len(clone_entries) == 1
+        assert await session.scalar(text("SELECT count(*) FROM accounting.entry WHERE id=:clone"), {"clone": clone_entries[0]}) == 0
+        assert await session.scalar(text("SELECT count(*) FROM accounting.line WHERE entry_id=:clone"), {"clone": clone_entries[0]}) == 0
+        assert await original_state() == before_stale, "Stale-source rollback changed original receipt or ledger"
         await session.rollback()
         return rejected
 
