@@ -11,7 +11,7 @@ from pydantic import Field
 from sqlalchemy import select
 
 from modules.accounting import inventory_cost, sales, service
-from modules.accounting.models import Entry, Line, SourceControl
+from modules.accounting.models import Entry, Line, Policy, SourceControl
 from modules.accounting.schemas import (
     Code,
     Input,
@@ -137,10 +137,19 @@ async def prepare(session, org_id, receipt, data: ShipmentPlanInput, *, procurem
             row = physical.get(allocation.line_source)
             if row is None:
                 raise service.AccountingError("Allocation references a foreign physical line")
-            if not sales.belongs(allocation.account, "41") or not sales.belongs(
+            owned_goods = sales.belongs(allocation.account, "41")
+            if not owned_goods and sales.belongs(allocation.account, "43"):
+                from modules.accounting.production_output_inventory import is_finished_goods_account
+
+                policy = await session.scalar(select(Policy).where(
+                    Policy.organization_id == org_id, Policy.effective_from <= data.posting_date,
+                ).order_by(Policy.effective_from.desc()).limit(1))
+                owned_goods = (policy is not None and policy.id == data.policy_id
+                               and is_finished_goods_account(policy, allocation.account))
+            if not owned_goods or not sales.belongs(
                 allocation.expense_account, "90.4"
             ):
-                raise service.AccountingError("Shipment sale requires owned goods 41 and cost 90.4")
+                raise service.AccountingError("Shipment sale requires goods 41 or exact policy finished goods 43 and cost 90.4")
             by_source[allocation.line_source] += allocation.quantity
             buckets[(allocation.account, row["warehouse"], row["sku_code"], allocation.lot)].append(
                 allocation

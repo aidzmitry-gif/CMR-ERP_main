@@ -23,7 +23,7 @@ from psycopg import sql
 from sqlalchemy.engine import make_url
 
 ROOT = Path(__file__).resolve().parents[2]
-HEAD = "crm_rel_001_joint_01"
+HEAD = "crm_rel_001_finished_goods_01"
 PARENTS = ("0192", "crm_live_deal_task_fidelity_01")
 ROLE = "crm_rel_001_g03"
 ADMIN_DATABASE = "crm_rel_001_g03_admin"

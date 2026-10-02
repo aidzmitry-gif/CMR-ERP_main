@@ -116,7 +116,8 @@ def test_joint_revision_is_the_only_head_and_merges_exact_frozen_parents():
     assert not duplicates, f"Duplicate migration revisions: {sorted(duplicates)}"
     assert not parents - set(definitions), f"Missing migration parents: {sorted(parents - set(definitions))}"
     assert {revision.revision for revision in scripts.walk_revisions()} == set(definitions)
-    assert scripts.get_heads() == ["crm_rel_001_joint_01"]
+    assert scripts.get_heads() == ["crm_rel_001_finished_goods_01"]
+    assert scripts.get_revision("crm_rel_001_finished_goods_01").down_revision == "crm_rel_001_joint_01"
     joint = scripts.get_revision("crm_rel_001_joint_01")
     assert joint.down_revision == ("0192", "crm_live_deal_task_fidelity_01")
     for operation in (joint.module.upgrade, joint.module.downgrade):
@@ -178,3 +179,28 @@ def test_deal_task_fidelity_revision_remains_reversible_with_its_data_loss_guard
     )
     assert "DROP COLUMN description" in downgrade_sql
     assert "ALTER TABLE sales.deal_task ALTER COLUMN deal_id SET NOT NULL" in downgrade_sql
+
+
+def test_finished_goods_migration_preserves_frozen_contract_and_blocks_lossy_downgrade():
+    scripts = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
+    module = scripts.get_revision("crm_rel_001_finished_goods_01").module
+    sql = module.definitions()
+    frozen = module.frozen("0130_accounting_ledger.py")
+    assert "validate_shipment_output_layer" not in frozen
+    assert "accounting.financial_sha(posting) IS DISTINCT FROM receipt.digest" in sql
+    assert "basis->>'basis_digest' IS DISTINCT FROM receipt.basis_digest" in sql
+    assert "financial_sha(basis)" not in module.HELPER
+    assert "r.registration_token<excluded_entry" in sql
+    assert "Shipment output WIP source basis is stale" in sql
+    assert "bucket.account ~ '^41([.]|$)' OR e.id<r.anchor_entry_id" in sql
+    assert "Unverified output layer movement" not in sql
+    assert "Shipment inventory and expense ledger coverage differs" in sql
+    assert "Shipment revenue and VAT ledger coverage differs" in sql
+    assert "output_cost_revision_evidence(" not in sql
+    output = StringIO()
+    context = MigrationContext.configure(dialect=postgresql.dialect(),
+                                         opts={"as_sql": True, "output_buffer": output})
+    with Operations.context(context):
+        module.downgrade()
+    assert "Cannot downgrade finished-goods shipment history" in output.getvalue()
+    assert "DELETE" not in output.getvalue()

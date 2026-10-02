@@ -265,3 +265,36 @@ async def test_large_act_preserves_all_balanced_pages(db, book, posting):
             sum(Decimal(row["amount"]) * (1 if row["side"] == "debit" else -1) for row in lines)
             == 0
         )
+
+
+@pytest.mark.parametrize("account", ["43", "43.1", "10", "44"])
+async def test_non41_shipment_requires_exact_policy_and_authenticated_output(db, book, posting, account):
+    receipt, data = await fixture(db, book, posting)
+    original_policy = await db.get(models.Policy, book[1])
+    policy = models.Policy(**{
+        field: getattr(original_policy, field)
+        for field in models.Policy.__table__.columns.keys()
+        if field not in {"id", "effective_from", "production_costing"}
+    }, effective_from=date(2026, 9, 1), production_costing={
+        "overhead_accounts": ["25"], "wip_account": "20", "finished_goods_account": "43",
+        "pool_dimensions": ["department"], "order_dimension": "order",
+        "rounding": "largest_remainder_cent", "reference": "Synthetic explicit finished goods",
+    })
+    db.add(policy)
+    db.add(models.Account(organization_id=book[0], code=account, title="Synthetic unverified goods",
+        category="asset", valid_from=date(2026, 1, 1), required_dimensions=["warehouse", "sku", "lot"],
+        currency_tracking=False, quantity_tracking=True, cash=False, normative_ref="Synthetic"))
+    await db.commit()
+    data["policy_id"] = policy.id
+    # A balanced manual debit with valid dimensions is still not a production receipt.
+    raw = posting("unreceipted-finished-goods", account, "60", policy_id=policy.id, lines=[
+        {"account": account, "side": "debit", "amount": "10", "quantity": "3",
+         "dimensions": {"warehouse": "W", "sku": "SKU", "lot": "lot1"}},
+        {"account": "60", "side": "credit", "amount": "10"},
+    ])
+    await service.post(db, book[0], raw, "tester")
+    await db.commit()
+    for allocation in data["allocations"]:
+        allocation["account"] = account
+    with pytest.raises(service.AccountingError, match="policy finished goods|no verified production output receipt"):
+        await shipment_preview.prepare(db, book[0], receipt, shipment_preview.ShipmentPlanInput(**data))
