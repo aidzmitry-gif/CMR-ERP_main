@@ -11,6 +11,7 @@ import { frontendAuthMode, keycloakPublicConfig } from "@/lib/auth-mode";
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
+  const errorParam = params.get("error");
   const mode = frontendAuthMode();
   const kc = keycloakPublicConfig();
   const ssoAvailable = Boolean(kc?.issuer && kc.clientId);
@@ -19,11 +20,11 @@ function LoginForm() {
   const [username, setUsername] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(
-    params.get("error") === "session_expired" ? "Сессия завершилась. Войдите снова." : params.get("error"),
+    errorParam === "session_expired" ? "Сессия завершилась. Войдите снова." : errorParam,
   );
 
   useEffect(() => {
-    if (mode === "oidc" && ssoAvailable) {
+    if (mode === "oidc" && ssoAvailable && !errorParam) {
       window.location.href = "/api/auth/oidc/start";
       return;
     }
@@ -35,7 +36,7 @@ function LoginForm() {
         if (d.users[0]) setUsername(d.users[0].username);
       })
       .catch(() => setError("Не удалось загрузить список сотрудников (backend недоступен)."));
-  }, [mode, ssoAvailable]);
+  }, [errorParam, mode, ssoAvailable]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
