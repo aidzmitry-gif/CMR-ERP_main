@@ -1,6 +1,6 @@
 # CRM-REL-001 mixed release preparation
 
-Status: **PREPARATION ONLY**, `release_ready=false`. This route exports committed
+Status: **ISOLATED REHEARSAL VERIFIED**, `release_ready=false`. This route exports committed
 backend sources and proves an isolated migration/restore. It has no production
 apply command and does not modify or bootstrap `/opt/belakb-deploy-v1`.
 
@@ -109,3 +109,51 @@ BUILD_ID `F_-CH9cdxitoaicSnuYyR`, until separately authorized switching.
 G08 still owns production writer freeze/rollback backup/switch/user OIDC scenario.
 This card cannot become RELEASE_READY without actual backend/copy/restore/frontend
 proofs and a reviewed recovery route.
+
+## Verified isolated results — 2026-10-03
+
+Application checkpoint remains `a2e9f615237d3af33e7f4292f36ed529f6164b70`.
+The built source/tools package is checkpoint
+`d9b405b32d33c6e2e8cd78aa6de62ec38a8cb816`; later evidence-card edits do not
+change that package identity or the application Git objects.
+
+- Backend image: `sha256:055b3c085487b50eb09a2d0158b02ce7d76bde3db3c4bf88868487f87c106ce8`.
+  Source manifest: `640fbe198c0ba88791f810d3fee67fe6a9e57e60aa0791f9699788b2443ade46`.
+  Exact image source, installed requirements, pip check and native Cyrillic PDF
+  passed. Its actual Docker entrypoint/PID1/health200 passed against an owned
+  empty PostgreSQL with writers/automigrate disabled; no source bind or egress.
+  That empty fixture is not a backup or a production/OIDC startup acceptance.
+- Frontend: source checkpoint above, BUILD_ID `nmkv-Zps_gDgnIgq5V-R3`, archive
+  `cfc70256b8f1423cb5203f1b1f58f5ca579f2274c4d98388e7ec030a919af1e5`.
+  On Linux, isolated startup, login200, OIDC-start307/PKCE and locked Linux Sharp
+  PNG passed. Actual OIDC login and client hydration remain unproved.
+- Fresh copy: `/opt/cmr-erp-rehearsals/CRM-REL-001/G06-fresh-copy-d9b4-01`.
+  Backup `database.dump`: 2,294,689 bytes,
+  SHA256 `af335aa9b4794132e9ab4b488bfd827294844a8435182f8e70829ed78ce0abb1`.
+  It is a consistent read-only live snapshot, not the final write-frozen rollback
+  backup for a production switch. All backup and business rows remain on server.
+- Upgrade from measured `0116` to `crm_rel_001_output_source_01`, repeated upgrade,
+  and a second independent restore of the original backup after upgrade passed.
+  All original columns/row multiplicities/exact numeric sums for 113 tables and
+  60,334 rows survived; 28 explicit relationship checks matched. No transformations.
+  Protected fingerprint artifact SHA256:
+  `f2694d97f0d3d7142442be3ec049cc1a4c9d1ab0910d795145485688d4885ec1`.
+- Guarded removal of owned containers/anonymous PG volumes completed. Exact
+  container absence and unchanged live image/IDs/config were audited afterwards.
+  Live schema remains `0116`; production changes are zero.
+
+The canonical evidence is under `.harness/work/CRM-REL-001-evidence` in the project
+workspace: `G06-backend-pg-startup-result.json`, `G06-backend-r2-copy-result.json`,
+`G06-post-copy-audit.json`, `G06-frontend-linux-r2-result.json` and
+`G06-source-reuse-boundary.json`. G04/G13 synthetic financial/UI scenarios remain
+applicable: only these ops files changed after their accepted application commit;
+the 747 common exported files match after LF/CRLF normalization. Test-only files
+and private module documentation are deliberately absent from the runtime image.
+
+Historical July/August close is blocked by missing confirmed analytical opening
+balances, source/OSV snapshot identity and unexplained turnover differences
+58.91 BYN (July) / 1,521.86 BYN (August), plus accountant allocation/payroll rules.
+No balancing entries, live period close or forced migration were performed.
+G10/G11 must resolve these prerequisites before G07 RELEASE_READY; production
+freeze/final backup/OIDC browser acceptance/switch/final receipt belong to the
+existing release coordinator. The v1 mixed-release refusal remains unchanged.
