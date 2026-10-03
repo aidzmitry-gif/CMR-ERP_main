@@ -14,6 +14,7 @@ CHAIN = 'CRM-REL-001'
 OPT_IN = CHAIN + '-isolated-only'
 APPLICATION_CHECKPOINT = 'a2e9f615237d3af33e7f4292f36ed529f6164b70'
 RUNTIME = 'sha256:469fbba3826e14647fb9b03280843ff591fc6f875244bb17e08f51043ef21319'
+RUNTIME_ALIAS = 'crm-rel-001-g06-runtime:469fbba3826e'
 HEAD = 'crm_rel_001_output_source_01'
 PINS = {
     'finance': '59832b2f14a2ee02d8db266a67f8206616bdcd94',
@@ -182,7 +183,7 @@ def prepare(repo, package_checkpoint, output):
     labels = (f'LABEL crm-rel-001-source={digest(files)} '
               f'crm-rel-001-package={package_checkpoint}\n')
     (context / 'Dockerfile').write_text(
-        f'FROM {RUNTIME}\nWORKDIR /app\nRUN rm -rf /app && mkdir /app\n'
+        f'FROM {RUNTIME_ALIAS}\nWORKDIR /app\nRUN rm -rf /app && mkdir /app\n'
         'COPY source/ /app/\nRUN chmod +x /app/docker/app-entrypoint.sh\n' + labels +
         'EXPOSE 8000\nENTRYPOINT ["docker/app-entrypoint.sh"]\n', encoding='utf8')
     return manifest
