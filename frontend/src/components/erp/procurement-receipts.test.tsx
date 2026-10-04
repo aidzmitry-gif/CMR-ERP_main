@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createHash } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -27,6 +27,11 @@ function explainUnregisteredContract() {
 function emptyContracts(url: string) {
   return { organization_id: 7, supplier_id: 19,
     status: url.includes("status=revoked") ? "revoked" : "active", items: [], truncated: false };
+}
+
+function emptyWarehouses(url: string) {
+  return { organization_id: Number(url.match(/\/organizations\/(\d+)\//)?.[1]),
+    items: [], truncated: false };
 }
 
 function durableReceiptDocument(invoiceReference = "INV-DURABLE") {
@@ -376,7 +381,8 @@ it("fails closed for foreign and malformed readiness responses", async () => {
     ? correctionReadiness(92, {}, { organization_id: 8 }) : url.includes("/93/correction-readiness")
       ? correctionReadiness(93, {}, { blockers: ["__proto__"] }) : url.includes("/94/correction-readiness")
         ? correctionReadiness(94, { no_difference: false }, { blockers: ["posting_workflow_not_approved"] })
-        : url.includes("supplier-contracts") ? emptyContracts(url) : url.includes("purchase-ownership") ? [] : rows }));
+        : url.includes("receipt-warehouse-options") ? emptyWarehouses(url)
+          : url.includes("supplier-contracts") ? emptyContracts(url) : url.includes("purchase-ownership") ? [] : rows }));
   vi.stubGlobal("fetch", fetcher);
   render(<ProcurementReceiptDrafts org="7" />);
   fireEvent.click(await screen.findByRole("button", { name: /CORR-92/ }));
@@ -384,10 +390,12 @@ it("fails closed for foreign and malformed readiness responses", async () => {
     .toHaveTextContent("Проведение и движение WMS остаются недоступны");
   expect(screen.queryByText(/Изменение количества или склада не выявлено/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: /CORR-93/ }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Проведение и движение WMS остаются недоступны");
+  expect(await within(screen.getByRole("region", { name: "Проверка исправления" })).findByRole("alert"))
+    .toHaveTextContent("Проведение и движение WMS остаются недоступны");
   expect(screen.queryByText(/Различий между исходной накладной и исправлением не выявлено/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: /CORR-94/ }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Проведение и движение WMS остаются недоступны");
+  expect(await within(screen.getByRole("region", { name: "Проверка исправления" })).findByRole("alert"))
+    .toHaveTextContent("Проведение и движение WMS остаются недоступны");
   expect(screen.queryByRole("button", { name: /Провести/ })).not.toBeInTheDocument();
 });
 
@@ -396,7 +404,8 @@ it("ignores readiness responses made stale by changing the selected correction o
   const rows = [correctionRow(92), correctionRow(93)];
   const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes("/92/correction-readiness")
     ? oldDocumentResponse.promise : url.includes("/93/correction-readiness") ? oldOrganizationResponse.promise
-      : url.includes("supplier-contracts") ? emptyContracts(url)
+      : url.includes("receipt-warehouse-options") ? emptyWarehouses(url)
+        : url.includes("supplier-contracts") ? emptyContracts(url)
         : url.includes("purchase-ownership") ? [] : url.includes("/organizations/7/") ? rows : [] }));
   vi.stubGlobal("fetch", fetcher);
   const view = render(<ProcurementReceiptDrafts org="7" />);
@@ -410,7 +419,8 @@ it("ignores readiness responses made stale by changing the selected correction o
   });
   expect(screen.getByText("Загрузка проверки для текущей версии исправления…")).toBeInTheDocument();
   view.rerender(<ProcurementReceiptDrafts org="8" />);
-  expect(await screen.findByRole("alert")).toHaveTextContent("Проведение и движение WMS остаются недоступны");
+  expect(await within(screen.getByRole("region", { name: "Проверка исправления" })).findByRole("alert"))
+    .toHaveTextContent("Проведение и движение WMS остаются недоступны");
   await act(async () => {
     oldOrganizationResponse.resolve(correctionReadiness(93, { vat_change: true, no_difference: false }));
     await oldOrganizationResponse.promise;
@@ -982,19 +992,20 @@ it("retries an uncertain receipt edit with the same key and closes only after co
       if (commands.length === 2) return { ok: false, status: 403, json: async () => ({ detail: "Access recheck failed" }) };
       return { ok: true, json: async () => saved };
     }
-    return { ok: true, json: async () => url.includes("purchase-ownership") ? [] : url.includes("supplier-contracts") ? emptyContracts(url) : [row] };
+    return { ok: true, json: async () => url.includes("receipt-warehouse-options") ? emptyWarehouses(url)
+      : url.includes("purchase-ownership") ? [] : url.includes("supplier-contracts") ? emptyContracts(url) : [row] };
   });
   vi.stubGlobal("fetch", fetcher);
   render(<ProcurementReceiptDrafts org="7" />);
   fireEvent.click(await screen.findByRole("button", { name: /INV-OLD/ }));
   fireEvent.change(screen.getByLabelText("Номер первичной накладной"), { target: { value: "INV-EDIT" } });
   fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Результат сохранения неизвестен");
+  expect(await screen.findByText(/Результат сохранения неизвестен/)).toHaveAttribute("role", "alert");
   expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("INV-EDIT");
   expect(screen.getByLabelText("Номер первичной накладной")).toBeDisabled();
   expect(screen.queryByText(/форма закрыта/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Повторить подтверждение той же редакции" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Предыдущий исход остаётся неизвестным");
+  expect(await screen.findByText(/Предыдущий исход остаётся неизвестным/)).toHaveAttribute("role", "alert");
   expect(screen.getByLabelText("Номер первичной накладной")).toBeDisabled();
   expect(sessionStorage.getItem("procurement-receipt-save:v1:7")).toContain("INV-EDIT");
   fireEvent.click(screen.getByRole("button", { name: "Повторить подтверждение той же редакции" }));

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createHash, webcrypto } from "node:crypto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -228,7 +228,16 @@ it.each(['wrong-org','duplicate'])('rejects an unconfirmed %s account response',
  setupClosing(mode==='wrong-org'?closingAccounts(2):[...closingAccounts(),closingAccounts()[0]]);render(<AccountingControls org="1" onChanged={vi.fn()}/>);policyBase();fireEvent.click(toggle());expect(await screen.findByRole('alert')).toHaveTextContent('Ответ не подтверждает');expect(submitPolicy()).toBeDisabled();expect(policyPosts()).toHaveLength(0);
 });
 it('limits monthly selection to 200 distinct accounts',async()=>{
- setupClosing(Array.from({length:201},(_,i)=>({...closingAccounts()[0],code:String(1000+i),title:'Monthly '+i})));render(<AccountingControls org="1" onChanged={vi.fn()}/>);policyBase();fireEvent.click(toggle());await screen.findByRole('checkbox',{name:'1000 · Monthly 0'});const boxes=screen.getAllByRole('checkbox',{name:/^[0-9]+ · Monthly /});act(()=>{for(let i=0;i<200;i++)fireEvent.click(boxes[i]);});expect(screen.getByText('Выбрано: 200 из 200.')).toBeInTheDocument();expect(screen.getByRole('checkbox',{name:'1200 · Monthly 200'})).toBeDisabled();expect(submitPolicy()).toBeDisabled();
+ setupClosing(Array.from({length:201},(_,i)=>({...closingAccounts()[0],code:String(1000+i),title:'Monthly '+i})));render(<AccountingControls org="1" onChanged={vi.fn()}/>);policyBase();fireEvent.click(toggle());
+ const group=await screen.findByRole('group',{name:'Счета месячного переноса'});
+ expect(group).toBeVisible();
+ const boxes=within(group).getAllByLabelText(/^\d+ · Monthly \d+$/,{selector:'input[type="checkbox"]'});
+ expect(boxes).toHaveLength(201);
+ expect(boxes[0]).toHaveAccessibleName('1000 · Monthly 0');
+ expect(boxes[200]).toHaveAccessibleName('1200 · Monthly 200');
+ act(()=>{for(let i=0;i<200;i++)fireEvent.click(boxes[i]);});
+ expect(within(group).getByText('Выбрано: 200 из 200.')).toBeInTheDocument();
+ expect(boxes[200]).toBeDisabled();expect(submitPolicy()).toBeDisabled();expect(policyPosts()).toHaveLength(0);
 });
 it.each(['','x'.repeat(1001)])('requires a bounded explicit closing reference %j',async value=>{
  setupClosing();render(<AccountingControls org="1" onChanged={vi.fn()}/>);policyBase();await filled();fireEvent.change(screen.getByRole('textbox',{name:'Основание настроек переноса',exact:true}),{target:{value}});expect(submitPolicy()).toBeDisabled();expect(policyPosts()).toHaveLength(0);

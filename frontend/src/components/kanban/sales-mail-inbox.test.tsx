@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "@/lib/api";
+import * as crmDirectory from "@/lib/crm-directory";
 import * as salesMail from "@/lib/sales-mail-api";
 import { SalesMailInbox } from "./sales-mail-inbox";
 
@@ -8,7 +9,8 @@ vi.mock("@/lib/sales-mail-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/sales-mail-api")>("@/lib/sales-mail-api");
   return { ...actual, fetchInboxPage: vi.fn(), fetchInboxDetail: vi.fn(), fetchSalesDeals: vi.fn(), assignInboxEmail: vi.fn() };
 });
-vi.mock("@/lib/api", () => ({ createDeal: vi.fn() }));
+vi.mock("@/lib/api", () => ({ createDeal: vi.fn(), linkCrmClientToCounterparty: vi.fn() }));
+vi.mock("@/lib/crm-directory", () => ({ loadDirectory: vi.fn() }));
 
 const item = {
   receipt_id: "receipt-1", direction: "incoming" as const, deal_id: null, owner_id: null, owner: null,
@@ -62,6 +64,12 @@ describe("SalesMailInbox", () => {
 
   it("сохраняет ID новой сделки и повторяет assignment без повторного create", async () => {
     vi.mocked(api.createDeal).mockResolvedValue({ id: "42" } as never);
+    vi.mocked(crmDirectory.loadDirectory).mockResolvedValue({ status: "ok", rows: [
+      { id: 41, name: "ООО Клиент", unp: "123456789", is_active: true, deal_id: null },
+    ], total: 1 });
+    vi.mocked(api.linkCrmClientToCounterparty).mockResolvedValue({
+      id: 72, name: "ООО Клиент", owner_id: 34, counterparty_id: 41,
+    });
     vi.mocked(salesMail.fetchInboxPage).mockResolvedValue({ items: [item, item2], next_offset: null });
     vi.mocked(salesMail.fetchInboxDetail).mockImplementation((receiptId) => Promise.resolve(receiptId === "receipt-2" ? detail2 : detail));
     vi.mocked(salesMail.assignInboxEmail)
@@ -72,7 +80,7 @@ describe("SalesMailInbox", () => {
     expect(await screen.findByText("Нужен счёт и договор")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Создать новую сделку и назначить" }));
     fireEvent.change(screen.getByLabelText("Номер"), { target: { value: "CRM-42" } });
-    fireEvent.change(screen.getByLabelText("Компания"), { target: { value: "ООО Клиент" } });
+    fireEvent.click(await screen.findByRole("button", { name: /ООО Клиент.*ID 41/ }));
     fireEvent.change(screen.getByLabelText("Описание"), { target: { value: "Запрос документов" } });
     fireEvent.click(screen.getByRole("button", { name: "Создать" }));
     expect(await screen.findByText("42")).toBeInTheDocument();
@@ -82,6 +90,8 @@ describe("SalesMailInbox", () => {
     fireEvent.click(screen.getByRole("button", { name: "Создать новую сделку и назначить" }));
     expect(screen.queryByRole("button", { name: "Создать", exact: true })).toBeNull();
     expect(api.createDeal).toHaveBeenCalledTimes(1);
+    expect(api.linkCrmClientToCounterparty).toHaveBeenCalledWith(41, expect.any(String), undefined);
+    expect(api.createDeal).toHaveBeenCalledWith(expect.objectContaining({ crm_client_id: 72, counterparty: "ООО Клиент" }));
     fireEvent.click(screen.getByRole("button", { name: /Вторая заявка/ }));
     await screen.findByText("Вторая заявка");
     fireEvent.click(screen.getByRole("button", { name: /Нужен счёт/ }));

@@ -18,7 +18,9 @@ function api(post: (url: string, body?: string) => unknown) {
   });
 }
 async function open() {
-  render(<AccountingView />); await screen.findByText(/включительно: 0\./); fireEvent.click(screen.getByRole("button", { name: "Открыть: Оплаты и возвраты счетов" }));
+  render(<AccountingView />); await screen.findByText(/включительно: 0\./);
+  fireEvent.click(screen.getByRole("button", { name: "Банк и платежи" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Оплаты счетов" }));
   fireEvent.change(screen.getByLabelText("ID счёта"), { target: { value: "77" } }); fireEvent.click(screen.getByRole("button", { name: "Открыть расчёты счёта" }));
   await screen.findByLabelText("Сумма распределения");
   for (const [label, value] of [["ID банковской проводки", "31"], ["Сумма распределения", "10.00"], ["Ключ распределения", "A1"], ["Первичное основание", "Выписка"]]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
