@@ -4,10 +4,11 @@ Status: **ISOLATED REHEARSAL VERIFIED**, `release_ready=false`. This route expor
 backend sources and proves an isolated migration/restore. It has no production
 apply command and does not modify or bootstrap `/opt/belakb-deploy-v1`.
 
-Application checkpoint: `a2e9f615237d3af33e7f4292f36ed529f6164b70`.
+Backend application checkpoint: `a2e9f615237d3af33e7f4292f36ed529f6164b70`.
+Current frontend application checkpoint: `a6644cc29bae24109daf98ebaed316a1e4b782df`.
 The final package checkpoint must be an exact commit containing these ops files;
-its selected application Git objects and ten module gitlinks must equal that
-accepted checkpoint. Working files and untracked files are never exported.
+its selected backend Git objects and ten module gitlinks must equal the accepted
+backend checkpoint. Working files and untracked files are never exported.
 
 ## Immutable backend source and image
 
@@ -123,7 +124,9 @@ change that package identity or the application Git objects.
   passed. Its actual Docker entrypoint/PID1/health200 passed against an owned
   empty PostgreSQL with writers/automigrate disabled; no source bind or egress.
   That empty fixture is not a backup or a production/OIDC startup acceptance.
-- Frontend: source checkpoint above, BUILD_ID `nmkv-Zps_gDgnIgq5V-R3`, archive
+- Historical frontend, superseded by the renewal below: source checkpoint
+  `a2e9f615237d3af33e7f4292f36ed529f6164b70`,
+  BUILD_ID `nmkv-Zps_gDgnIgq5V-R3`, archive
   `cfc70256b8f1423cb5203f1b1f58f5ca579f2274c4d98388e7ec030a919af1e5`.
   On Linux, isolated startup, login200, OIDC-start307/PKCE and locked Linux Sharp
   PNG passed. Actual OIDC login and client hydration remain unproved.
@@ -157,3 +160,51 @@ No balancing entries, live period close or forced migration were performed.
 G10/G11 must resolve these prerequisites before G07 RELEASE_READY; production
 freeze/final backup/OIDC browser acceptance/switch/final receipt belong to the
 existing release coordinator. The v1 mixed-release refusal remains unchanged.
+
+## Exact frontend renewal and current server baseline — 2026-10-04
+
+G15 checkpoint `a6644cc29bae24109daf98ebaed316a1e4b782df` changes only the
+login error guard and its regression test. An OIDC error now remains readable
+after reload; the explicit retry and normal automatic sign-in still work.
+Focused tests (22), typecheck, lint, production build and actual browser
+error/reload/retry passed. This is not proof of authenticated candidate access.
+
+G16 binds that committed frontend to BUILD_ID `8T71p1XFiqZ472xNljdbL`:
+893 selected source files match the commit after LF/CRLF normalization
+(891 raw-byte matches; two files differ only in line endings), and the locked
+dependency closure is unchanged. Immutable archive:
+32,901,860 bytes, SHA256
+`429f5318795cc20180618057ca81779b5edc0ce5e66f3f9201652e4554d8293b`.
+All 2,671 runtime files match the manifest. Source manifest SHA256:
+`ad5c7849951a69ad20e7b79a4a069e4667dc5fd25590457db7911709e005b885`.
+
+On the measured server, the existing guarded probe ran in a new private network
+namespace with zero egress routes. Linux Sharp PNG, login200, exact login chunk,
+OIDC-start307, S256 and HttpOnly state cookies passed; the redirect was not
+followed. The owned Node process stopped and a separate readback verified its
+absence, private file permissions and every extracted file hash. Durable receipt:
+`/opt/cmr-erp-rehearsals/CRM-REL-001/G16-frontend-a664-01/receipt.json`, SHA256
+`b74f11cc491d293f2c2cb622f701c9f6d6493f32af66bcc645eccf00350c7413`.
+
+The SSH access, expected host/Node and existing tailscaled service were confirmed.
+Before/after observations at 04:01:47 / 04:04:07 UTC agree on production
+container IDs, images, schema `0116`, runtime/environment/Compose hashes and
+installed v1 runner hashes. No production or access configuration changed in
+this run. Current runtime projection SHA256:
+`860a14eb63d10d7ecc57fbfb8a164e2ca3d4af65df6b20e6f24d9c063ee81430`.
+Current baseline evidence: `G16-frontend-renewal/after-baseline.json`; the
+comparison excludes only the observation timestamp.
+
+Measured Git reuse confirms unchanged backend, migrations, ten module gitlinks,
+business pages and auth kernel. The accepted backend image and historical G06
+copy/restore proof above remain applicable within that unchanged source boundary;
+no new database dump or migration run is claimed for October4. The old frontend
+runtime proof is replaced by G16. Evidence under `G16-frontend-renewal` includes
+`linux-result.json`, `server-readback.json`, `baseline-comparison.json` and
+`source-reuse-boundary.json`.
+
+Full isolated OIDC login is still **NOT_PROVEN**: this sealed frontend has a
+production callback; an existing isolated callback/IdP allowlist/backend must be
+proved before attempting authenticated candidate access. G10/G11 discrepancies
+remain deferred by the user. `release_ready=false`; no coordinator handoff,
+production switch, live 1C/ERP close, or push has occurred.
