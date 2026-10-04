@@ -16,6 +16,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     String,
+    Text,
     UniqueConstraint,
     event,
     func,
@@ -278,6 +279,59 @@ class Sku(Base):
     attributes: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
     # происхождение по полям (field-level provenance, M2) — единый слой с Counterparty.
     provenance: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+
+
+class CatalogSourceIdentity(Base):
+    """Scoped incoming identity; held rows deliberately have no native target."""
+
+    __tablename__ = "catalog_source_identity"
+    __table_args__ = (
+        UniqueConstraint("namespace", "entity", "source_guid", name="uq_catalog_source_identity"),
+        CheckConstraint("kind IN ('sku','group','counterparty')", name="ck_catalog_source_kind"),
+        CheckConstraint(
+            "(sku_id IS NULL AND group_id IS NULL AND counterparty_id IS NULL) OR "
+            "(kind='sku' AND sku_id IS NOT NULL AND group_id IS NULL AND counterparty_id IS NULL) OR "
+            "(kind='group' AND group_id IS NOT NULL AND sku_id IS NULL AND counterparty_id IS NULL) OR "
+            "(kind='counterparty' AND counterparty_id IS NOT NULL AND sku_id IS NULL AND group_id IS NULL)",
+            name="ck_catalog_source_target",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    namespace: Mapped[str] = mapped_column(String(64))
+    entity: Mapped[str] = mapped_column(String(128))
+    source_guid: Mapped[str] = mapped_column(String(36))
+    kind: Mapped[str] = mapped_column(String(16))
+    sku_id: Mapped[int | None] = mapped_column(ForeignKey("sku.id", ondelete="RESTRICT"))
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("ref_nomenclature_category.id", ondelete="RESTRICT"))
+    counterparty_id: Mapped[int | None] = mapped_column(ForeignKey("counterparty.id", ondelete="RESTRICT"))
+    source_sha: Mapped[str] = mapped_column(String(64))
+    revision_no: Mapped[int] = mapped_column()
+    target_sha: Mapped[str | None] = mapped_column(String(64))
+    holds: Mapped[list] = mapped_column(JSON)
+
+
+class CatalogSourceRevision(Base):
+    """Exact observed source text, never a reconstructed full source entity."""
+
+    __tablename__ = "catalog_source_revision"
+    __table_args__ = (
+        UniqueConstraint("identity_id", "revision_no", name="uq_catalog_source_revision"),
+        CheckConstraint("revision_no > 0", name="ck_catalog_source_revision_positive"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    identity_id: Mapped[int] = mapped_column(ForeignKey("catalog_source_identity.id", ondelete="RESTRICT"), index=True)
+    revision_no: Mapped[int] = mapped_column()
+    source_sha: Mapped[str] = mapped_column(String(64))
+    data_version: Mapped[str] = mapped_column(String(255))
+    previous_sha: Mapped[str | None] = mapped_column(String(64))
+    # Text preserves original decimal lexemes rather than JSON/float coercion.
+    source_text: Mapped[str] = mapped_column(Text)
+    target_sha: Mapped[str | None] = mapped_column(String(64))
+    holds: Mapped[list] = mapped_column(JSON)
+    actor: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class User(Base):

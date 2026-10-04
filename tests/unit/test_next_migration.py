@@ -116,7 +116,8 @@ def test_joint_revision_is_the_only_head_and_merges_exact_frozen_parents():
     assert not duplicates, f"Duplicate migration revisions: {sorted(duplicates)}"
     assert not parents - set(definitions), f"Missing migration parents: {sorted(parents - set(definitions))}"
     assert {revision.revision for revision in scripts.walk_revisions()} == set(definitions)
-    assert scripts.get_heads() == ["crm_rel_001_output_source_01"]
+    assert scripts.get_heads() == ["crm_rel_001_native_catalog_01"]
+    assert scripts.get_revision("crm_rel_001_native_catalog_01").down_revision == "crm_rel_001_output_source_01"
     assert scripts.get_revision("crm_rel_001_output_source_01").down_revision == "crm_rel_001_finished_goods_01"
     assert scripts.get_revision("crm_rel_001_finished_goods_01").down_revision == "crm_rel_001_joint_01"
     joint = scripts.get_revision("crm_rel_001_joint_01")
