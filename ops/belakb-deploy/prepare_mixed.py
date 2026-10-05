@@ -243,6 +243,8 @@ def remove_probe(name, image, network, *, container_id=None):
     require(all(m['Type'] == 'tmpfs' and m['Destination'] == '/tmp'
                 for m in info['Mounts']), 'PROBE_MOUNTS')
     run(['docker', 'rm', '-f', '-v', info['Id']])
+    found = subprocess.run(['docker', 'inspect', name], capture_output=True, timeout=30)
+    require(known_absent(found), 'PROBE_CLEANUP_UNCONFIRMED')
     return info['Id']
 
 

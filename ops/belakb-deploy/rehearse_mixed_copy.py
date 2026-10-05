@@ -5,6 +5,7 @@ import datetime
 import json
 import os
 import re
+import signal
 import socket
 import subprocess
 import time
@@ -199,6 +200,8 @@ def cleanup(state, owner, dump, production_mounts):
                 container = json.loads(found.stdout)[0]['Id']
             owned(container, name, owner, dump, production_mounts)
             run(['docker', 'rm', '-f', '-v', container])
+            found = subprocess.run(['docker', 'inspect', name], capture_output=True, timeout=30)
+            require(known_absent(found), 'COPY_CLEANUP_UNCONFIRMED')
         except Exception:
             failed = True
     require(not failed, 'COPY_CLEANUP_UNCONFIRMED')
@@ -216,90 +219,116 @@ def rehearsal(args):
     require(baseline['schema'] == ['0116'], 'MEASURED_BASELINE_HEAD_REQUIRED')
     live = inspect('aios-app-1')
     prod = inspect('aios-postgres-1')
-    require(live['Id'] == baseline['app_id'] and live['Image'] == baseline['app_image'] and
+    require(live['State']['Running'] and prod['State']['Running'] and
+            live['Id'] == baseline['app_id'] and live['Image'] == baseline['app_image'] and
             digest(projection(live)) == baseline['runtime_sha256'], 'LIVE_BASELINE_DRIFT')
     require(prod['Id'] == baseline['pg_id'] and prod['Image'] == PG_IMAGE, 'LIVE_POSTGRES_DRIFT')
     require(schema('aios-postgres-1', 'aios') == baseline['schema'], 'LIVE_SCHEMA_DRIFT')
     production_mounts = {m['Source'] for m in prod['Mounts'] + live['Mounts']}
-    protected_new_directory(args.output)
-    dump = args.output / 'database.dump'
-    state = {}
-    owner = 'crm-rel-001-g06-' + uuid.uuid4().hex
-    receipt = {'status': 'REHEARSAL_RUNNING', 'owner': owner,
-               'time_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-               'image_proof': None, 'probe_state_root': str(args.output),
-               'manifest_sha256': args.manifest_sha256,
-               'data_contract_sha256': args.data_contract_sha256,
-               'baseline_sha256': args.baseline_sha256, 'production_changes': 0,
-               'backup_kind': 'consistent live-read copy; not write-frozen production rollback backup',
-               'release_ready': False}
+    saved_handlers = {}
+    cleaning = False
+
+    def interrupted(signum, frame):
+        if not cleaning:
+            raise KeyboardInterrupt('REHEARSAL_INTERRUPTED')
+
     try:
-        receipt['image_proof'] = verify_image(manifest, args.image, state_root=args.output)
-        with dump.open('xb') as handle:
-            result = subprocess.run(['docker', 'exec', 'aios-postgres-1', 'pg_dump', '-U', 'aios',
-                '-d', 'aios', '-Fc', '--lock-wait-timeout=10000'], stdout=handle,
-                stderr=subprocess.PIPE, timeout=300)
-        require(result.returncode == 0, 'READ_DUMP_FAILED_OUTPUT_REDACTED')
-        dump.chmod(0o600)
-        receipt['backup_sha256'], receipt['backup_bytes'] = file_sha(dump), dump.stat().st_size
-        first = create_copy(owner + '-upgrade', owner, dump, state, production_mounts, args.output)
-        listing = run(['docker', 'exec', first, 'pg_restore', '--list', '/backup/database.dump'])
-        (args.output / 'archive.list').write_bytes(listing)
-        (args.output / 'archive.list').chmod(0o600)
-        restore(first, 'aios_before')
-        restore(first, 'aios_copy')
-        require(schema(first, 'aios_before') == schema(first, 'aios_copy') == baseline['schema'],
-                'RESTORED_HEAD_MISMATCH')
-        original_specs = specs(first)
-        require(original_specs, 'ORIGINAL_TABLES_EMPTY')
-        transforms = transformation_map(contract, original_specs)
-        original = snapshot(first, 'aios_before', original_specs)
-        require(snapshot(first, 'aios_copy', original_specs) == original, 'INITIAL_RESTORE_MISMATCH')
-        expected = snapshot(first, 'aios_before', original_specs, transforms)
-        stable = unchanged_columns(first, 'aios_before', original_specs, transforms)
-        original_links = links(first, 'aios_before', contract)
-        program = "import subprocess; subprocess.run(['alembic','upgrade','head'],check=True)"
-        probe(args.image, program, pg_id=first, state_root=args.output)
-        require(schema(first, 'aios_copy') == [HEAD], 'UPGRADE_HEAD_MISMATCH')
-        require(snapshot(first, 'aios_copy', original_specs) == expected, 'ORIGINAL_ROWS_OR_DECIMAL_MISMATCH')
-        require(unchanged_columns(first, 'aios_copy', original_specs, transforms) == stable,
-                'UNDECLARED_COLUMN_CHANGED')
-        require(links(first, 'aios_copy', contract) == original_links, 'KEY_LINK_CHANGED')
-        # Repeat actual Alembic execution, rather than assuming idempotence.
-        probe(args.image, program, pg_id=first, state_root=args.output)
-        require(snapshot(first, 'aios_copy', original_specs) == expected, 'REPEAT_UPGRADE_CHANGED_DATA')
-        # Second, independently created PostgreSQL is restored AFTER the upgrade.
-        second = create_copy(owner + '-restore', owner, dump, state, production_mounts, args.output)
-        restore(second, 'aios_before')
-        require(schema(second, 'aios_before') == baseline['schema'] and
-                snapshot(second, 'aios_before', original_specs) == original and
-                links(second, 'aios_before', contract) == original_links, 'SECOND_RESTORE_MISMATCH')
-        write_json(args.output / 'data-fingerprints.json',
-                   {'original': original, 'expected_after': expected, 'link_checks': original_links})
-        current, current_pg = inspect('aios-app-1'), inspect('aios-postgres-1')
-        require(current['Id'] == baseline['app_id'] and current['Image'] == baseline['app_image'] and
-                digest(projection(current)) == baseline['runtime_sha256'] and
-                current_pg['Id'] == baseline['pg_id'] and current_pg['Image'] == PG_IMAGE and
-                schema('aios-postgres-1', 'aios') == baseline['schema'], 'LIVE_CHANGED_EXTERNALLY')
-        receipt.update(status='FRESH_COPY_UPGRADE_AND_SEPARATE_RESTORE_PASS',
-                       original_tables=len(original_specs), live_head=baseline['schema'],
-                       candidate_head=HEAD, second_restore_after_upgrade=True)
-    except (Exception, KeyboardInterrupt) as error:
-        receipt['status'] = 'ISOLATED_REHEARSAL_FAILED'
-        receipt['safe_code'] = str(error) if re.fullmatch('[A-Z_0-9]+', str(error)) else type(error).__name__
-    finally:
+        for name in ('SIGTERM', 'SIGHUP', 'SIGINT'):
+            if hasattr(signal, name):
+                signum = getattr(signal, name)
+                saved_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, interrupted)
+        protected_new_directory(args.output)
+        dump = args.output / 'database.dump'
+        state = {}
+        owner = 'crm-rel-001-g06-' + uuid.uuid4().hex
+        receipt = {'status': 'REHEARSAL_RUNNING', 'owner': owner,
+                   'time_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                   'image_proof': None, 'probe_state_root': str(args.output),
+                   'manifest_sha256': args.manifest_sha256,
+                   'data_contract_sha256': args.data_contract_sha256,
+                   'baseline_sha256': args.baseline_sha256, 'production_changes': 0,
+                   'backup_kind': 'consistent live-read copy; not write-frozen production rollback backup',
+                   'release_ready': False}
         try:
-            cleanup(state, owner, dump, production_mounts)
-            receipt['owned_resources_removed'] = receipt.get('safe_code') != 'PROBE_CLEANUP_UNCONFIRMED'
-            if not receipt['owned_resources_removed']:
+            receipt['image_proof'] = verify_image(manifest, args.image, state_root=args.output)
+            with dump.open('xb') as handle:
+                result = subprocess.run(['docker', 'exec', 'aios-postgres-1', 'pg_dump', '-U', 'aios',
+                    '-d', 'aios', '-Fc', '--lock-wait-timeout=10000'], stdout=handle,
+                    stderr=subprocess.PIPE, timeout=300)
+            require(result.returncode == 0, 'READ_DUMP_FAILED_OUTPUT_REDACTED')
+            dump.chmod(0o600)
+            receipt['backup_sha256'], receipt['backup_bytes'] = file_sha(dump), dump.stat().st_size
+            first = create_copy(owner + '-upgrade', owner, dump, state, production_mounts, args.output)
+            listing = run(['docker', 'exec', first, 'pg_restore', '--list', '/backup/database.dump'])
+            (args.output / 'archive.list').write_bytes(listing)
+            (args.output / 'archive.list').chmod(0o600)
+            restore(first, 'aios_before')
+            restore(first, 'aios_copy')
+            require(schema(first, 'aios_before') == schema(first, 'aios_copy') == baseline['schema'],
+                    'RESTORED_HEAD_MISMATCH')
+            original_specs = specs(first)
+            require(original_specs, 'ORIGINAL_TABLES_EMPTY')
+            transforms = transformation_map(contract, original_specs)
+            original = snapshot(first, 'aios_before', original_specs)
+            require(snapshot(first, 'aios_copy', original_specs) == original, 'INITIAL_RESTORE_MISMATCH')
+            expected = snapshot(first, 'aios_before', original_specs, transforms)
+            stable = unchanged_columns(first, 'aios_before', original_specs, transforms)
+            original_links = links(first, 'aios_before', contract)
+            program = "import subprocess; subprocess.run(['alembic','upgrade','head'],check=True)"
+            probe(args.image, program, pg_id=first, state_root=args.output)
+            require(schema(first, 'aios_copy') == [HEAD], 'UPGRADE_HEAD_MISMATCH')
+            require(snapshot(first, 'aios_copy', original_specs) == expected, 'ORIGINAL_ROWS_OR_DECIMAL_MISMATCH')
+            require(unchanged_columns(first, 'aios_copy', original_specs, transforms) == stable,
+                    'UNDECLARED_COLUMN_CHANGED')
+            require(links(first, 'aios_copy', contract) == original_links, 'KEY_LINK_CHANGED')
+            # Repeat actual Alembic execution, rather than assuming idempotence.
+            probe(args.image, program, pg_id=first, state_root=args.output)
+            require(snapshot(first, 'aios_copy', original_specs) == expected, 'REPEAT_UPGRADE_CHANGED_DATA')
+            # Second, independently created PostgreSQL is restored AFTER the upgrade.
+            second = create_copy(owner + '-restore', owner, dump, state, production_mounts, args.output)
+            restore(second, 'aios_before')
+            require(schema(second, 'aios_before') == baseline['schema'] and
+                    snapshot(second, 'aios_before', original_specs) == original and
+                    links(second, 'aios_before', contract) == original_links, 'SECOND_RESTORE_MISMATCH')
+            write_json(args.output / 'data-fingerprints.json',
+                       {'original': original, 'expected_after': expected, 'link_checks': original_links})
+            receipt.update(status='FRESH_COPY_UPGRADE_AND_SEPARATE_RESTORE_PASS',
+                           original_tables=len(original_specs), live_head=baseline['schema'],
+                           candidate_head=HEAD, second_restore_after_upgrade=True)
+        except (Exception, KeyboardInterrupt) as error:
+            receipt['status'] = 'ISOLATED_REHEARSAL_FAILED'
+            receipt['safe_code'] = str(error) if re.fullmatch('[A-Z_0-9]+', str(error)) else type(error).__name__
+        finally:
+            cleaning = True
+            try:
+                cleanup(state, owner, dump, production_mounts)
+                receipt['owned_resources_removed'] = receipt.get('safe_code') != 'PROBE_CLEANUP_UNCONFIRMED'
+                if not receipt['owned_resources_removed']:
+                    receipt['status'] = 'OWNED_CLEANUP_UNCONFIRMED'
+            except Exception as error:
                 receipt['status'] = 'OWNED_CLEANUP_UNCONFIRMED'
-        except Exception as error:
-            receipt['status'] = 'OWNED_CLEANUP_UNCONFIRMED'
-            receipt['owned_resources_removed'] = False
-            receipt['cleanup_safe_code'] = str(error) if re.fullmatch('[A-Z_0-9]+', str(error)) else type(error).__name__
-        write_json(args.output / 'receipt.json', receipt)
-    print(json.dumps(receipt))
-    return 0 if receipt['status'] == 'FRESH_COPY_UPGRADE_AND_SEPARATE_RESTORE_PASS' else 1
+                receipt['owned_resources_removed'] = False
+                receipt['cleanup_safe_code'] = str(error) if re.fullmatch('[A-Z_0-9]+', str(error)) else type(error).__name__
+            try:
+                current, current_pg = inspect('aios-app-1'), inspect('aios-postgres-1')
+                require(current['State']['Running'] and current_pg['State']['Running'] and
+                        current['Id'] == baseline['app_id'] and current['Image'] == baseline['app_image'] and
+                        digest(projection(current)) == baseline['runtime_sha256'] and
+                        current_pg['Id'] == baseline['pg_id'] and current_pg['Image'] == PG_IMAGE and
+                        schema('aios-postgres-1', 'aios') == baseline['schema'], 'LIVE_CHANGED_EXTERNALLY')
+                receipt['live_baseline_unchanged'] = True
+            except Exception as error:
+                receipt['live_baseline_unchanged'] = False
+                receipt['baseline_safe_code'] = str(error) if re.fullmatch('[A-Z_0-9]+', str(error)) else type(error).__name__
+                if receipt['status'] != 'OWNED_CLEANUP_UNCONFIRMED':
+                    receipt['status'] = 'LIVE_BASELINE_UNCONFIRMED'
+            write_json(args.output / 'receipt.json', receipt)
+        print(json.dumps(receipt))
+        return 0 if receipt['status'] == 'FRESH_COPY_UPGRADE_AND_SEPARATE_RESTORE_PASS' else 1
+    finally:
+        for signum, handler in saved_handlers.items():
+            signal.signal(signum, handler)
 
 
 def main():

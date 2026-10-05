@@ -189,7 +189,8 @@ class Guards(unittest.TestCase):
                 if empty_cid:
                     Path(json.loads(path.read_text())['cidfile']).touch()
                 found = subprocess.CompletedProcess([], 0, json.dumps([info]).encode(), b'')
-                with patch.object(package.subprocess, 'run', return_value=found), \
+                absent = subprocess.CompletedProcess([], 1, b'[]', b'error: no such object')
+                with patch.object(package.subprocess, 'run', side_effect=[found, absent]), \
                         patch.object(package, 'run') as delete:
                     record = package.recover_probe(path)
                     delete.assert_called_once_with(['docker', 'rm', '-f', '-v', 'b' * 64])
@@ -319,7 +320,9 @@ class Guards(unittest.TestCase):
             delete.assert_not_called()
 
     def test_cleanup_failure_does_not_skip_other_owned_resource(self):
+        absent = subprocess.CompletedProcess([], 1, b'[]', b'error: no such object')
         with patch.object(copy, 'owned', side_effect=[package.Blocked('COPY_IDENTITY'), None]), \
+                patch.object(copy.subprocess, 'run', return_value=absent), \
                 patch.object(copy, 'run') as delete:
             with self.assertRaisesRegex(package.Blocked, 'COPY_CLEANUP_UNCONFIRMED'):
                 copy.cleanup({'one': 'a' * 64, 'two': 'b' * 64}, 'owner', Path('/dump'), set())
@@ -333,7 +336,8 @@ class Guards(unittest.TestCase):
                 package.remove_probe('own', 'sha256:' + 'a' * 64, 'none')
             delete.assert_not_called()
 
-    def exercise_rehearsal(self, *, fail_upgrade=False):
+    def exercise_rehearsal(self, *, fail_upgrade=False, baseline_failure=False, cleanup_failure=False,
+                           interrupt=False, interrupt_cleanup=False, baseline_drift=False):
         events = []
         with fixtures() as directory:
             base = Path(directory)
@@ -358,26 +362,48 @@ class Guards(unittest.TestCase):
                 kwargs['stdout'].write(b'PGDMP fixture')
                 return subprocess.CompletedProcess(argv, 0, b'', b'')
 
+            handlers = {}
+
             def upgrade(*unused, **kwargs):
                 events.append('upgrade')
+                if interrupt:
+                    handlers[copy.signal.SIGTERM](copy.signal.SIGTERM, None)
                 if fail_upgrade:
                     raise package.Blocked('UPGRADE_FAILED' if fail_upgrade is True else fail_upgrade)
 
             def current_schema(container, database):
                 return [package.HEAD] if database == 'aios_copy' and 'upgrade' in events else ['0116']
 
+            def inspect_live(name):
+                if name == 'aios-app-1' and 'cleanup' in events:
+                    events.append('baseline-after-cleanup')
+                    if baseline_failure:
+                        raise package.Blocked('FINAL_BASELINE_UNAVAILABLE')
+                return {'Id': baseline['app_id' if name == 'aios-app-1' else 'pg_id'],
+                        'Image': baseline['app_image'] if name == 'aios-app-1' else copy.PG_IMAGE,
+                        'Mounts': [], 'State': {'Running': not (baseline_drift and 'cleanup' in events)}}
+
+            def cleanup(*unused):
+                events.append('cleanup')
+                if interrupt_cleanup:
+                    handlers[copy.signal.SIGTERM](copy.signal.SIGTERM, None)
+                    events.append('cleanup-continued')
+                if cleanup_failure:
+                    raise package.Blocked('COPY_CLEANUP_UNCONFIRMED')
+
             with contextlib.ExitStack() as stack:
+                stack.enter_context(patch.object(copy.signal, 'getsignal', return_value=copy.signal.SIG_DFL))
+                stack.enter_context(patch.object(copy.signal, 'signal', side_effect=lambda sig, handler: handlers.__setitem__(sig, handler)))
                 for name, replacement in (
                     ('SERVER_ROOT', base), ('verify_image', lambda *a, **kw: {'status': 'verified'}),
-                    ('inspect', lambda name: {'Id': baseline['app_id' if name == 'aios-app-1' else 'pg_id'],
-                        'Image': baseline['app_image'] if name == 'aios-app-1' else copy.PG_IMAGE, 'Mounts': []}),
+                    ('inspect', inspect_live),
                     ('projection', lambda info: {}), ('schema', current_schema), ('create_copy', create),
                     ('restore', lambda container, db: events.append('restore-' + container + '-' + db)),
                     ('specs', lambda container: [{'schema': 'public', 'table': 't', 'columns': ['id'], 'numeric': [], 'keys': ['id']}]),
                     ('transformation_map', lambda *a: {}), ('snapshot', lambda *a: {'public.t': {'rows': 1, 'sha256': 'fixture'}}),
                     ('unchanged_columns', lambda *a: {}), ('links', lambda *a: {'fk': ['0']}),
                     ('probe', upgrade), ('run', lambda *a, **k: b'archive fixture'),
-                    ('cleanup', lambda *a: events.append('cleanup'))):
+                    ('cleanup', cleanup)):
                     stack.enter_context(patch.object(copy, name, replacement))
                 stack.enter_context(patch.object(copy.os, 'geteuid', return_value=0, create=True))
                 stack.enter_context(patch.object(copy.socket, 'gethostname', return_value='localhost.localdomain'))
@@ -385,6 +411,8 @@ class Guards(unittest.TestCase):
                 stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
                 exit_code = copy.rehearsal(args)
             receipt = json.loads((args.output / 'receipt.json').read_text())
+            self.assertTrue(handlers)
+            self.assertTrue(all(handler == copy.signal.SIG_DFL for handler in handlers.values()))
         return exit_code, receipt, events
 
     def test_separate_restore_happens_after_two_real_upgrade_calls(self):
@@ -393,7 +421,8 @@ class Guards(unittest.TestCase):
         self.assertEqual(receipt['status'], 'FRESH_COPY_UPGRADE_AND_SEPARATE_RESTORE_PASS')
         self.assertEqual(events[:events.index('create-second')].count('upgrade'), 2)
         self.assertGreater(events.index('restore-second-aios_before'), events.index('create-second'))
-        self.assertEqual(events[-1], 'cleanup')
+        self.assertEqual(events[-1], 'baseline-after-cleanup')
+        self.assertTrue(receipt['live_baseline_unchanged'])
         self.assertFalse(receipt['release_ready'])
 
     def test_upgrade_failure_is_nonzero_and_cleanup_receipt_is_honest(self):
@@ -401,7 +430,8 @@ class Guards(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(receipt['status'], 'ISOLATED_REHEARSAL_FAILED')
         self.assertNotIn('create-second', events)
-        self.assertEqual(events[-1], 'cleanup')
+        self.assertEqual(events[-1], 'baseline-after-cleanup')
+        self.assertTrue(receipt['live_baseline_unchanged'])
         self.assertTrue(receipt['owned_resources_removed'])
 
     def test_probe_cleanup_uncertainty_is_not_hidden_by_successful_pg_cleanup(self):
@@ -409,7 +439,117 @@ class Guards(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(receipt['status'], 'OWNED_CLEANUP_UNCONFIRMED')
         self.assertFalse(receipt['owned_resources_removed'])
-        self.assertEqual(events[-1], 'cleanup')
+        self.assertEqual(events[-1], 'baseline-after-cleanup')
+        self.assertTrue(receipt['live_baseline_unchanged'])
+
+
+    def test_successful_remove_requires_fresh_absence_for_pg_and_probe(self):
+        absent = subprocess.CompletedProcess([], 1, b'[]', b'error: no such object')
+        present = subprocess.CompletedProcess([], 0, b'[{}]', b'')
+        unknown = subprocess.CompletedProcess([], 1, b'[]', b'permission denied')
+        mixed = subprocess.CompletedProcess([], 1, b'[]', b'error: no such object\npermission denied')
+        for observed in (absent, present, unknown, mixed, subprocess.TimeoutExpired('docker', 30)):
+            ok = observed is absent
+            with self.subTest(kind=repr(observed)), fixtures() as directory:
+                path, info = self.abandoned_probe(Path(directory))
+                before = subprocess.CompletedProcess([], 0, json.dumps([info]).encode(), b'')
+                with patch.object(package.subprocess, 'run', side_effect=[before, observed]) as readback, \
+                        patch.object(package, 'run') as remove:
+                    if ok:
+                        self.assertEqual(package.remove_probe(info['Name'][1:], info['Image'], 'none'), info['Id'])
+                    else:
+                        with self.assertRaises((package.Blocked, subprocess.TimeoutExpired)):
+                            package.remove_probe(info['Name'][1:], info['Image'], 'none')
+                    remove.assert_called_once_with(['docker', 'rm', '-f', '-v', info['Id']])
+                    self.assertEqual(readback.call_count, 2)
+                    self.assertEqual(readback.call_args.args[0], ['docker', 'inspect', info['Name'][1:]])
+                with patch.object(copy, 'owned'), patch.object(copy, 'run') as remove, \
+                        patch.object(copy.subprocess, 'run', side_effect=[observed]) as readback:
+                    if ok:
+                        copy.cleanup({'own': 'b' * 64}, 'owner', Path('/dump'), set())
+                    else:
+                        with self.assertRaisesRegex(package.Blocked, 'COPY_CLEANUP_UNCONFIRMED'):
+                            copy.cleanup({'own': 'b' * 64}, 'owner', Path('/dump'), set())
+                    remove.assert_called_once_with(['docker', 'rm', '-f', '-v', 'b' * 64])
+                    readback.assert_called_once_with(['docker', 'inspect', 'own'], capture_output=True, timeout=30)
+
+    def test_final_baseline_uncertainty_cannot_pass_or_hide_original_failure(self):
+        for failure in (False, True):
+            with self.subTest(upgrade_failed=failure):
+                code, receipt, events = self.exercise_rehearsal(fail_upgrade=failure, baseline_failure=True)
+                self.assertEqual(code, 1)
+                self.assertEqual(receipt['status'], 'LIVE_BASELINE_UNCONFIRMED')
+                self.assertFalse(receipt['live_baseline_unchanged'])
+                self.assertTrue(receipt['owned_resources_removed'])
+                self.assertEqual(receipt['baseline_safe_code'], 'FINAL_BASELINE_UNAVAILABLE')
+                self.assertEqual(events[-1], 'baseline-after-cleanup')
+                if failure:
+                    self.assertEqual(receipt['safe_code'], 'UPGRADE_FAILED')
+
+    def test_cleanup_failure_still_checks_final_live_baseline(self):
+        code, receipt, events = self.exercise_rehearsal(cleanup_failure=True, baseline_failure=True)
+        self.assertEqual(code, 1)
+        self.assertEqual(receipt['status'], 'OWNED_CLEANUP_UNCONFIRMED')
+        self.assertFalse(receipt['owned_resources_removed'])
+        self.assertFalse(receipt['live_baseline_unchanged'])
+        self.assertEqual(receipt['cleanup_safe_code'], 'COPY_CLEANUP_UNCONFIRMED')
+        self.assertEqual(receipt['baseline_safe_code'], 'FINAL_BASELINE_UNAVAILABLE')
+        self.assertEqual(events[-1], 'baseline-after-cleanup')
+
+    def test_termination_enters_cleanup_and_handlers_restore(self):
+        code, receipt, events = self.exercise_rehearsal(interrupt=True, interrupt_cleanup=True)
+        self.assertEqual(code, 1)
+        self.assertEqual(receipt['safe_code'], 'REHEARSAL_INTERRUPTED')
+        self.assertEqual(receipt['status'], 'ISOLATED_REHEARSAL_FAILED')
+        self.assertTrue(receipt['owned_resources_removed'])
+        self.assertTrue(receipt['live_baseline_unchanged'])
+        self.assertNotIn('create-second', events)
+        self.assertEqual(events[-3:], ['cleanup', 'cleanup-continued', 'baseline-after-cleanup'])
+
+    def test_saved_handlers_restore_when_handler_installation_fails(self):
+        # Preflight only; no owned output/container can be created before installation.
+        with fixtures() as directory:
+            base = Path(directory)
+            for name, body in (('manifest', '{}'), ('contract', '{}'), ('baseline', json.dumps({
+                    'schema': ['0116'], 'app_id': 'app', 'app_image': 'image',
+                    'pg_id': 'pg', 'runtime_sha256': package.digest({})}))):
+                (base / name).write_text(body)
+            args = argparse.Namespace(output=base / 'new', manifest=base / 'manifest',
+                data_contract=base / 'contract', baseline=base / 'baseline',
+                manifest_sha256=package.file_sha(base / 'manifest'),
+                data_contract_sha256=package.file_sha(base / 'contract'),
+                baseline_sha256=package.file_sha(base / 'baseline'), image='sha256:' + 'a' * 64)
+            handlers = {}
+            calls = 0
+            def install(sig, handler):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise ValueError('handler install fixture')
+                handlers[sig] = handler
+            with patch.object(copy, 'SERVER_ROOT', base), \
+                    patch.object(copy.os, 'geteuid', return_value=0, create=True), \
+                    patch.object(copy.socket, 'gethostname', return_value='localhost.localdomain'), \
+                    patch.object(copy, 'inspect', side_effect=[{'Id': 'app', 'Image': 'image', 'Mounts': [], 'State': {'Running': True}},
+                        {'Id': 'pg', 'Image': copy.PG_IMAGE, 'Mounts': [], 'State': {'Running': True}}]), \
+                    patch.object(copy, 'projection', return_value={}), \
+                    patch.object(copy, 'schema', return_value=['0116']), \
+                    patch.object(copy.signal, 'getsignal', return_value=copy.signal.SIG_DFL), \
+                    patch.object(copy.signal, 'signal', side_effect=install), \
+                    patch.object(copy, 'protected_new_directory') as create:
+                with self.assertRaises(ValueError):
+                    copy.rehearsal(args)
+                create.assert_not_called()
+            self.assertTrue(all(handler == copy.signal.SIG_DFL for handler in handlers.values()))
+
+
+    def test_stopped_live_container_after_cleanup_is_real_baseline_drift(self):
+        code, receipt, events = self.exercise_rehearsal(baseline_drift=True)
+        self.assertEqual(code, 1)
+        self.assertEqual(receipt['status'], 'LIVE_BASELINE_UNCONFIRMED')
+        self.assertEqual(receipt['baseline_safe_code'], 'LIVE_CHANGED_EXTERNALLY')
+        self.assertFalse(receipt['live_baseline_unchanged'])
+        self.assertEqual(events[-1], 'baseline-after-cleanup')
 
 
 if __name__ == '__main__':
