@@ -568,26 +568,9 @@ function PaymentsTab() {
 
 // ──────────────────────────── Tab 3: Aging ────────────────────────────
 
-function AgingTab() {
-  const { data, loading, error } = useFetch<AgingResp>("/api/finance/aging");
-  const bar = (
-    <State
-      loading={loading}
-      error={error}
-      empty={
-        !loading &&
-        !error &&
-        data != null &&
-        parseFloat(data.ar.total) === 0 &&
-        parseFloat(data.ap.total) === 0
-      }
-      what="aging"
-    />
-  );
-  if (loading || error || !data || (parseFloat(data.ar.total) === 0 && parseFloat(data.ap.total) === 0))
-    return bar;
+function AgingSideTable({ title, side }: { title: string; side: AgingSide }) {
   const isAccent = (b: string) => b === "61-90" || b === "90+";
-  const Side = ({ title, side }: { title: string; side: AgingSide }) => (
+  return (
     <div className="overflow-hidden rounded-xl bg-surface shadow-card">
       <div className="border-b border-line px-4 py-2.5 text-sm font-semibold text-ink">
         {title} · {formatByn(parseFloat(side.total))}
@@ -613,12 +596,32 @@ function AgingTab() {
       </table>
     </div>
   );
+}
+
+function AgingTab() {
+  const { data, loading, error } = useFetch<AgingResp>("/api/finance/aging");
+  const bar = (
+    <State
+      loading={loading}
+      error={error}
+      empty={
+        !loading &&
+        !error &&
+        data != null &&
+        parseFloat(data.ar.total) === 0 &&
+        parseFloat(data.ap.total) === 0
+      }
+      what="aging"
+    />
+  );
+  if (loading || error || !data || (parseFloat(data.ar.total) === 0 && parseFloat(data.ap.total) === 0))
+    return bar;
   return (
     <>
       <p className="text-xs text-muted">На {data.as_of}. Корзины 61–90 и 90+ — критический срок.</p>
       <div className="mt-2 grid gap-4 md:grid-cols-2">
-        <Side title="Дебиторка (AR)" side={data.ar} />
-        <Side title="Кредиторка (AP)" side={data.ap} />
+        <AgingSideTable title="Дебиторка (AR)" side={data.ar} />
+        <AgingSideTable title="Кредиторка (AP)" side={data.ap} />
       </div>
     </>
   );
@@ -700,98 +703,99 @@ function CashflowTab() {
 
 // ──────────────────────────── Tab 5: Margin dashboard ────────────────────────────
 
+const MarginSection = ({
+  title,
+  resp,
+  keyLabel,
+  isCounterparty,
+}: {
+  title: string;
+  resp: { data: MarginResp | null; loading: boolean; error: boolean };
+  keyLabel: string;
+  isCounterparty?: boolean;
+}) => {
+  if (resp.loading) return <State loading={true} error={false} what={title.toLowerCase()} />;
+  if (resp.error) return <State loading={false} error={true} what={title.toLowerCase()} />;
+  const items = resp.data?.items ?? [];
+  if (items.length === 0)
+    return <State loading={false} error={false} empty what={title.toLowerCase()} />;
+  return (
+    <div className="overflow-hidden rounded-xl bg-surface shadow-card">
+      <div className="border-b border-line px-4 py-2.5 text-sm font-semibold text-ink">{title}</div>
+      <table className="w-full text-sm">
+        <thead className="border-b border-line text-left text-xs text-muted">
+          <tr>
+            <th className="px-4 py-2.5 font-medium">{keyLabel}</th>
+            <th className="px-4 py-2.5 text-right font-medium">Выручка</th>
+            <th className="px-4 py-2.5 text-right font-medium">Landed</th>
+            <th className="px-4 py-2.5 text-right font-medium">Фрахт</th>
+            <th className="px-4 py-2.5 text-right font-medium">Валовая</th>
+            <th className="px-4 py-2.5 text-right font-medium">%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((row) => (
+            <tr key={String(row.key ?? "_na_")} className="border-b border-line last:border-0">
+              <td className="px-4 py-2.5 text-ink">
+                {row.key == null ? (
+                  <span className="text-muted">Не атрибутировано</span>
+                ) : isCounterparty ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span>{String(row.key)}</span>
+                    <SourceTag entity="counterparty" source="mdm" unp={String(row.key)} />
+                  </span>
+                ) : (
+                  <span>#{String(row.key)}</span>
+                )}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums text-ink">
+                {formatByn(parseFloat(row.revenue))}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums text-muted">
+                {row.landed != null ? (
+                  formatByn(parseFloat(row.landed))
+                ) : (
+                  <span title="Себестоимость не привязана к сделке — маржа неизвестна">—</span>
+                )}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums text-muted">
+                {formatByn(parseFloat(row.freight))}
+              </td>
+              {row.gross != null ? (
+                <td
+                  className={`px-4 py-2.5 text-right tabular-nums ${
+                    parseFloat(row.gross) >= 0 ? "text-emerald-600" : "text-rose-600"
+                  }`}
+                >
+                  {formatByn(parseFloat(row.gross))}
+                </td>
+              ) : (
+                <td
+                  className="px-4 py-2.5 text-right tabular-nums text-muted"
+                  title="Себестоимость не атрибутирована к сделке — валовая прибыль неизвестна"
+                >
+                  —
+                </td>
+              )}
+              <td className="px-4 py-2.5 text-right tabular-nums text-muted">
+                {row.pct != null ? `${row.pct.toFixed(1)}%` : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
 function MarginTab() {
   const byDeal = useFetch<MarginResp>("/api/finance/margin/by-deal");
   const byCp = useFetch<MarginResp>("/api/finance/margin/by-counterparty");
-  const Section = ({
-    title,
-    resp,
-    keyLabel,
-    isCounterparty,
-  }: {
-    title: string;
-    resp: { data: MarginResp | null; loading: boolean; error: boolean };
-    keyLabel: string;
-    isCounterparty?: boolean;
-  }) => {
-    if (resp.loading) return <State loading={true} error={false} what={title.toLowerCase()} />;
-    if (resp.error) return <State loading={false} error={true} what={title.toLowerCase()} />;
-    const items = resp.data?.items ?? [];
-    if (items.length === 0)
-      return <State loading={false} error={false} empty what={title.toLowerCase()} />;
-    return (
-      <div className="overflow-hidden rounded-xl bg-surface shadow-card">
-        <div className="border-b border-line px-4 py-2.5 text-sm font-semibold text-ink">{title}</div>
-        <table className="w-full text-sm">
-          <thead className="border-b border-line text-left text-xs text-muted">
-            <tr>
-              <th className="px-4 py-2.5 font-medium">{keyLabel}</th>
-              <th className="px-4 py-2.5 text-right font-medium">Выручка</th>
-              <th className="px-4 py-2.5 text-right font-medium">Landed</th>
-              <th className="px-4 py-2.5 text-right font-medium">Фрахт</th>
-              <th className="px-4 py-2.5 text-right font-medium">Валовая</th>
-              <th className="px-4 py-2.5 text-right font-medium">%</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((row) => (
-              <tr key={String(row.key ?? "_na_")} className="border-b border-line last:border-0">
-                <td className="px-4 py-2.5 text-ink">
-                  {row.key == null ? (
-                    <span className="text-muted">Не атрибутировано</span>
-                  ) : isCounterparty ? (
-                    <span className="inline-flex items-center gap-2">
-                      <span>{String(row.key)}</span>
-                      <SourceTag entity="counterparty" source="mdm" unp={String(row.key)} />
-                    </span>
-                  ) : (
-                    <span>#{String(row.key)}</span>
-                  )}
-                </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-ink">
-                  {formatByn(parseFloat(row.revenue))}
-                </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-muted">
-                  {row.landed != null ? (
-                    formatByn(parseFloat(row.landed))
-                  ) : (
-                    <span title="Себестоимость не привязана к сделке — маржа неизвестна">—</span>
-                  )}
-                </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-muted">
-                  {formatByn(parseFloat(row.freight))}
-                </td>
-                {row.gross != null ? (
-                  <td
-                    className={`px-4 py-2.5 text-right tabular-nums ${
-                      parseFloat(row.gross) >= 0 ? "text-emerald-600" : "text-rose-600"
-                    }`}
-                  >
-                    {formatByn(parseFloat(row.gross))}
-                  </td>
-                ) : (
-                  <td
-                    className="px-4 py-2.5 text-right tabular-nums text-muted"
-                    title="Себестоимость не атрибутирована к сделке — валовая прибыль неизвестна"
-                  >
-                    —
-                  </td>
-                )}
-                <td className="px-4 py-2.5 text-right tabular-nums text-muted">
-                  {row.pct != null ? `${row.pct.toFixed(1)}%` : "—"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  };
   return (
     <div className="grid gap-4">
       <ReconcileDealCard />
-      <Section title="Маржа по сделкам" resp={byDeal} keyLabel="Сделка" />
-      <Section title="Маржа по контрагентам" resp={byCp} keyLabel="Контрагент (УНП)" isCounterparty />
+      <MarginSection title="Маржа по сделкам" resp={byDeal} keyLabel="Сделка" />
+      <MarginSection title="Маржа по контрагентам" resp={byCp} keyLabel="Контрагент (УНП)" isCounterparty />
     </div>
   );
 }
@@ -907,498 +911,53 @@ function ReconcileDealCard() {
   );
 }
 
-// ──────────────────────────── Tab P&L (Р5) ────────────────────────────
-
-interface PnlResp {
-  from_date: string | null;
-  to_date: string | null;
-  currency: string;
-  revenue: string;
-  cogs: string;
-  freight: string;
-  gross_profit: string;
-  payroll: string;
-  opex: string;
-  tax: string;
-  bank_fee: string;
-  operating_profit: string;
-}
-
-function PnlTab() {
-  const today = new Date().toISOString().slice(0, 10);
-  const firstOfYear = `${today.slice(0, 4)}-01-01`;
-
-  const [from, setFrom] = useState(firstOfYear);
-  const [to, setTo] = useState(today);
-  const [query, setQuery] = useState(`period_from=${firstOfYear}&period_to=${today}`);
-
-  const { data, loading, error } = useFetch<PnlResp>(`/api/finance/pnl?${query}`);
-
-  const apply = useCallback(() => {
-    setQuery(`period_from=${from}&period_to=${to}`);
-  }, [from, to]);
-
-  const downloadCsv = useCallback(() => {
-    const url = `/api/finance/pnl?period_from=${from}&period_to=${to}&format=csv`;
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `pnl_${from}_${to}.csv`;
-    a.click();
-  }, [from, to]);
-
-  const PNL_ROWS: { label: string; key: keyof PnlResp; bold?: boolean; indent?: boolean }[] = [
-    { label: "Выручка (признанная, accrual)", key: "revenue" },
-    { label: "Себестоимость (нетто)", key: "cogs", indent: true },
-    { label: "Фрахт (нетто)", key: "freight", indent: true },
-    { label: "ФОТ (опер. персонал)", key: "payroll", indent: true },
-    { label: "Прочие операционные (Opex)", key: "opex", indent: true },
-    { label: "Налоги", key: "tax", indent: true },
-    { label: "Банковские расходы", key: "bank_fee", indent: true },
-    { label: "Операционная прибыль", key: "operating_profit", bold: true },
-  ];
-
-  return (
-    <div className="space-y-4">
-      {/* Фильтр периода */}
-      <div className="flex flex-wrap items-end gap-3 rounded-xl bg-surface p-4 shadow-card">
-        <label className="flex flex-col gap-1 text-xs text-muted">
-          С
-          <input
-            type="date"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-            className="rounded-md border border-line bg-sunken px-2 py-1 text-sm text-ink"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-muted">
-          По
-          <input
-            type="date"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            className="rounded-md border border-line bg-sunken px-2 py-1 text-sm text-ink"
-          />
-        </label>
-        <button
-          type="button"
-          onClick={apply}
-          className="rounded-md bg-ink/10 px-3 py-1.5 text-sm font-medium text-ink hover:bg-ink/20"
-        >
-          Применить
-        </button>
-        <button
-          type="button"
-          onClick={downloadCsv}
-          className="ml-auto rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-muted hover:text-ink"
-        >
-          Скачать CSV
-        </button>
-      </div>
-
-      {/* Состояние */}
-      {loading && <p className="text-sm text-muted">Загрузка…</p>}
-      {error && (
-        <p className="rounded-xl bg-surface p-4 text-sm text-rose-600 shadow-card">
-          Нет данных P&L — проверьте подключение к финансовому модулю.
-        </p>
-      )}
-
-      {/* Таблица P&L */}
-      {data && !loading && (
-        <div className="overflow-hidden rounded-xl bg-surface shadow-card">
-          <div className="border-b border-line px-4 py-2.5 text-xs text-muted">
-            Период: {data.from_date ?? "начало"} — {data.to_date ?? "сейчас"} · {data.currency}
-          </div>
-          <table className="w-full text-sm">
-            <tbody>
-              {PNL_ROWS.map(({ label, key, bold, indent }) => {
-                const raw = data[key] as string;
-                const val = parseFloat(raw);
-                const isProfit = key === "operating_profit";
-                const positive = val >= 0;
-                return (
-                  <tr
-                    key={key}
-                    className={`border-b border-line last:border-0 ${bold ? "bg-sunken" : ""}`}
-                  >
-                    <td
-                      className={`px-4 py-3 ${indent ? "pl-8 text-muted" : "font-medium text-ink"} ${bold ? "font-semibold text-ink" : ""}`}
-                    >
-                      {label}
-                    </td>
-                    <td
-                      className={`px-4 py-3 text-right tabular-nums ${
-                        isProfit
-                          ? positive
-                            ? "font-bold text-emerald-600"
-                            : "font-bold text-rose-600"
-                          : "text-ink"
-                      }`}
-                    >
-                      {parseFloat(raw) !== 0 || key === "operating_profit"
-                        ? formatByn(val)
-                        : <span className="text-muted">—</span>}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {data.revenue === "0.00" && (
-            <p className="px-4 py-3 text-xs text-muted">
-              Нет признанной выручки за период. Выручка признаётся по отгрузке (событие{" "}
-              <code className="rounded bg-sunken px-1 py-0.5 font-mono text-xs">
-                sales.deal.handoff
-              </code>
-              ).
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ──────────────────────────── Tab: ДДС (Движение Денежных Средств) ────────────────────────────
-
-interface DdsResp {
-  period_from: string | null;
-  period_to: string | null;
-  currency: string;
-  inflows: string;
-  outflows: string;
-  net_cashflow: string;
-  bank_balance: string | null;
-  breakdown: Record<string, string>;
-}
-
-const DDS_BREAKDOWN_LABELS: Record<string, string> = {
-  receivable: "Поступления (счета)",
-  payroll: "ФОТ",
-  opex: "Прочие операционные",
-  tax: "Налоги",
-  bank_fee: "Банковские расходы",
-  freight: "Фрахт",
-  landed: "Себестоимость (landed)",
-  po_planned: "PO планируемый",
-};
-
-function DdsTab() {
-  const today = new Date().toISOString().slice(0, 10);
-  const firstOfYear = `${today.slice(0, 4)}-01-01`;
-
-  const [from, setFrom] = useState(firstOfYear);
-  const [to, setTo] = useState(today);
-  const [query, setQuery] = useState(`period_from=${firstOfYear}&period_to=${today}`);
-
-  const { data, loading, error } = useFetch<DdsResp>(`/api/finance/cashflow?${query}`);
-
-  const apply = useCallback(() => {
-    setQuery(`period_from=${from}&period_to=${to}`);
-  }, [from, to]);
-
-  const downloadCsv = useCallback(() => {
-    const url = `/api/finance/cashflow?period_from=${from}&period_to=${to}&format=csv`;
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `cashflow_${from}_${to}.csv`;
-    a.click();
-  }, [from, to]);
-
-  const net = data ? parseFloat(data.net_cashflow) : 0;
-  const netTone = net > 0 ? "pos" : net < 0 ? "neg" : undefined;
-
-  return (
-    <div className="space-y-4">
-      {/* Фильтр периода */}
-      <div className="flex flex-wrap items-end gap-3 rounded-xl bg-surface p-4 shadow-card">
-        <label className="flex flex-col gap-1 text-xs text-muted">
-          С
-          <input
-            type="date"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-            className="rounded-md border border-line bg-sunken px-2 py-1 text-sm text-ink"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-muted">
-          По
-          <input
-            type="date"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            className="rounded-md border border-line bg-sunken px-2 py-1 text-sm text-ink"
-          />
-        </label>
-        <button
-          type="button"
-          onClick={apply}
-          className="rounded-md bg-ink/10 px-3 py-1.5 text-sm font-medium text-ink hover:bg-ink/20"
-        >
-          Применить
-        </button>
-        <button
-          type="button"
-          onClick={downloadCsv}
-          className="ml-auto rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-muted hover:text-ink"
-        >
-          Скачать CSV
-        </button>
-      </div>
-
-      {/* Состояние */}
-      {loading && <p className="text-sm text-muted">Загрузка…</p>}
-      {error && (
-        <p className="rounded-xl bg-surface p-4 text-sm text-rose-600 shadow-card">
-          Нет данных ДДС — проверьте подключение к финансовому модулю.
-        </p>
-      )}
-
-      {data && !loading && (
-        <>
-          {/* Карточки-KPI */}
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Card title="Поступления" value={formatByn(parseFloat(data.inflows))} tone="pos" />
-            <Card title="Выбытия" value={formatByn(parseFloat(data.outflows))} tone="neg" />
-            <Card title="Нетто" value={formatByn(net)} tone={netTone} />
-            <div className="rounded-xl bg-surface p-4 shadow-card">
-              <div className="text-xs font-medium text-muted">Остаток на счёте</div>
-              <div className="mt-1 text-lg font-bold text-muted">
-                {data.bank_balance != null ? formatByn(parseFloat(data.bank_balance)) : "—"}
-              </div>
-              {data.bank_balance == null && (
-                <div className="mt-0.5 text-xs text-muted">нет связи с 1С</div>
-              )}
-            </div>
-          </div>
-
-          {/* Разбивка по видам */}
-          <div className="overflow-hidden rounded-xl bg-surface shadow-card">
-            <div className="border-b border-line px-4 py-2.5 text-xs text-muted">
-              Разбивка · {data.period_from ?? "начало"} — {data.period_to ?? "сейчас"} ·{" "}
-              {data.currency}
-            </div>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-line">
-                  <th className="px-4 py-2 text-left font-medium text-muted">Вид</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted">Сумма, BYN</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(data.breakdown).map(([kind, amount]) => {
-                  const val = parseFloat(amount);
-                  const isInflow = kind === "receivable";
-                  return (
-                    <tr key={kind} className="border-b border-line last:border-0">
-                      <td className="px-4 py-3 text-ink">
-                        {DDS_BREAKDOWN_LABELS[kind] ?? kind}
-                      </td>
-                      <td
-                        className={`px-4 py-3 text-right tabular-nums ${
-                          val === 0
-                            ? "text-muted"
-                            : isInflow
-                              ? "text-emerald-600"
-                              : "text-rose-600"
-                        }`}
-                      >
-                        {val !== 0 ? formatByn(val) : <span className="text-muted">—</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ──────────────────────────── Tab: Баланс (Р7) ────────────────────────────
-
-interface BalanceResp {
-  as_of: string;
-  currency: string;
-  accounts_receivable: string;
-  cash: string | null;
-  inventory_value: string | null;
-  total_assets: string;
-  accounts_payable: string;
-  payroll_payable: string;
-  tax_payable: string;
-  total_liabilities: string;
-  equity: string;
-}
-
-function BalanceTab() {
-  const today = new Date().toISOString().slice(0, 10);
-  const [asOf, setAsOf] = useState(today);
-  const [query, setQuery] = useState(`as_of=${today}`);
-
-  const { data, loading, error } = useFetch<BalanceResp>(`/api/finance/balance-sheet?${query}`);
-
-  const apply = useCallback(() => {
-    setQuery(`as_of=${asOf}`);
-  }, [asOf]);
-
-  const downloadCsv = useCallback(() => {
-    const url = `/api/finance/balance-sheet?as_of=${asOf}&format=csv`;
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `balance_sheet_${asOf}.csv`;
-    a.click();
-  }, [asOf]);
-
-  const equity = data ? parseFloat(data.equity) : 0;
-  const equityTone = equity > 0 ? "pos" : equity < 0 ? "neg" : undefined;
-
-  return (
-    <div className="space-y-4">
-      {/* Фильтр даты */}
-      <div className="flex flex-wrap items-end gap-3 rounded-xl bg-surface p-4 shadow-card">
-        <label className="flex flex-col gap-1 text-xs text-muted">
-          На дату
-          <input
-            type="date"
-            value={asOf}
-            onChange={(e) => setAsOf(e.target.value)}
-            className="rounded-md border border-line bg-sunken px-2 py-1 text-sm text-ink"
-          />
-        </label>
-        <button
-          type="button"
-          onClick={apply}
-          className="rounded-md bg-ink/10 px-3 py-1.5 text-sm font-medium text-ink hover:bg-ink/20"
-        >
-          Применить
-        </button>
-        <button
-          type="button"
-          onClick={downloadCsv}
-          className="ml-auto rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium text-muted hover:text-ink"
-        >
-          Скачать CSV
-        </button>
-      </div>
-
-      {loading && <p className="text-sm text-muted">Загрузка…</p>}
-      {error && (
-        <p className="rounded-xl bg-surface p-4 text-sm text-rose-600 shadow-card">
-          Нет данных баланса — проверьте подключение к финансовому модулю.
-        </p>
-      )}
-
-      {data && !loading && (
-        <>
-          {/* Две колонки: Активы / Пассивы */}
-          <div className="grid gap-4 md:grid-cols-2">
-            {/* Активы */}
-            <div className="overflow-hidden rounded-xl bg-surface shadow-card">
-              <div className="border-b border-line px-4 py-2.5 text-sm font-semibold text-ink">
-                Активы · {data.currency}
-              </div>
-              <table className="w-full text-sm">
-                <tbody>
-                  <tr className="border-b border-line">
-                    <td className="px-4 py-3 text-muted">Дебиторская задолженность</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-ink">
-                      {formatByn(parseFloat(data.accounts_receivable))}
-                    </td>
-                  </tr>
-                  <tr className="border-b border-line">
-                    <td className="px-4 py-3 text-muted">Денежные средства (банк)</td>
-                    <td className={`px-4 py-3 text-right tabular-nums ${data.cash == null ? "text-muted" : "text-ink"}`}>
-                      {data.cash != null ? formatByn(parseFloat(data.cash)) : <span className="text-xs">нет связи с 1С</span>}
-                    </td>
-                  </tr>
-                  <tr className="border-b border-line">
-                    <td className="px-4 py-3 text-muted">Запасы (склад)</td>
-                    <td className={`px-4 py-3 text-right tabular-nums ${data.inventory_value == null ? "text-muted" : "text-ink"}`}>
-                      {data.inventory_value != null
-                        ? formatByn(parseFloat(data.inventory_value))
-                        : <span className="text-xs">нет связи с 1С</span>}
-                    </td>
-                  </tr>
-                  <tr className="bg-sunken">
-                    <td className="px-4 py-3 font-semibold text-ink">ИТОГО Активы</td>
-                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-ink">
-                      {formatByn(parseFloat(data.total_assets))}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            {/* Пассивы */}
-            <div className="overflow-hidden rounded-xl bg-surface shadow-card">
-              <div className="border-b border-line px-4 py-2.5 text-sm font-semibold text-ink">
-                Пассивы · {data.currency}
-              </div>
-              <table className="w-full text-sm">
-                <tbody>
-                  <tr className="border-b border-line">
-                    <td className="px-4 py-3 text-muted">Кредиторская задолженность</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-ink">
-                      {formatByn(parseFloat(data.accounts_payable))}
-                    </td>
-                  </tr>
-                  <tr className="border-b border-line">
-                    <td className="px-4 py-3 text-muted">Задолженность по ФОТ</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-ink">
-                      {formatByn(parseFloat(data.payroll_payable))}
-                    </td>
-                  </tr>
-                  <tr className="border-b border-line">
-                    <td className="px-4 py-3 text-muted">Задолженность по налогам</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-ink">
-                      {formatByn(parseFloat(data.tax_payable))}
-                    </td>
-                  </tr>
-                  <tr className="bg-sunken">
-                    <td className="px-4 py-3 font-semibold text-ink">ИТОГО Пассивы</td>
-                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-ink">
-                      {formatByn(parseFloat(data.total_liabilities))}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Капитал */}
-          <div className="overflow-hidden rounded-xl bg-surface shadow-card">
-            <table className="w-full text-sm">
-              <tbody>
-                <tr>
-                  <td className="px-4 py-4 text-base font-bold text-ink">Капитал (Equity)</td>
-                  <td
-                    className={`px-4 py-4 text-right text-base tabular-nums font-bold ${
-                      equityTone === "pos"
-                        ? "text-emerald-600"
-                        : equityTone === "neg"
-                          ? "text-rose-600"
-                          : "text-ink"
-                    }`}
-                  >
-                    {formatByn(equity)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <p className="px-4 pb-3 text-xs text-muted">
-              На {data.as_of}. Equity = Активы − Пассивы. Поля «нет связи с 1С» считаются как 0 в итоге.
-            </p>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 // ──────────────────────────── Tab 6: Reconcile с 1С ────────────────────────────
+
+const ReconcileSection = ({
+  title,
+  rows,
+  tone,
+}: {
+  title: string;
+  rows: { ref: string | null; amount: string; counterparty_ref: string | null }[];
+  tone?: "ok" | "warn";
+}) => (
+  <div className="overflow-hidden rounded-xl bg-surface shadow-card">
+    <div
+      className={`border-b border-line px-4 py-2.5 text-sm font-semibold ${
+        tone === "ok" ? "text-emerald-600" : tone === "warn" ? "text-amber-600" : "text-ink"
+      }`}
+    >
+      {title} · {rows.length}
+    </div>
+    {rows.length === 0 ? (
+      <p className="px-4 py-4 text-sm text-muted">Пусто</p>
+    ) : (
+      <table className="w-full text-sm">
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={`${r.ref}-${i}`} className="border-b border-line last:border-0">
+              <td className="px-4 py-2.5 text-ink">{r.ref ?? "—"}</td>
+              <td className="px-4 py-2.5 text-muted">
+                {r.counterparty_ref ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span>{r.counterparty_ref}</span>
+                    <SourceTag entity="counterparty" source="1c" unp={r.counterparty_ref} />
+                  </span>
+                ) : (
+                  "—"
+                )}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums text-ink">
+                {r.amount} BYN
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
+  </div>
+);
 
 function ReconcileTab() {
   const { data, loading, error } = useFetch<ReconResp>("/api/finance/reconcile-1c");
@@ -1419,60 +978,15 @@ function ReconcileTab() {
       </div>
     );
   }
-  const Section = ({
-    title,
-    rows,
-    tone,
-  }: {
-    title: string;
-    rows: { ref: string | null; amount: string; counterparty_ref: string | null }[];
-    tone?: "ok" | "warn";
-  }) => (
-    <div className="overflow-hidden rounded-xl bg-surface shadow-card">
-      <div
-        className={`border-b border-line px-4 py-2.5 text-sm font-semibold ${
-          tone === "ok" ? "text-emerald-600" : tone === "warn" ? "text-amber-600" : "text-ink"
-        }`}
-      >
-        {title} · {rows.length}
-      </div>
-      {rows.length === 0 ? (
-        <p className="px-4 py-4 text-sm text-muted">Пусто</p>
-      ) : (
-        <table className="w-full text-sm">
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={`${r.ref}-${i}`} className="border-b border-line last:border-0">
-                <td className="px-4 py-2.5 text-ink">{r.ref ?? "—"}</td>
-                <td className="px-4 py-2.5 text-muted">
-                  {r.counterparty_ref ? (
-                    <span className="inline-flex items-center gap-2">
-                      <span>{r.counterparty_ref}</span>
-                      <SourceTag entity="counterparty" source="1c" unp={r.counterparty_ref} />
-                    </span>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-ink">
-                  {r.amount} BYN
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
-  );
   return (
     <>
       <p className="text-xs text-muted">
         На {data.as_of}. Источник: {data.source}. ERP-сторона только читает 1С — записи нет.
       </p>
       <div className="mt-2 grid gap-4 md:grid-cols-3">
-        <Section title="Совпало" rows={data.matched} tone="ok" />
-        <Section title="Только в ERP" rows={data.only_in_erp} tone="warn" />
-        <Section title="Только в 1С" rows={data.only_in_1c} tone="warn" />
+        <ReconcileSection title="Совпало" rows={data.matched} tone="ok" />
+        <ReconcileSection title="Только в ERP" rows={data.only_in_erp} tone="warn" />
+        <ReconcileSection title="Только в 1С" rows={data.only_in_1c} tone="warn" />
       </div>
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <div className="rounded-xl bg-surface p-4 shadow-card">

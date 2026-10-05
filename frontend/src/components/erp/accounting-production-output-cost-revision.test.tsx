@@ -154,7 +154,7 @@ it("refuses a retry when the saved command changed in another tab", async () => 
   const key = 'production-output-cost-revision:["1","2026-10","chief"]';
   const values = new Map([[key, JSON.stringify({ org: "1", month: "2026-10", principal: "chief", command })]]);
   vi.stubGlobal("localStorage", { getItem: (item: string) => values.get(item) ?? null, setItem: (item: string, value: string) => values.set(item, value), removeItem: (item: string) => values.delete(item), clear: () => values.clear() });
-  const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () => ({ organization_id: 1, principal: "chief", can_confirm: true }) }));
+  const fetcher = vi.fn<(url: string) => Promise<unknown>>(async () => ({ ok: true, json: async () => ({ organization_id: 1, principal: "chief", can_confirm: true }) }));
   vi.stubGlobal("fetch", fetcher);
   render(<AccountingProductionOutputCostRevision org="1" month="2026-10" disabled={false} />);
   const retry = await screen.findByRole("button", { name: "Повторить тот же запрос" });

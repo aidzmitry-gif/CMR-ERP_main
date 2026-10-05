@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { AccountingChart } from "./accounting-chart";
@@ -139,4 +140,100 @@ it("treats a 5xx adoption result as unknown and retries its frozen body", async 
   expect(await screen.findByText("Запись о рассмотрении каталога сохранена сервером.")).toBeInTheDocument();
   expect(posts).toHaveLength(2);
   expect(posts[1]).toBe(posts[0]);
+});
+
+it("keeps an unknown adoption in its original organization across a switch and exact retry", async () => {
+  const posts: { url: string; body: string }[] = [];
+  adoptionPost = async (url, init) => {
+    posts.push({ url, body: String(init?.body) });
+    if (posts.length === 1) throw new Error("network lost");
+    const body = JSON.parse(posts[0].body) as { request_key: string; effective_from: string; evidence: string };
+    return respond({ ...adoption(1, body.request_key), ...body });
+  };
+  render(<AccountingChart />);
+  await screen.findByText("Товары на складах");
+  fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
+  await screen.findByText(/запись о рассмотрении нормативного каталога не найдена/i);
+  fireEvent.change(screen.getByLabelText("Дата рассмотрения каталога"), { target: { value: "2026-10-01" } });
+  fireEvent.change(screen.getByLabelText("Основание рассмотрения каталога"), { target: { value: "Original organization evidence" } });
+  fireEvent.click(screen.getByText("Зафиксировать рассмотрение каталога"));
+  expect(await screen.findByRole("alert")).toHaveTextContent(/Статус принятия неизвестен/);
+
+  fireEvent.change(screen.getByLabelText("Юридическое лицо"), { target: { value: "2" } });
+  fireEvent.click(screen.getByText("Повторить фиксацию рассмотрения"));
+  expect(await screen.findByRole("alert")).toHaveTextContent(/для другого юрлица/);
+  expect(posts).toHaveLength(1);
+  expect(screen.getByLabelText("Дата рассмотрения каталога")).toBeDisabled();
+  expect(screen.getByLabelText("Основание рассмотрения каталога")).toBeDisabled();
+  expect(screen.getByRole("status")).toHaveTextContent("Original organization evidence");
+
+  fireEvent.change(screen.getByLabelText("Юридическое лицо"), { target: { value: "1" } });
+  fireEvent.click(screen.getByText("Повторить фиксацию рассмотрения"));
+  await screen.findByText("Запись о рассмотрении каталога сохранена сервером.");
+  expect(posts).toHaveLength(2);
+  expect(posts[1]).toEqual(posts[0]);
+  expect(posts[0].url).toBe("/api/accounting/organizations/1/catalog-adoptions");
+  expect(screen.getByLabelText("Дата рассмотрения каталога")).toBeEnabled();
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+});
+
+it("unlocks a known rejected adoption and sends a new explicit command with a new key", async () => {
+  const keys = ["00000000-0000-4000-8000-000000000011", "00000000-0000-4000-8000-000000000012"];
+  vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValueOnce(keys[0]).mockReturnValueOnce(keys[1]) });
+  const posts: { request_key: string; effective_from: string; evidence: string }[] = [];
+  adoptionPost = async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as typeof posts[number];
+    posts.push(body);
+    return posts.length === 1 ? respond({ detail: "Explicit rejection" }, false, 400) : respond({ ...adoption(1, body.request_key), ...body });
+  };
+  render(<AccountingChart />);
+  await screen.findByText("Товары на складах");
+  fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
+  await screen.findByText(/запись о рассмотрении нормативного каталога не найдена/i);
+  fireEvent.change(screen.getByLabelText("Дата рассмотрения каталога"), { target: { value: "2026-10-01" } });
+  fireEvent.change(screen.getByLabelText("Основание рассмотрения каталога"), { target: { value: "Rejected evidence" } });
+  fireEvent.click(screen.getByText("Зафиксировать рассмотрение каталога"));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Explicit rejection");
+  expect(screen.getByLabelText("Дата рассмотрения каталога")).toBeEnabled();
+  expect(screen.getByLabelText("Основание рассмотрения каталога")).toBeEnabled();
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Дата рассмотрения каталога"), { target: { value: "2026-10-02" } });
+  fireEvent.change(screen.getByLabelText("Основание рассмотрения каталога"), { target: { value: "Corrected evidence" } });
+  fireEvent.click(screen.getByText("Зафиксировать рассмотрение каталога"));
+  await screen.findByText("Запись о рассмотрении каталога сохранена сервером.");
+  expect(posts).toEqual([
+    { request_key: keys[0], effective_from: "2026-10-01", evidence: "Rejected evidence" },
+    { request_key: keys[1], effective_from: "2026-10-02", evidence: "Corrected evidence" },
+  ]);
+});
+
+it("locks the organization selector while an adoption POST is pending and unlocks after completion", async () => {
+  let finishPost!: () => void;
+  const posts: string[] = [];
+  adoptionPost = async (url, init) => {
+    posts.push(url);
+    const body = JSON.parse(String(init?.body)) as { request_key: string; effective_from: string; evidence: string };
+    await new Promise<void>((resolve) => { finishPost = resolve; });
+    return respond({ ...adoption(1, body.request_key), ...body });
+  };
+  render(<AccountingChart />);
+  await screen.findByText("Товары на складах");
+  fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
+  await screen.findByText(/запись о рассмотрении нормативного каталога не найдена/i);
+  fireEvent.change(screen.getByLabelText("Дата рассмотрения каталога"), { target: { value: "2026-10-01" } });
+  fireEvent.change(screen.getByLabelText("Основание рассмотрения каталога"), { target: { value: "Deferred organization evidence" } });
+  fireEvent.click(screen.getByText("Зафиксировать рассмотрение каталога"));
+  const organization = screen.getByLabelText("Юридическое лицо");
+  expect(organization).toBeDisabled();
+  await userEvent.setup().selectOptions(organization, "2");
+  expect(organization).toHaveValue("1");
+  expect(posts).toEqual(["/api/accounting/organizations/1/catalog-adoptions"]);
+  finishPost();
+  await screen.findByText("Запись о рассмотрении каталога сохранена сервером.");
+  expect(organization).toBeEnabled();
+  await userEvent.setup().selectOptions(organization, "2");
+  expect(organization).toHaveValue("2");
+  await screen.findByText(/запись о рассмотрении нормативного каталога не найдена/i);
+  expect(screen.queryByText("Основание: Deferred organization evidence")).not.toBeInTheDocument();
+  expect(posts).toHaveLength(1);
 });

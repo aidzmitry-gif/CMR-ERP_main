@@ -109,7 +109,6 @@ export function AccountingBankImport({ org, accounts, policyId, date, onDate, on
 
   // A changed organisation invalidates the selected source and any in-flight
   // mapping lookup; a late response must not configure the new organisation.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     mappingRequest.current += 1;
     setSelectedId(null); setPreview(null); setPrepared(null); setMappingLocked(false); setMappingError("");

@@ -63,7 +63,6 @@ export function AccountingBankMapping({ org, accounts, onChanged }: {
 
   // Organisation boundaries are security boundaries: never render or mutate
   // data obtained for a previous organisation.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     currentOrg.current = org;
     sequence.current += 1;
@@ -74,7 +73,6 @@ export function AccountingBankMapping({ org, accounts, onChanged }: {
 
   // The parent list is only a display cache. Create must resolve accounts from
   // the accounting API at the requested effective date.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     const request = ++accountsSequence.current;
     if (!org || !validFrom) { setDatedAccounts([]); return; }

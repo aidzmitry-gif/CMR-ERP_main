@@ -14,6 +14,7 @@ type NormativeEvidence = { document: string; url: string; source_kind: string; c
 type NormativeReview = { status: string; checked_at: string; verified_through: string; source_access?: string; note?: string; blocking_reasons?: string[]; evidence?: NormativeEvidence[] };
 type Catalog = { version: string; source: string; verified_through: string; current_revision_reference?: string; current_normative_verified: boolean; chart_codes_verified?: boolean; verification_note?: string; normative_review?: NormativeReview; known_amendments?: CatalogAmendment[]; accounts: ChartRow[] };
 type Org = { id: number; name: string; unp: string };
+type PendingAdoption = { org: string; body: CatalogAdoptionCommand };
 const labels: Record<string, string> = { counterparty: "Контрагент", contract: "Договор", settlement_document: "Документ расчётов", warehouse: "Склад", sku: "Номенклатура", lot: "Партия", order: "Заказ", employee: "Сотрудник", asset: "Основное средство", department: "Подразделение", owner: "Владелец", serial: "Серийный номер" };
 const amendmentImpact = (amendment: CatalogAmendment) => amendment.impact_on_chart === "no_chart_code_change"
   ? "номера счетов и субсчета в проверенном тексте не изменены."
@@ -45,7 +46,8 @@ export function AccountingChart() {
   const [adoptionEvidence, setAdoptionEvidence] = useState("");
   const [adoptionBusy, setAdoptionBusy] = useState(false);
   const [notice, setNotice] = useState("");
-  const pendingAdoption = useRef<{ org: string; body: CatalogAdoptionCommand } | null>(null);
+  const [frozenAdoption, setFrozenAdoption] = useState<PendingAdoption | null>(null);
+  const pendingAdoption = useRef<PendingAdoption | null>(null);
   const adoptionLoad = useRef(0);
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
@@ -77,29 +79,31 @@ export function AccountingChart() {
     if (!frozen && !key) { setError("Браузер не поддерживает crypto.randomUUID; подтверждение каталога не отправлено."); return; }
     const body = frozen?.body ?? { request_key: key!, effective_from: adoptionEffective, evidence: adoptionEvidence.trim() };
     if (!body.effective_from || !body.evidence) { setError("Укажите дату действия и evidence подтверждения каталога."); return; }
-    pendingAdoption.current = { org, body };
+    const pending = { org, body };
+    pendingAdoption.current = pending;
+    setFrozenAdoption(pending);
     setAdoptionBusy(true); setError(""); setNotice("");
     try {
       const saved = await createCatalogAdoption(Number(org), body);
       pendingAdoption.current = null;
+      setFrozenAdoption(null);
       adoptionLoad.current += 1;
       setAdoptions((current) => [saved, ...(current ?? []).filter((row) => row.catalog_adoption_id !== saved.catalog_adoption_id)]);
       setNotice("Запись о рассмотрении каталога сохранена сервером.");
     } catch (reason) {
       const error = reason as CatalogAdoptionApiError;
-      if (error.known) pendingAdoption.current = null;
+      if (error.known) { pendingAdoption.current = null; setFrozenAdoption(null); }
       setError(error.message);
     } finally { setAdoptionBusy(false); }
   }
   const source = mode === "catalog" ? catalog?.accounts : working;
   const rows = source?.filter((row) => `${row.code} ${row.title}`.toLocaleLowerCase("ru").includes(query.trim().toLocaleLowerCase("ru"))).sort((a, b) => Number(Boolean(a.off_balance || a.category === "off_balance")) - Number(Boolean(b.off_balance || b.category === "off_balance")) || a.code.localeCompare(b.code, "ru", { numeric: true }));
-  const frozenAdoption = pendingAdoption.current;
   return <div className="min-w-0 w-0 flex-1 space-y-4 p-6 lg:pr-24 text-ink">
     <header className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-2xl font-semibold">План счетов</h1><p className="mt-1 text-sm text-muted">Справочник Беларуси и рабочий план каждого юридического лица.</p></div><Link className="text-sm text-accent underline" href="/erp/accounting">Перейти в бухгалтерию</Link></header>
     {error && <p role="alert" className="rounded-xl border border-red-300 p-3 text-red-700">{error}</p>}
     <div className="flex flex-wrap gap-3">{[["catalog", "Типовой справочник"], ["working", "Рабочий план"], ["settings", "Настроить счета"]].map(([id, title]) => <Button key={id} variant={mode === id ? "primary" : "secondary"} onClick={() => setMode(id)}>{title}</Button>)}</div>
     {mode === "catalog" && catalog && <div className="rounded-xl border border-line bg-surface p-3 text-sm text-muted"><p>Основа — постановление Минфина № 50, транскрипция проверена по {catalog.verified_through}. {catalog.chart_codes_verified ? "Номера счетов и субсчета приложения 1 сверены с применимой первичной редакцией." : "Доступный официальный текст подтверждает исторический справочник; актуальность на 2026 год требует первичной сверки."} <a className="text-accent underline" href={catalog.source} target="_blank" rel="noreferrer">Официальный источник</a></p>{catalog.verification_note && <p className="mt-2">{catalog.verification_note}</p>}{catalog.normative_review && <><p className="mt-2">Проверка сведений: {catalog.normative_review.checked_at}; {catalog.chart_codes_verified ? "приложение 1 сверено с применимой первичной редакцией." : "статус: первичная проверка редакции 2026 года требуется."} Проверено до {catalog.normative_review.verified_through}.</p>{catalog.normative_review.blocking_reasons?.length ? <div className="mt-2"><b className="text-ink">До регламентированного применения нужно:</b><ul className="list-disc pl-5">{catalog.normative_review.blocking_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></div> : null}{catalog.normative_review.evidence?.length ? <div className="mt-2"><b className="text-ink">Источники проверки:</b><ul className="list-disc pl-5">{catalog.normative_review.evidence.map((item) => <li key={item.document}><a className="text-accent underline" href={item.url} target="_blank" rel="noreferrer">{item.document}</a>: {item.coverage} {item.full_text_verified ? "Полный текст проверен." : "Полный текст не получен."}</li>)}</ul></div> : null}</>}{catalog.known_amendments?.length ? <ul className="mt-2 list-disc pl-5">{catalog.known_amendments.map((amendment) => <li key={amendment.document}><span>{amendment.document} от {amendment.date}, действует с {amendment.effective_from}: {amendmentImpact(amendment)}</span>{amendment.chart_appendix_verified && <div className="mt-1">Приложение 1 сверено с применимой первичной редакцией.</div>}{amendment.review_scope && <div className="mt-1">Область проверки: {amendment.review_scope}</div>}{amendment.evidence && <div className="mt-1">{amendment.evidence}</div>}{amendment.source_url && <a className="mt-1 inline-block text-accent underline" href={amendment.source_url} target="_blank" rel="noreferrer">Открыть карточку кандидата</a>}</li>)}</ul> : null}</div>}
-    {mode !== "catalog" && <div className="flex flex-wrap gap-3 rounded-xl border border-line bg-surface p-4"><label className="min-w-64 flex-1 text-sm">Юридическое лицо<Select aria-label="Юридическое лицо" value={org} onChange={(e) => { setWorking(null); setError(""); setOrg(e.target.value); }}><option value="">Выберите организацию</option>{organizations.map((o) => <option key={o.id} value={o.id}>{o.name} · {o.unp}</option>)}</Select></label><label className="text-sm">Действует на дату<Input aria-label="Дата рабочего плана" type="date" value={on} onChange={(e) => { setWorking(null); setOn(e.target.value); }} /></label></div>}
+    {mode !== "catalog" && <div className="flex flex-wrap gap-3 rounded-xl border border-line bg-surface p-4"><label className="min-w-64 flex-1 text-sm">Юридическое лицо<Select aria-label="Юридическое лицо" value={org} disabled={adoptionBusy} onChange={(e) => { setWorking(null); setError(""); setOrg(e.target.value); }}><option value="">Выберите организацию</option>{organizations.map((o) => <option key={o.id} value={o.id}>{o.name} · {o.unp}</option>)}</Select></label><label className="text-sm">Действует на дату<Input aria-label="Дата рабочего плана" type="date" value={on} onChange={(e) => { setWorking(null); setOn(e.target.value); }} /></label></div>}
     {mode === "settings" ? <AccountingControls key={org} org={org} onChanged={() => { setWorking(null); setReload((v) => v + 1); }} /> : <>
       {mode === "working" && org && <section className="space-y-3 rounded-xl border border-line bg-surface p-4" aria-label="Рассмотрение нормативного каталога">
         <div><h2 className="font-semibold">Рассмотрение нормативного каталога</h2>{adoptions === null ? <p className="text-sm text-muted">Загрузка записей рассмотрения…</p> : activeAdoption ? <div className="mt-2 space-y-1 text-sm"><p>Рассмотрено с {activeAdoption.effective_from}. Версия: {activeAdoption.catalog_version}.</p><p>Источник: <a className="text-accent underline" href={activeAdoption.catalog_source} target="_blank" rel="noreferrer">{activeAdoption.catalog_source}</a></p><p>Основание: {activeAdoption.evidence}</p><p>Review-state: {reviewSummary(activeAdoption.catalog_review_state)}</p><p>{activeAdoption.current_normative_verified ? "Нормативная верификация указана сервером." : "Регламентированная готовность не подтверждена: server current_normative_verified=false."}</p></div> : <p className="mt-2 text-sm text-muted">На выбранную дату запись о рассмотрении нормативного каталога не найдена; готовность не предполагается.</p>}</div>
