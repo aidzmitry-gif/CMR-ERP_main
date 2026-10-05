@@ -12,10 +12,10 @@ from pathlib import Path, PurePosixPath
 
 CHAIN = 'CRM-REL-001'
 OPT_IN = CHAIN + '-isolated-only'
-APPLICATION_CHECKPOINT = 'a2e9f615237d3af33e7f4292f36ed529f6164b70'
+APPLICATION_CHECKPOINT = 'efc5e15c234c30ad6469315e806f3f98a0ffb394'
 RUNTIME = 'sha256:469fbba3826e14647fb9b03280843ff591fc6f875244bb17e08f51043ef21319'
 RUNTIME_ALIAS = 'crm-rel-001-g06-runtime:469fbba3826e'
-HEAD = 'crm_rel_001_output_source_01'
+HEAD = 'crm_rel_001_native_catalog_01'
 PINS = {
     'finance': '59832b2f14a2ee02d8db266a67f8206616bdcd94',
     'hr': 'f8a6e0142f1920b07ec56818f42d156a602ff9c3',
