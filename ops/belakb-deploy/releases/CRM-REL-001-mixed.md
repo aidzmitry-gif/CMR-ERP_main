@@ -1,11 +1,13 @@
 # CRM-REL-001 mixed release preparation
 
-Status: **ISOLATED REHEARSAL VERIFIED**, `release_ready=false`. This route exports committed
-backend sources and proves an isolated migration/restore. It has no production
+Status: **CURRENT SOURCE RENEWAL IN PROGRESS**, `release_ready=false`. This route exports committed
+backend sources for isolated verification. The dated image/migration/restore results
+below are historical; current runtime acceptance remains pending. It has no production
 apply command and does not modify or bootstrap `/opt/belakb-deploy-v1`.
 
-Backend application checkpoint: `a2e9f615237d3af33e7f4292f36ed529f6164b70`.
-Current frontend application checkpoint: `a6644cc29bae24109daf98ebaed316a1e4b782df`.
+Backend application checkpoint: `e52994932a56c7f371c3d120234ba83a9a0a17a1`.
+Current frontend source checkpoint: `e52994932a56c7f371c3d120234ba83a9a0a17a1`;
+its new immutable build is pending.
 The final package checkpoint must be an exact commit containing these ops files;
 its selected backend Git objects and ten module gitlinks must equal the accepted
 backend checkpoint. Working files and untracked files are never exported.
@@ -38,7 +40,7 @@ The cached runtime already passed pip/native PDF probes, but is not a release im
 requires an existing private 0700 owner directory on server. It repeats pip check, exact file hashes/no stale files,
 entrypoint/provenance, requirements compatibility, imports, Alembic head and
 native Cyrillic PDF extraction. These probes have no source bind or network access.
-The required head is `crm_rel_001_output_source_01`.
+The required head is `crm_rel_001_native_catalog_01`.
 
 Every probe fsyncs an atomic private JSON record containing name, owner, immutable
 image, network and cidfile **before Docker create**, and uses `--cidfile` to retain
@@ -148,10 +150,12 @@ change that package identity or the application Git objects.
 The canonical evidence is under `.harness/work/CRM-REL-001-evidence` in the project
 workspace: `G06-backend-pg-startup-result.json`, `G06-backend-r2-copy-result.json`,
 `G06-post-copy-audit.json`, `G06-frontend-linux-r2-result.json` and
-`G06-source-reuse-boundary.json`. G04/G13 synthetic financial/UI scenarios remain
-applicable: only these ops files changed after their accepted application commit;
+`G06-source-reuse-boundary.json`. Within that historical source boundary,
+G04/G13 synthetic financial/UI scenarios remained applicable: only those ops files
+changed after their accepted application commit;
 the 747 common exported files match after LF/CRLF normalization. Test-only files
 and private module documentation are deliberately absent from the runtime image.
+These historical results do not accept the current e529 runtime.
 
 Historical July/August close is blocked by missing confirmed analytical opening
 balances, source/OSV snapshot identity and unexplained turnover differences
@@ -161,7 +165,7 @@ G10/G11 must resolve these prerequisites before G07 RELEASE_READY; production
 freeze/final backup/OIDC browser acceptance/switch/final receipt belong to the
 existing release coordinator. The v1 mixed-release refusal remains unchanged.
 
-## Exact frontend renewal and current server baseline — 2026-10-04
+## Historical frontend renewal and server baseline — 2026-10-04
 
 G15 checkpoint `a6644cc29bae24109daf98ebaed316a1e4b782df` changes only the
 login error guard and its regression test. An OIDC error now remains readable
@@ -190,14 +194,14 @@ The SSH access, expected host/Node and existing tailscaled service were confirme
 Before/after observations at 04:01:47 / 04:04:07 UTC agree on production
 container IDs, images, schema `0116`, runtime/environment/Compose hashes and
 installed v1 runner hashes. No production or access configuration changed in
-this run. Current runtime projection SHA256:
+this run. Runtime projection SHA256 observed in that rehearsal:
 `860a14eb63d10d7ecc57fbfb8a164e2ca3d4af65df6b20e6f24d9c063ee81430`.
-Current baseline evidence: `G16-frontend-renewal/after-baseline.json`; the
+Dated baseline evidence: `G16-frontend-renewal/after-baseline.json`; the
 comparison excludes only the observation timestamp.
 
-Measured Git reuse confirms unchanged backend, migrations, ten module gitlinks,
-business pages and auth kernel. The accepted backend image and historical G06
-copy/restore proof above remain applicable within that unchanged source boundary;
+Measured Git reuse on October4 confirmed unchanged backend, migrations, ten module gitlinks,
+business pages and auth kernel. The then-accepted backend image and historical G06
+copy/restore proof above applied within that unchanged source boundary;
 no new database dump or migration run is claimed for October4. The old frontend
 runtime proof is replaced by G16. Evidence under `G16-frontend-renewal` includes
 `linux-result.json`, `server-readback.json`, `baseline-comparison.json` and
@@ -208,3 +212,20 @@ production callback; an existing isolated callback/IdP allowlist/backend must be
 proved before attempting authenticated candidate access. G10/G11 discrepancies
 remain deferred by the user. `release_ready=false`; no coordinator handoff,
 production switch, live 1C/ERP close, or push has occurred.
+
+## Current source renewal — 2026-10-06
+
+Application e529 includes the accepted G19 complete-card save contract, G20 safe
+sales counterparty resolution (sales `0c447381a3f95b8f576dc2bcf92f267bc22ba2ee`)
+and three synthetic legal addresses in the G09 concurrency fixture. The other nine
+module pins, runtime dependency image and source/tree/secret/no-apply guards remain
+unchanged. The exact tooling package checkpoint is recorded only after the private
+two-path checkpoint and committed-source export; it is pending here.
+
+Required current evidence remains pending: exact source manifest and immutable backend
+image, real PostgreSQL concurrency/financial scenarios, fresh production-copy migration
+to `crm_rel_001_native_catalog_01`, independent backup restore, new frontend build and
+authenticated OIDC/browser acceptance. The G09 concurrency test is excluded from the
+backend runtime source policy and requires separately sealed test bytes. Previous a664
+frontend and af9 backend image receipts remain historical and cannot replace these
+current proofs. No production change or RELEASE_READY is claimed.

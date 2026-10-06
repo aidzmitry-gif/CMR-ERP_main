@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 
 CHAIN = 'CRM-REL-001'
 OPT_IN = CHAIN + '-isolated-only'
-APPLICATION_CHECKPOINT = 'af9ba9f879b083758e31bc9296316afc13b92b60'
+APPLICATION_CHECKPOINT = 'e52994932a56c7f371c3d120234ba83a9a0a17a1'
 RUNTIME = 'sha256:469fbba3826e14647fb9b03280843ff591fc6f875244bb17e08f51043ef21319'
 RUNTIME_ALIAS = 'crm-rel-001-g06-runtime:469fbba3826e'
 HEAD = 'crm_rel_001_native_catalog_01'
@@ -24,7 +24,7 @@ PINS = {
     'marketing': 'd4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282',
     'procurement': '0f60bb3173c42ad080301d68586b70abde1ab5ac',
     'production': 'be7d7e198bf09cc41c642d22125db401da5adc48',
-    'sales': '8ff96be028282f6e4cf244d14e58cbf8299b54af',
+    'sales': '0c447381a3f95b8f576dc2bcf92f267bc22ba2ee',
     'service': '3d33800c44865cd7a7373b29192c5d59d3c4bec8',
     'wms': '59de6378f91b803e849c5966b4c606df2b190e9a',
 }
