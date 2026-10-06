@@ -305,15 +305,18 @@ async def test_two_sessions_optimistic_write_conflict(api, session):
 
 async def test_legacy_sales_contract_collision_is_safe_409(api, session):
     await create(api)
+    legacy = Counterparty(name="Другая компания", unp=None)
+    session.add(legacy)
+    await session.commit()
     template = await api.post("/sales/contract-templates", json={"code": "collision", "name": "Договор", "body": "{{buyer.name}}"})
     assert template.status_code == 201
-    deal = await api.post("/sales/deals", json={"number": "COLLISION", "title": "Проверка", "counterparty": "Другая компания"})
+    deal = await api.post("/sales/deals", json={"number": "COLLISION", "title": "Проверка", "counterparty": "Другая компания", "counterparty_id": legacy.id})
     assert deal.status_code == 201
     response = await api.post(f"/sales/deals/{deal.json()['id']}/contract", json={"template_code": "collision", "unp": MNS["unp"]})
     assert response.status_code == 409 and response.json()["detail"]["code"] == "duplicate_unp"
     assert "ids" not in response.json()["detail"]
     await session.rollback()
-    # Creating the deal already established this stub; the rejected contract must
+    # This incomplete historical card already existed; the rejected contract must
     # neither remove it nor assign the conflicting taxpayer identity.
     other = await session.get(Counterparty, deal.json()["counterparty_id"])
     assert other.name == "Другая компания" and other.unp is None

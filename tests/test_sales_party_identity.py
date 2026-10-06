@@ -1,8 +1,9 @@
 """Stable identity wins over colliding or renamed display text."""
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import func, select
 
-from core.domain.models import Counterparty, CounterpartyBranch, Sku
+from core.domain.models import Counterparty, CounterpartyBranch, OutboxEvent, Sku
 from modules.sales.models import Deal, DealDocument, DealItem, PriceQuote
 from modules.sales.party_identity import party_for_deal, prepare_party_change
 from modules.sales.touch_history import SalesTouchHistory
@@ -60,6 +61,69 @@ async def test_api_create_uses_id_and_does_not_trust_label(api, session):
     assert response.status_code == 201, response.text
     assert response.json()["counterparty_id"] == cp.id
     assert response.json()["counterparty"] == "Display"
+
+
+@pytest.mark.parametrize("method", ["POST", "PATCH"])
+async def test_unknown_party_name_cannot_create_incomplete_card(api, session, method):
+    cp = Counterparty(
+        name="Retained party", unp="900000021",
+        requisites={"legal_address": "Synthetic legal address"},
+    )
+    session.add(cp)
+    await session.flush()
+    branch = CounterpartyBranch(legal_entity_id=cp.id, name="Retained branch")
+    session.add(branch)
+    await session.flush()
+    deal = Deal(
+        number="KNOWN-PARTY", title="Keep title", counterparty=cp.name,
+        counterparty_id=cp.id, branch_id=branch.id,
+    )
+    session.add(deal)
+    await session.commit()
+    original = (deal.title, deal.counterparty, deal.counterparty_id, deal.branch_id, cp.revision)
+    counts = {
+        model: await session.scalar(select(func.count()).select_from(model))
+        for model in (Counterparty, Deal, OutboxEvent)
+    }
+    unknown_name = "Submitted private party name"
+    if method == "POST":
+        response = await api.post("/sales/deals", json={
+            "number": "UNKNOWN-PARTY", "title": "New deal", "counterparty": unknown_name,
+        })
+    else:
+        response = await api.patch(f"/sales/deals/{deal.id}", json={
+            "title": "Do not save this edit", "counterparty": unknown_name,
+        })
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert "УНП" in detail and "юридическим адресом" in detail
+    assert unknown_name not in response.text
+    # Committing after the rejected request also detects any unintended pending writes.
+    await session.commit()
+    for model, before in counts.items():
+        assert await session.scalar(select(func.count()).select_from(model)) == before
+    await session.refresh(deal)
+    await session.refresh(cp)
+    assert (deal.title, deal.counterparty, deal.counterparty_id, deal.branch_id, cp.revision) == original
+
+
+@pytest.mark.parametrize("ambiguous", [False, True])
+async def test_existing_name_selection_keeps_identity_and_ambiguity_guard(api, session, ambiguous):
+    cp = Counterparty(name="Existing legacy party")
+    session.add(cp)
+    if ambiguous:
+        session.add(Counterparty(name=cp.name))
+    await session.commit()
+    before = await session.scalar(select(func.count()).select_from(Counterparty))
+    response = await api.post("/sales/deals", json={
+        "number": "EXISTING-NAME", "title": "Choose existing", "counterparty": cp.name,
+    })
+    assert response.status_code == (409 if ambiguous else 201), response.text
+    assert await session.scalar(select(func.count()).select_from(Counterparty)) == before
+    if ambiguous:
+        assert await session.scalar(select(func.count()).select_from(Deal)) == 0
+    else:
+        assert response.json()["counterparty_id"] == cp.id
 
 
 async def test_document_snapshot_keeps_parent_and_branch_after_rename(api, session):
@@ -145,8 +209,8 @@ async def test_invoice_requires_confirmed_price_instead_of_legacy_history(sessio
     session.add_all([DealItem(deal_id=deal.id, sku_id=sku.id, qty=1),
                      PriceQuote(sku_code=sku.code, counterparty=first.name, price=100)])
     await session.commit()
-    from modules.sales.documents import capture
     from modules.sales import routes
+    from modules.sales.documents import capture
     monkeypatch.setattr(routes, '_seller_with_facsimile', lambda core, branding: {})
     doc = DealDocument(deal_id=deal.id, kind="invoice", number="LEGACY-AMBIG", amount=100)
     session.add(doc)
