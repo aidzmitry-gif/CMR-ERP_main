@@ -330,8 +330,13 @@ export function SpravCounterpartyEditor(props: SpravCounterpartyEditorProps) {
     const effectiveUnp = selectedPreview && selectedFields.has("unp")
       ? selectedPreview.values.unp
       : normalize(draft.unp);
+    const effectiveLegalAddress = selectedPreview && selectedFields.has("legal_address")
+      ? normalize(selectedPreview.values.legal_address)
+      : normalize(draft.legal_address);
     if (!effectiveName) return "Укажите название компании или выберите его из предпросмотра.";
-    if (effectiveUnp && !/^\d{9}$/.test(effectiveUnp)) return "УНП должен содержать 9 цифр.";
+    if (!effectiveUnp) return "Укажите УНП компании.";
+    if (!/^[0-9]{9}$/.test(effectiveUnp)) return "УНП должен содержать 9 цифр.";
+    if (!effectiveLegalAddress) return "Укажите юридический адрес компании или выберите его из предпросмотра.";
     if (isEdit && selectedFields.has("unp") && card?.unp && preview?.values.unp !== card.unp) {
       return "Смена УНП существующей карточки через реестр запрещена. Измените УНП вручную без выбора поля реестра.";
     }
@@ -559,6 +564,7 @@ export function SpravCounterpartyEditor(props: SpravCounterpartyEditorProps) {
                     onChange={(event) => updateField("unp", event.target.value)}
                     inputMode="numeric"
                     aria-label="УНП (карточка)"
+                    aria-required="true"
                   />
                   <button
                     type="button"
@@ -577,6 +583,7 @@ export function SpravCounterpartyEditor(props: SpravCounterpartyEditorProps) {
                   value={draft.legal_address}
                   onChange={(event) => updateField("legal_address", event.target.value)}
                   aria-label="Юридический адрес"
+                  aria-required="true"
                 />
               </label>
               <label className="min-w-0 text-sm text-muted">

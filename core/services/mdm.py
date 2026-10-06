@@ -327,6 +327,11 @@ async def save_counterparty(
                 provenance[target] = {"source": registry_data["source"], "at": registry_data["fetched_at"],
                                      "source_url": registry_data["source_url"]}
     cp.provenance, cp.requisites = provenance, requisites
+    if type(cp.unp) is not str or not re.fullmatch(r"[0-9]{9}", cp.unp):
+        raise CounterpartyWriteError("unp_required", "Укажите УНП из 9 цифр", 422)
+    legal_address = requisites.get("legal_address")
+    if type(legal_address) is not str or not legal_address.strip():
+        raise CounterpartyWriteError("legal_address_required", "Укажите юридический адрес", 422)
     if counterparty_id is None:
         await session.flush()  # ID нужен для FK контактов; это ещё не commit.
     contacts_changed = False

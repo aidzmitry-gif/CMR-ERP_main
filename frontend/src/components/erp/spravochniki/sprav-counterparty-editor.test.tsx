@@ -76,6 +76,7 @@ describe("SpravCounterpartyEditor", () => {
     expect(await screen.findByText(/Источник: МНС \(ГРП\)/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать Юридическое наименование" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать УНП" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать Юридический адрес" }));
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
     await waitFor(() => expect(navigation.push).toHaveBeenCalledWith(
@@ -90,8 +91,8 @@ describe("SpravCounterpartyEditor", () => {
     expect(saveBody).toEqual({
       registry: {
         unp: "190000001",
-        fields: ["name", "unp"],
-        preview: { name: "ООО Новая Ромашка", unp: "190000001" },
+        fields: ["name", "unp", "legal_address"],
+        preview: { name: "ООО Новая Ромашка", unp: "190000001", legal_address: registry.address },
       },
     });
     expect(JSON.stringify(saveBody)).not.toContain("provenance");
@@ -109,6 +110,7 @@ describe("SpravCounterpartyEditor", () => {
     render(<SpravCounterpartyEditor mode="create" initialUnp="190000001" />);
 
     fireEvent.change(screen.getByLabelText("Наименование компании"), { target: { value: "Моя компания" } });
+    fireEvent.change(screen.getByLabelText("Юридический адрес"), { target: { value: "Мой юридический адрес" } });
     fireEvent.change(screen.getByLabelText("Банк"), { target: { value: "Мой банк" } });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
@@ -323,6 +325,7 @@ describe("SpravCounterpartyEditor", () => {
     await screen.findByText(/Источник: МНС \(ГРП\)/);
     fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать Юридическое наименование" }));
     fireEvent.change(screen.getByLabelText("Юридическое наименование для документов"), { target: { value: "Ручное имя" } });
+    fireEvent.change(screen.getByLabelText("Юридический адрес"), { target: { value: "Ручной адрес" } });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -344,6 +347,7 @@ describe("SpravCounterpartyEditor", () => {
     const legalChoice = screen.getByRole("checkbox", { name: "Выбрать Юридическое наименование" });
     fireEvent.click(legalChoice);
     fireEvent.change(screen.getByLabelText("Наименование компании"), { target: { value: "Ромашка для менеджеров" } });
+    fireEvent.change(screen.getByLabelText("Юридический адрес"), { target: { value: "Ручной адрес" } });
     expect(legalChoice).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -352,6 +356,51 @@ describe("SpravCounterpartyEditor", () => {
     expect(body.manual.legal_name).toBeUndefined();
     expect(body.registry.fields).toEqual(["name"]);
     expect(body.registry.preview.name).toBe(registry.name);
+  });
+
+  it.each(["create", "edit"] as const)("%s требует УНП и адрес до запроса сохранения", (mode) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    if (mode === "create") {
+      render(<SpravCounterpartyEditor mode="create" />);
+      fireEvent.change(screen.getByLabelText("Наименование компании"), { target: { value: "Компания" } });
+    } else {
+      render(<SpravCounterpartyEditor mode="edit" card={{ ...card, unp: null, requisites: {} }} />);
+      fireEvent.click(screen.getByRole("button", { name: "Редактировать" }));
+    }
+    expect(screen.getByLabelText("УНП (карточка)")).toHaveAttribute("aria-required", "true");
+    expect(screen.getByLabelText("Юридический адрес")).toHaveAttribute("aria-required", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Укажите УНП компании.");
+    fireEvent.change(screen.getByLabelText("УНП (карточка)"), { target: { value: "190000001" } });
+    fireEvent.change(screen.getByLabelText("Юридический адрес"), { target: { value: "  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Укажите юридический адрес компании");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["УНП (карточка)", "Юридический адрес"])("не позволяет очистить обязательное поле %s", (label) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SpravCounterpartyEditor mode="edit" card={card} />);
+    fireEvent.click(screen.getByRole("button", { name: "Редактировать" }));
+    fireEvent.change(screen.getByLabelText(label), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(label === "УНП (карточка)" ? "Укажите УНП" : "Укажите юридический адрес");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("адрес из предпросмотра требует явного выбора", async () => {
+    const fetchMock = vi.fn(async () => response(registry));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SpravCounterpartyEditor mode="create" initialUnp="190000001" />);
+    fireEvent.click(screen.getByRole("button", { name: "Получить по УНП" }));
+    await screen.findByText(/Источник: МНС \(ГРП\)/);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать Юридическое наименование" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Укажите юридический адрес компании");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(navigation.push).not.toHaveBeenCalled();
   });
 
   it("синхронный latch не допускает двойной PATCH до ответа сервера", async () => {

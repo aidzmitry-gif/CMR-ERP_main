@@ -6,7 +6,13 @@ import pytest
 from sqlalchemy import func, insert, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from core.domain.models import Contact, Counterparty, CounterpartyUnpConflict, SurvivorshipRule
+from core.domain.models import (
+    AuditLog,
+    Contact,
+    Counterparty,
+    CounterpartyUnpConflict,
+    SurvivorshipRule,
+)
 from core.services import mdm, reference_import
 from core.services.eventbus import OutboxEventBus
 from modules.sales.touch_history import SalesTouchHistory
@@ -32,7 +38,9 @@ def selection(*fields, data=None):
 
 
 async def create(api, **kwargs):
-    response = await api.post("/system/mdm/counterparty", json={"manual": {"name": "Ручная компания", "unp": "100582333"}, **kwargs})
+    response = await api.post("/system/mdm/counterparty", json={"manual": {
+        "name": "Ручная компания", "unp": "100582333", "legal_address": "Тестовый юридический адрес",
+    }, **kwargs})
     assert response.status_code == 201, response.text
     return response.json()
 
@@ -41,6 +49,95 @@ async def card(api, receipt):
     response = await api.get(f"/system/mdm/counterparty/{receipt['id']}")
     assert response.status_code == 200, response.text
     return response.json()
+
+
+@pytest.mark.parametrize(("manual", "code"), [
+    ({"name": "Компания", "legal_address": "Адрес"}, "unp_required"),
+    ({"name": "Компания", "unp": None, "legal_address": "Адрес"}, "unp_required"),
+    ({"name": "Компания", "unp": "", "legal_address": "Адрес"}, "unp_required"),
+    ({"name": "Компания", "unp": "  ", "legal_address": "Адрес"}, "unp_required"),
+    ({"name": "Компания", "unp": MNS["unp"]}, "legal_address_required"),
+    ({"name": "Компания", "unp": MNS["unp"], "legal_address": None}, "legal_address_required"),
+    ({"name": "Компания", "unp": MNS["unp"], "legal_address": ""}, "legal_address_required"),
+    ({"name": "Компания", "unp": MNS["unp"], "legal_address": " \u00a0 "}, "legal_address_required"),
+])
+async def test_create_requires_final_requisites_before_contact_or_audit_write(api, session, manual, code):
+    response = await api.post("/system/mdm/counterparty", json={
+        "manual": manual, "contacts": [{"full_name": "Не сохранять"}],
+    })
+    assert response.status_code == 422 and response.json()["detail"]["code"] == code
+    for model in (Counterparty, Contact, AuditLog):
+        assert await session.scalar(select(func.count()).select_from(model)) == 0
+
+
+@pytest.mark.parametrize(("patch", "code"), [
+    ({"unp": None}, "unp_required"),
+    ({"unp": "  "}, "unp_required"),
+    ({"legal_address": None}, "legal_address_required"),
+    ({"legal_address": " \u00a0 "}, "legal_address_required"),
+])
+async def test_clearing_required_field_rolls_back_card_contacts_and_audit(api, patch, code):
+    receipt = await create(api, contacts=[{"full_name": "Контакт", "phone": "+375 29 111-22-33"}])
+    before = await card(api, receipt)
+    response = await api.patch(f"/system/mdm/counterparty/{receipt['id']}", json={
+        "expected_revision": before["revision"], "manual": {"name": "Не сохранять", **patch},
+        "contacts": [{"id": before["contacts"][0]["id"], "phone": None}],
+    })
+    assert response.status_code == 422 and response.json()["detail"]["code"] == code
+    after = await card(api, receipt)
+    for field in ("name", "unp", "requisites", "provenance", "revision", "contacts", "audit"):
+        assert after[field] == before[field]
+
+
+@pytest.mark.parametrize(("unp", "requisites", "code"), [
+    (None, {"legal_address": "Адрес"}, "unp_required"),
+    ("не УНП", {"legal_address": "Адрес"}, "unp_required"),
+    (MNS["unp"], {}, "legal_address_required"),
+    (MNS["unp"], {"legal_address": 123}, "legal_address_required"),
+])
+@pytest.mark.parametrize("manual", [{}, {"name": "Не сохранять"}])
+async def test_partial_and_noop_legacy_save_require_requisites(api, session, unp, requisites, code, manual):
+    # Simulate existing data; the ORM/import bypass is a separate, unaccepted slice.
+    cp = Counterparty(name="Старая карточка", unp=unp, requisites=requisites)
+    session.add(cp)
+    await session.commit()
+    receipt = {"id": cp.id, "revision": cp.revision}
+    before = await card(api, receipt)
+    response = await api.patch(f"/system/mdm/counterparty/{receipt['id']}", json={
+        "expected_revision": receipt["revision"], "manual": manual,
+    })
+    assert response.status_code == 422 and response.json()["detail"]["code"] == code
+    after = await card(api, receipt)
+    for field in ("name", "unp", "requisites", "provenance", "revision", "contacts", "audit"):
+        assert after[field] == before[field]
+
+
+async def test_legacy_card_can_be_repaired_without_new_identity(api, session):
+    cp = Counterparty(name="Старая карточка")
+    session.add(cp)
+    await session.commit()
+    receipt = {"id": cp.id, "revision": cp.revision}
+    response = await api.patch(f"/system/mdm/counterparty/{receipt['id']}", json={
+        "expected_revision": receipt["revision"],
+        "manual": {"unp": MNS["unp"], "legal_address": "Подтверждённый оператором адрес"},
+    })
+    assert response.status_code == 200, response.text
+    saved = await card(api, receipt)
+    assert saved["id"] == receipt["id"] and saved["revision"] == receipt["revision"] + 1
+    assert saved["name"] == "Старая карточка" and saved["unp"] == MNS["unp"]
+    assert saved["provenance"]["legal_address"]["source"] == "manual"
+    assert await session.scalar(select(func.count()).select_from(Counterparty)) == 1
+
+
+async def test_unselected_registry_address_does_not_satisfy_required_field(api, session):
+    lookup = registry(api)
+    response = await api.post("/system/mdm/counterparty", json={
+        "registry": selection("name", "unp"),
+    })
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "legal_address_required"
+    lookup.assert_awaited_once_with(MNS["unp"])
+    assert await session.scalar(select(func.count()).select_from(Counterparty)) == 0
 
 
 async def test_manual_create_reload_contacts_audit_and_clear(api, session):
@@ -62,13 +159,14 @@ async def test_manual_create_reload_contacts_audit_and_clear(api, session):
     assert saved["audit"][0]["action"] == "counterparty.created"
     assert saved["audit"][0]["actor"]
     response = await api.patch(f"/system/mdm/counterparty/{receipt['id']}", json={
-        "expected_revision": saved["revision"], "manual": {"bank_name": "", "legal_address": None},
+        "expected_revision": saved["revision"], "manual": {"bank_name": ""},
         "contacts": [{"id": saved["contacts"][0]["id"], "phone": None, "email": ""}],
     })
     assert response.status_code == 200, response.text
     updated = await card(api, receipt)
     assert updated["revision"] == saved["revision"] + 1
-    assert updated["requisites"]["bank_name"] is updated["requisites"]["legal_address"] is None
+    assert updated["requisites"]["bank_name"] is None
+    assert updated["requisites"]["legal_address"] == "Ручной адрес"
     assert updated["contacts"][0]["phone"] is updated["contacts"][0]["email"] is None
     assert len(updated["audit"]) == 2
     no_op = await api.patch(f"/system/mdm/counterparty/{receipt['id']}", json={"expected_revision": updated["revision"]})
@@ -149,7 +247,7 @@ async def test_permission_and_contact_ownership(api):
     assert denied.status_code == 403
     first = await create(api, contacts=[{"full_name": "Контакт"}])
     first_card = await card(api, first)
-    second = await create(api, manual={"name": "Другая", "unp": "100582334"})
+    second = await create(api, manual={"name": "Другая", "unp": "100582334", "legal_address": "Другой адрес"})
     response = await api.patch(f"/system/mdm/counterparty/{second['id']}", json={
         "expected_revision": second["revision"], "manual": {"name": "Не сохранять"},
         "contacts": [{"id": first_card["contacts"][0]["id"], "full_name": "Чужой"}],
@@ -270,7 +368,7 @@ async def test_stale_identity_map_cannot_hide_database_unp_collision(session, un
 
 async def test_mns_survives_1c_with_explicit_legacy_priority_and_metadata(api, session):
     registry(api)
-    receipt = await create(api, manual={}, registry=selection("name", "unp"))
+    receipt = await create(api, manual={}, registry=selection("name", "unp", "legal_address"))
     session.add(SurvivorshipRule(entity_type="counterparty", field="name", strategy="source_priority", source_priority=["egr", "erp", "manual", "1c"]))
     await session.commit()
     await reference_import.upsert_counterparty(session, unp=MNS["unp"], name="Имя 1С", source="1c")
@@ -282,7 +380,10 @@ async def test_mns_survives_1c_with_explicit_legacy_priority_and_metadata(api, s
 
 @pytest.mark.parametrize(("strategy", "priority"), [("manual_only", []), ("source_priority", ["manual", "mns_grp", "1c"])])
 async def test_operator_rule_protects_field_on_registry_apply(api, session, strategy, priority):
-    receipt = await create(api, manual={"name": "Ручная компания", "legal_name": "Ручное юридическое имя", "unp": MNS["unp"]})
+    receipt = await create(api, manual={
+        "name": "Ручная компания", "legal_name": "Ручное юридическое имя",
+        "unp": MNS["unp"], "legal_address": "Ручной адрес",
+    })
     session.add(SurvivorshipRule(entity_type="counterparty", field="name", strategy=strategy, source_priority=priority))
     await session.commit()
     registry(api)
