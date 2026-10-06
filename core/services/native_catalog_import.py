@@ -1,7 +1,8 @@
 """Transactional incoming catalogs. No posting, stock, outbound sync or commit.
 
 The caller supplies sealed observed JSON text and owns its outer transaction.
-Nomenclature is a projection, not a complete source entity. Counterparties are
+Nomenclature starts as a projection; enrichment preserves its existing fields.
+An enriched observation does not establish full source validation. Counterparties are
 retained on hold until a separate, authoritative requisites mapper is accepted.
 """
 from __future__ import annotations
@@ -109,15 +110,29 @@ def _target_sha(target):
     return digest(json.dumps(values, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False))
 
 
+def _preserves_source_fields(previous_text, incoming_text):
+    # Compare before GUID normalization and preserve number spellings and types.
+    def parse(value):
+        return json.loads(value, parse_int=lambda token: ("number", token),
+                          parse_float=lambda token: ("number", token), object_pairs_hook=_pairs)
+
+    previous, incoming = parse(previous_text), parse(incoming_text)
+    return previous.keys() < incoming.keys() and all(incoming[key] == value for key, value in previous.items())
+
+
 def import_catalog(session: Session, namespace: str, rows: list[SourceRow], *, actor: str,
-                   expected_previous: dict[tuple[str, str], str | None] | None = None):
+                   expected_previous: dict[tuple[str, str], str | None] | None = None,
+                   enrich_projection: bool = False):
     """Load one bounded source batch; every failure rolls back this entire batch.
 
     Units deliberately remain unknown until sealed unit entity mappings are
     implemented. Neither default 'шт' nor a catalogue folder default is guessed.
+    Enrichment only adds observed fields to an existing, unchanged projection.
     """
     if not isinstance(namespace, str) or not 0 < len(namespace) <= 64 or not isinstance(actor, str) or not 0 < len(actor) <= 128:
         raise CatalogImportConflict("IMPORT_SCOPE")
+    if type(enrich_projection) is not bool:
+        raise CatalogImportConflict("ENRICHMENT_MODE")
     if session.new or session.dirty or session.deleted:
         raise CatalogImportConflict("CLEAN_SESSION_REQUIRED")
     if not 0 < len(rows) <= 30000:
@@ -190,6 +205,8 @@ def import_catalog(session: Session, namespace: str, rows: list[SourceRow], *, a
             incoming, row = parsed[key]
             kind = ("counterparty" if incoming.entity == COUNTERPARTIES else "group" if row["IsFolder"] else "sku")
             identity = existing.get(key)
+            if enrich_projection and (identity is None or kind == "counterparty"):
+                raise CatalogImportConflict("ENRICHMENT_REQUIRES_PROJECTION")
             source_sha = digest(incoming.source_text)
             target = _native(identity, session) if identity else None
             previous = identity.source_sha if identity else None
@@ -204,11 +221,17 @@ def import_catalog(session: Session, namespace: str, rows: list[SourceRow], *, a
                 if (current is None or current.source_sha != previous or digest(current.source_text) != previous
                     or current.target_sha != identity.target_sha or current.holds != identity.holds):
                     raise CatalogImportConflict("CURRENT_REVISION_INTEGRITY")
-                if any(v.data_version == row["DataVersion"] and v.source_sha != source_sha for v in revisions):
-                    raise CatalogImportConflict("DATA_VERSION_REUSED")
                 if previous == source_sha:
                     totals["replayed"] += 1
                     continue
+                if enrich_projection:
+                    if (target is None or "NATIVE_TITLE_INVALID" in current.holds or current.data_version != row["DataVersion"]
+                        or target.attributes.get("source_catalog", {}).get("observed_shape") != "projection"):
+                        raise CatalogImportConflict("ENRICHMENT_REQUIRES_PROJECTION")
+                    if not _preserves_source_fields(current.source_text, incoming.source_text):
+                        raise CatalogImportConflict("ENRICHMENT_FIELDS_CHANGED")
+                elif any(v.data_version == row["DataVersion"] and v.source_sha != source_sha for v in revisions):
+                    raise CatalogImportConflict("DATA_VERSION_REUSED")
             if expected_previous.get(key) != previous:
                 raise CatalogImportConflict("EXPECTED_PREVIOUS_SHA")
             holds = []
@@ -242,7 +265,7 @@ def import_catalog(session: Session, namespace: str, rows: list[SourceRow], *, a
                     raise CatalogImportConflict("GROUP_PARENT_HELD")
                 attributes = {"source_catalog": {"namespace": namespace, "entity": key[0], "guid": key[1],
                     "code": row["Code"], "unit_guid": row["ЕдиницаИзмерения_Key"],
-                    "observed_shape": "projection", "group_review": "PENDING", "holds": holds}}
+                    "observed_shape": "enriched" if enrich_projection else "projection", "group_review": "PENDING", "holds": holds}}
                 target.attributes = attributes
                 target.is_active = not holds
                 if kind == "sku":
