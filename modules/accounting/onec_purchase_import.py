@@ -11,7 +11,7 @@ import hashlib
 import json
 import re
 from datetime import date, datetime
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +19,7 @@ from pydantic import ValidationError
 
 CACHE_SCHEMA = "onec-purchase-cache-v1"
 MAPPING_SCHEMA = "onec-purchase-map-v1"
+SOURCE_MAPPING_SCHEMA = "onec-purchase-map-v2"
 PLAN_SCHEMA = "onec-purchase-draft-plan-v1"
 
 
@@ -69,14 +70,16 @@ def _nonblank(value: Any, label: str, *, max_length: int) -> str:
 def validate_mapping_profile(profile: Any) -> dict[str, Any]:
     """Validate a complete exact-reference mapping profile before reading rows."""
     profile = _object(profile, "mapping profile")
+    source_format = profile.get("schema_version") == SOURCE_MAPPING_SCHEMA
     _keys(
         profile,
         {"schema_version", "entity", "organization_id", "paths", "currency_refs",
-         "suppliers", "contracts", "warehouses", "skus"},
+         "suppliers", "contracts", "warehouses", "skus"}
+        | ({"source_rules"} if source_format else set()),
         "mapping profile",
     )
-    if profile["schema_version"] != MAPPING_SCHEMA:
-        raise PurchaseImportError(f"mapping schema_version must be {MAPPING_SCHEMA}")
+    if profile["schema_version"] not in (MAPPING_SCHEMA, SOURCE_MAPPING_SCHEMA):
+        raise PurchaseImportError("unsupported purchase mapping schema_version")
     entity = _nonblank(profile["entity"], "entity", max_length=180)
     if not entity.startswith("Document_"):
         raise PurchaseImportError("entity must be an explicit 1C Document_* type")
@@ -99,10 +102,31 @@ def validate_mapping_profile(profile: Any) -> dict[str, Any]:
     line_paths = _object(paths["line"], "paths.line")
     _keys(
         line_paths,
-        {"sku_ref", "quantity", "net_amount", "vat_rate", "vat_amount", "vat_basis"},
+        ({"sku_ref", "quantity", "amount", "vat_rate", "vat_amount"} if source_format else
+         {"sku_ref", "quantity", "net_amount", "vat_rate", "vat_amount", "vat_basis"}),
         "paths.line",
     )
-    for group_name, group in (("document", document_paths), ("line", line_paths)):
+    pointer_groups = [("document", document_paths), ("line", line_paths)]
+    if source_format:
+        rules = _object(profile["source_rules"], "source_rules")
+        _keys(rules, {"price_includes_vat", "gross_amount", "vat_basis", "vat_rates", "amount_modes"},
+              "source_rules")
+        pointer_groups.append(("source_rules", {
+            key: rules[key] for key in ("price_includes_vat", "gross_amount", "vat_basis")
+        }))
+        rates = _object(rules["vat_rates"], "source_rules.vat_rates")
+        if not rates:
+            raise PurchaseImportError("source_rules.vat_rates must explicitly map source codes")
+        for code, raw_rate in rates.items():
+            _text(code, "source VAT code")
+            rate = _source_money(raw_rate, "mapped VAT rate")
+            if rate > 100:
+                raise PurchaseImportError("mapped VAT rate must be between 0 and 100")
+        modes = _object(rules["amount_modes"], "source_rules.amount_modes")
+        _keys(modes, {"false", "true"}, "source_rules.amount_modes")
+        if any(mode not in ("net", "gross") for mode in modes.values()):
+            raise PurchaseImportError("each source amount mode must explicitly be net or gross")
+    for group_name, group in pointer_groups:
         for field, pointer in group.items():
             if (not isinstance(pointer, str) or not pointer.startswith("/")
                     or re.search(r"~(?![01])", pointer)):
@@ -196,6 +220,21 @@ def _decimal(value: Any, label: str) -> Decimal:
         raise PurchaseImportError(f"{label} is not a valid decimal") from exc
     if not result.is_finite():
         raise PurchaseImportError(f"{label} must be finite")
+    return result
+
+
+def _source_money(value: Any, label: str) -> Decimal:
+    """Bound v2 arithmetic to the existing receipt's exact cent money domain."""
+    result = _decimal(value, label)
+    parts = result.as_tuple()
+    if len(parts.digits) > 40 or not -20 <= parts.exponent <= 20:
+        raise PurchaseImportError(f"{label} exceeds source decimal precision bounds")
+    if not Decimal(0) <= result < Decimal("1e18"):
+        raise PurchaseImportError(f"{label} is outside the receipt money range")
+    with localcontext() as context:
+        context.prec = 60
+        if result != result.quantize(Decimal("0.01")):
+            raise PurchaseImportError(f"{label} must be exact to cents; no rounding is permitted")
     return result
 
 
@@ -307,6 +346,17 @@ def _map_document(
     line_paths = mapping["paths"]["line"]
     entity = mapping["entity"]
     ref = row["Ref_Key"]
+    source_format = mapping["schema_version"] == SOURCE_MAPPING_SCHEMA
+    if source_format:
+        _text(row.get("DataVersion"), "DataVersion", max_length=255)
+        if row.get("Posted") is not True or row.get("DeletionMark") is not False:
+            raise PurchaseImportError("source document must be posted and not marked for deletion")
+        rules = mapping["source_rules"]
+        includes_vat = _pointer(row, rules["price_includes_vat"], "price_includes_vat")
+        if type(includes_vat) is not bool:
+            raise PurchaseImportError("price_includes_vat must be a source boolean")
+        amount_mode = rules["amount_modes"]["true" if includes_vat else "false"]
+        source_basis = _text(_pointer(row, rules["vat_basis"], "vat_basis"), "vat_basis")
     source_date_text = _pointer(row, doc_paths["document_date"], "document_date")
     document_date = _iso_date(source_date_text, "document_date")
     if not start <= document_date < end:
@@ -353,18 +403,35 @@ def _map_document(
             _pointer(source_line, line_paths["quantity"], f"line {line_number} quantity"),
             f"line {line_number} quantity",
         )
-        net_amount = _decimal(
-            _pointer(source_line, line_paths["net_amount"], f"line {line_number} net_amount"),
-            f"line {line_number} net_amount",
-        )
-        vat_rate = _decimal(
-            _pointer(source_line, line_paths["vat_rate"], f"line {line_number} vat_rate"),
-            f"line {line_number} vat_rate",
-        )
-        vat_amount = _decimal(
-            _pointer(source_line, line_paths["vat_amount"], f"line {line_number} vat_amount"),
-            f"line {line_number} vat_amount",
-        )
+        amount_field = "amount" if source_format else "net_amount"
+        raw_amount = _pointer(source_line, line_paths[amount_field], f"line {line_number} {amount_field}")
+        raw_rate = _pointer(source_line, line_paths["vat_rate"], f"line {line_number} vat_rate")
+        raw_vat = _pointer(source_line, line_paths["vat_amount"], f"line {line_number} vat_amount")
+        if source_format:
+            code = _text(raw_rate, f"line {line_number} VAT code")
+            if code not in rules["vat_rates"]:
+                raise PurchaseImportError(f"line {line_number} VAT code has no explicit rate mapping")
+            vat_rate = _source_money(rules["vat_rates"][code], f"line {line_number} vat_rate")
+            vat_amount = _source_money(raw_vat, f"line {line_number} vat_amount")
+            amount = _source_money(raw_amount, f"line {line_number} amount")
+            gross = _source_money(
+                _pointer(source_line, rules["gross_amount"], f"line {line_number} gross_amount"),
+                f"line {line_number} gross_amount",
+            )
+            with localcontext() as context:
+                context.prec = 60
+                net_amount = amount - vat_amount if amount_mode == "gross" else amount
+                if gross != net_amount + vat_amount:
+                    raise PurchaseImportError(f"line {line_number} gross amount differs from net plus source VAT")
+            vat_basis = source_basis  # Original text, not certification of deduction or tax policy.
+        else:
+            net_amount = _decimal(raw_amount, f"line {line_number} net_amount")
+            vat_rate = _decimal(raw_rate, f"line {line_number} vat_rate")
+            vat_amount = _decimal(raw_vat, f"line {line_number} vat_amount")
+            vat_basis = _text(
+                _pointer(source_line, line_paths["vat_basis"], f"line {line_number} vat_basis"),
+                f"line {line_number} vat_basis",
+            )
         if net_amount <= 0:
             raise PurchaseImportError(f"line {line_number} net_amount must be positive")
         if not Decimal(0) <= vat_rate <= Decimal(100):
@@ -374,10 +441,6 @@ def _map_document(
         )
         if vat_amount != expected_vat:
             raise PurchaseImportError(f"line {line_number} VAT amount does not match explicit rate and net amount")
-        vat_basis = _text(
-            _pointer(source_line, line_paths["vat_basis"], f"line {line_number} vat_basis"),
-            f"line {line_number} vat_basis",
-        )
         lot = f"onec:{ref}:{line_number}"
         if len(lot) > 200:
             raise PurchaseImportError(f"line {line_number} source Ref_Key is too long for the receipt lot")
@@ -438,6 +501,11 @@ def prepare_month_plan(cache_dir: Path, mapping_path: Path) -> tuple[list[dict[s
         "posting_previewed": False,
         "posted": False,
     }
+    if mapping["schema_version"] == SOURCE_MAPPING_SCHEMA:
+        metadata["mapping_schema_version"] = SOURCE_MAPPING_SCHEMA
+        metadata["source_documents"] = [
+            {"ref_key": row["Ref_Key"], "data_version": row["DataVersion"]} for row in rows
+        ]
     return drafts, metadata
 
 

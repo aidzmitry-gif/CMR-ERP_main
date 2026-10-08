@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 
 from modules.accounting.onec_purchase_import import (
     MAPPING_SCHEMA,
+    SOURCE_MAPPING_SCHEMA,
     PurchaseImportError,
     UnmappedPurchaseDocuments,
     build_receipt_drafts,
@@ -428,3 +429,199 @@ def test_cli_unmapped_reference_writes_report_and_no_partial_draft_package(
     issue = json.loads(reports[0].read_text(encoding="utf-8"))
     assert issue["source_ref"] == "receipt-ref-1"
     assert "exact supplier catalogue mapping" in issue["reason"]
+
+
+@pytest.fixture
+def source_mapping(mapping):
+    profile = deepcopy(mapping)
+    profile["schema_version"] = SOURCE_MAPPING_SCHEMA
+    profile["entity"] = "Document_ПриобретениеТоваровУслуг"
+    paths = profile["paths"]["line"]
+    paths["amount"] = "/Сумма"
+    del paths["net_amount"]
+    del paths["vat_basis"]
+    profile["source_rules"] = {
+        "price_includes_vat": "/ЦенаВключаетНДС",
+        "gross_amount": "/СуммаСНДС",
+        "vat_basis": "/НалогообложениеНДС",
+        "vat_rates": {"НДС20": "20", "БезНДС": "0"},
+        "amount_modes": {"false": "net", "true": "gross"},
+    }
+    return profile
+
+
+@pytest.fixture
+def source_receipt(source_doc):
+    row = deepcopy(source_doc)
+    row.update(DataVersion="synthetic-version-1", Posted=True, DeletionMark=False)
+    row["ЦенаВключаетНДС"] = False
+    row["НалогообложениеНДС"] = "synthetic-source-tax-mode"
+    line = row["Товары"][0]
+    line["Сумма"] = "100.00"
+    line["СуммаСНДС"] = "120.00"
+    line["СтавкаНДС"] = "НДС20"
+    del line["СуммаБезНДС"]
+    del line["ОснованиеНДС"]
+    return row
+
+
+@pytest.mark.parametrize("includes_vat,mode,amount", [
+    (False, "net", "100.00"), (True, "gross", "120.00"),
+    (True, "net", "100.00"), (False, "gross", "120.00"),
+])
+def test_source_v2_uses_only_explicit_amount_policy_and_preserves_source(
+    source_mapping, source_receipt, metadata, includes_vat, mode, amount,
+):
+    source_receipt["ЦенаВключаетНДС"] = includes_vat
+    source_receipt["Товары"][0]["Сумма"] = amount
+    source_mapping["source_rules"]["amount_modes"][str(includes_vat).lower()] = mode
+    original = deepcopy(source_receipt)
+    profile_before = deepcopy(source_mapping)
+    meta = {**metadata, "entity": source_mapping["entity"]}
+
+    draft = build_receipt_drafts([source_receipt], meta, source_mapping)[0]
+
+    assert source_receipt == original and source_mapping == profile_before
+    item = draft["document"]["items"][0]
+    assert Decimal(item["net_amount"]) == Decimal("100.00")
+    assert Decimal(item["vat_amount"]) == Decimal("20.00")
+    assert item["vat_basis"] == source_receipt["НалогообложениеНДС"]
+    assert item["lot"] == "onec:receipt-ref-1:1"
+    assert draft["key"] == "onec:purchase:" + hashlib.sha256(
+        (source_mapping["entity"] + "\0receipt-ref-1").encode("utf-8")
+    ).hexdigest()
+    ReceiptCreate.model_validate({"key": draft["key"], "document": draft["document"]})
+
+
+def test_source_v2_no_vat_is_explicit_not_a_missing_rate_default(source_mapping, source_receipt, metadata):
+    line = source_receipt["Товары"][0]
+    line.update({"СтавкаНДС": "БезНДС", "СуммаНДС": "0", "СуммаСНДС": "100"})
+    item = build_receipt_drafts(
+        [source_receipt], {**metadata, "entity": source_mapping["entity"]}, source_mapping,
+    )[0]["document"]["items"][0]
+    assert Decimal(item["vat_rate"]) == Decimal(item["vat_amount"]) == 0
+
+
+@pytest.mark.parametrize("field,value,reason", [
+    ("DataVersion", None, "DataVersion"), ("DataVersion", " ", "DataVersion"),
+    ("Posted", False, "must be posted"), ("Posted", 1, "must be posted"),
+    ("DeletionMark", True, "must be posted"), ("DeletionMark", 0, "must be posted"),
+    ("ЦенаВключаетНДС", "false", "source boolean"),
+    ("ЦенаВключаетНДС", 1, "source boolean"),
+    ("НалогообложениеНДС", "", "vat_basis"),
+    ("Валюта_Key", "unmapped-currency", "explicit BYN mapping"),
+    ("Контрагент_Key", "unmapped-supplier", "exact supplier"),
+    ("Договор_Key", "unmapped-contract", "exact contract"),
+    ("Склад_Key", "unmapped-warehouse", "organization warehouse"),
+])
+def test_source_v2_invalid_document_blocks_whole_package(
+    source_mapping, source_receipt, metadata, field, value, reason,
+):
+    bad = deepcopy(source_receipt)
+    bad["Ref_Key"] = "receipt-ref-2"
+    bad[field] = value
+    with pytest.raises(UnmappedPurchaseDocuments) as error:
+        build_receipt_drafts(
+            [source_receipt, bad], {**metadata, "entity": source_mapping["entity"]}, source_mapping,
+        )
+    assert len(error.value.issues) == 1
+    assert reason in error.value.issues[0]["reason"]
+
+
+@pytest.mark.parametrize("field,value,reason", [
+    ("СтавкаНДС", "НДС_СЕКРЕТ_99", "no explicit rate mapping"),
+    ("СтавкаНДС", 20, "must be text"),
+    ("СуммаСНДС", "119.99", "gross amount differs"),
+    ("СуммаНДС", "19.99", "gross amount differs"),
+    ("Сумма", "100.001", "exact to cents"),
+    ("Сумма", 100.0, "explicit decimal"),
+    ("Сумма", "1e18", "money range"),
+    ("Сумма", "1e-21", "precision bounds"),
+    ("Сумма", "NaN", "finite"),
+    ("Сумма", "-1", "money range"),
+    ("Номенклатура_Key", "unmapped-sku", "exact SKU"),
+])
+def test_source_v2_invalid_line_is_not_defaulted_or_rounded(
+    source_mapping, source_receipt, metadata, field, value, reason,
+):
+    source_receipt["Товары"][0][field] = value
+    with pytest.raises(UnmappedPurchaseDocuments) as error:
+        build_receipt_drafts(
+            [source_receipt], {**metadata, "entity": source_mapping["entity"]}, source_mapping,
+        )
+    assert reason in error.value.issues[0]["reason"]
+    assert "НДС_СЕКРЕТ_99" not in str(error.value.issues)
+
+
+def test_source_v2_consistent_gross_still_requires_correct_source_vat(source_mapping, source_receipt, metadata):
+    source_receipt["Товары"][0].update({"СуммаНДС": "19.99", "СуммаСНДС": "119.99"})
+    with pytest.raises(UnmappedPurchaseDocuments) as error:
+        build_receipt_drafts(
+            [source_receipt], {**metadata, "entity": source_mapping["entity"]}, source_mapping,
+        )
+    assert "VAT amount does not match" in error.value.issues[0]["reason"]
+
+
+@pytest.mark.parametrize("mutation", ["missing_rules", "unknown_mode", "missing_mode", "unknown_rule",
+                                        "invalid_pointer", "empty_rates", "negative_rate", "large_rate",
+                                        "float_rate", "missing_unit"])
+def test_source_v2_incomplete_profile_fails_before_document_mapping(source_mapping, metadata, mutation):
+    rules = source_mapping["source_rules"]
+    if mutation == "missing_rules":
+        del source_mapping["source_rules"]
+    elif mutation == "unknown_mode":
+        rules["amount_modes"]["true"] = "auto"
+    elif mutation == "missing_mode":
+        del rules["amount_modes"]["false"]
+    elif mutation == "unknown_rule":
+        rules["guess_rate"] = True
+    elif mutation == "invalid_pointer":
+        rules["gross_amount"] = "/bad~2pointer"
+    elif mutation == "empty_rates":
+        rules["vat_rates"] = {}
+    elif mutation in ("negative_rate", "large_rate", "float_rate"):
+        rules["vat_rates"]["НДС20"] = {"negative_rate": "-1", "large_rate": "100.01", "float_rate": 20.0}[mutation]
+    else:
+        source_mapping["skus"]["sku-1"]["unit"] = ""
+    with pytest.raises(PurchaseImportError):
+        build_receipt_drafts([], {**metadata, "entity": source_mapping["entity"]}, source_mapping)
+
+
+def test_source_v2_large_gross_subtraction_stays_exact_at_money_boundary(
+    source_mapping, source_receipt, metadata,
+):
+    source_receipt["ЦенаВключаетНДС"] = True
+    source_receipt["Товары"][0].update({
+        "Сумма": "999999999999999999.98", "СуммаСНДС": "999999999999999999.98",
+        "СуммаНДС": "166666666666666666.66",
+    })
+    item = build_receipt_drafts(
+        [source_receipt], {**metadata, "entity": source_mapping["entity"]}, source_mapping,
+    )[0]["document"]["items"][0]
+    assert Decimal(item["net_amount"]) == Decimal("833333333333333333.32")
+    assert Decimal(item["vat_amount"]) == Decimal("166666666666666666.66")
+
+
+def test_source_v2_plan_preserves_raw_digest_identity_and_data_version(
+    tmp_path, source_mapping, source_receipt, metadata,
+):
+    payload = (json.dumps(source_receipt, ensure_ascii=False) + "\n").encode("utf-8")
+    cache = tmp_path / "onec_purchases.jsonl"
+    cache.write_bytes(payload)
+    (tmp_path / "onec_purchases.meta.json").write_text(json.dumps({
+        **metadata, "entity": source_mapping["entity"], "source_sha256": hashlib.sha256(payload).hexdigest(),
+    }), encoding="utf-8")
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text(json.dumps(source_mapping, ensure_ascii=False), encoding="utf-8")
+
+    drafts, plan = prepare_month_plan(tmp_path, mapping_path)
+    data_path, meta_path = write_month_plan(tmp_path, drafts, plan)
+    assert cache.read_bytes() == payload
+    assert plan["source_sha256"] == hashlib.sha256(payload).hexdigest()
+    assert plan["mapping_sha256"] == hashlib.sha256(mapping_path.read_bytes()).hexdigest()
+    assert plan["mapping_schema_version"] == SOURCE_MAPPING_SCHEMA
+    assert plan["source_documents"] == [{"ref_key": "receipt-ref-1", "data_version": "synthetic-version-1"}]
+    assert plan["posted"] is plan["posting_previewed"] is False
+    assert write_month_plan(tmp_path, drafts, plan) == (data_path, meta_path)
+    saved = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert saved["source_documents"] == plan["source_documents"]
