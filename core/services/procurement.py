@@ -1,8 +1,48 @@
 """Procurement-owned primary sources for authorized accounting readers."""
 from datetime import date
-from typing import Any, Protocol
+from decimal import Decimal, InvalidOperation
+from typing import Annotated, Any, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+
+
+def exact_foreign_value(value):
+    if isinstance(value, (float, bool)) or value is None:
+        raise ValueError("Foreign purchase values require exact decimal strings")
+    try:
+        result = Decimal(value)
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError("Invalid foreign purchase decimal") from exc
+    if not result.is_finite():
+        raise ValueError("Foreign purchase value must be finite")
+    return result
+
+
+class ReceiptForeignAmounts(BaseModel):
+    """Original invoice amounts; the existing receipt amounts remain valued BYN."""
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
+    net_amount: Annotated[Decimal, BeforeValidator(exact_foreign_value),
+                          Field(gt=0, max_digits=20, decimal_places=2)]
+    vat_amount: Annotated[Decimal, BeforeValidator(exact_foreign_value),
+                          Field(ge=0, max_digits=20, decimal_places=2)]
+
+
+class ReceiptForeignExchange(BaseModel):
+    """Explicit approved valuation facts, never a quote lookup or a default rate."""
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+    rate: Annotated[Decimal, BeforeValidator(exact_foreign_value),
+                    Field(gt=0, max_digits=24, decimal_places=6)]
+    rate_scale: int = Field(gt=0, le=2147483647, strict=True)
+    rate_date: date
+    rate_source: str = Field(min_length=1, max_length=200)
+    valuation_basis: str = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def original_currency(self):
+        if self.currency == "BYN":
+            raise ValueError("Foreign purchase currency must differ from BYN")
+        return self
 
 
 class ReceiptAccountingOptions(BaseModel):

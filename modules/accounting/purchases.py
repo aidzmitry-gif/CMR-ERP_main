@@ -1,9 +1,10 @@
-"""BYN receipt of owned inventory; input VAT is recorded, never deducted here."""
+"""Owned inventory valued in BYN; input VAT is recorded, never deducted here."""
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 
 from pydantic import Field, model_validator
 
+from core.services.procurement import ReceiptForeignAmounts, ReceiptForeignExchange
 from modules.accounting import service
 from modules.accounting.schemas import Code, Input, LineInput, Money, PostingInput, Quantity
 
@@ -19,15 +20,21 @@ class PurchaseItem(Input):
     vat_rate: Money = Field(le=100)
     vat_amount: Money
     vat_basis: str = Field(min_length=1, max_length=200)
+    foreign_amounts: ReceiptForeignAmounts | None = Field(
+        default=None, exclude_if=lambda value: value is None,
+    )
 
     @model_validator(mode="after")
     def amounts(self):
         if self.net_amount <= 0:
             raise ValueError("Purchase net amount must be positive")
-        expected = (self.net_amount * self.vat_rate / Decimal(100)).quantize(
-            Decimal("0.01"), rounding=ROUND_HALF_UP,
-        )
-        if self.vat_amount != expected:
+        amounts = self.foreign_amounts or self
+        with localcontext() as context:
+            context.prec = 48
+            expected = (amounts.net_amount * self.vat_rate / Decimal(100)).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP,
+            )
+        if amounts.vat_amount != expected:
             raise ValueError("VAT amount must match the explicit line rate and net amount")
         return self
 
@@ -47,9 +54,25 @@ class PurchaseDocument(Input):
     vat_account: Code | None
     explanation: str = Field(min_length=1, max_length=700)
     items: list[PurchaseItem] = Field(min_length=1, max_length=300)
+    foreign_exchange: ReceiptForeignExchange | None = Field(
+        default=None, exclude_if=lambda value: value is None,
+    )
 
     @model_validator(mode="after")
     def vat_account_matches_lines(self):
+        if self.foreign_exchange is None:
+            if any(item.foreign_amounts is not None for item in self.items):
+                raise ValueError("Original amounts require explicit foreign exchange")
+        else:
+            if any(item.foreign_amounts is None for item in self.items):
+                raise ValueError("Foreign exchange requires original amounts on every line")
+            exchange = self.foreign_exchange.model_dump(exclude={"valuation_basis"})
+            for item in self.items:
+                for field in ("net_amount", "vat_amount"):
+                    LineInput(account=item.account, side="debit", amount=getattr(item, field),
+                              original_amount=getattr(item.foreign_amounts, field), **exchange)
+            # Reuse the posting builder to prove component/gross rounding agrees.
+            self.posting()
         if any(item.vat_amount for item in self.items):
             if self.vat_account is None:
                 raise ValueError("Nonzero input VAT requires its account")
@@ -81,14 +104,28 @@ class PurchaseDocument(Input):
             if item.vat_amount:
                 lines.append(LineInput(account=self.vat_account, side="debit",
                                        amount=item.vat_amount, dimensions=detail))
-            gross += item.net_amount + item.vat_amount
+            with localcontext() as context:
+                context.prec = 48
+                gross += item.net_amount + item.vat_amount
+        foreign = {}
+        if self.foreign_exchange is not None:
+            dimensions = {**dimensions,
+                          "fx_valuation_basis": self.foreign_exchange.valuation_basis}
+            with localcontext() as context:
+                context.prec = 48
+                original_gross = sum((item.foreign_amounts.net_amount + item.foreign_amounts.vat_amount
+                                      for item in self.items), Decimal(0))
+            foreign = {**self.foreign_exchange.model_dump(exclude={"valuation_basis"}),
+                       "original_amount": original_gross}
         lines.append(LineInput(account=self.settlement_account, side="credit",
-                               amount=gross, dimensions=dimensions))
+                               amount=gross, dimensions=dimensions, **foreign))
+        rule = "purchase-fx" if self.foreign_exchange is not None else "purchase-byn"
+        version = "v2" if verified_counterparty_id is not None else "v1"
         return PostingInput(source=self.source, source_version=self.source_version,
                             operation="inventory_purchase", document_date=self.document_date,
                             operation_date=self.operation_date, posting_date=self.posting_date,
                             policy_id=self.policy_id,
-                            rule_version="purchase-byn-v2" if verified_counterparty_id is not None else "purchase-byn-v1",
+                            rule_version=f"{rule}-{version}",
                             explanation=self.explanation, lines=lines)
 
 
