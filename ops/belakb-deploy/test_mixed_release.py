@@ -3,13 +3,16 @@ import argparse
 import contextlib
 import io
 import json
+import os
+import sys
 import shutil
 import subprocess
 import tempfile
 import unittest
 import uuid
-from pathlib import Path
-from unittest.mock import patch
+from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import prepare_mixed as package
 import rehearse_mixed_copy as copy
@@ -550,6 +553,287 @@ class Guards(unittest.TestCase):
         self.assertEqual(receipt['baseline_safe_code'], 'LIVE_CHANGED_EXTERNALLY')
         self.assertFalse(receipt['live_baseline_unchanged'])
         self.assertEqual(events[-1], 'baseline-after-cleanup')
+
+
+class IntakeQuiescence(unittest.TestCase):
+    """Local component controls; kernel flock and all systemctl effects are mocked."""
+
+    @staticmethod
+    def states(*, timers_active=False, service_alive=False, job=False):
+        return [{'unit': unit, 'definitionSHA256': package.digest({'fixture': unit}),
+                 'active': 'active' if (timers_active and unit in package.INTAKE_TIMERS) or
+                           (service_alive and unit in package.INTAKE_SERVICES) else 'inactive',
+                 'sub': 'waiting' if timers_active and unit in package.INTAKE_TIMERS else
+                        'running' if service_alive and unit in package.INTAKE_SERVICES else 'dead',
+                 'jobPending': job, 'processesPresent': service_alive and unit in package.INTAKE_SERVICES}
+                for unit in package.INTAKE_UNITS]
+
+    @contextlib.contextmanager
+    def prepared(self, batches=None):
+        with fixtures() as base:
+            root = Path(base)
+            private = root / 'state'
+            private.mkdir(mode=0o755 if os.name == 'nt' else 0o700)
+            lock = root / 'global.lock'
+            lock.touch()
+            fd = os.open(lock, os.O_RDWR)
+            clock = [0.0]
+            batches = batches or [self.states(timers_active=True), self.states()]
+            reads = [0]
+            def unit_state(unit, *, timeout):
+                batch = min(reads[0] // 4, len(batches)-1)
+                reads[0] += 1
+                return dict(next(x for x in batches[batch] if x['unit'] == unit))
+            flock = Mock()
+            native = SimpleNamespace(flock=flock, LOCK_EX=2, LOCK_NB=4)
+            try:
+                with patch.dict(sys.modules, {'fcntl': native}), \
+                        patch.object(package.sys, 'platform', 'linux'), \
+                        patch.object(package, 'RELEASE_LOCK', lock), \
+                        patch.object(package, 'intake_unit', side_effect=unit_state) as observed, \
+                        patch.object(package, 'run', return_value=b'') as command, \
+                        patch.object(package.time, 'monotonic', side_effect=lambda: clock[0]), \
+                        patch.object(package.time, 'sleep', side_effect=lambda x: clock.__setitem__(0, clock[0]+x)) as sleep:
+                    yield SimpleNamespace(path=private/'intake.json', fd=fd, flock=flock,
+                                          expected={x['unit']: x['definitionSHA256'] for x in self.states()},
+                                          command=command, observed=observed, sleep=sleep, root=root,
+                                          clock=clock)
+            finally:
+                os.close(fd)
+
+    def test_observed_drain_is_only_intake_component_and_record_precedes_stop(self):
+        with self.prepared() as case:
+            def stop(argv, **kwargs):
+                durable = json.loads(case.path.read_text())
+                self.assertEqual(durable['status'], 'TIMER_STOP_ATTEMPTED_DRAIN_UNKNOWN')
+                self.assertTrue(durable['timerStopAttempted'])
+                self.assertFalse(durable['fullFreezeAccepted'])
+                self.assertEqual(argv, ['systemctl', 'stop', '--no-ask-password', '--job-mode=fail',
+                                       'crm-admin-mail-stage.timer', 'crm-mottor-intake.timer'])
+                return b''
+            case.command.side_effect = stop
+            result = package.quiesce_intake(case.path, case.expected, lease_fd=case.fd)
+            self.assertEqual(result['status'], 'INTAKE_TIMERS_STOPPED_SERVICES_DRAINED')
+            self.assertFalse(result['queueMutationAttempted'])
+            self.assertFalse(result['releaseReady'])
+            self.assertFalse(result['fullFreezeAccepted'])
+            self.assertEqual(json.loads(case.path.read_text()), result)
+            case.command.assert_called_once()
+            case.flock.assert_called_once_with(case.fd, 6)
+
+    def test_inflight_service_is_observed_to_completion_without_stop_or_kill(self):
+        with self.prepared([self.states(timers_active=True, service_alive=True),
+                            self.states(service_alive=True), self.states()]) as case:
+            result = package.quiesce_intake(case.path, case.expected, lease_fd=case.fd)
+            self.assertEqual(result['status'], 'INTAKE_TIMERS_STOPPED_SERVICES_DRAINED')
+            self.assertEqual(case.observed.call_count, 12)
+            self.assertEqual([x.args[0] for x in case.observed.call_args_list[-4:]],
+                             list(package.INTAKE_SERVICES + package.INTAKE_TIMERS))
+            case.sleep.assert_called_once_with(0.25)
+            self.assertEqual(case.command.call_count, 1)
+
+    def test_failed_service_with_no_process_or_job_is_drained(self):
+        after = self.states()
+        after[-1].update(active='failed', sub='failed')
+        with self.prepared([self.states(timers_active=True), after]) as case:
+            self.assertEqual(package.quiesce_intake(case.path, case.expected, lease_fd=case.fd)
+                             ['status'], 'INTAKE_TIMERS_STOPPED_SERVICES_DRAINED')
+
+    def test_identity_mismatch_prevents_record_and_timer_mutation(self):
+        with self.prepared() as case:
+            case.expected[package.INTAKE_SERVICES[0]] = '0'*64
+            with self.assertRaisesRegex(package.Blocked, 'INTAKE_UNIT_DEFINITION_DRIFT'):
+                package.quiesce_intake(case.path, case.expected, lease_fd=case.fd)
+            case.command.assert_not_called()
+            self.assertFalse(case.path.exists())
+
+    def test_exclusive_record_reservation_refuses_racing_foreign_record(self):
+        with self.prepared() as case:
+            original = case.observed.side_effect
+            def observe(unit, **kwargs):
+                result = original(unit, **kwargs)
+                if unit == package.INTAKE_SERVICES[-1]:
+                    case.path.write_text('foreign-record')
+                return result
+            case.observed.side_effect = observe
+            with self.assertRaises(FileExistsError):
+                package.quiesce_intake(case.path, case.expected, lease_fd=case.fd)
+            self.assertEqual(case.path.read_text(), 'foreign-record')
+            case.command.assert_not_called()
+
+    def test_existing_or_interrupted_empty_record_refuses_retry(self):
+        with self.prepared() as case:
+            case.path.touch()
+            with self.assertRaisesRegex(package.Blocked, 'INTAKE_RECORD_EXISTS_NO_RETRY'):
+                package.quiesce_intake(case.path, case.expected, lease_fd=case.fd)
+            case.command.assert_not_called()
+            case.observed.assert_not_called()
+
+    def test_wrong_global_descriptor_and_competing_lease_refuse_before_observation(self):
+        with self.prepared() as case:
+            wrong = os.open(case.path.parent/'wrong.lock', os.O_RDWR | os.O_CREAT, 0o600)
+            try:
+                with self.assertRaisesRegex(package.Blocked, 'INTAKE_GLOBAL_LEASE'):
+                    package.quiesce_intake(case.path, case.expected, lease_fd=wrong)
+            finally:
+                os.close(wrong)
+            case.flock.side_effect = BlockingIOError()
+            with self.assertRaisesRegex(package.Blocked, 'ANOTHER_RELEASE_RUNNING'):
+                package.quiesce_intake(case.path, case.expected, lease_fd=case.fd)
+            case.command.assert_not_called()
+            case.observed.assert_not_called()
+
+    def test_lost_stop_reply_retains_unknown_and_never_reopens_or_retries(self):
+        with self.prepared() as case:
+            case.command.side_effect = package.Blocked('COMMAND_UNAVAILABLE_OR_TIMEOUT')
+            with self.assertRaisesRegex(package.Blocked, 'COMMAND_UNAVAILABLE_OR_TIMEOUT'):
+                package.quiesce_intake(case.path, case.expected, lease_fd=case.fd)
+            receipt = json.loads(case.path.read_text())
+            self.assertEqual(receipt['status'], 'INTAKE_QUIESCENCE_UNKNOWN_NO_REOPEN')
+            self.assertTrue(receipt['timerStopAttempted'])
+            with self.assertRaisesRegex(package.Blocked, 'INTAKE_RECORD_EXISTS_NO_RETRY'):
+                package.quiesce_intake(case.path, case.expected, lease_fd=case.fd)
+            self.assertEqual(case.command.call_count, 1)
+
+    def test_pending_jobs_active_timers_processes_and_unknown_states_never_pass(self):
+        for change in ({'jobPending': True}, {'processesPresent': True},
+                       {'active': 'active', 'sub': 'exited'}, {'active': 'UNKNOWN', 'sub': 'UNKNOWN'}):
+            with self.subTest(change=change):
+                after = self.states()
+                after[-1].update(change)
+                with self.prepared([self.states(timers_active=True), after]) as case:
+                    with self.assertRaisesRegex(package.Blocked, 'INTAKE_DRAIN_TIMEOUT'):
+                        package.quiesce_intake(case.path, case.expected, lease_fd=case.fd, timeout=1)
+                    self.assertEqual(json.loads(case.path.read_text())['status'],
+                                     'INTAKE_QUIESCENCE_UNKNOWN_NO_REOPEN')
+                    self.assertEqual(case.command.call_count, 1)
+        with self.prepared([self.states(timers_active=True)]) as case:
+            with self.assertRaisesRegex(package.Blocked, 'INTAKE_DRAIN_TIMEOUT'):
+                package.quiesce_intake(case.path, case.expected, lease_fd=case.fd, timeout=1)
+
+    def test_definition_change_during_drain_preserves_unknown(self):
+        after = self.states()
+        after[-1]['definitionSHA256'] = '1'*64
+        with self.prepared([self.states(timers_active=True), after]) as case:
+            with self.assertRaisesRegex(package.Blocked, 'INTAKE_UNIT_DEFINITION_DRIFT'):
+                package.quiesce_intake(case.path, case.expected, lease_fd=case.fd)
+            self.assertEqual(json.loads(case.path.read_text())['status'],
+                             'INTAKE_QUIESCENCE_UNKNOWN_NO_REOPEN')
+
+    def test_interruption_keeps_durable_unknown_without_service_signal(self):
+        with self.prepared() as case:
+            case.command.side_effect = KeyboardInterrupt()
+            with self.assertRaises(KeyboardInterrupt):
+                package.quiesce_intake(case.path, case.expected, lease_fd=case.fd)
+            self.assertEqual(json.loads(case.path.read_text())['errorType'], 'KeyboardInterrupt')
+            self.assertEqual(case.command.call_count, 1)
+
+    @contextlib.contextmanager
+    def unit_output(self, unit):
+        body = b'[Unit]\nDescription=local fixture\n'
+        file_name = '/etc/systemd/system/' + unit
+        props = {'Id': unit, 'LoadState': 'loaded', 'NeedDaemonReload': 'no',
+                 'FragmentPath': file_name, 'DropInPaths': '', 'PropagatesStopTo': '',
+                 'ConsistsOf': '', 'BoundBy': '', 'OnSuccess': '', 'OnFailure': '',
+                 'RequiredBy': '', 'RequisiteOf': '', 'UpheldBy': '',
+                 'ActiveState': 'inactive', 'SubState': 'dead', 'Job': ''}
+        if unit in package.INTAKE_SERVICES:
+            props.update(Type='oneshot', Restart='no', RemainAfterExit='no',
+                         StopWhenUnneeded='no', MainPID='0', ControlPID='0', ControlGroup='')
+        else:
+            props['Triggers'] = unit.removesuffix('.timer') + '.service'
+        class UnitFile(PurePosixPath):
+            def resolve(self, strict=False): return self
+            def is_file(self): return str(self) == file_name
+            def stat(self): return SimpleNamespace(st_size=len(body))
+            def read_bytes(self): return body
+        def show(*args, **kwargs):
+            return ''.join(k+'='+v+'\n' for k, v in props.items()).encode()
+        with patch.object(package, 'Path', UnitFile), patch.object(package, 'run', side_effect=show):
+            yield props
+
+    def test_unit_metadata_binds_files_and_does_not_export_raw_properties(self):
+        for unit in package.INTAKE_UNITS:
+            with self.subTest(unit=unit), self.unit_output(unit) as props:
+                result = package.intake_unit(unit, timeout=3)
+                self.assertEqual(set(result), {'unit', 'definitionSHA256', 'active', 'sub',
+                                               'jobPending', 'processesPresent'})
+                self.assertEqual(len(result['definitionSHA256']), 64)
+                self.assertFalse(result['processesPresent'])
+                old = result['definitionSHA256']
+                props['OnFailure'] = 'other.service'
+                if unit in package.INTAKE_TIMERS:
+                    with self.assertRaisesRegex(package.Blocked, 'INTAKE_STOP_CASCADE'):
+                        package.intake_unit(unit, timeout=3)
+                else:
+                    with self.assertRaisesRegex(package.Blocked, 'INTAKE_SERVICE_LIFECYCLE'):
+                        package.intake_unit(unit, timeout=3)
+
+    def test_stop_cascade_and_auto_stopping_service_refuse(self):
+        for name in ('PropagatesStopTo', 'ConsistsOf', 'BoundBy', 'RequiredBy', 'RequisiteOf',
+                     'UpheldBy', 'OnSuccess', 'OnFailure'):
+            with self.subTest(name=name), self.unit_output(package.INTAKE_TIMERS[0]) as props:
+                props[name] = 'other.service'
+                with self.assertRaisesRegex(package.Blocked, 'INTAKE_STOP_CASCADE'):
+                    package.intake_unit(package.INTAKE_TIMERS[0], timeout=3)
+        with self.unit_output(package.INTAKE_SERVICES[0]) as props:
+            props['StopWhenUnneeded'] = 'yes'
+            with self.assertRaisesRegex(package.Blocked, 'INTAKE_SERVICE_LIFECYCLE'):
+                package.intake_unit(package.INTAKE_SERVICES[0], timeout=3)
+
+    def test_empty_job_is_systemd_no_job_and_live_cgroup_is_not_drained(self):
+        with self.unit_output(package.INTAKE_SERVICES[0]) as props:
+            self.assertFalse(package.intake_unit(package.INTAKE_SERVICES[0], timeout=3)['jobPending'])
+            props['Job'] = '42'
+            props['ControlGroup'] = '/system.slice/fixture.service'
+            result = package.intake_unit(package.INTAKE_SERVICES[0], timeout=3)
+            self.assertTrue(result['jobPending'])
+            self.assertTrue(result['processesPresent'])
+
+    def test_service_completion_hooks_refuse_before_any_timer_effect(self):
+        reader = package.intake_unit
+        for name in ('OnSuccess', 'OnFailure'):
+            with self.subTest(name=name), self.prepared() as case, \
+                    self.unit_output(package.INTAKE_SERVICES[0]) as props:
+                props[name] = package.INTAKE_TIMERS[0]
+                case.observed.side_effect = reader
+                with self.assertRaisesRegex(package.Blocked, 'INTAKE_SERVICE_LIFECYCLE'):
+                    package.quiesce_intake(case.path, case.expected, lease_fd=case.fd)
+                case.command.assert_not_called()
+                self.assertFalse(case.path.exists())
+
+    def test_terminal_snapshot_past_deadline_is_unknown_not_success(self):
+        with self.prepared() as case:
+            original = case.observed.side_effect
+            calls = [0]
+            def late(unit, **kwargs):
+                result = original(unit, **kwargs)
+                calls[0] += 1
+                if calls[0] == 8:
+                    case.clock[0] = 2
+                return result
+            case.observed.side_effect = late
+            with self.assertRaisesRegex(package.Blocked, 'INTAKE_DRAIN_TIMEOUT'):
+                package.quiesce_intake(case.path, case.expected, lease_fd=case.fd, timeout=1)
+            self.assertEqual(json.loads(case.path.read_text())['status'],
+                             'INTAKE_QUIESCENCE_UNKNOWN_NO_REOPEN')
+            case.command.assert_called_once()
+            case.sleep.assert_not_called()
+
+    def test_unknown_malformed_unit_properties_and_path_refuse(self):
+        for field, value, error in (('NeedDaemonReload', 'yes', 'INTAKE_UNIT_NOT_CURRENT'),
+                                    ('FragmentPath', '/etc/secret', 'INTAKE_UNIT_FILE_SCOPE'),
+                                    ('MainPID', 'unknown', 'INTAKE_PID_UNKNOWN'),
+                                    ('Job', '0 /unknown', 'INTAKE_STATE_UNKNOWN'),
+                                    ('ActiveState', 'new-state', 'INTAKE_STATE_UNKNOWN')):
+            with self.subTest(field=field), self.unit_output(package.INTAKE_SERVICES[0]) as props:
+                props[field] = value
+                with self.assertRaisesRegex(package.Blocked, error):
+                    package.intake_unit(package.INTAKE_SERVICES[0], timeout=3)
+        with self.unit_output(package.INTAKE_SERVICES[0]) as props:
+            del props['Job']
+            with self.assertRaisesRegex(package.Blocked, 'INTAKE_UNIT_PROPERTIES'):
+                package.intake_unit(package.INTAKE_SERVICES[0], timeout=3)
 
 
 if __name__ == '__main__':

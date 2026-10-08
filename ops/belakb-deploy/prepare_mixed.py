@@ -5,8 +5,11 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import stat
 import subprocess
+import sys
+import time
 import uuid
 from pathlib import Path, PurePosixPath
 
@@ -224,6 +227,148 @@ def write_probe_state(path, record):
             os.fsync(fd)
         finally:
             os.close(fd)
+
+
+INTAKE_TIMERS = ('crm-admin-mail-stage.timer', 'crm-mottor-intake.timer')
+INTAKE_SERVICES = ('crm-admin-mail-stage.service', 'crm-mottor-intake.service')
+INTAKE_UNITS = INTAKE_TIMERS + INTAKE_SERVICES
+RELEASE_LOCK = Path('/run/lock/belakb-deploy.lock')
+
+
+def intake_unit(unit, *, timeout):
+    """Private unit-file binding and lifecycle observation; never return argv/env."""
+    require(unit in INTAKE_UNITS, 'INTAKE_TARGET')
+    runtime = ('ActiveState', 'SubState', 'Job')
+    identity = ('Id', 'LoadState', 'NeedDaemonReload', 'FragmentPath', 'DropInPaths',
+                'PropagatesStopTo', 'ConsistsOf', 'BoundBy', 'RequiredBy', 'RequisiteOf',
+                'UpheldBy', 'OnSuccess', 'OnFailure')
+    if unit in INTAKE_SERVICES:
+        identity += ('Type', 'Restart', 'RemainAfterExit', 'StopWhenUnneeded')
+        runtime += ('MainPID', 'ControlPID', 'ControlGroup')
+    else:
+        identity += ('Triggers',)
+    raw = run(['systemctl', 'show', '--all', '--no-pager', unit,
+               '--property=' + ','.join(identity + runtime)], timeout=timeout)
+    require(len(raw) <= 65536, 'INTAKE_UNIT_OUTPUT_LIMIT')
+    lines = raw.decode('utf8').splitlines()
+    require(all('=' in line for line in lines), 'INTAKE_UNIT_OUTPUT_FORMAT')
+    props = dict(line.split('=', 1) for line in lines)
+    require(len(props) == len(lines) and set(props) == set(identity + runtime),
+            'INTAKE_UNIT_PROPERTIES')
+    require(props['Id'] == unit and props['LoadState'] == 'loaded' and
+            props['NeedDaemonReload'] == 'no', 'INTAKE_UNIT_NOT_CURRENT')
+    if unit in INTAKE_TIMERS:
+        require(props['Triggers'] == unit.removesuffix('.timer') + '.service' and
+                not any(props[k] for k in ('PropagatesStopTo', 'ConsistsOf', 'BoundBy',
+                                           'RequiredBy', 'RequisiteOf', 'UpheldBy',
+                                           'OnSuccess', 'OnFailure')), 'INTAKE_STOP_CASCADE')
+    else:
+        require((props['Type'], props['Restart'], props['RemainAfterExit'],
+                 props['StopWhenUnneeded']) == ('oneshot', 'no', 'no', 'no') and
+                not props['OnSuccess'] and not props['OnFailure'],
+                'INTAKE_SERVICE_LIFECYCLE')
+    files = {}
+    for name in [props['FragmentPath'], *shlex.split(props['DropInPaths'])]:
+        path = Path(name)
+        roots = tuple(Path(x) for x in
+                      ('/etc/systemd/system', '/usr/lib/systemd/system', '/lib/systemd/system'))
+        require(path.is_absolute() and any(path.is_relative_to(x) for x in roots) and
+                any(path.resolve(strict=True).is_relative_to(x.resolve()) for x in roots),
+                'INTAKE_UNIT_FILE_SCOPE')
+        require(path.is_file() and path.stat().st_size <= 65536, 'INTAKE_UNIT_FILE_LIMIT')
+        body = path.read_bytes()
+        require(len(body) <= 65536 and len(files) < 32 and name not in files,
+                'INTAKE_UNIT_FILE_LIMIT')
+        files[name] = sha(body)
+    require(props['ActiveState'] in ('active', 'inactive', 'failed', 'activating',
+                                    'deactivating', 'reloading') and
+            props['SubState'] in ('running', 'exited', 'dead', 'failed', 'waiting',
+                                 'elapsed', 'start', 'stop', 'auto-restart') and
+            re.fullmatch(r'(?:|[1-9][0-9]{0,9})', props['Job']), 'INTAKE_STATE_UNKNOWN')
+    alive = False
+    if unit in INTAKE_SERVICES:
+        require(all(re.fullmatch(r'[0-9]{1,10}', props[k]) for k in ('MainPID', 'ControlPID')),
+                'INTAKE_PID_UNKNOWN')
+        alive = any(int(props[k]) for k in ('MainPID', 'ControlPID')) or bool(props['ControlGroup'])
+    return {'unit': unit, 'definitionSHA256': digest({'properties':
+            {k: props[k] for k in identity}, 'files': files}),
+            'active': props['ActiveState'], 'sub': props['SubState'],
+            'jobPending': bool(props['Job']), 'processesPresent': bool(alive)}
+
+
+def quiesce_intake(path, expected, *, lease_fd, timeout=30):
+    """Future coordinator component under its global lease; no apply CLI or reopen.
+
+    This closes two schedules and observes drain only. Other writers and delivery
+    outcomes remain unknown; callers must not treat this as a database write freeze.
+    """
+    require(sys.platform == 'linux', 'LINUX_SERVER_REQUIRED')
+    require(type(timeout) is int and 0 < timeout <= 60, 'INTAKE_DEADLINE')
+    require(set(expected) == set(INTAKE_UNITS) and all(isinstance(x, str) and
+            re.fullmatch('[a-f0-9]{64}', x) for x in expected.values()), 'INTAKE_DEFINITION_BINDING')
+    require(type(lease_fd) is int and lease_fd >= 0, 'INTAKE_GLOBAL_LEASE')
+    import fcntl
+    locked, live = os.fstat(lease_fd), RELEASE_LOCK.stat(follow_symlinks=False)
+    require(stat.S_ISREG(live.st_mode) and (locked.st_dev, locked.st_ino) ==
+            (live.st_dev, live.st_ino), 'INTAKE_GLOBAL_LEASE')
+    try:
+        # Reuse the caller's descriptor/open-file description, retaining its lock.
+        fcntl.flock(lease_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise Blocked('ANOTHER_RELEASE_RUNNING') from None
+    private_probe_root(path.parent)
+    require(not path.exists() and not path.is_symlink() and
+            not path.with_suffix('.pending').exists() and
+            not path.with_suffix('.pending').is_symlink(), 'INTAKE_RECORD_EXISTS_NO_RETRY')
+    deadline = time.monotonic() + timeout
+
+    def observe():
+        result = []
+        # A completing service is observed before its schedules' final snapshots.
+        for unit in INTAKE_SERVICES + INTAKE_TIMERS:
+            remaining = deadline - time.monotonic()
+            require(remaining > 0, 'INTAKE_DRAIN_TIMEOUT')
+            item = intake_unit(unit, timeout=min(5, remaining))
+            require(item['definitionSHA256'] == expected[unit], 'INTAKE_UNIT_DEFINITION_DRIFT')
+            result.append(item)
+        require(time.monotonic() < deadline, 'INTAKE_DRAIN_TIMEOUT')
+        return result
+
+    before = observe()
+    record = {'format': 1, 'chain': CHAIN, 'status': 'PREPARED_NO_TIMER_STOP',
+              'units': before, 'timerStopAttempted': False, 'fullFreezeAccepted': False,
+              'releaseReady': False, 'queueMutationAttempted': False}
+    # Reserve exclusively; an interrupted/empty record also forbids blind retry.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                 getattr(os, 'O_NOFOLLOW', 0), 0o600)
+    os.close(fd)
+    write_probe_state(path, record)
+    try:
+        record.update(status='TIMER_STOP_ATTEMPTED_DRAIN_UNKNOWN', timerStopAttempted=True)
+        write_probe_state(path, record)
+        remaining = deadline - time.monotonic()
+        require(remaining > 0, 'INTAKE_DRAIN_TIMEOUT')
+        run(['systemctl', 'stop', '--no-ask-password', '--job-mode=fail', *INTAKE_TIMERS],
+            timeout=min(5, remaining))
+        while True:
+            after = observe()
+            drained = all(not x['jobPending'] and not x['processesPresent'] and
+                          ((x['active'], x['sub']) == ('inactive', 'dead') if
+                           x['unit'] in INTAKE_TIMERS else
+                           (x['active'], x['sub']) in (('inactive', 'dead'), ('failed', 'failed')))
+                          for x in after)
+            if drained:
+                record.update(status='INTAKE_TIMERS_STOPPED_SERVICES_DRAINED', units=after)
+                write_probe_state(path, record)
+                return record
+            remaining = deadline - time.monotonic()
+            require(remaining > 0, 'INTAKE_DRAIN_TIMEOUT')
+            time.sleep(min(0.25, remaining))
+    except BaseException as error:
+        # Stopping a timer may have happened even when its reply was lost.
+        record.update(status='INTAKE_QUIESCENCE_UNKNOWN_NO_REOPEN', errorType=type(error).__name__)
+        write_probe_state(path, record)
+        raise
 
 
 def remove_probe(name, image, network, *, container_id=None):
