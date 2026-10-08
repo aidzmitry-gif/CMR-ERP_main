@@ -1,5 +1,6 @@
 """Local guard/lifecycle tests only: Docker, PostgreSQL and Git export are mocked."""
 import argparse
+import ast
 import contextlib
 import io
 import json
@@ -60,6 +61,37 @@ class Guards(unittest.TestCase):
                     with self.assertRaises(package.Blocked):
                         package.prepare(Path(directory) / 'repo', 'c' * 40, output)
                 self.assertFalse(output.exists())
+
+    def test_fx_postgres_import_closure_is_selected_without_opening_other_tests(self):
+        repo = Path(__file__).resolve().parents[2]
+        pending = ['tests/integration/test_purchase_foreign_receipts_postgres.py', 'tests/conftest.py']
+        seen = set()
+        while pending:
+            path = pending.pop()
+            if path in seen:
+                continue
+            seen.add(path)
+            self.assertIn(path, package.PROOFS)
+            self.assertTrue(package.selected(path))
+            for node in ast.walk(ast.parse((repo / path).read_text(encoding='utf8'))):
+                modules = []
+                if isinstance(node, ast.Import):
+                    modules = [item.name for item in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    modules = [node.module] + [node.module + '.' + item.name for item in node.names]
+                for module in modules:
+                    if module.startswith('tests.'):
+                        dependency = module.replace('.', '/') + '.py'
+                        if (repo / dependency).is_file() and dependency not in seen:
+                            pending.append(dependency)
+        self.assertEqual(len(seen), 14)
+        self.assertIn('tests/__init__.py', package.PROOFS)
+        self.assertIn('tests/integration/__init__.py', package.PROOFS)
+        self.assertIn('docs/accounting/migration-proposal.py', package.PROOFS)
+        self.assertEqual(package.APPLICATION_CHECKPOINT, 'f4fd310e0104bacfc0f95a28389f783486cfc3bf')
+        self.assertEqual(package.PINS['procurement'], 'd8f50e89d5f4fbb796715594a9eb6d1740623dfe')
+        for path in ('tests/private.py', 'tests/fixtures/customer.json', 'docs/accounting/private.py'):
+            self.assertFalse(package.selected(path))
 
     def test_source_export_uses_committed_objects_and_replaces_whole_app(self):
         names = package.ROOT_FILES | package.PROOFS | package.CLOSURE_FILES | {'core/runtime/app.py', 'docker/app-entrypoint.sh'}

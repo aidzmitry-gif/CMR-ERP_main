@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 
 CHAIN = 'CRM-REL-001'
 OPT_IN = CHAIN + '-isolated-only'
-APPLICATION_CHECKPOINT = '590296255bbadaebacc9615f985eb86255c80663'
+APPLICATION_CHECKPOINT = 'f4fd310e0104bacfc0f95a28389f783486cfc3bf'
 RUNTIME = 'sha256:469fbba3826e14647fb9b03280843ff591fc6f875244bb17e08f51043ef21319'
 RUNTIME_ALIAS = 'crm-rel-001-g06-runtime:469fbba3826e'
 HEAD = 'crm_rel_001_native_docs_01'
@@ -25,7 +25,7 @@ PINS = {
     'leads': '9a304f771ba74369ded199168e0e1da3ad6348d2',
     'logistics': '6923d2e021980ef2546f382364d38dc34a0fef29',
     'marketing': 'd4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282',
-    'procurement': '0f60bb3173c42ad080301d68586b70abde1ab5ac',
+    'procurement': 'd8f50e89d5f4fbb796715594a9eb6d1740623dfe',
     'production': 'be7d7e198bf09cc41c642d22125db401da5adc48',
     'sales': '0c447381a3f95b8f576dc2bcf92f267bc22ba2ee',
     'service': '3d33800c44865cd7a7373b29192c5d59d3c4bec8',
@@ -36,8 +36,28 @@ PREFIXES = ('config/', 'connectors/', 'core/', 'integrations/', 'modules/',
 ROOT_FILES = {'main.py', 'alembic.ini', 'requirements.txt', 'pyproject.toml', 'Dockerfile'}
 CLOSURE_FILES = {'ops/sales_mail/__init__.py', 'ops/sales_mail/config.py',
                  'ops/sales_mail/queue.py', 'ops/sales_mail/relay.py'}
-PROOFS = {'tests/integration/crm_rel_001_migration_proof.py',
-          'tests/integration/crm_rel_001_financial_proof.py'}
+PROOFS = {
+    'tests/integration/crm_rel_001_migration_proof.py',
+    'tests/integration/crm_rel_001_financial_proof.py',
+    # Exact native FX acceptance import closure, not an unrestricted tests export.
+    'tests/__init__.py',
+    'tests/conftest.py',
+    'tests/accounting/conftest.py',
+    'tests/accounting/test_bank_documents.py',
+    'tests/accounting/test_inventory_cost.py',
+    'tests/accounting/test_invoice_settlements.py',
+    'tests/accounting/test_postgres.py',
+    'tests/accounting/test_procurement_receipt_drafts.py',
+    'tests/accounting/test_purchase_documents.py',
+    'tests/accounting/test_purchase_foreign_receipts.py',
+    'tests/accounting/test_sales.py',
+    'tests/integration/__init__.py',
+    'tests/integration/test_invoice_issuance_postgres.py',
+    'tests/integration/test_purchase_foreign_receipts_postgres.py',
+    'tests/reservation_source.py',
+    'tests/test_invoice_issuance.py',
+    'docs/accounting/migration-proposal.py',
+}
 
 
 class Blocked(RuntimeError):
