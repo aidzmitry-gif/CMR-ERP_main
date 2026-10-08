@@ -371,6 +371,102 @@ def quiesce_intake(path, expected, *, lease_fd, timeout=30):
         raise
 
 
+APPLICATION = 'aios-app-1'
+APPLICATION_RUNNER = Path('/opt/belakb-deploy-v1/deploy.py')
+APPLICATION_RUNNER_SHA = '4855161df501555b5e898b968c555880b1e067f8f191f62cee265a42e7387096'
+APPLICATION_STOP_GRACE = 5
+
+
+def quiesce_application(path, expected, *, lease_fd, timeout=30):
+    """Future coordinator component only; never a full writer freeze or reopen.
+
+    A lost reply leaves durable UNKNOWN. Neither this function nor the CLI retries
+    the stop, restarts the app, or changes the separate network entry guard.
+    """
+    require(sys.platform == 'linux' and not sys.flags.optimize, 'LINUX_NONOPTIMIZED_REQUIRED')
+    require(type(timeout) is int and 0 < timeout <= 60, 'APPLICATION_DEADLINE')
+    require(type(expected) is dict and set(expected) ==
+            {'id', 'image', 'running', 'restartPolicy', 'runtimeSHA256'} and
+            isinstance(expected['id'], str) and re.fullmatch('[a-f0-9]{64}', expected['id']) and
+            isinstance(expected['image'], str) and
+            re.fullmatch('sha256:[a-f0-9]{64}', expected['image']) and
+            isinstance(expected['runtimeSHA256'], str) and
+            re.fullmatch('[a-f0-9]{64}', expected['runtimeSHA256']) and
+            expected['running'] is True and type(expected['restartPolicy']) is dict and
+            expected['restartPolicy'] == {'Name': 'no', 'MaximumRetryCount': 0} and
+            type(expected['restartPolicy']['MaximumRetryCount']) is int,
+            'APPLICATION_BASELINE_BINDING')
+    require(type(lease_fd) is int and lease_fd >= 0, 'APPLICATION_GLOBAL_LEASE')
+    import fcntl
+    locked, live = os.fstat(lease_fd), RELEASE_LOCK.stat(follow_symlinks=False)
+    require(stat.S_ISREG(live.st_mode) and (locked.st_dev, locked.st_ino) ==
+            (live.st_dev, live.st_ino), 'APPLICATION_GLOBAL_LEASE')
+    try:
+        fcntl.flock(lease_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise Blocked('ANOTHER_RELEASE_RUNNING') from None
+    private_probe_root(path.parent)
+    require(not path.exists() and not path.is_symlink() and
+            not path.with_suffix('.pending').exists() and
+            not path.with_suffix('.pending').is_symlink(), 'APPLICATION_RECORD_EXISTS_NO_RETRY')
+    deadline = time.monotonic() + timeout
+    runner_body = APPLICATION_RUNNER.read_bytes()
+    require(len(runner_body) <= 65536 and sha(runner_body) == APPLICATION_RUNNER_SHA,
+            'INSTALLED_RUNNER_CHANGED')
+    # Execute the exact hashed bytes, avoiding a second file read after the seal.
+    runner = {'__name__': 'sealed_v1_application_readonly', '__file__': str(APPLICATION_RUNNER)}
+    exec(compile(runner_body, str(APPLICATION_RUNNER), 'exec'), runner)
+
+    def observe(target):
+        remaining = deadline - time.monotonic()
+        require(remaining > 0, 'APPLICATION_STOP_TIMEOUT')
+        raw = run(['docker', 'inspect', target], timeout=min(5, remaining))
+        require(len(raw) <= 1048576, 'APPLICATION_INSPECT_OUTPUT_LIMIT')
+        data = json.loads(raw)
+        require(type(data) is list and len(data) == 1 and type(data[0]) is dict,
+                'APPLICATION_INSPECT_FORMAT')
+        info = data[0]
+        require(info['Name'] == '/' + APPLICATION and
+                type(info['State']['Running']) is bool and
+                all(info['State'][key] is False for key in ('Restarting', 'Paused', 'Dead')),
+                'APPLICATION_STATE_UNKNOWN')
+        result = {'id': info['Id'], 'image': info['Image'], 'running': info['State']['Running'],
+                  'restartPolicy': info['HostConfig']['RestartPolicy'],
+                  'runtimeSHA256': runner['digest'](runner['projection'](info))}
+        require(time.monotonic() < deadline, 'APPLICATION_STOP_TIMEOUT')
+        return result
+
+    before = observe(APPLICATION)
+    require(before == expected, 'APPLICATION_IDENTITY_DRIFT')
+    record = {'format': 1, 'chain': CHAIN, 'status': 'PREPARED_NO_APPLICATION_STOP',
+              'application': before, 'applicationStopAttempted': False,
+              'stopGraceSeconds': APPLICATION_STOP_GRACE, 'fullFreezeAccepted': False,
+              'releaseReady': False, 'guardMutationAttempted': False}
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                 getattr(os, 'O_NOFOLLOW', 0), 0o600)
+    os.close(fd)
+    write_probe_state(path, record)
+    try:
+        record.update(status='APPLICATION_STOP_ATTEMPTED_STATE_UNKNOWN',
+                      applicationStopAttempted=True)
+        write_probe_state(path, record)
+        remaining = deadline - time.monotonic()
+        require(remaining > APPLICATION_STOP_GRACE, 'APPLICATION_STOP_TIMEOUT')
+        run(['docker', 'stop', '--time', str(APPLICATION_STOP_GRACE), before['id']],
+            timeout=min(APPLICATION_STOP_GRACE + 3, remaining))
+        after = observe(before['id'])
+        require(after == dict(before, running=False), 'APPLICATION_STOP_UNCONFIRMED')
+        record.update(status='APPLICATION_STOPPED_COMPONENT_ONLY', application=after)
+        write_probe_state(path, record)
+        require(time.monotonic() < deadline, 'APPLICATION_STOP_TIMEOUT')
+        return record
+    except BaseException as error:
+        record.update(status='APPLICATION_QUIESCENCE_UNKNOWN_NO_REOPEN',
+                      errorType=type(error).__name__)
+        write_probe_state(path, record)
+        raise
+
+
 def remove_probe(name, image, network, *, container_id=None):
     found = subprocess.run(['docker', 'inspect', name], capture_output=True, timeout=30)
     if found.returncode:

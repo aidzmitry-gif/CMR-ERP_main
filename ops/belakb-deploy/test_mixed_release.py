@@ -836,5 +836,255 @@ class IntakeQuiescence(unittest.TestCase):
                 package.intake_unit(package.INTAKE_SERVICES[0], timeout=3)
 
 
+class ApplicationQuiescence(unittest.TestCase):
+    """Public fixtures only; Docker and kernel flock effects are mocked."""
+
+    @contextlib.contextmanager
+    def prepared(self):
+        with fixtures() as base:
+            root = Path(base)
+            private = root / 'state'
+            private.mkdir(mode=0o755 if os.name == 'nt' else 0o700)
+            lock = root / 'global.lock'
+            lock.touch()
+            fd = os.open(lock, os.O_RDWR)
+            clock = [0.0]
+            before = {'Id': 'a'*64, 'Name': '/aios-app-1', 'Image': 'sha256:'+'b'*64,
+                      'State': {'Running': True, 'Restarting': False, 'Paused': False, 'Dead': False},
+                      'Config': {'Env': ['PRIVATE_FIXTURE=not-exported'], 'Labels': {}},
+                      'HostConfig': {'RestartPolicy': {'Name': 'no', 'MaximumRetryCount': 0},
+                                     'Dns': ['fixture-dns']},
+                      'Mounts': [], 'NetworkSettings': {'Networks': {'fixture-network': {}}}}
+            after = json.loads(json.dumps(before))
+            after['State']['Running'] = False
+            expected = {'id': before['Id'], 'image': before['Image'], 'running': True,
+                        'restartPolicy': before['HostConfig']['RestartPolicy'].copy(),
+                        'runtimeSHA256': package.digest(package.projection(before))}
+            reads = [0]
+            def respond(argv, **kwargs):
+                if argv[:2] == ['docker', 'inspect']:
+                    data = before if reads[0] == 0 else after
+                    reads[0] += 1
+                    return json.dumps([data]).encode()
+                if argv[:2] == ['docker', 'stop']:
+                    return b''
+                raise AssertionError('Unexpected external command')
+            native = SimpleNamespace(flock=Mock(), LOCK_EX=2, LOCK_NB=4)
+            runner = Path(__file__).resolve().parents[5] / 'ops/belakb-deploy/deploy.py'
+            try:
+                with patch.dict(sys.modules, {'fcntl': native}), \
+                        patch.object(package.sys, 'platform', 'linux'), \
+                        patch.object(package, 'RELEASE_LOCK', lock), \
+                        patch.object(package, 'APPLICATION_RUNNER', runner), \
+                        patch.object(package, 'run', side_effect=respond) as command, \
+                        patch.object(package.time, 'monotonic', side_effect=lambda: clock[0]):
+                    yield SimpleNamespace(path=private/'app.json', fd=fd, flock=native.flock,
+                                          root=root, clock=clock, before=before, after=after,
+                                          expected=expected, command=command, respond=respond)
+            finally:
+                os.close(fd)
+
+    def test_durable_attempt_precedes_single_exact_stop_and_private_readback(self):
+        with self.prepared() as c:
+            def respond(argv, **kwargs):
+                if argv[:2] == ['docker', 'stop']:
+                    record = json.loads(c.path.read_bytes())
+                    self.assertEqual(record['status'], 'APPLICATION_STOP_ATTEMPTED_STATE_UNKNOWN')
+                    self.assertTrue(record['applicationStopAttempted'])
+                    self.assertFalse(record['fullFreezeAccepted'])
+                    self.assertEqual(argv, ['docker', 'stop', '--time', '5', 'a'*64])
+                    self.assertGreater(kwargs['timeout'], 5)
+                    self.assertLessEqual(kwargs['timeout'], 8)
+                return c.respond(argv, **kwargs)
+            c.command.side_effect = respond
+            result = package.quiesce_application(c.path, c.expected, lease_fd=c.fd)
+            self.assertEqual(result['status'], 'APPLICATION_STOPPED_COMPONENT_ONLY')
+            self.assertFalse(result['application']['running'])
+            self.assertFalse(result['releaseReady'])
+            self.assertFalse(result['guardMutationAttempted'])
+            self.assertEqual(json.loads(c.path.read_bytes()), result)
+            self.assertNotIn('PRIVATE_FIXTURE', c.path.read_text())
+            self.assertNotIn('fixture-dns', c.path.read_text())
+            self.assertEqual([x.args[0] for x in c.command.call_args_list],
+                             [['docker', 'inspect', 'aios-app-1'],
+                              ['docker', 'stop', '--time', '5', 'a'*64],
+                              ['docker', 'inspect', 'a'*64]])
+            c.flock.assert_called_once_with(c.fd, 6)
+
+    def test_wrong_baseline_or_name_state_refuses_before_durable_stop(self):
+        for field in ('Id', 'Image', 'Dns', 'RestartPolicy', 'Name', 'Running', 'Paused'):
+            with self.subTest(field=field), self.prepared() as c:
+                if field == 'Dns':
+                    c.before['HostConfig']['Dns'] = []
+                elif field == 'RestartPolicy':
+                    c.before['HostConfig'][field]['Name'] = 'always'
+                elif field in ('Running', 'Paused'):
+                    c.before['State'][field] = field == 'Paused'
+                else:
+                    c.before[field] = 'wrong'
+                with self.assertRaises(package.Blocked):
+                    package.quiesce_application(c.path, c.expected, lease_fd=c.fd)
+                self.assertFalse(c.path.exists())
+                self.assertEqual(c.command.call_count, 1)
+
+    def test_caller_baseline_mutation_after_admission_cannot_redirect_stop(self):
+        with self.prepared() as c:
+            writer = package.write_probe_state
+            def mutate_caller(path, record):
+                writer(path, record)
+                if record['applicationStopAttempted']:
+                    c.expected.update(id='c'*64, image='sha256:'+'d'*64,
+                                      runtimeSHA256='e'*64, running=False)
+                    c.expected['restartPolicy']['Name'] = 'always'
+            with patch.object(package, 'write_probe_state', side_effect=mutate_caller):
+                result = package.quiesce_application(c.path, c.expected, lease_fd=c.fd)
+            self.assertEqual(result['status'], 'APPLICATION_STOPPED_COMPONENT_ONLY')
+            self.assertEqual(result['application']['id'], 'a'*64)
+            self.assertEqual(result['application']['restartPolicy']['Name'], 'no')
+            self.assertEqual([x.args[0] for x in c.command.call_args_list],
+                             [['docker', 'inspect', 'aios-app-1'],
+                              ['docker', 'stop', '--time', '5', 'a'*64],
+                              ['docker', 'inspect', 'a'*64]])
+
+    def test_arbitrary_target_invalid_baseline_timeout_platform_and_optimize_refuse(self):
+        for change in ('target', 'running', 'restart', 'bool-retry', 'bad-id'):
+            with self.subTest(change=change), self.prepared() as c:
+                if change == 'target': c.expected['target'] = 'postgres'
+                elif change == 'running': c.expected['running'] = 1
+                elif change == 'restart': c.expected['restartPolicy']['Name'] = 'always'
+                elif change == 'bool-retry': c.expected['restartPolicy']['MaximumRetryCount'] = False
+                else: c.expected['id'] = 'arbitrary'
+                with self.assertRaisesRegex(package.Blocked, 'APPLICATION_BASELINE_BINDING'):
+                    package.quiesce_application(c.path, c.expected, lease_fd=c.fd)
+                c.command.assert_not_called()
+        for timeout in (True, 0, 61, 1.5):
+            with self.subTest(timeout=timeout), self.prepared() as c:
+                with self.assertRaisesRegex(package.Blocked, 'APPLICATION_DEADLINE'):
+                    package.quiesce_application(c.path, c.expected, lease_fd=c.fd, timeout=timeout)
+                c.command.assert_not_called()
+        for field, value in (('platform', 'win32'), ('flags', SimpleNamespace(optimize=1))):
+            with self.subTest(field=field), self.prepared() as c, patch.object(package.sys, field, value):
+                with self.assertRaisesRegex(package.Blocked, 'LINUX_NONOPTIMIZED_REQUIRED'):
+                    package.quiesce_application(c.path, c.expected, lease_fd=c.fd)
+                c.command.assert_not_called()
+
+    def test_existing_empty_pending_or_raced_receipt_prevents_repeat(self):
+        for kind in ('empty', 'pending', 'raced'):
+            with self.subTest(kind=kind), self.prepared() as c:
+                target = c.path.with_suffix('.pending') if kind == 'pending' else c.path
+                if kind != 'raced': target.write_text('')
+                else:
+                    def respond(argv, **kwargs):
+                        target.write_text('reservation-by-other-caller')
+                        return c.respond(argv, **kwargs)
+                    c.command.side_effect = respond
+                with self.assertRaises((package.Blocked, FileExistsError)):
+                    package.quiesce_application(c.path, c.expected, lease_fd=c.fd)
+                self.assertEqual(target.read_text(), 'reservation-by-other-caller' if kind == 'raced' else '')
+                self.assertFalse(any(x.args[0][:2] == ['docker', 'stop'] for x in c.command.call_args_list))
+
+    def test_wrong_descriptor_or_competing_release_refuses_effects(self):
+        for kind in ('bool', 'different-file', 'competing'):
+            with self.subTest(kind=kind), self.prepared() as c:
+                other = c.root/'other.lock'; other.touch()
+                other_fd = os.open(other, os.O_RDWR)
+                try:
+                    if kind == 'competing': c.flock.side_effect = BlockingIOError()
+                    fd = True if kind == 'bool' else other_fd if kind == 'different-file' else c.fd
+                    with self.assertRaises(package.Blocked):
+                        package.quiesce_application(c.path, c.expected, lease_fd=fd)
+                    c.command.assert_not_called()
+                    self.assertFalse(c.path.exists())
+                finally: os.close(other_fd)
+
+    def test_installed_primitive_seal_mismatch_refuses_before_observation(self):
+        with self.prepared() as c, patch.object(package, 'APPLICATION_RUNNER_SHA', '0'*64):
+            with self.assertRaisesRegex(package.Blocked, 'INSTALLED_RUNNER_CHANGED'):
+                package.quiesce_application(c.path, c.expected, lease_fd=c.fd)
+            c.command.assert_not_called()
+            self.assertFalse(c.path.exists())
+
+    def test_lost_reply_interrupt_or_late_stop_is_unknown_and_never_retried(self):
+        for kind in ('lost', 'interrupt', 'late'):
+            with self.subTest(kind=kind), self.prepared() as c:
+                def respond(argv, **kwargs):
+                    if argv[:2] == ['docker', 'stop']:
+                        if kind == 'lost': raise package.Blocked('COMMAND_UNAVAILABLE_OR_TIMEOUT')
+                        if kind == 'interrupt': raise KeyboardInterrupt()
+                        c.clock[0] = 31
+                    return c.respond(argv, **kwargs)
+                c.command.side_effect = respond
+                with self.assertRaises((package.Blocked, KeyboardInterrupt)):
+                    package.quiesce_application(c.path, c.expected, lease_fd=c.fd)
+                self.assertEqual(json.loads(c.path.read_bytes())['status'],
+                                 'APPLICATION_QUIESCENCE_UNKNOWN_NO_REOPEN')
+                self.assertEqual(c.command.call_count, 2)
+                with self.assertRaisesRegex(package.Blocked, 'APPLICATION_RECORD_EXISTS_NO_RETRY'):
+                    package.quiesce_application(c.path, c.expected, lease_fd=c.fd)
+                self.assertEqual(c.command.call_count, 2)
+
+    def test_late_before_or_after_observation_cannot_report_success(self):
+        for phase in ('before', 'after'):
+            with self.subTest(phase=phase), self.prepared() as c:
+                def respond(argv, **kwargs):
+                    result = c.respond(argv, **kwargs)
+                    if argv[:2] == ['docker', 'inspect'] and (argv[-1] == 'aios-app-1') == (phase == 'before'):
+                        c.clock[0] = 31
+                    return result
+                c.command.side_effect = respond
+                with self.assertRaisesRegex(package.Blocked, 'APPLICATION_STOP_TIMEOUT'):
+                    package.quiesce_application(c.path, c.expected, lease_fd=c.fd)
+                if phase == 'before': self.assertFalse(c.path.exists())
+                else: self.assertEqual(json.loads(c.path.read_bytes())['status'],
+                                       'APPLICATION_QUIESCENCE_UNKNOWN_NO_REOPEN')
+
+    def test_postread_same_stopped_identity_and_raw_config_are_required(self):
+        for kind in ('running', 'id', 'image', 'dns', 'restart', 'name'):
+            with self.subTest(kind=kind), self.prepared() as c:
+                if kind == 'running': c.after['State']['Running'] = True
+                elif kind == 'id': c.after['Id'] = 'c'*64
+                elif kind == 'image': c.after['Image'] = 'sha256:'+'c'*64
+                elif kind == 'dns': c.after['HostConfig']['Dns'] = []
+                elif kind == 'restart': c.after['HostConfig']['RestartPolicy']['Name'] = 'always'
+                else: c.after['Name'] = '/another-app'
+                with self.assertRaises(package.Blocked):
+                    package.quiesce_application(c.path, c.expected, lease_fd=c.fd)
+                self.assertEqual(json.loads(c.path.read_bytes())['status'],
+                                 'APPLICATION_QUIESCENCE_UNKNOWN_NO_REOPEN')
+                self.assertEqual(c.command.call_count, 3)
+
+    def test_all_commands_share_deadline_and_small_budget_does_not_stop(self):
+        with self.prepared() as c:
+            def respond(argv, **kwargs):
+                if argv[-1] == 'aios-app-1': c.clock[0] = 1
+                elif argv[:2] == ['docker', 'stop']: c.clock[0] = 6
+                else: c.clock[0] = 9
+                return c.respond(argv, **kwargs)
+            c.command.side_effect = respond
+            package.quiesce_application(c.path, c.expected, lease_fd=c.fd, timeout=10)
+            self.assertEqual([x.kwargs['timeout'] for x in c.command.call_args_list], [5, 8, 4])
+        with self.prepared() as c:
+            with self.assertRaisesRegex(package.Blocked, 'APPLICATION_STOP_TIMEOUT'):
+                package.quiesce_application(c.path, c.expected, lease_fd=c.fd, timeout=5)
+            self.assertEqual(c.command.call_count, 1)
+            self.assertEqual(json.loads(c.path.read_bytes())['status'],
+                             'APPLICATION_QUIESCENCE_UNKNOWN_NO_REOPEN')
+
+    def test_failed_attempt_record_write_cannot_issue_stop(self):
+        with self.prepared() as c:
+            writer = package.write_probe_state
+            calls = [0]
+            def fail_attempt(path, record):
+                calls[0] += 1
+                if calls[0] == 2: raise OSError('fixture-persistence-error')
+                writer(path, record)
+            with patch.object(package, 'write_probe_state', side_effect=fail_attempt):
+                with self.assertRaises(OSError):
+                    package.quiesce_application(c.path, c.expected, lease_fd=c.fd)
+            self.assertEqual(c.command.call_count, 1)
+            self.assertEqual(json.loads(c.path.read_bytes())['status'],
+                             'APPLICATION_QUIESCENCE_UNKNOWN_NO_REOPEN')
+
+
 if __name__ == '__main__':
     unittest.main()
