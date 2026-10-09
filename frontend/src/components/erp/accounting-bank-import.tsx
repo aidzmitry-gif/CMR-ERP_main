@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
@@ -32,13 +32,18 @@ type Candidate = {
   entry_id: number | null;
 };
 type Preview = {
+  organization_id: number;
   basis_digest: string;
   digest: string;
   source_snapshot: Snapshot;
   lines: { account: string; title: string; side: string; amount: string; dimensions?: Record<string, string> }[];
   confirmation_available: boolean;
   normative_verified: boolean;
+  rule_key?: string;
+  resolved_command?: Record<string, unknown>;
 };
+type Rule = { key: string; title: string; direction: string; settlement_account: string; cash_activity: string; required_dimensions: string[] };
+type Prepared = { org: string; automatic: boolean; ruleKey: string; command: Record<string, unknown>; preview: Preview };
 
 function message(body: unknown, fallback: string) {
   return typeof body === "object" && body !== null && typeof (body as { detail?: unknown }).detail === "string"
@@ -67,7 +72,18 @@ export function AccountingBankImport({ org, accounts, policyId, date, onDate, on
   const [explanation, setExplanation] = useState("");
   const [requestKey, setRequestKey] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
-  const [prepared, setPrepared] = useState<Record<string, unknown> | null>(null);
+  const [prepared, setPrepared] = useState<Prepared | null>(null);
+  const [manual, setManual] = useState(false);
+  const [ruleKey, setRuleKey] = useState("");
+  const [ruleOptions, setRuleOptions] = useState<{ scope: string; rules: Rule[]; policyId: number | null; error: string } | null>(null);
+  const rulesScope = `${org}:${date}:${policyId}`;
+  const rules = ruleOptions?.scope === rulesScope ? ruleOptions.rules : [];
+  const ruleError = ruleOptions?.scope === rulesScope ? ruleOptions.error : "";
+  const rulesPolicy = ruleOptions?.scope === rulesScope ? ruleOptions.policyId : null;
+  const scope = useRef({ org, date, policyId });
+  useLayoutEffect(() => { scope.current = { org, date, policyId }; }, [org, date, policyId]);
+  const postedCallback = useRef(onPosted);
+  useLayoutEffect(() => { postedCallback.current = onPosted; }, [onPosted]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -77,7 +93,12 @@ export function AccountingBankImport({ org, accounts, policyId, date, onDate, on
   const [mappingLocked, setMappingLocked] = useState(false);
   const [mappingError, setMappingError] = useState("");
 
-  const selected = candidates.find((candidate) => candidate.source_snapshot.transaction_id === selectedId) ?? null;
+  const selected = prepared ? { source_snapshot: prepared.preview.source_snapshot, source_digest: String(prepared.command.source_digest),
+    binding_status: "own" as const, imported: false, entry_id: null }
+    : candidates.find((candidate) => candidate.source_snapshot.transaction_id === selectedId) ?? null;
+  const rule = rules.find(r => r.key === ruleKey && r.direction === selected?.source_snapshot.direction);
+  const effectiveSettlement = manual ? settlementAccount : rule?.settlement_account ?? "";
+  const effectiveActivity = manual ? cashActivity : rule?.cash_activity ?? "";
   const cashAccounts = useMemo(() => accounts.filter((account) => account.cash), [accounts]);
   const settlementAccounts = useMemo(
     () => accounts.filter((account) => !account.cash && ["asset", "liability"].includes(account.category)),
@@ -85,19 +106,19 @@ export function AccountingBankImport({ org, accounts, policyId, date, onDate, on
   );
 
   const load = useCallback(async () => {
-    if (!org) return;
+    if (!org || scope.current.org !== org) return;
     setLoading(true);
     setError("");
     try {
       const response = await fetch(`/api/accounting/organizations/${org}/bank-import/candidates`, { cache: "no-store" });
       const body = await response.json();
-      if (!alive.current) return;
+      if (!alive.current || scope.current.org !== org) return;
       if (!response.ok) throw new Error(message(body, "Не удалось загрузить очередь банковских строк."));
       setCandidates(body as Candidate[]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось загрузить очередь банковских строк.");
+      if (alive.current && scope.current.org === org) setError(e instanceof Error ? e.message : "Не удалось загрузить очередь банковских строк.");
     } finally {
-      setLoading(false);
+      if (alive.current && scope.current.org === org) setLoading(false);
     }
   }, [org]);
 
@@ -111,8 +132,25 @@ export function AccountingBankImport({ org, accounts, policyId, date, onDate, on
   // mapping lookup; a late response must not configure the new organisation.
   useEffect(() => {
     mappingRequest.current += 1;
-    setSelectedId(null); setPreview(null); setPrepared(null); setMappingLocked(false); setMappingError("");
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedId(null); setMappingLocked(false); setMappingError("");
   }, [org]);
+
+  useEffect(() => {
+    if (manual || !org || prepared) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch(`/api/accounting/organizations/${org}/bank-import/auto-rules?on=${date}`, { cache: "no-store", signal: controller.signal });
+        const body = await response.json();
+        if (!response.ok) throw new Error(message(body, "Настройте правила банковских проводок в учётной политике."));
+        if (String(body.organization_id) !== org || body.policy_id !== policyId || !Array.isArray(body.rules)) throw new Error("Правила не соответствуют выбранному юрлицу и политике.");
+        if (!controller.signal.aborted) setRuleOptions({ scope: rulesScope, rules: body.rules, policyId: body.policy_id, error: "" });
+      } catch (cause) { if (!controller.signal.aborted) setRuleOptions({ scope: rulesScope, rules: [], policyId: null,
+        error: cause instanceof Error ? cause.message : "Не удалось загрузить правила." }); }
+    })();
+    return () => controller.abort();
+  }, [org, date, policyId, rulesScope, manual, prepared]);
 
   async function resolveMapping(candidate: Candidate) {
     const source = candidate.source_snapshot;
@@ -150,7 +188,7 @@ export function AccountingBankImport({ org, accounts, policyId, date, onDate, on
     setSelectedId(candidate.source_snapshot.transaction_id);
     setBankDimensions({}); setSettlementDimensions({});
     setBankAccount("");
-    setSettlementAccount(settlementAccounts[0]?.code ?? "");
+    setSettlementAccount(settlementAccounts[0]?.code ?? ""); setRuleKey("");
     setExplanation(candidate.source_snapshot.purpose || `Банковская строка ${candidate.source_snapshot.ext_id}`);
     setRequestKey(globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${candidate.source_snapshot.transaction_id}`);
     setPreview(null);
@@ -183,36 +221,49 @@ export function AccountingBankImport({ org, accounts, policyId, date, onDate, on
 
   async function execute(confirm: boolean) {
     if (!selected) return;
-    if (!policyId) { setError("Сначала утвердите учётную политику на дату отражения."); return; }
-    const body = confirm ? { ...prepared, basis_digest: preview?.basis_digest, digest: preview?.digest } : {
+    if (!confirm && !policyId) { setError("Сначала утвердите учётную политику на дату отражения."); return; }
+    if (confirm && !prepared) return;
+    const start = { ...scope.current };
+    const automatic = confirm ? prepared!.automatic : !manual;
+    const targetOrg = confirm ? prepared!.org : org;
+    const base = {
       request_key: requestKey,
       source_transaction_id: selected.source_snapshot.transaction_id,
       source_digest: selected.source_digest,
       policy_id: policyId,
-      bank_account: bankAccount,
-      settlement_account: settlementAccount,
-      bank_dimensions: bankDimensions,
       settlement_dimensions: settlementDimensions,
       posting_date: date,
-      cash_activity: cashActivity,
       explanation,
     };
-    if (!body) return;
+    const previewCommand = automatic ? { ...base, rule_key: ruleKey } : { ...base,
+      bank_account: bankAccount, settlement_account: settlementAccount, bank_dimensions: bankDimensions, cash_activity: cashActivity };
+    const frozen = prepared && { ...prepared.command, basis_digest: prepared.preview.basis_digest, digest: prepared.preview.digest };
+    const body = confirm ? automatic ? { rule_key: prepared!.ruleKey, command: frozen } : frozen : previewCommand;
     setBusy(true); setError(""); setNotice("");
     try {
-      const response = await fetch(`/api/accounting/organizations/${org}/bank-import/${confirm ? "confirm" : "preview"}`, {
+      const response = await fetch(`/api/accounting/organizations/${targetOrg}/bank-import/${automatic ? "auto-" : ""}${confirm ? "confirm" : "preview"}`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       const result = await response.json();
       if (!alive.current) return;
       if (!response.ok) throw new Error(message(result, "Проверьте источник, политику и счета."));
       if (confirm) {
+        if (!Number.isSafeInteger(result.entry_id) || result.entry_id <= 0 || String(result.organization_id) !== targetOrg
+          || result.source_transaction_id !== prepared!.command.source_transaction_id) throw new Error("Ответ не подтверждает проведение исходной строки. Повторите то же подтверждение.");
         setSelectedId(null); setPreview(null); setPrepared(null);
         setNotice(`Строка ${selected.source_snapshot.ext_id} проведена в бухгалтерскую книгу.`);
         await load();
-        if (alive.current) onPosted();
+        if (alive.current) postedCallback.current();
       } else {
-        setPrepared(body as Record<string, unknown>);
+        if (scope.current.org !== start.org || scope.current.date !== start.date || scope.current.policyId !== start.policyId) return;
+        const command = automatic ? result.resolved_command : previewCommand;
+        if (String(result.organization_id) !== org || result.source_snapshot?.transaction_id !== base.source_transaction_id
+          || !/^[0-9a-f]{64}$/.test(result.basis_digest) || !/^[0-9a-f]{64}$/.test(result.digest)
+          || !command || command.request_key !== base.request_key || command.source_transaction_id !== base.source_transaction_id
+          || command.source_digest !== base.source_digest || command.policy_id !== base.policy_id || command.posting_date !== base.posting_date
+          || JSON.stringify(command.settlement_dimensions) !== JSON.stringify(base.settlement_dimensions) || command.explanation !== base.explanation
+          || (automatic && (result.rule_key !== ruleKey || command.settlement_account !== rule?.settlement_account || command.cash_activity !== rule?.cash_activity))) throw new Error("Расчёт не соответствует выбранной строке. Повторите расчёт.");
+        setPrepared({ org, automatic, ruleKey, command, preview: result as Preview });
         setPreview(result as Preview);
       }
     } catch (e) { setError(e instanceof Error ? e.message : "Операция импорта не выполнена."); }
@@ -226,21 +277,24 @@ export function AccountingBankImport({ org, accounts, policyId, date, onDate, on
     </div>
     {error && <p role="alert" className="text-red-700">{error}</p>}
     {notice && <p role="status" className="text-money">{notice}</p>}
-    <AccountingBankStatementSource key={`source-${org}`} org={org} disabled={busy} onImported={load} />
-    <AccountingBankStatementCsv key={`csv-${org}`} org={org} disabled={busy} onImported={load} />
-    <AccountingBankMapping key={org} org={org} accounts={accounts} onChanged={() => { mappingRequest.current += 1; setSelectedId(null); setPreview(null); setPrepared(null); setMappingLocked(false); setMappingError(""); void load(); }} />
+    <AccountingBankStatementSource key={`source-${org}`} org={org} disabled={busy || !!prepared} onImported={load} />
+    <AccountingBankStatementCsv key={`csv-${org}`} org={org} disabled={busy || !!prepared} onImported={load} />
+    {!prepared && <AccountingBankMapping key={org} org={org} accounts={accounts} onChanged={() => { mappingRequest.current += 1; setSelectedId(null); setPreview(null); setPrepared(null); setMappingLocked(false); setMappingError(""); void load(); }} />}
     <div className="flex items-end gap-3">
-      <label className="text-sm">Дата отражения<Input aria-label="Дата отражения импорта" type="date" value={date} disabled={busy} onChange={(event) => { setPreview(null); setPrepared(null); onDate(event.target.value); }} /></label>
+      <label className="text-sm">Дата отражения<Input aria-label="Дата отражения импорта" type="date" value={String(prepared?.command.posting_date ?? date)} disabled={busy || !!prepared} onChange={(event) => { setPreview(null); setPrepared(null); onDate(event.target.value); }} /></label>
       <Button variant="secondary" disabled={busy || loading || !org} onClick={() => void load()}>Обновить очередь</Button>
     </div>
+    <label><input type="checkbox" checked={manual} disabled={busy || !!prepared} onChange={event => { setManual(event.target.checked); setRuleKey(""); setSettlementDimensions({}); }} /> Выбрать счета вручную</label>
+    {prepared && <p role="status">Расчёт зафиксирован в этом окне для юрлица № {prepared.org}. При обрыве связи повторите подтверждение.</p>}
+    {!manual && !prepared && ruleError && <p role="alert">{ruleError}</p>}
     {loading && <p role="status">Загрузка очереди…</p>}
     {!loading && !candidates.length && <p className="rounded border border-line p-3 text-sm text-muted">Банковских строк пока нет.</p>}
     {!!candidates.length && <div className="overflow-x-auto rounded border border-line"><table className="w-full text-left text-sm"><thead><tr className="border-b border-line text-muted"><th className="p-2">Дата / источник</th><th className="p-2">Контрагент и назначение</th><th className="p-2">Сумма</th><th className="p-2">Состояние</th><th className="p-2" /></tr></thead><tbody>{candidates.map((candidate) => {
       const source = candidate.source_snapshot;
       const eligible = source.currency === "BYN" && !!source.occurred_on && Number(source.amount) > 0;
       const state = candidate.imported ? `Проведено · № ${candidate.entry_id}` : candidate.binding_status === "own" ? "Привязано к юрлицу" : candidate.binding_status === "other" ? "Привязано к другому юрлицу" : "Нужна привязка";
-      return <tr key={source.transaction_id} className="border-b border-line last:border-0"><td className="p-2 align-top"><strong>{source.occurred_on || "Без даты"}</strong><br /><span className="text-xs text-muted">{source.source_external_id || source.ext_id}</span></td><td className="p-2 align-top">{source.payer_name || source.payer_unp || "Контрагент не указан"}<br /><span className="text-xs text-muted">{source.purpose || "Назначение не указано"}</span></td><td className="p-2 align-top whitespace-nowrap">{source.direction === "payment" ? "Списание" : "Поступление"}<br />{source.amount ?? "Некорректная сумма"} {source.currency}</td><td className="p-2 align-top"><span className={candidate.imported ? "text-money" : candidate.binding_status === "own" ? "text-accent-ink" : "text-muted"}>{state}</span>{!eligible && <><br /><span className="text-xs text-red-700">Нужны положительная сумма, дата и BYN.</span></>}</td><td className="p-2 align-top text-right"><div className="flex flex-wrap justify-end gap-2">{candidate.imported && Number.isSafeInteger(candidate.entry_id) && candidate.entry_id! > 0 && onEntry && <Button variant="secondary" disabled={busy} onClick={() => onEntry(candidate.entry_id!)}>Открыть проводку</Button>}{candidate.binding_status === "unbound" && <Button variant="secondary" disabled={busy} onClick={() => void bind(candidate)}>Привязать</Button>}{candidate.binding_status === "own" && !candidate.imported && eligible && <Button disabled={busy || accounts.length === 0} onClick={() => select(candidate)}>Выбрать</Button>}</div></td></tr>;
+      return <tr key={source.transaction_id} className="border-b border-line last:border-0"><td className="p-2 align-top"><strong>{source.occurred_on || "Без даты"}</strong><br /><span className="text-xs text-muted">{source.source_external_id || source.ext_id}</span></td><td className="p-2 align-top">{source.payer_name || source.payer_unp || "Контрагент не указан"}<br /><span className="text-xs text-muted">{source.purpose || "Назначение не указано"}</span></td><td className="p-2 align-top whitespace-nowrap">{source.direction === "payment" ? "Списание" : "Поступление"}<br />{source.amount ?? "Некорректная сумма"} {source.currency}</td><td className="p-2 align-top"><span className={candidate.imported ? "text-money" : candidate.binding_status === "own" ? "text-accent-ink" : "text-muted"}>{state}</span>{!eligible && <><br /><span className="text-xs text-red-700">Нужны положительная сумма, дата и BYN.</span></>}</td><td className="p-2 align-top text-right"><div className="flex flex-wrap justify-end gap-2">{candidate.imported && Number.isSafeInteger(candidate.entry_id) && candidate.entry_id! > 0 && onEntry && <Button variant="secondary" disabled={busy} onClick={() => onEntry(candidate.entry_id!)}>Открыть проводку</Button>}{candidate.binding_status === "unbound" && <Button variant="secondary" disabled={busy || !!prepared} onClick={() => void bind(candidate)}>Привязать</Button>}{candidate.binding_status === "own" && !candidate.imported && eligible && <Button disabled={busy || !!prepared || accounts.length === 0} onClick={() => select(candidate)}>Выбрать</Button>}</div></td></tr>;
     })}</tbody></table></div>}
-    {selected && !selected.imported && <div className="space-y-3 rounded-xl border border-accent p-3"><h3 className="font-semibold">Проведение строки {selected.source_snapshot.ext_id}</h3><p className="text-sm text-muted">Источник: {selected.source_snapshot.amount} {selected.source_snapshot.currency} · {selected.source_snapshot.purpose || "назначение не указано"}</p>{mappingLoading && <p role="status" className="text-sm text-muted">Проверка registry mapping…</p>}{mappingError && <p role="alert" className="text-red-700">{mappingError}</p>}<div className="grid gap-3 md:grid-cols-4"><label>Денежный счёт<Select aria-label="Счёт банка импорта" value={bankAccount} disabled={busy || !!preview || mappingLocked} onChange={(event) => { setBankAccount(event.target.value); setBankDimensions({}); setPreview(null); setPrepared(null); }}><option value="">Выберите счёт</option>{cashAccounts.map((account) => <option key={account.code} value={account.code}>{account.code} · {account.title}</option>)}</Select></label><label>Счёт расчётов<Select aria-label="Счёт расчётов импорта" value={settlementAccount} disabled={busy || !!preview} onChange={(event) => { setSettlementAccount(event.target.value); setSettlementDimensions({}); setPreview(null); setPrepared(null); }}><option value="">Выберите счёт</option>{settlementAccounts.map((account) => <option key={account.code} value={account.code}>{account.code} · {account.title}</option>)}</Select></label><label>Вид денежного потока<Select aria-label="Поток импорта" value={cashActivity} disabled={busy || !!preview} onChange={(event) => { setCashActivity(event.target.value); setPreview(null); setPrepared(null); }}><option value="operating">Текущая деятельность</option><option value="investing">Инвестиционная</option><option value="financing">Финансовая</option></Select></label><label className="md:col-span-1">Основание<Input aria-label="Основание импорта" value={explanation} disabled={busy || !!preview} onChange={(event) => { setExplanation(event.target.value); setPreview(null); setPrepared(null); }} /></label></div>{([{ code: bankAccount, title: "Банк", values: bankDimensions, update: setBankDimensions, locked: mappingLocked }, { code: settlementAccount, title: "Расчёты", values: settlementDimensions, update: setSettlementDimensions, locked: false }]).map(({ code, title, values, update, locked }) => <div key={title} className="grid gap-3 md:grid-cols-3">{accounts.find((account) => account.code === code)?.required_dimensions.filter((key) => title !== "Банк" || !["bank_statement", "bank_transaction_id"].includes(key)).map((key) => <label key={key}>{title}: {({ counterparty: "Контрагент", contract: "Договор", settlement_document: "Документ расчётов", department: "Подразделение" } as Record<string, string>)[key] || key}<Input aria-label={`${title}: ${key}`} value={values[key] || ""} disabled={busy || !!preview || locked} onChange={(event) => { update({ ...values, [key]: event.target.value }); setPreview(null); setPrepared(null); }} /></label>)}</div>)}<Button disabled={busy || mappingLoading || !!mappingError || !mappingLocked || !policyId || !bankAccount || !settlementAccount || !explanation} onClick={() => void execute(false)}>Рассчитать проводки</Button>{preview && <div className="space-y-2 rounded-xl border border-accent p-3"><p className="text-sm">Источник подтверждён: {preview.source_snapshot.ext_id} · {preview.source_snapshot.amount} BYN</p>{preview.lines.map((line, index) => <p key={index}>{line.side === "debit" ? "Дт" : "Кт"} {line.account} · {line.title} — {line.amount} BYN{Object.entries(line.dimensions ?? {}).map(([key, value]) => <span key={key} className="ml-3 text-muted">{key}: {value}</span>)}</p>)}{!preview.normative_verified && <p className="text-red-700">Политика не подтверждена нормативно: подтверждение заблокировано.</p>}<Button disabled={busy || !preview.confirmation_available} onClick={() => void execute(true)}>Подтвердить импорт</Button></div>}</div>}
+    {selected && !selected.imported && <div className="space-y-3 rounded-xl border border-accent p-3"><h3 className="font-semibold">Проведение строки {selected.source_snapshot.ext_id}</h3><p className="text-sm text-muted">Источник: {selected.source_snapshot.amount} {selected.source_snapshot.currency} · {selected.source_snapshot.purpose || "назначение не указано"}</p>{mappingLoading && <p role="status" className="text-sm text-muted">Проверка registry mapping…</p>}{mappingError && <p role="alert" className="text-red-700">{mappingError}</p>}{!manual && !prepared && <label>Банковская операция<Select aria-label="Банковская операция" value={ruleKey} disabled={busy} onChange={e => { setRuleKey(e.target.value); setSettlementDimensions({}); }}><option value="">Выберите операцию</option>{rules.filter(r => r.direction === selected.source_snapshot.direction).map(r => <option key={r.key} value={r.key}>{r.title}</option>)}</Select>{!selected.source_snapshot.direction && <p>Направление в источнике не задано. Автоматические проводки недоступны.</p>}</label>}<div className="grid gap-3 md:grid-cols-4"><label>Денежный счёт<Select aria-label="Счёт банка импорта" value={bankAccount} disabled={busy || !!preview || mappingLocked} onChange={(event) => { setBankAccount(event.target.value); setBankDimensions({}); setPreview(null); setPrepared(null); }}><option value="">Выберите счёт</option>{cashAccounts.map((account) => <option key={account.code} value={account.code}>{account.code} · {account.title}</option>)}</Select></label><label>Счёт расчётов<Select aria-label="Счёт расчётов импорта" value={String(prepared?.command.settlement_account ?? effectiveSettlement)} disabled={!manual || busy || !!preview} onChange={(event) => { setSettlementAccount(event.target.value); setSettlementDimensions({}); setPreview(null); setPrepared(null); }}><option value="">Выберите счёт</option>{settlementAccounts.map((account) => <option key={account.code} value={account.code}>{account.code} · {account.title}</option>)}</Select></label><label>Вид денежного потока<Select aria-label="Поток импорта" value={String(prepared?.command.cash_activity ?? effectiveActivity)} disabled={!manual || busy || !!preview} onChange={(event) => { setCashActivity(event.target.value); setPreview(null); setPrepared(null); }}><option value="operating">Текущая деятельность</option><option value="investing">Инвестиционная</option><option value="financing">Финансовая</option></Select></label><label className="md:col-span-1">Основание<Input aria-label="Основание импорта" value={explanation} disabled={busy || !!preview} onChange={(event) => { setExplanation(event.target.value); setPreview(null); setPrepared(null); }} /></label></div>{([{ code: bankAccount, title: "Банк", values: bankDimensions, update: setBankDimensions, locked: mappingLocked }, { code: effectiveSettlement, title: "Расчёты", values: settlementDimensions, update: setSettlementDimensions, locked: false }]).map(({ code, title, values, update, locked }) => <div key={title} className="grid gap-3 md:grid-cols-3">{(title === "Расчёты" && !manual ? rule?.required_dimensions : accounts.find((account) => account.code === code)?.required_dimensions)?.filter((key) => title !== "Банк" || !["bank_statement", "bank_transaction_id"].includes(key)).map((key) => <label key={key}>{title}: {({ counterparty: "Контрагент", contract: "Договор", settlement_document: "Документ расчётов", department: "Подразделение" } as Record<string, string>)[key] || key}<Input aria-label={`${title}: ${key}`} value={values[key] || ""} disabled={busy || !!preview || locked} onChange={(event) => { update({ ...values, [key]: event.target.value }); setPreview(null); setPrepared(null); }} /></label>)}</div>)}<Button disabled={busy || !!prepared || mappingLoading || !!mappingError || !mappingLocked || !policyId || !bankAccount || !effectiveSettlement || !explanation || (!manual && (!rule || rulesPolicy !== policyId || !!ruleError))} onClick={() => void execute(false)}>Рассчитать проводки</Button>{preview && <div className="space-y-2 rounded-xl border border-accent p-3"><p className="text-sm">Источник подтверждён: {preview.source_snapshot.ext_id} · {preview.source_snapshot.amount} BYN</p>{preview.lines.map((line, index) => <p key={index}>{line.side === "debit" ? "Дт" : "Кт"} {line.account} · {line.title} — {line.amount} BYN{Object.entries(line.dimensions ?? {}).map(([key, value]) => <span key={key} className="ml-3 text-muted">{key}: {value}</span>)}</p>)}{!preview.normative_verified && <p className="text-red-700">Политика не подтверждена нормативно: подтверждение заблокировано.</p>}<Button disabled={busy || preview.confirmation_available !== true || preview.normative_verified !== true} onClick={() => void execute(true)}>Подтвердить импорт</Button></div>}</div>}
   </section>;
 }

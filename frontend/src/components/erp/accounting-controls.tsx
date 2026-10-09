@@ -15,6 +15,7 @@ import { AccountingProductionCostSources } from "./accounting-production-cost-so
 import { FxPolicyFields, type FxPolicySelection } from "./fx-policy-fields";
 import { ShipmentDocumentPolicyFields, type ShipmentDocumentPolicySelection } from "./shipment-document-policy-fields";
 import { PurchasePostingPolicyFields, type PurchasePostingSelection } from "./purchase-posting-policy-fields";
+import { BankPostingPolicyFields, type BankPostingSelection } from "./bank-posting-policy-fields";
 
 type Period = { month: string; generation: number; closed: boolean };
 type SourceControl = { id: number; source: string; version: number; month: string };
@@ -179,10 +180,12 @@ export function AccountingControls({ org, onChanged, initialSection = "setup", o
   const [fx, setFx] = useState<FxPolicySelection | null>(null);
   const [shipmentDocuments, setShipmentDocuments] = useState<ShipmentDocumentPolicySelection | null>(null);
   const [purchasePosting, setPurchasePosting] = useState<PurchasePostingSelection | null>(null);
+  const [bankPosting, setBankPosting] = useState<BankPostingSelection | null>(null);
   const [closingIntent, setClosingIntent] = useState({ org, enabled: false });
   const closingEnabled = closingIntent.org === org && closingIntent.enabled;
   const closingScope = `${org}:${policy.effective_from}`;
   const purchasePostingReady = purchasePosting?.scope === closingScope && (!purchasePosting.enabled || purchasePosting.value !== null);
+  const bankPostingReady = bankPosting?.scope === closingScope && (!bankPosting.enabled || bankPosting.value !== null);
   const fxReady = fx?.scope === closingScope && (!fx.enabled || fx.value !== null);
   const productionReady = production?.scope === closingScope && (!production.enabled || production.value !== null);
   const shipmentDocumentsReady = shipmentDocuments?.scope === closingScope && (!shipmentDocuments.enabled || shipmentDocuments.value !== null);
@@ -241,6 +244,7 @@ export function AccountingControls({ org, onChanged, initialSection = "setup", o
     finally { saveLock.current = false; setBusy(false); onBusyChange?.(false); }
   }
   function savePolicy() {
+    if (!bankPostingReady) { setError("Проверьте правила автоматических проводок банка."); return; }
     if (!purchasePostingReady) { setError("Проверьте правила автоматических проводок поступлений."); return; }
     if (!fxReady) { setError("Проверьте настройки валютного учёта для выбранной организации и даты."); return; }
     if (production?.scope !== closingScope || (production.enabled && !production.value)) { setError("Проверьте настройки производственных затрат."); return; }
@@ -252,7 +256,10 @@ export function AccountingControls({ org, onChanged, initialSection = "setup", o
       ...(late.enabled ? { late_cost_allocation: { basis: late.basis, rounding: late.rounding } } : {}),
       ...(production.enabled ? { production_costing: production.value } : {}),
       ...(shipmentDocuments?.enabled ? { shipment_documents: shipmentDocuments.value } : {}),
-      ...(purchasePosting?.enabled ? { document_posting: purchasePosting.value } : {}) }, "Версия политики сохранена.");
+      ...((purchasePosting?.enabled || bankPosting?.enabled) ? { document_posting: {
+        purchase: purchasePosting?.enabled ? purchasePosting.value!.purchase : {},
+        ...(bankPosting?.enabled ? { bank: bankPosting.value } : {}),
+      } } : {}) }, "Версия политики сохранена.");
   }
   async function readImport(file: File | null, sourceFile: File | null) {
     if (importOrg === org && importRetry) return;
@@ -352,7 +359,8 @@ export function AccountingControls({ org, onChanged, initialSection = "setup", o
               </>}
             </fieldset>
             <PurchasePostingPolicyFields org={org} effectiveDate={policy.effective_from} onChange={setPurchasePosting} />
-            <label className="block text-sm"><input type="checkbox" checked={policy.normative_verified} onChange={(e) => setPolicy({ ...policy, normative_verified: e.target.checked })} /> Бухгалтер проверил применимую нормативную редакцию</label><Button disabled={!purchasePostingReady || !fxReady || !productionReady || !shipmentDocumentsReady || !lateReady || !closingReady || !policy.reference || !policy.inventory_method || !policy.allocation_basis || !policy.depreciation_method || !policy.normative_reference} onClick={savePolicy}>Утвердить версию политики</Button>
+            <BankPostingPolicyFields org={org} effectiveDate={policy.effective_from} onChange={setBankPosting} />
+            <label className="block text-sm"><input type="checkbox" checked={policy.normative_verified} onChange={(e) => setPolicy({ ...policy, normative_verified: e.target.checked })} /> Бухгалтер проверил применимую нормативную редакцию</label><Button disabled={!bankPostingReady || !purchasePostingReady || !fxReady || !productionReady || !shipmentDocumentsReady || !lateReady || !closingReady || !policy.reference || !policy.inventory_method || !policy.allocation_basis || !policy.depreciation_method || !policy.normative_reference} onClick={savePolicy}>Утвердить версию политики</Button>
           </div>
           <div className="space-y-2 border-t border-line pt-4"><h2 className="font-semibold">Доступ к книге</h2><Input aria-label="Идентификатор сотрудника" placeholder="Идентификатор сотрудника в системе входа" value={member.subject} onChange={(e) => setMember({ ...member, subject: e.target.value })} /><Select aria-label="Права сотрудника" value={member.role} onChange={(e) => setMember({ ...member, role: e.target.value })}><option value="reader">Просмотр</option><option value="accountant">Бухгалтер</option><option value="chief">Главный бухгалтер</option></Select><Button disabled={!member.subject} onClick={() => void save(`${prefix}/members`, member, "Доступ сохранён.", "PUT")}>Назначить доступ</Button></div>
         </>}

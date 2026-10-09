@@ -28,6 +28,7 @@ from core.services.procurement import (
     ReceiptAutomaticOptions,
 )
 from modules.accounting import (
+    automatic_bank_import,
     automatic_receipts,
     bank_account_mapping,
     bank_import,
@@ -466,6 +467,8 @@ async def create_policy(org_id: int, data: PolicyInput, ctx=Depends(member)):
         await fx_revaluation.validate_policy(ctx[0], org_id, data.effective_from, data.currency_revaluation)
     if data.document_posting is not None:
         await automatic_receipts.validate_settings(ctx[0], org_id, data.effective_from, data.document_posting)
+        if data.document_posting.bank is not None:
+            await automatic_bank_import.validate_settings(ctx[0], org_id, data.effective_from, data.document_posting.bank)
     row = Policy(organization_id=org_id, approved_by=ctx[1], **data.model_dump(exclude_none=True))
     ctx[0].add(row)
     service.audit(ctx[0], org_id, ctx[1], "policy_approved", data.model_dump(mode="json"))
@@ -763,6 +766,32 @@ async def bank_import_confirm(org_id: int, data: bank_import.BankImportConfirmIn
                               ctx=Depends(member), core=Depends(get_core)):
     try:
         row = await bank_import.confirm(ctx[0], org_id, data, ctx[1], core.services.event_bus)
+    except service.AccountingError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return serialize(row)
+
+
+@router.get("/organizations/{org_id}/bank-import/auto-rules")
+async def automatic_bank_rules(org_id: int, on: date, ctx=Depends(member)):
+    try:
+        return await automatic_bank_import.options(ctx[0], org_id, on)
+    except service.AccountingError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/organizations/{org_id}/bank-import/auto-preview")
+async def automatic_bank_preview(org_id: int, data: automatic_bank_import.BankAutomaticInput, ctx=Depends(member)):
+    try:
+        return await automatic_bank_import.prepare(ctx[0], org_id, data)
+    except service.AccountingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/organizations/{org_id}/bank-import/auto-confirm", status_code=201)
+async def automatic_bank_confirm(org_id: int, data: automatic_bank_import.BankAutomaticConfirmation,
+                                 ctx=Depends(member), core=Depends(get_core)):
+    try:
+        row = await automatic_bank_import.confirm(ctx[0], org_id, data, ctx[1], core.services.event_bus)
     except service.AccountingError as exc:
         raise HTTPException(409, str(exc)) from exc
     return serialize(row)

@@ -21,11 +21,11 @@ it("binds an imported bank source, previews it, and confirms the same package", 
     if (url.endsWith("/accounts?on=2026-09-05")) return Promise.resolve({ ok: true, json: async () => [{ id: 51, code: "51", title: "Historical bank", cash: true, category: "asset", required_dimensions: [] }] });
     if (url.includes("/bank-account-mappings?include_closed=true")) return Promise.resolve({ ok: true, json: async () => [] });
     if (url.endsWith("/bank-import/preview")) return Promise.resolve({ ok: true, json: async () => ({
-      basis_digest: "b".repeat(64), digest: "c".repeat(64), source_snapshot: candidate.source_snapshot,
+      organization_id: 1, basis_digest: "b".repeat(64), digest: "c".repeat(64), source_snapshot: candidate.source_snapshot,
       lines: [{ account: "51", title: "Банк", side: "debit", amount: "75.00", dimensions: { counterparty: "CP-7", contract: "CONTRACT-7" } }],
       confirmation_available: true, normative_verified: true,
     }) });
-    if (url.endsWith("/bank-import/confirm")) return Promise.resolve({ ok: true, json: async () => ({ entry_id: 9 }) });
+    if (url.endsWith("/bank-import/confirm")) return Promise.resolve({ ok: true, json: async () => ({ entry_id: 9, organization_id: 1, source_transaction_id: 7 }) });
     throw new Error(url);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -35,6 +35,7 @@ it("binds an imported bank source, previews it, and confirms the same package", 
     { id: 62, code: "62", title: "Покупатели", cash: false, category: "asset", required_dimensions: ["counterparty", "contract"] },
   ]} policyId={3} date="2026-09-05" onDate={vi.fn()} onPosted={posted} />);
 
+  fireEvent.click(screen.getByLabelText("Выбрать счета вручную"));
   fireEvent.click(await screen.findByRole("button", { name: "Привязать" }));
   expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/source-bindings"))).toBe(true);
   fireEvent.click(await screen.findByRole("button", { name: "Выбрать" }));
@@ -44,7 +45,7 @@ it("binds an imported bank source, previews it, and confirms the same package", 
   fireEvent.click(screen.getByRole("button", { name: "Рассчитать проводки" }));
   expect(await screen.findByText("contract: CONTRACT-7")).toBeVisible();
   fireEvent.click(await screen.findByRole("button", { name: "Подтвердить импорт" }));
-  expect(await screen.findByRole("status")).toHaveTextContent("BANK-7");
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Строка BANK-7 проведена"));
   expect(posted).toHaveBeenCalledOnce();
   const previewCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/bank-import/preview"));
   const confirmCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/bank-import/confirm"));

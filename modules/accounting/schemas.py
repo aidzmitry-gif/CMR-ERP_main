@@ -306,8 +306,23 @@ class PurchasePostingPolicyInput(Input):
     vat_account: PostingAccount | None = None
 
 
+BankOperationKey = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,49}$")]
+
+
+class BankPostingRuleInput(Input):
+    title: str = Field(min_length=1, max_length=100)
+    direction: Literal["receipt", "payment"]
+    settlement_account: PostingAccount
+    cash_activity: Literal["operating", "investing", "financing"]
+
+
+class BankPostingPolicyInput(Input):
+    rules: dict[BankOperationKey, BankPostingRuleInput] = Field(min_length=1, max_length=100)
+
+
 class DocumentPostingPolicyInput(Input):
     purchase: PurchasePostingPolicyInput
+    bank: BankPostingPolicyInput | None = None
 
 
 class PolicyInput(Input):

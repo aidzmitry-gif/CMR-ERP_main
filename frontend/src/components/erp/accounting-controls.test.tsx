@@ -502,3 +502,21 @@ it("retries an unknown confirmation with the frozen exact opening package", asyn
   expect(JSON.parse(calls[0][1].body)).toEqual(JSON.parse(calls[1][1].body));
   expect(JSON.parse(calls[1][1].body)).toEqual(command);
 });
+
+
+it("saves explicit bank rules together with the unchanged required purchase settings shape", async () => {
+  setupClosing([...closingAccounts(), { organization_id: 1, code: "60.01", title: "Поставщики", category: "liability", cash: false, quantity_tracking: false, required_dimensions: [] }]);
+  render(<AccountingControls org="1" onChanged={vi.fn()} />); policyBase();
+  fireEvent.click(screen.getByLabelText("Настроить правила банковских операций"));
+  fireEvent.click(screen.getByText("Добавить банковское правило"));
+  await screen.findByRole("option", { name: "60.01 · Поставщики" });
+  expect(submitPolicy()).toBeDisabled();
+  for (const [label, value] of [["Ключ", "supplier_payment"], ["Название", "Оплата поставщику"], ["Направление", "payment"], ["Счёт", "60.01"], ["Поток", "operating"]])
+    fireEvent.change(screen.getByLabelText(`${label} банковской операции 1`), { target: { value } });
+  await waitFor(() => expect(submitPolicy()).toBeEnabled());
+  fireEvent.click(submitPolicy());
+  await waitFor(() => expect(policyPosts()).toHaveLength(1));
+  expect(JSON.parse(policyPosts()[0][1].body).document_posting).toEqual({ purchase: {}, bank: { rules: {
+    supplier_payment: { title: "Оплата поставщику", direction: "payment", settlement_account: "60.01", cash_activity: "operating" },
+  } } });
+});
