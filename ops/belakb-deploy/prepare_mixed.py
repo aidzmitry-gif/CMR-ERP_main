@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 
 CHAIN = 'CRM-REL-001'
 OPT_IN = CHAIN + '-isolated-only'
-APPLICATION_CHECKPOINT = 'f4fd310e0104bacfc0f95a28389f783486cfc3bf'
+APPLICATION_CHECKPOINT = 'd96e7b5b1fae0a3ac01dbbc5fd90702cb75cd0fc'
 RUNTIME = 'sha256:469fbba3826e14647fb9b03280843ff591fc6f875244bb17e08f51043ef21319'
 RUNTIME_ALIAS = 'crm-rel-001-g06-runtime:469fbba3826e'
 HEAD = 'crm_rel_001_native_docs_01'

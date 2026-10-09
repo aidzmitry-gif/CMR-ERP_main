@@ -88,7 +88,7 @@ class Guards(unittest.TestCase):
         self.assertIn('tests/__init__.py', package.PROOFS)
         self.assertIn('tests/integration/__init__.py', package.PROOFS)
         self.assertIn('docs/accounting/migration-proposal.py', package.PROOFS)
-        self.assertEqual(package.APPLICATION_CHECKPOINT, 'f4fd310e0104bacfc0f95a28389f783486cfc3bf')
+        self.assertEqual(package.APPLICATION_CHECKPOINT, 'd96e7b5b1fae0a3ac01dbbc5fd90702cb75cd0fc')
         self.assertEqual(package.PINS['procurement'], 'd8f50e89d5f4fbb796715594a9eb6d1740623dfe')
         for path in ('tests/private.py', 'tests/fixtures/customer.json', 'docs/accounting/private.py'):
             self.assertFalse(package.selected(path))
