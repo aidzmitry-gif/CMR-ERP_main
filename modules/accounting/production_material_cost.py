@@ -36,7 +36,7 @@ class ProductionMaterialIssuePreviewInput(Input):
     department: str = Field(min_length=1, max_length=200)
     wms_movement_id: int = Field(gt=0, strict=True)
     posting_date: date
-    account: Code
+    account: Code | None = None
     warehouse: str = Field(min_length=1, max_length=200)
     sku: str = Field(min_length=1, max_length=200)
     lot: str = Field(min_length=1, max_length=200)
@@ -49,6 +49,7 @@ class ProductionMaterialIssuePostingInput(ProductionMaterialIssuePreviewInput):
 
 
 class ProductionMaterialIssuePostingConfirmInput(ProductionMaterialIssuePostingInput):
+    account: Code
     zero_value: bool = Field(default=False, strict=True)
     basis_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     digest: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -61,6 +62,13 @@ def _line(account: str, side: str, amount: str, dimensions: dict[str, str], quan
     return result
 
 
+def resolved_material_account(data, settings):
+    account = data.account or settings.material_inventory_account
+    if account is None:
+        raise AccountingError("Configure a material inventory account in the production policy or select it explicitly")
+    return data.model_copy(update={"account": account})
+
+
 async def prepare_material_issue_posting(session, org_id: int, month: str,
                                           data: ProductionMaterialIssuePostingInput,
                                           production, procurement=None):
@@ -68,6 +76,7 @@ async def prepare_material_issue_posting(session, org_id: int, month: str,
     if review["inventory_cost"]["issue_cost_byn"] == "0.00":
         return await prepare_material_zero_issue(session, org_id, month, data, production, procurement=procurement)
     _, _, policy, settings = await _load_policy(session, org_id, month, data, current=True)
+    data = resolved_material_account(data, settings)
     _, _, binding, _ = await _load_source(session, org_id, month, data)
     document = material_issue_document(org_id, data, policy, settings, binding)
     cost, posting = await inventory_issues.prepare(
@@ -301,6 +310,7 @@ async def preview_material_issue(session, org_id: int, month: str,
         raise AccountingError("Production order verification service is unavailable")
     await lock_organization(session, org_id)
     _, last, policy, settings = await _load_policy(session, org_id, month, data, current=True)
+    data = resolved_material_account(data, settings)
     _, _, binding, movement = await _load_source(session, org_id, month, data)
 
     orders = await production.cost_orders(session, org_id, [data.order_id])
@@ -362,6 +372,7 @@ async def prepare_material_zero_issue(session, org_id: int, month: str, data: Pr
     if review["inventory_cost"]["issue_cost_byn"] != "0.00":
         raise AccountingError("Material zero receipt is only valid for an all-zero allocation")
     _, _, policy, settings = await _load_policy(session, org_id, month, data, current=True)
+    data = resolved_material_account(data, settings)
     _, _, binding, movement = await _load_source(session, org_id, month, data)
     document = material_issue_document(org_id, data, policy, settings, binding)
     cost = review["inventory_cost"]

@@ -74,10 +74,11 @@ const openingReceipt = (command: ReturnType<typeof openingCommand>) => ({
   created_at: "2026-09-21T00:00:00Z",
 });
 
-it("submits production configuration through the existing policy form", async () => {
+it.each([undefined, "10.1"])("submits production configuration through the existing policy form (material %s)", async material => {
   setupClosing([
     { organization_id: 1, code: "20", title: "НЗП", category: "asset", cash: false, currency_tracking: false, quantity_tracking: false, required_dimensions: ["order", "department"] },
     { organization_id: 1, code: "25", title: "Накладные", category: "asset", cash: false, currency_tracking: false, quantity_tracking: false, required_dimensions: ["department"] },
+    { organization_id: 1, code: "10.1", title: "Материалы", category: "asset", cash: false, currency_tracking: false, quantity_tracking: true, required_dimensions: ["warehouse", "sku"] },
   ]);
   render(<AccountingControls org="1" onChanged={vi.fn()} />); policyBase();
   fireEvent.click(screen.getByLabelText("Настроить затраты производства"));
@@ -85,13 +86,16 @@ it("submits production configuration through the existing policy form", async ()
   fireEvent.change(screen.getByLabelText("Группировка производственных затрат"), { target: { value: "department" } });
   await screen.findByText("25 · Накладные");
   fireEvent.change(screen.getByLabelText("Счёт НЗП"), { target: { value: "20" } });
+  expect(screen.getByLabelText("Автоматический счёт материалов")).toHaveValue("");
+  if (material) fireEvent.change(screen.getByLabelText("Автоматический счёт материалов"), { target: { value: material } });
   fireEvent.click(screen.getByLabelText("25 · Накладные"));
   fireEvent.change(screen.getByLabelText("Округление производственных затрат"), { target: { value: "largest_remainder_cent" } });
   fireEvent.change(screen.getByLabelText("Основание распределения производственных затрат"), { target: { value: "Приказ о распределении затрат" } });
   fireEvent.click(submitPolicy());
   await waitFor(() => expect(policyPosts()).toHaveLength(1));
   expect(JSON.parse(policyPosts()[0][1].body).production_costing).toEqual({ overhead_accounts: ["25"], wip_account: "20",
-    pool_dimensions: ["department"], order_dimension: "order", rounding: "largest_remainder_cent", reference: "Приказ о распределении затрат" });
+    pool_dimensions: ["department"], order_dimension: "order", rounding: "largest_remainder_cent", reference: "Приказ о распределении затрат",
+    ...(material ? { material_inventory_account: material } : {}) });
 });
 
 it("late-cost policy requires explicit basis and rounding", async () => {

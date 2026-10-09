@@ -7,10 +7,17 @@ async def validate_accounts(session, org_id, effective_date, settings):
     configured = [*settings.overhead_accounts, settings.wip_account]
     if settings.finished_goods_account is not None:
         configured.append(settings.finished_goods_account)
+    if settings.material_inventory_account is not None:
+        configured.append(settings.material_inventory_account)
     for code in configured:
         account = accounts.get(code)
         if account is None:
             raise AccountingError(f'Production cost account {code} must exist for this organization and date')
+        if code == settings.material_inventory_account:
+            if (code.split('.')[0] not in {'10', '41'} or account.category != 'asset'
+                    or not account.quantity_tracking or account.cash or account.currency_tracking):
+                raise AccountingError(f'Material inventory account {code} must be a non-cash quantity-tracking asset without currency tracking')
+            continue
         wip = code == settings.wip_account
         finished_goods = code == settings.finished_goods_account
         categories = {'asset'} if wip else {'asset', 'expense'}

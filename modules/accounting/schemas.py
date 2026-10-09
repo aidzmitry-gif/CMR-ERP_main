@@ -223,6 +223,7 @@ class ProductionCostPolicyInput(Input):
     # No statutory account is inferred.  Until this is filled the production
     # output screen can only show a provisional cost basis.
     finished_goods_account: Code | None = None
+    material_inventory_account: Code | None = None
     pool_dimensions: list[Literal['department']]
     order_dimension: Literal['order']
     rounding: Literal['largest_remainder_cent']
@@ -233,6 +234,8 @@ class ProductionCostPolicyInput(Input):
         codes = [*self.overhead_accounts, self.wip_account]
         if self.finished_goods_account is not None:
             codes.append(self.finished_goods_account)
+        if self.material_inventory_account is not None:
+            codes.append(self.material_inventory_account)
         if len(codes) != len(set(codes)) or len(self.pool_dimensions) != len(set(self.pool_dimensions)):
             raise ValueError('Production cost accounts and pool dimensions must not repeat')
         return self
