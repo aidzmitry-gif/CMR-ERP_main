@@ -20,6 +20,7 @@ from pydantic import ValidationError
 CACHE_SCHEMA = "onec-purchase-cache-v1"
 MAPPING_SCHEMA = "onec-purchase-map-v1"
 SOURCE_MAPPING_SCHEMA = "onec-purchase-map-v2"
+FX_MAPPING_SCHEMA = "onec-purchase-map-v3"
 PLAN_SCHEMA = "onec-purchase-draft-plan-v1"
 
 
@@ -70,15 +71,16 @@ def _nonblank(value: Any, label: str, *, max_length: int) -> str:
 def validate_mapping_profile(profile: Any) -> dict[str, Any]:
     """Validate a complete exact-reference mapping profile before reading rows."""
     profile = _object(profile, "mapping profile")
-    source_format = profile.get("schema_version") == SOURCE_MAPPING_SCHEMA
+    fx_format = profile.get("schema_version") == FX_MAPPING_SCHEMA
+    source_format = profile.get("schema_version") in (SOURCE_MAPPING_SCHEMA, FX_MAPPING_SCHEMA)
     _keys(
         profile,
         {"schema_version", "entity", "organization_id", "paths", "currency_refs",
          "suppliers", "contracts", "warehouses", "skus"}
-        | ({"source_rules"} if source_format else set()),
+        | ({"source_rules"} if source_format else set()) | ({"fx"} if fx_format else set()),
         "mapping profile",
     )
-    if profile["schema_version"] not in (MAPPING_SCHEMA, SOURCE_MAPPING_SCHEMA):
+    if profile["schema_version"] not in (MAPPING_SCHEMA, SOURCE_MAPPING_SCHEMA, FX_MAPPING_SCHEMA):
         raise PurchaseImportError("unsupported purchase mapping schema_version")
     entity = _nonblank(profile["entity"], "entity", max_length=180)
     if not entity.startswith("Document_"):
@@ -126,6 +128,24 @@ def validate_mapping_profile(profile: Any) -> dict[str, Any]:
         _keys(modes, {"false", "true"}, "source_rules.amount_modes")
         if any(mode not in ("net", "gross") for mode in modes.values()):
             raise PurchaseImportError("each source amount mode must explicitly be net or gross")
+    if fx_format:
+        from core.services.procurement import ReceiptForeignExchange
+
+        fx = _object(profile["fx"], "fx")
+        _keys(fx, {"byn_line_paths", "documents"}, "fx")
+        byn_paths = _object(fx["byn_line_paths"], "fx.byn_line_paths")
+        _keys(byn_paths, {"net_amount", "vat_amount"}, "fx.byn_line_paths")
+        pointer_groups.append(("fx.byn_line_paths", byn_paths))
+        documents = _object(fx["documents"], "fx.documents")
+        for ref, facts in documents.items():
+            _nonblank(ref, "fx.documents key", max_length=200)
+            facts = _object(facts, "fx document")
+            _keys(facts, {"source_data_version", "exchange"}, "fx document")
+            _nonblank(facts["source_data_version"], "FX source_data_version", max_length=255)
+            try:
+                ReceiptForeignExchange.model_validate(facts["exchange"])
+            except ValidationError as exc:
+                raise PurchaseImportError("FX exchange facts must satisfy the native receipt schema") from exc
     for group_name, group in pointer_groups:
         for field, pointer in group.items():
             if (not isinstance(pointer, str) or not pointer.startswith("/")
@@ -135,7 +155,10 @@ def validate_mapping_profile(profile: Any) -> dict[str, Any]:
     currencies = _object(profile["currency_refs"], "currency_refs")
     for ref, currency in currencies.items():
         _nonblank(ref, "currency_refs key", max_length=200)
-        if currency != "BYN":
+        if fx_format:
+            if not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency):
+                raise PurchaseImportError("currency_refs must explicitly map three-letter currency codes")
+        elif currency != "BYN":
             raise PurchaseImportError("the current owned-inventory receipt flow accepts BYN only")
     if not currencies:
         raise PurchaseImportError("currency_refs must explicitly map at least one 1C currency Ref_Key")
@@ -346,7 +369,7 @@ def _map_document(
     line_paths = mapping["paths"]["line"]
     entity = mapping["entity"]
     ref = row["Ref_Key"]
-    source_format = mapping["schema_version"] == SOURCE_MAPPING_SCHEMA
+    source_format = mapping["schema_version"] in (SOURCE_MAPPING_SCHEMA, FX_MAPPING_SCHEMA)
     if source_format:
         _text(row.get("DataVersion"), "DataVersion", max_length=255)
         if row.get("Posted") is not True or row.get("DeletionMark") is not False:
@@ -381,7 +404,26 @@ def _map_document(
     if warehouse is None:
         raise PurchaseImportError("warehouse_ref has no exact organization warehouse mapping")
     if currency is None:
-        raise PurchaseImportError("currency_ref has no explicit BYN mapping")
+        if mapping["schema_version"] != FX_MAPPING_SCHEMA:
+            raise PurchaseImportError("currency_ref has no explicit BYN mapping")
+        raise PurchaseImportError("currency_ref has no explicit currency mapping")
+
+    exchange = None
+    if mapping["schema_version"] == FX_MAPPING_SCHEMA:
+        facts = mapping["fx"]["documents"].get(ref)
+        if currency == "BYN":
+            if facts is not None:
+                raise PurchaseImportError("BYN document must not carry FX facts")
+        else:
+            if facts is None:
+                raise PurchaseImportError("foreign document requires explicit FX facts")
+            if facts["source_data_version"] != row["DataVersion"]:
+                raise PurchaseImportError("FX facts do not match source DataVersion")
+            from core.services.procurement import ReceiptForeignExchange
+
+            exchange = ReceiptForeignExchange.model_validate(facts["exchange"])
+            if exchange.currency != currency:
+                raise PurchaseImportError("FX currency differs from exact source currency mapping")
 
     source_lines = _pointer(row, doc_paths["lines"], "lines")
     if not isinstance(source_lines, list) or not source_lines:
@@ -441,6 +483,19 @@ def _map_document(
         )
         if vat_amount != expected_vat:
             raise PurchaseImportError(f"line {line_number} VAT amount does not match explicit rate and net amount")
+        foreign_amounts = None
+        if exchange is not None:
+            foreign_amounts = {"net_amount": str(net_amount), "vat_amount": str(vat_amount)}
+            byn_paths = mapping["fx"]["byn_line_paths"]
+            net_amount, vat_amount = (
+                _source_money(_pointer(source_line, byn_paths[field], f"line {line_number} BYN {field}"),
+                              f"line {line_number} BYN {field}")
+                for field in ("net_amount", "vat_amount")
+            )
+            if net_amount <= 0:
+                raise PurchaseImportError(f"line {line_number} BYN net_amount must be positive")
+            for field, value in (("net_amount", net_amount), ("vat_amount", vat_amount)):
+                _validate_fx_amount(value, foreign_amounts[field], exchange)
         lot = f"onec:{ref}:{line_number}"
         if len(lot) > 200:
             raise PurchaseImportError(f"line {line_number} source Ref_Key is too long for the receipt lot")
@@ -449,14 +504,24 @@ def _map_document(
             "unit": sku["unit"], "lot": lot, "quantity": str(quantity),
             "net_amount": str(net_amount), "vat_rate": str(vat_rate),
             "vat_amount": str(vat_amount), "vat_basis": vat_basis,
+            **({"foreign_amounts": foreign_amounts} if foreign_amounts is not None else {}),
         })
+
+    if exchange is not None:
+        # Native posting validates the aggregate payable as well as components.
+        with localcontext() as context:
+            context.prec = 60
+            byn_gross = sum(Decimal(item[field]) for item in items for field in ("net_amount", "vat_amount"))
+            foreign_gross = sum(Decimal(item["foreign_amounts"][field]) for item in items
+                                for field in ("net_amount", "vat_amount"))
+        _validate_fx_amount(byn_gross, foreign_gross, exchange)
 
     identity = f"{entity}\0{ref}".encode("utf-8")
     key = "onec:purchase:" + hashlib.sha256(identity).hexdigest()
     request = {
         "key": key,
         "document": {
-            "currency": currency,
+            "currency": "BYN",
             "invoice_reference": number,
             "document_date": document_date.isoformat(),
             "operation_date": operation_date.isoformat(),
@@ -466,6 +531,7 @@ def _map_document(
             "warehouse_id": warehouse["id"], "warehouse_title": warehouse["title"],
             "explanation": f"Импорт из 1С {entity}; Ref_Key={ref}",
             "items": items,
+            **({"foreign_exchange": exchange.model_dump(mode="json")} if exchange is not None else {}),
         },
     }
     validated = ReceiptCreate.model_validate(request)
@@ -473,6 +539,14 @@ def _map_document(
         "organization_id": mapping["organization_id"],
         **validated.model_dump(mode="json", exclude_none=True),
     }
+
+
+def _validate_fx_amount(amount, original_amount, exchange) -> None:
+    from modules.accounting.schemas import LineInput
+
+    # Schema validation only; account selection and posting stay in the gateway.
+    LineInput(account="60", side="credit", amount=amount, original_amount=original_amount,
+              **exchange.model_dump(exclude={"valuation_basis"}))
 
 
 def prepare_month_plan(cache_dir: Path, mapping_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -501,8 +575,8 @@ def prepare_month_plan(cache_dir: Path, mapping_path: Path) -> tuple[list[dict[s
         "posting_previewed": False,
         "posted": False,
     }
-    if mapping["schema_version"] == SOURCE_MAPPING_SCHEMA:
-        metadata["mapping_schema_version"] = SOURCE_MAPPING_SCHEMA
+    if mapping["schema_version"] in (SOURCE_MAPPING_SCHEMA, FX_MAPPING_SCHEMA):
+        metadata["mapping_schema_version"] = mapping["schema_version"]
         metadata["source_documents"] = [
             {"ref_key": row["Ref_Key"], "data_version": row["DataVersion"]} for row in rows
         ]

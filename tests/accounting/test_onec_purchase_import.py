@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import func, select
 
 from modules.accounting.onec_purchase_import import (
+    FX_MAPPING_SCHEMA,
     MAPPING_SCHEMA,
     SOURCE_MAPPING_SCHEMA,
     PurchaseImportError,
@@ -625,3 +626,156 @@ def test_source_v2_plan_preserves_raw_digest_identity_and_data_version(
     assert write_month_plan(tmp_path, drafts, plan) == (data_path, meta_path)
     saved = json.loads(meta_path.read_text(encoding="utf-8"))
     assert saved["source_documents"] == plan["source_documents"]
+
+
+@pytest.fixture
+def fx_mapping(source_mapping):
+    profile = deepcopy(source_mapping)
+    profile["schema_version"] = FX_MAPPING_SCHEMA
+    profile["currency_refs"]["currency-usd"] = "USD"
+    profile["fx"] = {
+        "byn_line_paths": {"net_amount": "/BYNNet", "vat_amount": "/BYNVat"},
+        "documents": {"receipt-ref-1": {
+            "source_data_version": "synthetic-version-1",
+            "exchange": {"currency": "USD", "rate": "3.000000", "rate_scale": 1,
+                         "rate_date": "2026-09-12", "rate_source": "synthetic-approved-quote",
+                         "valuation_basis": "synthetic-approved-invoice-valuation"},
+        }},
+    }
+    return profile
+
+
+@pytest.fixture
+def fx_receipt(source_receipt):
+    row = deepcopy(source_receipt)
+    row["Валюта_Key"] = "currency-usd"
+    row["Курс"] = "1"  # Uncertified header must not replace the explicit quote.
+    row["Товары"][0].update(BYNNet="300.00", BYNVat="60.00")
+    return row
+
+
+@pytest.mark.parametrize("rate,scale", [("3.000000", 1), ("300.000000", 100)])
+def test_fx_v3_preserves_original_values_and_reuses_native_posting_validation(
+    fx_mapping, fx_receipt, metadata, rate, scale,
+):
+    from modules.accounting.purchases import PurchaseDocument
+
+    fx_mapping["fx"]["documents"]["receipt-ref-1"]["exchange"].update(rate=rate, rate_scale=scale)
+    original, profile = deepcopy(fx_receipt), deepcopy(fx_mapping)
+    draft = build_receipt_drafts([fx_receipt], {**metadata, "entity": fx_mapping["entity"]}, fx_mapping)[0]
+    document = draft["document"]
+    assert fx_receipt == original and fx_mapping == profile
+    assert document["currency"] == "BYN"
+    assert document["items"][0]["foreign_amounts"] == {"net_amount": "100.00", "vat_amount": "20.00"}
+    assert document["items"][0]["net_amount"] == "300.00"
+    assert document["items"][0]["vat_amount"] == "60.00"
+    assert document["foreign_exchange"] == fx_mapping["fx"]["documents"]["receipt-ref-1"]["exchange"]
+    purchase = PurchaseDocument(
+        source=draft["key"], source_version=1, document_date=document["document_date"],
+        operation_date=document["operation_date"], posting_date=document["operation_date"],
+        policy_id=1, invoice_reference=document["invoice_reference"], counterparty=document["supplier"],
+        contract=document["contract"], warehouse=document["warehouse"], settlement_account="60",
+        vat_account="18", explanation=document["explanation"], foreign_exchange=document["foreign_exchange"],
+        items=[{key: value for key, value in item.items() if key not in ("sku_id", "sku_title")} | {"account": "10"}
+               for item in document["items"]],
+    )
+    credit = next(line for line in purchase.posting().lines if line.side == "credit")
+    assert credit.amount == Decimal("360.00") and credit.original_amount == Decimal("120.00")
+    assert credit.currency == "USD" and credit.rate_scale == scale
+
+
+@pytest.mark.parametrize("mutation,reason", [
+    ("missing-facts", "requires explicit FX facts"),
+    ("data-version", "DataVersion"),
+    ("currency", "currency differs"),
+    ("net", "does not match the documented exchange rate"),
+    ("vat", "does not match the documented exchange rate"),
+    ("missing-byn", "BYN net_amount"),
+])
+def test_fx_v3_invalid_document_blocks_the_whole_package(fx_mapping, fx_receipt, source_receipt, metadata,
+                                                       mutation, reason):
+    facts = fx_mapping["fx"]["documents"]["receipt-ref-1"]
+    if mutation == "missing-facts":
+        fx_mapping["fx"]["documents"].clear()
+    elif mutation == "data-version":
+        facts["source_data_version"] = "another-version"
+    elif mutation == "currency":
+        facts["exchange"]["currency"] = "EUR"
+    elif mutation == "net":
+        fx_receipt["Товары"][0]["BYNNet"] = "301.00"
+    elif mutation == "vat":
+        fx_receipt["Товары"][0]["BYNVat"] = "61.00"
+    else:
+        del fx_receipt["Товары"][0]["BYNNet"]
+    valid_byn = deepcopy(source_receipt)
+    valid_byn["Ref_Key"] = "valid-byn"
+    with pytest.raises(UnmappedPurchaseDocuments) as caught:
+        build_receipt_drafts([valid_byn, fx_receipt], {**metadata, "entity": fx_mapping["entity"]}, fx_mapping)
+    assert len(caught.value.issues) == 1
+    assert caught.value.issues[0]["source_ref"] == "receipt-ref-1"
+    assert reason in caught.value.issues[0]["reason"]
+
+
+def test_fx_v3_component_rounding_cannot_hide_payable_rounding_mismatch(fx_mapping, fx_receipt, metadata):
+    fx_mapping["fx"]["documents"]["receipt-ref-1"]["exchange"]["rate"] = "0.500000"
+    line = fx_receipt["Товары"][0]
+    line.update(Сумма="0.03", СуммаСНДС="0.03", СтавкаНДС="БезНДС", СуммаНДС="0.00",
+                BYNNet="0.02", BYNVat="0.00")
+    fx_receipt["Товары"].append(deepcopy(line))
+    with pytest.raises(UnmappedPurchaseDocuments, match="need mapping") as caught:
+        build_receipt_drafts([fx_receipt], {**metadata, "entity": fx_mapping["entity"]}, fx_mapping)
+    assert "does not match the documented exchange rate" in caught.value.issues[0]["reason"]
+
+
+def test_fx_v3_rounded_zero_byn_net_blocks_whole_package(fx_mapping, fx_receipt, source_receipt, metadata):
+    fx_mapping["fx"]["documents"]["receipt-ref-1"]["exchange"]["rate"] = "0.000001"
+    fx_receipt["Товары"][0].update(BYNNet="0.00", BYNVat="0.00")
+    valid_byn = deepcopy(source_receipt)
+    valid_byn["Ref_Key"] = "valid-byn"
+    with pytest.raises(UnmappedPurchaseDocuments) as caught:
+        build_receipt_drafts([valid_byn, fx_receipt], {**metadata, "entity": fx_mapping["entity"]}, fx_mapping)
+    assert len(caught.value.issues) == 1
+    assert "BYN net_amount must be positive" in caught.value.issues[0]["reason"]
+
+
+def test_fx_v3_byn_sibling_is_identical_to_v2_and_rejects_fx_facts(
+    fx_mapping, source_mapping, source_receipt, metadata,
+):
+    meta = {**metadata, "entity": source_mapping["entity"]}
+    fx_mapping["fx"]["documents"].clear()
+    assert build_receipt_drafts([source_receipt], meta, fx_mapping) == build_receipt_drafts(
+        [source_receipt], meta, source_mapping,
+    )
+    fx_mapping["fx"]["documents"][source_receipt["Ref_Key"]] = {
+        "source_data_version": source_receipt["DataVersion"],
+        "exchange": {"currency": "USD", "rate": "3", "rate_scale": 1, "rate_date": "2026-09-12",
+                     "rate_source": "synthetic", "valuation_basis": "synthetic"},
+    }
+    with pytest.raises(UnmappedPurchaseDocuments) as caught:
+        build_receipt_drafts([source_receipt], meta, fx_mapping)
+    assert "BYN document must not carry FX facts" in caught.value.issues[0]["reason"]
+
+
+@pytest.mark.parametrize("field,value", [("rate", None), ("rate", 3.0), ("rate_scale", "1"),
+                                         ("rate_source", ""), ("valuation_basis", "")])
+def test_fx_v3_profile_requires_exact_complete_exchange_facts(fx_mapping, metadata, field, value):
+    fx_mapping["fx"]["documents"]["receipt-ref-1"]["exchange"][field] = value
+    with pytest.raises(PurchaseImportError, match="native receipt schema"):
+        build_receipt_drafts([], {**metadata, "entity": fx_mapping["entity"]}, fx_mapping)
+
+
+def test_fx_v3_plan_seals_source_version_and_mapping(tmp_path, fx_mapping, fx_receipt, metadata):
+    payload = (json.dumps(fx_receipt, ensure_ascii=False) + "\n").encode("utf-8")
+    (tmp_path / "onec_purchases.jsonl").write_bytes(payload)
+    (tmp_path / "onec_purchases.meta.json").write_text(json.dumps({
+        **metadata, "entity": fx_mapping["entity"], "source_sha256": hashlib.sha256(payload).hexdigest(),
+    }), encoding="utf-8")
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text(json.dumps(fx_mapping, ensure_ascii=False), encoding="utf-8")
+    drafts, plan = prepare_month_plan(tmp_path, mapping_path)
+    assert plan["mapping_schema_version"] == FX_MAPPING_SCHEMA
+    assert plan["source_documents"] == [{"ref_key": fx_receipt["Ref_Key"], "data_version": fx_receipt["DataVersion"]}]
+    assert plan["mapping_sha256"] == hashlib.sha256(mapping_path.read_bytes()).hexdigest()
+    assert plan["source_sha256"] == hashlib.sha256(payload).hexdigest()
+    assert not plan["posted"] and not plan["posting_previewed"]
+    assert drafts[0]["document"]["foreign_exchange"]["currency"] == "USD"
