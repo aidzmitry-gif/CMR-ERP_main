@@ -1,7 +1,7 @@
 """Synthetic automatic-account owners on migrated, test-owned PostgreSQL.
 
 The existing frozen proposal fixture remains unchanged. This wrapper applies
-the actual G26 policy migration before seeding; it does not prove full CRM head,
+the registered bank mapping and G26 policy migrations before seeding; it does not prove full CRM head,
 real document admission, statutory approval, month closing or OIDC.
 """
 
@@ -10,18 +10,18 @@ from copy import deepcopy
 from decimal import Decimal
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from fastapi import FastAPI, Request
+from fastapi import Request
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 
 from core.domain.models import Counterparty
+from core.runtime.app import create_app
 from core.runtime.deps import get_session
 from core.services.auth import CurrentUser, get_current_user
 from modules.accounting import (
@@ -29,17 +29,20 @@ from modules.accounting import (
     automatic_shipments,
     bank_import,
     models,
-    routes,
 )
 from modules.accounting.gateway import AccountingService
 from modules.finance.models import BankTransaction
 from modules.procurement.models import Supplier
-from modules.wms.models import WarehouseDirectory
+from modules.sales.reservation_source import SalesReservationSource
+from modules.wms.invoice_reservations import ReserveInput, reserve
+from modules.wms.models import StockMovement, WarehouseDirectory
+from modules.wms.reservation_events import apply
 from tests.accounting.conftest import book, db, posting  # noqa: F401
 from tests.accounting.test_automatic_bank_import import confirmation
 from tests.accounting.test_automatic_bank_import import setup as bank_setup
 from tests.accounting.test_automatic_shipments import setup as shipment_setup
 from tests.accounting.test_postgres import pg_factory  # noqa: F401
+from tests.reservation_source import invoice
 
 pytestmark = pytest.mark.integration
 
@@ -49,12 +52,13 @@ async def automatic_pg(pg_factory, db, book):  # noqa: F811
     factory = pg_factory
 
     def policy_migration(connection):
-        path = Path(__file__).resolve().parents[2] / "migrations/versions/crm_rel_001_auto_posting_01.py"
-        spec = spec_from_file_location("automatic_policy_migration", path)
-        migration = module_from_spec(spec)
-        spec.loader.exec_module(migration)
         with Operations.context(MigrationContext.configure(connection)):
-            migration.upgrade()
+            for name in ("0137_bank_account_mapping", "crm_rel_001_auto_posting_01"):
+                path = Path(__file__).resolve().parents[2] / f"migrations/versions/{name}.py"
+                spec = spec_from_file_location(name, path)
+                migration = module_from_spec(spec)
+                spec.loader.exec_module(migration)
+                migration.upgrade()
 
     async with factory() as session:
         connection = await session.connection()
@@ -71,11 +75,8 @@ async def automatic_pg(pg_factory, db, book):  # noqa: F811
             ))
         await session.commit()
 
-    app = FastAPI()
-    app.include_router(routes.router, prefix="/accounting")
-    app.state.core = SimpleNamespace(services=SimpleNamespace(
-        event_bus=None, accounting=AccountingService(),
-    ))
+    app = create_app()
+    app.state.core.services.db.session_factory = factory
 
     async def request_session():
         async with factory() as session:
@@ -86,7 +87,8 @@ async def automatic_pg(pg_factory, db, book):  # noqa: F811
 
     app.dependency_overrides[get_session] = request_session
     app.dependency_overrides[get_current_user] = identity
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as api:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
+                           headers={"X-User-Roles": "director"}) as api:
         api.test_app = app
         yield api, factory, book
 
@@ -127,9 +129,11 @@ async def test_pg_automatic_bank_concurrent_durable_replay_and_holds(automatic_p
     changed["command"]["bank_dimensions"] = {"bank_account": "forged"}
     assert (await api.post(path + "/auto-confirm", json=changed)).status_code == 409
     assert await ledger_state(factory) == baseline
-    first, second = await asyncio.gather(*[
+    results = await asyncio.gather(*[
         api.post(path + "/auto-confirm", json=body) for _ in range(2)
-    ])
+    ], return_exceptions=True)
+    assert not any(isinstance(result, BaseException) for result in results), results
+    first, second = results
     assert first.status_code == second.status_code == 201, (first.text, second.text)
     entry = first.json()["entry_id"]
     assert second.json()["entry_id"] == entry
@@ -161,8 +165,43 @@ async def test_pg_automatic_bank_concurrent_durable_replay_and_holds(automatic_p
 
 async def test_pg_automatic_shipment_concurrent_exact_cost_and_authorized_saved_replay(automatic_pg, posting, monkeypatch):  # noqa: F811
     api, factory, selected_book = automatic_pg
+    services = api.test_app.state.core.services
+    gateway, sales_source = services.wms_reservations, services.sales_source
     async with factory() as session:
-        receipt, _, options, gateway = await shipment_setup(api, session, selected_book, posting)
+        fake_receipt, _, options, _ = await shipment_setup(api, session, selected_book, posting)
+        services.wms_reservations, services.sales_source = gateway, sales_source
+        org = selected_book[0]
+        await invoice(session, 27, [{"sku_code": "SKU", "qty": "1"}, {"sku_code": "SKU", "qty": "2"}], org)
+        session.add(StockMovement(organization_id=org, sku_code="SKU", warehouse="W", kind="in", qty="3", reason="receipt"))
+        await session.commit()
+        actor = await AccountingService().source_member(session, org, CurrentUser("tester", ["director"]))
+        facts = await SalesReservationSource().invoice_reservation(session, 27)
+        physical_lines = [{"line_no": 1, "warehouse": "W", "qty": "1"},
+                          {"line_no": 2, "warehouse": "W", "qty": "2"}]
+        await reserve(session, org, facts, ReserveInput(allocations=physical_lines,
+                      journal_complete=True, evidence="Synthetic complete journal"), actor)
+        await apply(session, 27, [("SKU", "W", Decimal("1")), ("SKU", "W", Decimal("2"))],
+                    organization_id=org, release=False)
+        await session.commit()
+    wms_path = f"/wms/organizations/{org}/invoices/27/physical-shipments"
+    identity = {"expected_version": facts["version"], "expected_content_sha256": facts["content_sha256"]}
+    physical_preview = await api.post(wms_path + "/preview", json=identity)
+    assert physical_preview.status_code == 200, physical_preview.text
+    basis = physical_preview.json()
+    created = await api.post(wms_path, json={**identity, "source_key": fake_receipt["source_key"],
+        "expected_reservation_digest": basis["reservation_digest"],
+        "expected_remaining_digest": basis["remaining_digest"],
+        "expected_physical_digest": basis["physical_digest"], "operation_date": "2026-09-02",
+        "evidence": "Synthetic actual release by authorized operator", "lines": physical_lines})
+    assert created.status_code == 201, created.text
+    receipt = created.json()
+    options["expected_act_digest"] = receipt["digest"]
+    for allocation in options["allocations"]:
+        original_line = next(line for line in fake_receipt["snapshot"]["lines"]
+                             if line["source"] == allocation["line_source"])
+        line = next(line for line in receipt["snapshot"]["lines"]
+                    if line["line_no"] == original_line["line_no"] and line["warehouse"] == original_line["warehouse"])
+        allocation["line_source"] = line["source"]
     original_receipt = deepcopy(receipt)
     path = f"/accounting/organizations/{selected_book[0]}/shipments/{receipt['source_key']}"
     baseline = await ledger_state(factory)
@@ -179,9 +218,11 @@ async def test_pg_automatic_shipment_concurrent_exact_cost_and_authorized_saved_
     changed["commercial_lines"][0]["net_amount"] = "999.00"
     assert (await api.post(path + "/auto-confirm", json=changed)).status_code == 409
     assert await ledger_state(factory) == baseline
-    first, second = await asyncio.gather(*[
+    results = await asyncio.gather(*[
         api.post(path + "/auto-confirm", json=body) for _ in range(2)
-    ])
+    ], return_exceptions=True)
+    assert not any(isinstance(result, BaseException) for result in results), results
+    first, second = results
     assert first.status_code == second.status_code == 201, (first.text, second.text)
     assert first.json() == second.json()
     entry = first.json()["anchor_entry_id"]
@@ -215,7 +256,9 @@ async def test_pg_automatic_shipment_concurrent_exact_cost_and_authorized_saved_
     assert replay.status_code == 201 and replay.json() == first.json()
     assert (await api.post(path + "/auto-confirm", json=body, headers={"X-User": "outsider"})).status_code == 403
     assert (await api.post(path + "/auto-confirm", json=changed)).status_code == 409
-    gateway.accounting_shipment_source.side_effect = ValueError("Original source is no longer authorized")
+    async def unauthorized_source(*_args, **_kwargs):
+        raise ValueError("Original source is no longer authorized")
+    monkeypatch.setattr(gateway, "accounting_shipment_source", unauthorized_source)
     assert (await api.post(path + "/auto-confirm", json=body)).status_code == 409
     assert receipt == original_receipt
     assert await ledger_state(factory) == posted_state
