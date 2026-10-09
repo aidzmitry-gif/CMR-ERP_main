@@ -142,6 +142,7 @@ class Policy(Base):
     # Optional by design.  An absent TN/TTN scenario blocks that workflow;
     # no document kind, form, number or external operator is inferred.
     shipment_documents: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    document_posting: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     approved_by: Mapped[str] = mapped_column(String(200))
 
 

@@ -8,6 +8,7 @@ const accounts = [{ code: "60", title: "Поставщик", category: "liabilit
 it("blocks calculation when no policy applies to the selected date", async () => {
   vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string) => ({ ok: true, json: async () => url.includes("accounts?") ? accounts : [{ id: 3, effective_from: "2027-01-01", reference: "Будущая политика" }] })));
   render(<AccountingReceiptPreview org="7" source={source} />);
+  fireEvent.click(screen.getByLabelText("Выбрать счета вручную"));
   await screen.findByRole("option", { name: "60 · Поставщик" });
   fireEvent.change(screen.getByLabelText("Счёт расчётов с поставщиком"), { target: { value: "60" } });
   fireEvent.change(screen.getByLabelText(/Счёт запасов/), { target: { value: "41" } });
@@ -21,6 +22,7 @@ function fixture() {
 it("requires explicit accounts, sends exact source version and invalidates on edit", async () => {
   const fetcher = fixture();
   render(<AccountingReceiptPreview org="7" source={source} />);
+  fireEvent.click(screen.getByLabelText("Выбрать счета вручную"));
   await screen.findByText("Учётная политика: Политика 2026");
   const button = screen.getByRole("button", { name: "Рассчитать проводки поступления" });
   expect(button).toBeDisabled();
@@ -36,6 +38,7 @@ it("requires explicit accounts, sends exact source version and invalidates on ed
 it("requires input VAT account when the source contains VAT", async () => {
   fixture();
   render(<AccountingReceiptPreview org="7" source={{ ...source, document: { ...source.document, items: [{ sku: "Товар", vat_amount: "20.00" }] } }} />);
+  fireEvent.click(screen.getByLabelText("Выбрать счета вручную"));
   await screen.findByText("Учётная политика: Политика 2026");
   fireEvent.change(screen.getByLabelText("Счёт расчётов с поставщиком"), { target: { value: "60" } });
   fireEvent.change(screen.getByLabelText(/Счёт запасов/), { target: { value: "41" } });

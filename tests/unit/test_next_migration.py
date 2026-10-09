@@ -116,7 +116,8 @@ def test_joint_revision_is_the_only_head_and_merges_exact_frozen_parents():
     assert not duplicates, f"Duplicate migration revisions: {sorted(duplicates)}"
     assert not parents - set(definitions), f"Missing migration parents: {sorted(parents - set(definitions))}"
     assert {revision.revision for revision in scripts.walk_revisions()} == set(definitions)
-    assert scripts.get_heads() == ["crm_rel_001_native_docs_01"]
+    assert scripts.get_heads() == ["crm_rel_001_auto_posting_01"]
+    assert scripts.get_revision("crm_rel_001_auto_posting_01").down_revision == "crm_rel_001_native_docs_01"
     assert scripts.get_revision("crm_rel_001_native_docs_01").down_revision == "crm_rel_001_native_catalog_01"
     assert scripts.get_revision("crm_rel_001_native_catalog_01").down_revision == "crm_rel_001_output_source_01"
     assert scripts.get_revision("crm_rel_001_output_source_01").down_revision == "crm_rel_001_finished_goods_01"
@@ -132,6 +133,23 @@ def test_joint_revision_is_the_only_head_and_merges_exact_frozen_parents():
         with Operations.context(context):
             operation()
         assert output.getvalue() == ""
+
+
+def test_automatic_posting_migration_is_add_only_and_preserves_configured_history():
+    scripts = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
+    module = scripts.get_revision("crm_rel_001_auto_posting_01").module
+    outputs = []
+    for operation in (module.upgrade, module.downgrade):
+        output = StringIO()
+        context = MigrationContext.configure(dialect=postgresql.dialect(),
+            opts={"as_sql": True, "output_buffer": output})
+        with Operations.context(context):
+            operation()
+        outputs.append(output.getvalue())
+    assert outputs[0].strip() == "ALTER TABLE accounting.policy ADD COLUMN document_posting JSONB;"
+    assert "UPDATE" not in outputs[0] and "DEFAULT" not in outputs[0]
+    assert "WHERE document_posting IS NOT NULL" in outputs[1]
+    assert outputs[1].index("RAISE EXCEPTION") < outputs[1].index("DROP COLUMN document_posting")
 
 
 def test_deal_task_fidelity_revision_remains_reversible_with_its_data_loss_guard():

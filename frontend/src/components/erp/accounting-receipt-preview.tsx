@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { AccountingReceiptConfirm } from "./accounting-receipt-confirm";
+import { AccountingAutomaticReceipt } from "./accounting-automatic-receipt";
 import { Input, Select } from "@/components/ui/input";
 
 type Source = { id: number; version: number; document: { operation_date: string; items: { sku: string; vat_amount: string }[] } };
@@ -13,10 +14,13 @@ type Preview = { digest: string; organization_id: number; source: string; source
 export function AccountingReceiptPreview({ org, source, onVerified }: { org: string; source: Source; onVerified?: () => void }) {
   const [locked, setLocked] = useState(false);
   const [date, setDate] = useState(source.document.operation_date);
+  const [manual, setManual] = useState(false);
   return <section aria-label="Подготовка проводок поступления" className="space-y-3 border-t border-line pt-3">
     <h3 className="font-semibold">Подготовка проводок поступления</h3>
     <label className="block">Дата отражения<Input type="date" disabled={locked} value={date} onChange={e => setDate(e.target.value)} /></label>
-    <ReceiptOptions key={`${org}:${source.id}:${source.version}:${date}`} org={org} source={source} date={date} onLock={() => setLocked(true)} onVerified={onVerified} />
+    <label><input type="checkbox" disabled={locked} checked={manual} onChange={e => setManual(e.target.checked)} /> Выбрать счета вручную</label>
+    {manual ? <ReceiptOptions key={`${org}:${source.id}:${source.version}:${date}`} org={org} source={source} date={date} onLock={() => setLocked(true)} onVerified={onVerified} />
+      : <AccountingAutomaticReceipt key={`${org}:${source.id}:${source.version}:${date}`} org={org} receiptId={source.id} version={source.version} date={date} onLock={() => setLocked(true)} onVerified={onVerified} />}
   </section>;
 }
 

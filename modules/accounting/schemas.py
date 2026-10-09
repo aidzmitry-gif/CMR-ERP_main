@@ -7,7 +7,7 @@ from fractions import Fraction
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 
 def exact(value):
@@ -284,6 +284,29 @@ class LateCostPreviewInput(Input):
     conversion: LateCostConversionInput | None = None
 
 
+def selector_id(value):
+    if int(value) > 2147483647:
+        raise ValueError("Native selector ID is out of range")
+    return value
+
+
+SelectorId = Annotated[str, Field(pattern=r"^[1-9][0-9]{0,9}$"), AfterValidator(selector_id)]
+PostingAccount = Annotated[str, Field(max_length=20, pattern=r"^[0-9]+(?:\.[0-9]+)*$")]
+
+
+class PurchasePostingPolicyInput(Input):
+    default_inventory_account: PostingAccount | None = None
+    inventory_by_sku: dict[SelectorId, PostingAccount] = Field(default_factory=dict, max_length=300)
+    inventory_by_category: dict[SelectorId, PostingAccount] = Field(default_factory=dict, max_length=300)
+    default_settlement_account: PostingAccount | None = None
+    settlement_by_supplier: dict[SelectorId, PostingAccount] = Field(default_factory=dict, max_length=300)
+    vat_account: PostingAccount | None = None
+
+
+class DocumentPostingPolicyInput(Input):
+    purchase: PurchasePostingPolicyInput
+
+
 class PolicyInput(Input):
     effective_from: date
     reference: str = Field(min_length=1, max_length=200)
@@ -297,6 +320,7 @@ class PolicyInput(Input):
     late_cost_allocation: LateCostPolicyInput | None = None
     production_costing: ProductionCostPolicyInput | None = None
     shipment_documents: ShipmentDocumentsPolicyInput | None = None
+    document_posting: DocumentPostingPolicyInput | None = None
 
 
 class LineInput(Input):

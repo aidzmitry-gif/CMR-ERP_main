@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 from datetime import date
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
@@ -21,8 +22,13 @@ from core.services.auth import (
     resolve_effective_oidc_user,
 )
 from core.services.config import get_settings
-from core.services.procurement import ReceiptAccountingConfirmation, ReceiptAccountingOptions
+from core.services.procurement import (
+    ReceiptAccountingConfirmation,
+    ReceiptAccountingOptions,
+    ReceiptAutomaticOptions,
+)
 from modules.accounting import (
+    automatic_receipts,
     bank_account_mapping,
     bank_import,
     bank_statement,
@@ -430,6 +436,20 @@ async def policies(org_id: int, ctx=Depends(member)):
     return [serialize(row) for row in rows]
 
 
+@router.get("/organizations/{org_id}/purchase-posting-selector")
+async def purchase_posting_selector(org_id: int, kind: Literal["sku", "category", "supplier"],
+                                    selector_id: int = Query(gt=0, le=2147483647), ctx=Depends(member)):
+    chief(ctx)
+    from core.domain.reference import NomenclatureCategory
+    from modules.procurement.models import Supplier
+    model = {"sku": Sku, "category": NomenclatureCategory, "supplier": Supplier}[kind]
+    row = await ctx[0].get(model, selector_id)
+    if row is None or (row.status != "active" if kind == "supplier" else not row.is_active):
+        raise HTTPException(404, "Активная карточка для правила не найдена")
+    return {"organization_id": org_id, "kind": kind, "id": row.id,
+            "title": row.title if kind == "sku" else row.name}
+
+
 @router.post("/organizations/{org_id}/policies", status_code=201)
 async def create_policy(org_id: int, data: PolicyInput, ctx=Depends(member)):
     chief(ctx)
@@ -444,6 +464,8 @@ async def create_policy(org_id: int, data: PolicyInput, ctx=Depends(member)):
         await validate_production_accounts(ctx[0], org_id, data.effective_from, data.production_costing)
     if data.currency_revaluation is not None:
         await fx_revaluation.validate_policy(ctx[0], org_id, data.effective_from, data.currency_revaluation)
+    if data.document_posting is not None:
+        await automatic_receipts.validate_settings(ctx[0], org_id, data.effective_from, data.document_posting)
     row = Policy(organization_id=org_id, approved_by=ctx[1], **data.model_dump(exclude_none=True))
     ctx[0].add(row)
     service.audit(ctx[0], org_id, ctx[1], "policy_approved", data.model_dump(mode="json"))
@@ -1326,6 +1348,38 @@ async def accounting_receipt_confirm(org_id: int, receipt_id: int, data: Receipt
                                            core.services.accounting, core.services.event_bus)
     return {**result, "organization_id": org_id, "source": f"procurement:receipt:{receipt_id}",
             "source_version": data.expected_version}
+
+
+@router.post("/organizations/{org_id}/receipts/{receipt_id}/auto-preview")
+async def automatic_receipt_preview(org_id: int, receipt_id: int, data: ReceiptAutomaticOptions,
+                                    ctx=Depends(member), core=Depends(get_core), user=Depends(get_current_user)):
+    gateway = getattr(core.services, "procurement_source", None)
+    if gateway is None:
+        raise HTTPException(503, "Procurement source service is unavailable")
+    await core.services.accounting.source_member(ctx[0], org_id, user)
+    source = await automatic_receipts.scoped_source(ctx[0], org_id, receipt_id, data.expected_version, gateway)
+    if source["entry_id"] is not None:
+        raise HTTPException(409, "Поступление уже проведено; исходные проводки сохранены")
+    options = await automatic_receipts.resolve_options(ctx[0], org_id, source, data)
+    result = await accounting_receipt_preview(org_id, receipt_id, options, ctx, core, user)
+    return {**result, "resolved_options": options.model_dump(mode="json")}
+
+
+@router.post("/organizations/{org_id}/receipts/{receipt_id}/auto-confirm", status_code=201)
+async def automatic_receipt_confirm(org_id: int, receipt_id: int, data: ReceiptAccountingConfirmation,
+                                    ctx=Depends(member), core=Depends(get_core), user=Depends(get_current_user)):
+    gateway = getattr(core.services, "procurement_source", None)
+    if gateway is None:
+        raise HTTPException(503, "Procurement source service is unavailable")
+    await core.services.accounting.source_member(ctx[0], org_id, user)
+    source = await automatic_receipts.scoped_source(ctx[0], org_id, receipt_id, data.expected_version, gateway)
+    # Posted retries retain the original options and digest, even after a newer
+    # policy takes effect. The canonical owner verifies that frozen command.
+    if source["entry_id"] is None:
+        resolved = await automatic_receipts.resolve_options(ctx[0], org_id, source, data)
+        if resolved.model_dump() != data.model_dump(exclude={"digest"}):
+            raise HTTPException(409, "Правила проводок изменились. Рассчитайте поступление заново")
+    return await accounting_receipt_confirm(org_id, receipt_id, data, ctx, core, user)
 
 
 async def verified_shipment_source(session, org_id, key, core):

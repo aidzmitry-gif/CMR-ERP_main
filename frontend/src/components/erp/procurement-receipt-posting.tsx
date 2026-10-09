@@ -3,15 +3,32 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
+import { AccountingAutomaticReceipt } from "./accounting-automatic-receipt";
 
 export type ReceiptAccount = { code: string; title: string; category: string; cash: boolean; quantity_tracking: boolean };
 type Preview = { digest: string; lines: { account: string; title: string; side: string; amount: string }[] };
-export function ProcurementReceiptPosting({ org, receiptId, version, items, accounts, policyId, date, onPosted, onBusy, blocked = false }: {
+type Props = {
   org: string; receiptId: number; version: number; items: { sku: string; lot: string }[];
   accounts: ReceiptAccount[]; policyId?: number; date: string;
   onPosted: (entryId: number) => void; onBusy: (busy: boolean) => void;
   blocked?: boolean;
-}) {
+};
+export function ProcurementReceiptPosting(props: Props) {
+  const [manual, setManual] = useState(false), [locked, setLocked] = useState(false);
+  const [lockedContext, setLockedContext] = useState<Props | null>(null);
+  const context = lockedContext ?? props;
+  return <section className="space-y-3 rounded-lg border border-line p-4">
+    <h3 className="font-semibold">Проводки по сохранённой версии {context.version}</h3>
+    <p>Дата отражения: {context.date}.</p>
+    <label><input type="checkbox" disabled={locked || props.blocked} checked={manual} onChange={e => setManual(e.target.checked)} /> Выбрать счета вручную</label>
+    {manual ? <ManualReceiptPosting key={`${props.org}:${props.receiptId}:${props.version}:${props.date}:${props.policyId}`} {...props} /> : <AccountingAutomaticReceipt
+      key={`${context.org}:${context.receiptId}:${context.version}:${context.date}`} org={context.org}
+      receiptId={context.receiptId} version={context.version} date={context.date} blocked={props.blocked}
+      onBusy={context.onBusy} onLock={() => { setLockedContext(context); setLocked(true); context.onBusy(true); }}
+      onVerified={entryId => { context.onBusy(false); context.onPosted(entryId); }} />}
+  </section>;
+}
+function ManualReceiptPosting({ org, receiptId, version, items, accounts, policyId, date, onPosted, onBusy, blocked = false }: Props) {
   const [inventory, setInventory] = useState(items.map(() => ""));
   const [supplier, setSupplier] = useState(""), [vat, setVat] = useState("");
   const [preview, setPreview] = useState<{ body: string; result: Preview } | null>(null);

@@ -45,6 +45,12 @@ class ReceiptForeignExchange(BaseModel):
         return self
 
 
+class ReceiptAutomaticOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=1, strict=True)
+    posting_date: date
+
+
 class ReceiptAccountingOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     expected_version: int = Field(ge=1, strict=True)
