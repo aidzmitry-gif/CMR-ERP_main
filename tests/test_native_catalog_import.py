@@ -163,6 +163,42 @@ def test_unit_binding_preserves_other_holds(db):
     bind_source_units(db, "1c:ka_copy", [unit_binding(db, incoming)], actor="unit-test")
     assert identity.holds == ["EXTERNAL_REVIEW"]
     assert target.is_active is False
+    db.commit()
+    with pytest.raises(CatalogImportConflict, match="UNIT_ACTIVATION_HELD"):
+        bind_source_units(db, "1c:ka_copy", [unit_binding(db, incoming)], actor="unit-test", activate=True)
+    assert target.is_active is False
+
+
+def test_explicit_unit_activation_is_audited_and_replays(db):
+    incoming = row(1)
+    load(db, [incoming])
+    db.commit()
+    first = unit_binding(db, incoming)
+    bind_source_units(db, "1c:ka_copy", [first], actor="unit-test")
+    db.commit()
+    with pytest.raises(CatalogImportConflict, match="EXPECTED_TARGET_REVISION"):
+        bind_source_units(db, "1c:ka_copy", [first], actor="unit-test", activate=True)
+    current = unit_binding(db, incoming)
+    assert bind_source_units(db, "1c:ka_copy", [current], actor="unit-test", activate=True) == {"bound": 1, "replayed": 0}
+    db.commit()
+    target = db.scalar(select(Sku))
+    assert target.is_active is True
+    assert target.attributes["source_catalog"]["group_review"] == "PENDING"
+    assert count(db, CatalogSourceRevision) == 3
+    assert bind_source_units(db, "1c:ka_copy", [current], actor="unit-test", activate=True) == {"bound": 0, "replayed": 1}
+    assert count(db, CatalogSourceRevision) == 3
+
+
+def test_initial_explicit_activation_clears_only_unknown_unit(db):
+    incoming = row(1)
+    load(db, [incoming])
+    db.commit()
+    binding = unit_binding(db, incoming)
+    with pytest.raises(CatalogImportConflict, match="UNIT_ACTIVATION_MODE"):
+        bind_source_units(db, "1c:ka_copy", [binding], actor="unit-test", activate="true")
+    bind_source_units(db, "1c:ka_copy", [binding], actor="unit-test", activate=True)
+    assert db.scalar(select(Sku)).is_active is True
+    assert count(db, CatalogSourceRevision) == 2
 
 
 def test_same_name_code_different_guid_and_namespace(db):

@@ -299,16 +299,20 @@ class SourceUnitBinding:
     evidence_sha: str
 
 
-def bind_source_units(session: Session, namespace: str, bindings: list[SourceUnitBinding], *, actor: str):
-    """Bind exact source unit labels without conversion, activation or commit.
+def bind_source_units(session: Session, namespace: str, bindings: list[SourceUnitBinding], *, actor: str,
+                      activate: bool = False):
+    """Bind exact source unit labels without conversion or commit.
 
     The caller verifies the sealed source observation and supplies its evidence
     digest. This records unit identity only; it does not approve quantity factors,
-    source groups, financial admission, or document posting.
+    source groups, financial admission, or document posting. Explicit activation
+    is allowed only with no remaining holds; group review stays pending.
     """
     if (not isinstance(namespace, str) or not 0 < len(namespace) <= 64
         or not isinstance(actor, str) or not 0 < len(actor) <= 128):
         raise CatalogImportConflict("IMPORT_SCOPE")
+    if type(activate) is not bool:
+        raise CatalogImportConflict("UNIT_ACTIVATION_MODE")
     if session.new or session.dirty or session.deleted:
         raise CatalogImportConflict("CLEAN_SESSION_REQUIRED")
     if not 0 < len(bindings) <= 30000:
@@ -383,20 +387,26 @@ def bind_source_units(session: Session, namespace: str, bindings: list[SourceUni
             unit_proof = {"entity": "Catalog_УпаковкиЕдиницыИзмерения", "guid": guid(unit["Ref_Key"]),
                           "data_version": unit["DataVersion"], "sha": digest(binding.unit_source_text),
                           "source_text": binding.unit_source_text, "evidence_sha": binding.evidence_sha}
-            if target.provenance.get("source_unit") == unit_proof and target.unit == unit["Description"]:
+            already_bound = (target.provenance.get("source_unit") == unit_proof
+                             and target.unit == unit["Description"] and "UNKNOWN_UNIT" not in identity.holds)
+            holds = [value for value in identity.holds if value != "UNKNOWN_UNIT"]
+            if activate and holds:
+                raise CatalogImportConflict("UNIT_ACTIVATION_HELD")
+            if already_bound and (not activate or target.is_active):
                 totals["replayed"] += 1
                 continue
             if identity.revision_no != binding.expected_revision or identity.target_sha != binding.expected_target_sha:
                 raise CatalogImportConflict("EXPECTED_TARGET_REVISION")
-            if "UNKNOWN_UNIT" not in identity.holds or target.unit:
+            if not already_bound and ("UNKNOWN_UNIT" not in identity.holds or target.unit):
                 raise CatalogImportConflict("UNIT_BINDING_ALREADY_SET")
-            holds = [value for value in identity.holds if value != "UNKNOWN_UNIT"]
             attributes = dict(target.attributes)
             attributes["source_catalog"] = {**attributes["source_catalog"], "holds": holds}
             target.attributes = attributes
             target.provenance = {**target.provenance, "source_unit": unit_proof}
             target.unit = unit["Description"]
-            # Inactivity, group review and every other hold remain unchanged.
+            if activate:
+                target.is_active = True
+            # Group review and every other hold remain unchanged.
             session.flush()
             identity.revision_no += 1
             identity.target_sha, identity.holds = _target_sha(target), holds
