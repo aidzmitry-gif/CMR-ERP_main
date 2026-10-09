@@ -288,3 +288,121 @@ def import_catalog(session: Session, namespace: str, rows: list[SourceRow], *, a
                 source_text=incoming.source_text, target_sha=identity.target_sha, holds=holds, actor=actor))
             session.flush()
     return totals
+
+
+@dataclass(frozen=True)
+class SourceUnitBinding:
+    sku: SourceRow
+    unit_source_text: str
+    expected_revision: int
+    expected_target_sha: str
+    evidence_sha: str
+
+
+def bind_source_units(session: Session, namespace: str, bindings: list[SourceUnitBinding], *, actor: str):
+    """Bind exact source unit labels without conversion, activation or commit.
+
+    The caller verifies the sealed source observation and supplies its evidence
+    digest. This records unit identity only; it does not approve quantity factors,
+    source groups, financial admission, or document posting.
+    """
+    if (not isinstance(namespace, str) or not 0 < len(namespace) <= 64
+        or not isinstance(actor, str) or not 0 < len(actor) <= 128):
+        raise CatalogImportConflict("IMPORT_SCOPE")
+    if session.new or session.dirty or session.deleted:
+        raise CatalogImportConflict("CLEAN_SESSION_REQUIRED")
+    if not 0 < len(bindings) <= 30000:
+        raise CatalogImportConflict("BATCH_SIZE")
+    parsed = {}
+    for binding in bindings:
+        key, sku = binding.sku.parse()
+        if binding.sku.entity != NOMENCLATURE or sku["IsFolder"] or sku["DeletionMark"]:
+            raise CatalogImportConflict("UNIT_SKU_SCOPE")
+        if key in parsed:
+            raise CatalogImportConflict("DUPLICATE_SOURCE_GUID")
+        if (type(binding.expected_revision) is not int or binding.expected_revision <= 0
+            or any(not isinstance(value, str) or len(value) != 64
+                   or any(char not in "0123456789abcdef" for char in value)
+                   for value in (binding.expected_target_sha, binding.evidence_sha))):
+            raise CatalogImportConflict("UNIT_BINDING_EVIDENCE")
+        if not isinstance(binding.unit_source_text, str):
+            raise CatalogImportConflict("SOURCE_ROW_SIZE")
+        try:
+            size = len(binding.unit_source_text.encode("utf8"))
+        except UnicodeEncodeError:
+            raise CatalogImportConflict("SOURCE_JSON") from None
+        if size > 2 * 1024 * 1024:
+            raise CatalogImportConflict("SOURCE_ROW_SIZE")
+        try:
+            unit = json.loads(binding.unit_source_text, parse_float=Decimal, object_pairs_hook=_pairs,
+                              parse_constant=lambda _: (_ for _ in ()).throw(CatalogImportConflict("JSON_NONFINITE")))
+        except (json.JSONDecodeError, UnicodeError):
+            raise CatalogImportConflict("SOURCE_JSON") from None
+        if not isinstance(unit, dict) or guid(unit.get("Ref_Key")) != sku["ЕдиницаИзмерения_Key"]:
+            raise CatalogImportConflict("UNIT_REFERENCE_MISMATCH")
+        if unit.get("DeletionMark") is not False:
+            raise CatalogImportConflict("UNIT_DELETED_OR_UNKNOWN")
+        if not isinstance(unit.get("DataVersion"), str) or not 0 < len(unit["DataVersion"]) <= 255:
+            raise CatalogImportConflict("SOURCE_DATA_VERSION")
+        label = unit.get("Description")
+        if not isinstance(label, str) or not label.strip() or label != label.strip() or len(label) > 16:
+            raise CatalogImportConflict("UNIT_LABEL_INVALID")
+        for value, code in ((label, "UNIT_LABEL_INVALID"), (unit["DataVersion"], "SOURCE_DATA_VERSION")):
+            try:
+                value.encode("utf8")
+            except UnicodeEncodeError:
+                raise CatalogImportConflict(code) from None
+            if any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in value):
+                raise CatalogImportConflict(code)
+        parsed[key] = binding, sku, unit
+    totals = dict(bound=0, replayed=0)
+    with session.begin_nested():
+        if session.get_bind().dialect.name == "postgresql":
+            lock = int.from_bytes(blake2b(("catalog:" + namespace).encode(), digest_size=8).digest(), "big", signed=True)
+            session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock})
+        for key in sorted(parsed):
+            binding, sku, unit = parsed[key]
+            identity = session.scalar(select(CatalogSourceIdentity).where(
+                CatalogSourceIdentity.namespace == namespace, CatalogSourceIdentity.entity == NOMENCLATURE,
+                CatalogSourceIdentity.source_guid == key).with_for_update().execution_options(populate_existing=True))
+            if identity is None or identity.kind != "sku":
+                raise CatalogImportConflict("UNIT_SKU_IDENTITY_MISSING")
+            target = _native(identity, session)
+            current = session.scalar(select(CatalogSourceRevision).where(
+                CatalogSourceRevision.identity_id == identity.id,
+                CatalogSourceRevision.revision_no == identity.revision_no).execution_options(populate_existing=True))
+            if (current is None or current.source_sha != identity.source_sha
+                or digest(current.source_text) != identity.source_sha or current.target_sha != identity.target_sha
+                or current.holds != identity.holds):
+                raise CatalogImportConflict("CURRENT_REVISION_INTEGRITY")
+            if target is None or _target_sha(target) != identity.target_sha:
+                raise CatalogImportConflict("NATIVE_TARGET_CHANGED")
+            if (binding.sku.source_text != current.source_text or digest(binding.sku.source_text) != identity.source_sha
+                or sku["DataVersion"] != current.data_version):
+                raise CatalogImportConflict("UNIT_SKU_SOURCE_CHANGED")
+            unit_proof = {"entity": "Catalog_УпаковкиЕдиницыИзмерения", "guid": guid(unit["Ref_Key"]),
+                          "data_version": unit["DataVersion"], "sha": digest(binding.unit_source_text),
+                          "source_text": binding.unit_source_text, "evidence_sha": binding.evidence_sha}
+            if target.provenance.get("source_unit") == unit_proof and target.unit == unit["Description"]:
+                totals["replayed"] += 1
+                continue
+            if identity.revision_no != binding.expected_revision or identity.target_sha != binding.expected_target_sha:
+                raise CatalogImportConflict("EXPECTED_TARGET_REVISION")
+            if "UNKNOWN_UNIT" not in identity.holds or target.unit:
+                raise CatalogImportConflict("UNIT_BINDING_ALREADY_SET")
+            holds = [value for value in identity.holds if value != "UNKNOWN_UNIT"]
+            attributes = dict(target.attributes)
+            attributes["source_catalog"] = {**attributes["source_catalog"], "holds": holds}
+            target.attributes = attributes
+            target.provenance = {**target.provenance, "source_unit": unit_proof}
+            target.unit = unit["Description"]
+            # Inactivity, group review and every other hold remain unchanged.
+            session.flush()
+            identity.revision_no += 1
+            identity.target_sha, identity.holds = _target_sha(target), holds
+            session.add(CatalogSourceRevision(identity_id=identity.id, revision_no=identity.revision_no,
+                source_sha=identity.source_sha, data_version=current.data_version, previous_sha=identity.source_sha,
+                source_text=current.source_text, target_sha=identity.target_sha, holds=holds, actor=actor))
+            session.flush()
+            totals["bound"] += 1
+    return totals

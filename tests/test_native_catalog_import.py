@@ -10,7 +10,8 @@ from core.db.base import Base
 from core.domain.models import CatalogSourceIdentity, CatalogSourceRevision, Counterparty, CounterpartyAlias, Sku
 from core.domain.reference import NomenclatureCategory
 from core.services.native_catalog_import import (
-    COUNTERPARTIES, NOMENCLATURE, CatalogImportConflict, SourceRow, digest, import_catalog,
+    COUNTERPARTIES, NOMENCLATURE, CatalogImportConflict, SourceRow, SourceUnitBinding,
+    bind_source_units, digest, import_catalog,
 )
 
 
@@ -43,6 +44,125 @@ def count(db, model):
 
 def load(db, rows, namespace="1c:ka_copy", **kwargs):
     return import_catalog(db, namespace, rows, actor="synthetic-test", **kwargs)
+
+
+def unit_binding(db, incoming, **unit_changes):
+    identity = db.scalar(select(CatalogSourceIdentity).where(
+        CatalogSourceIdentity.source_guid == json.loads(incoming.source_text)["Ref_Key"]))
+    unit = {"Ref_Key": "11111111-1111-1111-1111-111111111111", "DataVersion": "unit-v1",
+            "DeletionMark": False, "Description": "упак"}
+    unit.update(unit_changes)
+    return SourceUnitBinding(incoming, json.dumps(unit, ensure_ascii=True), identity.revision_no,
+                             identity.target_sha, "a" * 64)
+
+
+def test_unit_binding_preserves_history_and_replays_without_activation(db):
+    incoming = row(1)
+    load(db, [incoming])
+    db.commit()
+    binding = unit_binding(db, incoming)
+    old = db.scalar(select(CatalogSourceRevision))
+    old_values = old.source_text, old.source_sha, old.target_sha, list(old.holds)
+    result = bind_source_units(db, "1c:ka_copy", [binding], actor="unit-test")
+    db.commit()
+    assert result == {"bound": 1, "replayed": 0}
+    target = db.scalar(select(Sku))
+    assert target.unit == "упак" and target.is_active is False
+    assert target.attributes["source_catalog"]["group_review"] == "PENDING"
+    assert target.attributes["source_catalog"]["holds"] == []
+    assert target.provenance["source_unit"]["source_text"] == binding.unit_source_text
+    revisions = list(db.scalars(select(CatalogSourceRevision).order_by(CatalogSourceRevision.revision_no)))
+    assert len(revisions) == 2
+    assert (old.source_text, old.source_sha, old.target_sha, old.holds) == old_values
+    assert revisions[1].source_text == incoming.source_text
+    assert revisions[1].source_sha == revisions[1].previous_sha == digest(incoming.source_text)
+    assert bind_source_units(db, "1c:ka_copy", [binding], actor="unit-test") == {"bound": 0, "replayed": 1}
+    assert load(db, [incoming])["replayed"] == 1
+    assert count(db, CatalogSourceRevision) == 2
+
+
+@pytest.mark.parametrize("changes,code", [
+    ({"DeletionMark": True}, "UNIT_DELETED_OR_UNKNOWN"),
+    ({"DeletionMark": None}, "UNIT_DELETED_OR_UNKNOWN"),
+    ({"Ref_Key": "22222222-2222-2222-2222-222222222222"}, "UNIT_REFERENCE_MISMATCH"),
+    ({"Description": ""}, "UNIT_LABEL_INVALID"),
+    ({"Description": " шт"}, "UNIT_LABEL_INVALID"),
+    ({"Description": "x" * 17}, "UNIT_LABEL_INVALID"),
+    ({"Description": "шт\u0000"}, "UNIT_LABEL_INVALID"),
+    ({"Description": "шт\ud800"}, "UNIT_LABEL_INVALID"),
+    ({"Description": "шт\u0085"}, "UNIT_LABEL_INVALID"),
+    ({"DataVersion": ""}, "SOURCE_DATA_VERSION"),
+    ({"DataVersion": "v\u0000"}, "SOURCE_DATA_VERSION"),
+    ({"DataVersion": "v\ud800"}, "SOURCE_DATA_VERSION"),
+])
+def test_invalid_unit_leaves_unknown_unit_and_source_unchanged(db, changes, code):
+    incoming = row(1)
+    load(db, [incoming])
+    db.commit()
+    with pytest.raises(CatalogImportConflict, match=code):
+        bind_source_units(db, "1c:ka_copy", [unit_binding(db, incoming, **changes)], actor="unit-test")
+    assert count(db, CatalogSourceRevision) == 1
+    assert db.scalar(select(Sku)).unit == ""
+    assert db.scalar(select(CatalogSourceIdentity)).holds == ["UNKNOWN_UNIT"]
+
+
+def test_invalid_unit_source_encoding_fails_before_mutation(db):
+    from dataclasses import replace
+    incoming = row(1)
+    load(db, [incoming])
+    db.commit()
+    binding = unit_binding(db, incoming)
+    with pytest.raises(CatalogImportConflict, match="SOURCE_JSON"):
+        bind_source_units(db, "1c:ka_copy", [replace(binding, unit_source_text='"\ud800"')], actor="unit-test")
+    assert count(db, CatalogSourceRevision) == 1
+    assert db.scalar(select(Sku)).unit == ""
+
+
+def test_unit_binding_batch_rolls_back_when_later_target_was_edited(db):
+    first, second = row(1), row(2)
+    load(db, [first, second])
+    db.commit()
+    bindings = [unit_binding(db, value) for value in (first, second)]
+    edited = db.get(Sku, db.scalar(select(CatalogSourceIdentity).where(
+        CatalogSourceIdentity.source_guid == json.loads(second.source_text)["Ref_Key"])).sku_id)
+    edited.title = "Manual edit"
+    db.commit()
+    with pytest.raises(CatalogImportConflict, match="NATIVE_TARGET_CHANGED"):
+        bind_source_units(db, "1c:ka_copy", bindings, actor="unit-test")
+    assert count(db, CatalogSourceRevision) == 2
+    assert all(value.unit == "" for value in db.scalars(select(Sku)))
+    assert edited.title == "Manual edit"
+
+
+def test_unit_binding_rejects_changed_source_and_stale_revision(db):
+    from dataclasses import replace
+    incoming = row(1)
+    load(db, [incoming])
+    db.commit()
+    binding = unit_binding(db, incoming)
+    with pytest.raises(CatalogImportConflict, match="UNIT_SKU_SOURCE_CHANGED"):
+        bind_source_units(db, "1c:ka_copy", [replace(binding, sku=row(1, version="v2"))], actor="unit-test")
+    with pytest.raises(CatalogImportConflict, match="EXPECTED_TARGET_REVISION"):
+        bind_source_units(db, "1c:ka_copy", [replace(binding, expected_revision=2)], actor="unit-test")
+    assert count(db, CatalogSourceRevision) == 1
+
+
+def test_unit_binding_preserves_other_holds(db):
+    from core.services.native_catalog_import import _target_sha
+    incoming = row(1)
+    load(db, [incoming])
+    db.commit()
+    target = db.scalar(select(Sku))
+    identity = db.scalar(select(CatalogSourceIdentity))
+    current = db.scalar(select(CatalogSourceRevision))
+    holds = ["UNKNOWN_UNIT", "EXTERNAL_REVIEW"]
+    target.attributes = {"source_catalog": {**target.attributes["source_catalog"], "holds": holds}}
+    identity.holds = current.holds = holds
+    identity.target_sha = current.target_sha = _target_sha(target)
+    db.commit()
+    bind_source_units(db, "1c:ka_copy", [unit_binding(db, incoming)], actor="unit-test")
+    assert identity.holds == ["EXTERNAL_REVIEW"]
+    assert target.is_active is False
 
 
 def test_same_name_code_different_guid_and_namespace(db):
