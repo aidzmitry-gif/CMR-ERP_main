@@ -10,9 +10,15 @@ from modules.integrations.registry import RegistryClient
 
 
 async def test_onec_wire_branch_import_keeps_two_branches_under_one_legal_entity(api, session, monkeypatch):
-    from sqlalchemy import select
+    from sqlalchemy import func, select
 
-    from core.domain.models import Counterparty, CounterpartyBranch, CounterpartyBranchAlias
+    from core.domain.models import (
+        Counterparty,
+        CounterpartyAlias,
+        CounterpartyBranch,
+        CounterpartyBranchAlias,
+        OutboxEvent,
+    )
     from modules.integrations.client import OneCClient
 
     parent = '00000000-0000-0000-0000-000000000001'
@@ -27,6 +33,21 @@ async def test_onec_wire_branch_import_keeps_two_branches_under_one_legal_entity
     monkeypatch.setattr(client, '_get_all', lambda *args, **kwargs: rows)
     gateway = api._transport.app.state.core.services.onec
     monkeypatch.setattr(gateway, 'fetch_counterparties', client.fetch_counterparties)
+    # The wire adapter has no confirmed address mapping: reject and roll back,
+    # including an earlier complete card. Never invent an OData address field.
+    mapped = await client.fetch_counterparties()
+    complete = {'id': '00000000-0000-0000-0000-000000000004', 'unp': '191000004',
+                'name': 'Complete test head', 'legal_address': 'Synthetic registered address, 4'}
+    monkeypatch.setattr(gateway, 'fetch_counterparties', AsyncMock(return_value=[complete, *mapped]))
+    response = await api.post('/integrations/1c/sync')
+    assert response.status_code == 422, response.text
+    assert response.json()['detail']['code'] == 'legal_address_required'
+    for model in (Counterparty, CounterpartyAlias, CounterpartyBranch, CounterpartyBranchAlias, OutboxEvent):
+        assert await session.scalar(select(func.count()).select_from(model)) == 0
+    # An explicitly complete normalized fixture exercises the branch importer.
+    enriched = [dict(row, legal_address='Synthetic registered address, 1')
+                if row['id'] == parent else row for row in mapped]
+    monkeypatch.setattr(gateway, 'fetch_counterparties', AsyncMock(return_value=enriched))
     for _ in range(2):
         response = await api.post('/integrations/1c/sync')
         assert response.status_code == 200, response.text

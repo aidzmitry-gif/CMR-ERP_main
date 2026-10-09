@@ -13,7 +13,8 @@ from core.domain.models import (
 from core.services.mdm import CounterpartyWriteError
 from core.services.reference_import import import_counterparties
 
-HEAD = {'id': 'head', 'unp': '600187521', 'name': 'Head', 'legal_name': 'Head Legal'}
+HEAD = {'id': 'head', 'unp': '600187521', 'name': 'Head', 'legal_name': 'Head Legal',
+        'legal_address': 'Synthetic registered address, 1'}
 BRANCH = {'id': 'branch', 'record_kind': 'branch', 'parent_external_ref': 'head', 'name': 'Branch', 'raw_branch_code': '0002'}
 
 
