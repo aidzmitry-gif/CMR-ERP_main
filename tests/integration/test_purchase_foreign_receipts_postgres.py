@@ -31,6 +31,10 @@ async def foreign_pg(issuance_pg, pg_book):  # noqa: F811 — pytest fixture inj
     api.headers.update({"X-User": "tester", "X-User-Roles": "director"})
     org, policy = pg_book
     async with factory() as session:
+        await session.execute(text(
+            "SELECT setval(pg_get_serial_sequence('accounting.account', 'id'), "
+            "(SELECT max(id) FROM accounting.account))"
+        ))
         await ensure_receipt_catalog_sku(session)
         session.add(Currency(code="USD", title="Synthetic USD"))
         for code, title, quantity in (("41.1", "Synthetic owned goods", True),
