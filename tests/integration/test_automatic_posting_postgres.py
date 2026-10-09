@@ -6,10 +6,13 @@ real document admission, statutory approval, month closing or OIDC.
 """
 
 import asyncio
+import re
 from copy import deepcopy
+from datetime import date
 from decimal import Decimal
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -38,9 +41,9 @@ from modules.wms.invoice_reservations import ReserveInput, reserve
 from modules.wms.models import StockMovement, WarehouseDirectory
 from modules.wms.reservation_events import apply
 from tests.accounting.conftest import book, db, posting  # noqa: F401
-from tests.accounting.test_automatic_bank_import import confirmation
-from tests.accounting.test_automatic_bank_import import setup as bank_setup
+from tests.accounting.test_automatic_bank_import import confirmation, policy
 from tests.accounting.test_automatic_shipments import setup as shipment_setup
+from tests.accounting.test_bank_import import map_source
 from tests.accounting.test_postgres import pg_factory  # noqa: F401
 from tests.reservation_source import invoice
 
@@ -52,8 +55,17 @@ async def automatic_pg(pg_factory, db, book):  # noqa: F811
     factory = pg_factory
 
     def policy_migration(connection):
+        assert re.fullmatch(r"acc_test_[a-f0-9]{32}", connection.scalar(text("SELECT current_database()")))
+        assert connection.scalar(text("SELECT count(*) FROM finance.bank_transaction")) == 0
+        assert connection.scalar(text("SELECT count(*) FROM pg_constraint WHERE conrelid='finance.bank_transaction'::regclass "
+                                      "AND conname IN ('bank_statement_direction','bank_statement_provenance')")) == 0
+        assert connection.scalar(text("SELECT to_regclass('finance.bank_statement_source_identity')")) is None
+        # The shared fixture uses current ORM columns with a pre-0135 guard.
+        # Reproduce only the empty legacy column prestate; real0135 adds all guards.
+        connection.execute(text("ALTER TABLE finance.bank_transaction DROP COLUMN direction, DROP COLUMN source_provider, "
+                                "DROP COLUMN source_external_id, DROP COLUMN source_kind, DROP COLUMN source_reference"))
         with Operations.context(MigrationContext.configure(connection)):
-            for name in ("0137_bank_account_mapping", "crm_rel_001_auto_posting_01"):
+            for name in ("0135_full_bank_statement_sources", "0137_bank_account_mapping", "crm_rel_001_auto_posting_01"):
                 path = Path(__file__).resolve().parents[2] / f"migrations/versions/{name}.py"
                 spec = spec_from_file_location(name, path)
                 migration = module_from_spec(spec)
@@ -101,6 +113,25 @@ async def ledger_state(factory):
 
 async def forbid_resolver(*_args, **_kwargs):
     raise AssertionError("Durable replay must not use current policy, source, mapping or cost")
+
+
+async def bank_setup(api, session, selected_book, direction):
+    configured = await api.post(f"/accounting/organizations/{selected_book[0]}/policies", json=policy())
+    assert configured.status_code == 201, configured.text
+    source = BankTransaction(ext_id="AUTO-BANK-1", occurred_on=date(2026, 9, 3), amount="123.45", currency="BYN",
+        account_code="main", source_provider="synthetic-bank", direction=direction,
+        source_external_id="AUTO-BANK-1", source_kind="file", source_reference="Synthetic complete bank statement",
+        purpose="No account inferred from purpose")
+    session.add(source)
+    await session.commit()
+    session.add(models.SourceBinding(organization_id=selected_book[0], source_type="finance_bank_transaction",
+        source_id=source.id, ownership="own", evidence="Synthetic reviewed source ownership", actor="tester"))
+    await session.commit()
+    await map_source(session, selected_book[0], source)
+    return source, dict(request_key=str(uuid4()), source_transaction_id=source.id,
+        source_digest=bank_import._digest(bank_import.source_snapshot(source)), policy_id=configured.json()["id"],
+        posting_date="2026-09-04", rule_key="supplier_payment" if direction == "payment" else "buyer_receipt",
+        settlement_dimensions={"counterparty": "reviewed-party", "contract": "reviewed-contract"}, explanation="Reviewed operation")
 
 
 @pytest.mark.parametrize("direction,pairs", [
