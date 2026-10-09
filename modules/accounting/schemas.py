@@ -320,9 +320,18 @@ class BankPostingPolicyInput(Input):
     rules: dict[BankOperationKey, BankPostingRuleInput] = Field(min_length=1, max_length=100)
 
 
+class SalesPostingPolicyInput(Input):
+    buyer_account: PostingAccount
+    revenue_account: PostingAccount
+    vat_revenue_account: PostingAccount
+    vat_payable_account: PostingAccount
+    expense_account: PostingAccount
+
+
 class DocumentPostingPolicyInput(Input):
     purchase: PurchasePostingPolicyInput
     bank: BankPostingPolicyInput | None = None
+    sales: SalesPostingPolicyInput | None = None
 
 
 class PolicyInput(Input):

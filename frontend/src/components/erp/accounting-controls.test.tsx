@@ -3,8 +3,22 @@ import { createHash, webcrypto } from "node:crypto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { AccountingControls } from "./accounting-controls";
+import { saleAccountFields } from "./sales-posting-policy-fields";
 
 const fetchMock = vi.fn();
+
+it("saves all five explicit sale accounts without dropping required purchase shape", async () => {
+  setupClosing([...closingAccounts(), ...saleAccountFields.map(([, title, code, category]) => ({ organization_id: 1, code, title, category, cash: false, quantity_tracking: false, required_dimensions: [] }))]);
+  render(<AccountingControls org="1" onChanged={vi.fn()} />); policyBase();
+  fireEvent.click(screen.getByLabelText("Настроить счета реализации"));
+  await screen.findByRole("option", { name: "62 · Покупатель" });
+  expect(submitPolicy()).toBeDisabled();
+  for (const [, label, code] of saleAccountFields) fireEvent.change(screen.getByLabelText(`Автоматический счёт реализации · ${label}`), { target: { value: code } });
+  await waitFor(() => expect(submitPolicy()).toBeEnabled());
+  fireEvent.click(submitPolicy());
+  await waitFor(() => expect(policyPosts()).toHaveLength(1));
+  expect(JSON.parse(policyPosts()[0][1].body).document_posting).toEqual({ purchase: {}, sales: Object.fromEntries(saleAccountFields.map(([field, , code]) => [field, code])) });
+});
 const closingAccounts = (org = 1) => [
   { organization_id: org, code: "11", title: "Расход", category: "expense", cash: false, quantity_tracking: false, required_dimensions: [] },
   { organization_id: org, code: "91", title: "Результат", category: "income", cash: false, quantity_tracking: false, required_dimensions: ["department"] },

@@ -7,6 +7,7 @@ import { AccountingShipmentConfirm } from "./accounting-shipment-confirm";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { shipmentValidationMessage } from "@/lib/shipment-validation-message";
+import { saleAccountFields, type SalesPostingAccounts } from "./sales-posting-policy-fields";
 
 type Account = { code: string; title: string; required_dimensions: string[] };
 type Act = { digest: string; source_key: string; snapshot: { organization_id: number; document_id: number; operation_date: string; lines: { source: string; line_no: number; warehouse: string; sku_code: string; qty: string }[] } };
@@ -28,13 +29,20 @@ export function AccountingShipmentPreview({ org, source, accounts, date, policyI
   const [act, setAct] = useState<Act | null>(null), [error, setError] = useState(() => keyOf(org, source) ? "" : "Источник не относится к выбранному юрлицу.");
   const [draftBusy, setDraftBusy] = useState(false);
   const [postingLocked, setPostingLocked] = useState(false);
-  const [confirmation, setConfirmation] = useState<{ org: string; source: string; sourceKey: string; body: string; scope: string } | null>(null);
+  const [confirmationStarted, setConfirmationStarted] = useState(false);
+  const [confirmation, setConfirmation] = useState<{ org: string; source: string; sourceKey: string; body: string; scope: string; automatic: boolean } | null>(null);
+  const [automatic, setAutomatic] = useState(false);
+  const [ruleBundle, setRuleBundle] = useState<{ scope: string; accounts?: SalesPostingAccounts; error?: string } | null>(null);
   const [loading, setLoading] = useState(() => !!keyOf(org, source)), [busy, setBusy] = useState(false);
   const [allocations, setAllocations] = useState<Allocation[]>([]), [terms, setTerms] = useState<Terms[]>([]);
   const [form, setForm] = useState({ document_date: "", explanation: "", recognition_basis: "", unit_basis: "", cost_allocation: "", vat_rounding: "" });
   const [result, setResult] = useState<{ scope: string; value: Calculation } | null>(null), [page, setPage] = useState(0);
   const pending = useRef<AbortController | null>(null);
-  const scope = `${org}/${source}/${date}/${policyId}`;
+  const ruleScope = `${org}/${date}/${policyId}`;
+  const rules = ruleBundle?.scope === ruleScope ? ruleBundle.accounts : undefined;
+  const scope = `${org}/${source}/${date}/${policyId}/${automatic}`;
+  const displayAllocations = automatic && rules ? allocations.map(row => ({ ...row, expense_account: rules.expense_account })) : allocations;
+  const displayTerms = automatic && rules ? terms.map(row => ({ ...row, ...Object.fromEntries(saleAccountFields.filter(([field]) => field !== "expense_account").map(([field]) => [field, rules[field]])) })) : terms;
   const [previousScope, setPreviousScope] = useState(scope);
   if (previousScope !== scope) {
     setPreviousScope(scope);
@@ -58,6 +66,22 @@ export function AccountingShipmentPreview({ org, source, accounts, date, policyI
     // Discard it permanently, including when the user returns to the old date.
     pending.current?.abort();
   }, [scope]);
+  useEffect(() => {
+    if (!automatic || !key || !policyId) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch(`/api/accounting/organizations/${org}/shipments/auto-rules?on=${date}`, { cache: "no-store", signal: controller.signal });
+        const data = await response.json();
+        if (!response.ok) throw new Error(shipmentValidationMessage(data.detail));
+        if (data.organization_id !== Number(org) || data.policy_id !== policyId || !data.accounts
+          || !saleAccountFields.every(([field, , root]) => typeof data.accounts[field] === "string"
+            && (data.accounts[field] === root || data.accounts[field].startsWith(root + ".")))) throw new Error("Счета реализации относятся к другой организации или политике.");
+        if (!controller.signal.aborted) setRuleBundle({ scope: ruleScope, accounts: data.accounts });
+      } catch (reason) { if (!controller.signal.aborted) setRuleBundle({ scope: ruleScope, error: reason instanceof Error ? reason.message : "Счета реализации не настроены." }); }
+    })();
+    return () => controller.abort();
+  }, [automatic, key, org, date, policyId, ruleScope]);
   useEffect(() => {
     const controller = new AbortController();
     if (!key) return;
@@ -92,18 +116,28 @@ export function AccountingShipmentPreview({ org, source, accounts, date, policyI
   async function calculate() {
     if (!act || !policyId || !key || busy || disabled || postingLocked) return;
     if (Object.values(form).some(value => !value.trim())) { setError("Заполните даты, основания и методы расчёта."); return; }
+    if (automatic && !rules) { setError("Проверьте настройки автоматических счетов реализации."); return; }
     const controller = new AbortController(); pending.current?.abort(); pending.current = controller;
     setBusy(true); setResult(null); setError("");
     try {
-      const inputs = { ...form, expected_act_digest: act.digest, policy_id: policyId, posting_date: date, recognition: "sale_on_shipment", allocations, commercial_lines: terms };
-      const response = await fetch(`/api/accounting/organizations/${org}/shipments/${key}/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify(inputs) });
+      const inputs = { ...form, expected_act_digest: act.digest, policy_id: policyId, posting_date: date, recognition: "sale_on_shipment",
+        allocations: automatic ? allocations.map(row => ({ ...row, expense_account: undefined })) : allocations,
+        commercial_lines: automatic ? terms.map(row => ({ ...row, buyer_account: undefined, revenue_account: undefined, vat_revenue_account: undefined, vat_payable_account: undefined })) : terms };
+      const response = await fetch(`/api/accounting/organizations/${org}/shipments/${key}/${automatic ? "auto-preview" : "preview"}`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify(inputs) });
       const data = await response.json();
       if (!response.ok) throw new Error(shipmentValidationMessage(data.detail));
       const value = data as Calculation;
       if (String(value.organization_id) !== org || value.source !== source || value.status !== "preview" || value.posted !== false) throw new Error("Получен результат другого источника или состояния.");
+      const command = automatic ? data.resolved_command : inputs;
+      if (automatic && (!command || command.expected_act_digest !== act.digest || command.policy_id !== policyId || command.posting_date !== date
+        || !Array.isArray(command.allocations) || command.allocations.length !== allocations.length
+        || !command.allocations.every((row: Allocation) => row.expense_account === rules?.expense_account)
+        || !Array.isArray(command.commercial_lines) || command.commercial_lines.length !== terms.length
+        || !command.commercial_lines.every((row: Terms) => saleAccountFields.filter(([field]) => field !== "expense_account").every(([field]) => row[field as keyof Terms] === rules?.[field])))) throw new Error("Ответ не содержит проверенную команду с настроенными счетами.");
       if (!controller.signal.aborted) {
-        setConfirmation(typeof data.basis_digest === "string" && /^[a-f0-9]{64}$/.test(data.basis_digest)
-          ? { org, source, sourceKey: key, scope, body: JSON.stringify({ ...inputs, expected_basis_digest: data.basis_digest }) } : null);
+        setConfirmationStarted(false);
+        setConfirmation((!automatic || data.confirmation_available === true) && typeof data.basis_digest === "string" && /^[a-f0-9]{64}$/.test(data.basis_digest)
+          ? { org, source, sourceKey: key, scope, automatic, body: JSON.stringify({ ...command, expected_basis_digest: data.basis_digest }) } : null);
         setResult({ scope, value }); setPage(0);
       }
     } catch (reason) { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Расчёт не выполнен."); }
@@ -117,31 +151,34 @@ export function AccountingShipmentPreview({ org, source, accounts, date, policyI
       <p>Счёт № {act.snapshot.document_id} · Отгрузка {act.snapshot.operation_date} · Политика {policyId ? `№ ${policyId}` : "не выбрана для даты"}</p>
       {key && <AccountingPreparationDraft key={`${org}/${key}`} org={org} source={source} sourceKey={key} payload={{act_digest:act.digest,posting_date:date,policy_id:policyId ?? null,form,allocations,terms}} disabled={busy || disabled || postingLocked} onRestore={restoreDraft} onBusy={setDraftBusy} />}
       <fieldset disabled={busy || draftBusy || disabled || postingLocked} className="space-y-4">
+        <label><input type="checkbox" checked={automatic} onChange={event => { invalidate(); setAutomatic(event.target.checked); }} /> Использовать счета из учётной политики</label>
+        {automatic && <p>Автоматически выбираются только счета. Суммы, налоговое основание, партии и аналитики проверяются перед проведением.</p>}
+        {automatic && !rules && <p role={ruleBundle?.scope === ruleScope && ruleBundle.error ? "alert" : "status"}>{ruleBundle?.scope === ruleScope && ruleBundle.error ? ruleBundle.error : "Загружаются счета реализации…"}</p>}
         <div className="grid gap-3 md:grid-cols-2"><label>Дата отражения<Input aria-label="Дата отражения отгрузки" type="date" value={date} onChange={event => { invalidate(); onDate(event.target.value); }} /></label>
           {([['document_date','Дата первичного документа'],['explanation','Содержание операции'],['recognition_basis','Основание признания выручки'],['unit_basis','Основание соответствия единиц']] as const).map(([field,label]) => <label key={field}>{label}<Input aria-label={label} type={field === 'document_date' ? 'date' : 'text'} value={form[field]} onChange={event => { invalidate(); setForm({ ...form, [field]: event.target.value }); }} /></label>)}
           <label>Распределение стоимости<Select aria-label="Распределение стоимости" value={form.cost_allocation} onChange={event => { invalidate(); setForm({ ...form, cost_allocation: event.target.value }); }}><option value="">Выберите метод</option><option value="cumulative_floor_last">По накопленному количеству, остаток копеек последней доле</option></Select></label>
           <label>Округление НДС<Select aria-label="Округление НДС" value={form.vat_rounding} onChange={event => { invalidate(); setForm({ ...form, vat_rounding: event.target.value }); }}><option value="">Выберите метод</option><option value="commercial_line_half_up">До копеек по строке счёта, половина вверх</option></Select></label>
         </div>
         {act.snapshot.lines.map(line => <article key={line.source} className="space-y-3 rounded border border-line p-3"><h3>Строка счёта {line.line_no} · {line.sku_code} · Склад {line.warehouse} · Отгружено {line.qty}</h3>
-          {allocations.map((row,index) => row.line_source === line.source && <fieldset key={index} aria-label={`Распределение ${index + 1}`} className="grid gap-3 border-b border-line pb-3 md:grid-cols-2">
+          {displayAllocations.map((row,index) => row.line_source === line.source && <fieldset key={index} aria-label={`Распределение ${index + 1}`} className="grid gap-3 border-b border-line pb-3 md:grid-cols-2">
             <AccountField accounts={accounts} label={`Счёт запасов ${index + 1}`} value={row.account} root='41' onChange={value => updateAllocation(index,{ account: value })} />
             <label>Партия<Input aria-label={`Партия ${index + 1}`} value={row.lot} onChange={event => updateAllocation(index,{lot:event.target.value})} /></label>
             <AccountingLotPicker key={`${org}/${date}/${policyId}/${row.account}/${line.warehouse}/${line.sku_code}`} org={org} date={date} policyId={policyId} account={row.account} warehouse={line.warehouse} sku={line.sku_code} onSelect={lot => updateAllocation(index,{lot})} />
             <label>Количество<Input aria-label={`Количество ${index + 1}`} value={row.quantity} onChange={event => updateAllocation(index,{quantity:event.target.value})} /></label>
-            <AccountField accounts={accounts} label={`Счёт себестоимости ${index + 1}`} value={row.expense_account} root='90.4' onChange={value => updateAllocation(index,{expense_account:value,expense_dimensions:{}})} />
+            {automatic ? <p>Счёт себестоимости {index + 1}: {rules?.expense_account ?? "не настроен"}</p> : <AccountField accounts={accounts} label={`Счёт себестоимости ${index + 1}`} value={row.expense_account} root='90.4' onChange={value => updateAllocation(index,{expense_account:value,expense_dimensions:{}})} />}
             <Dimensions accounts={accounts} label={`Расход ${index + 1}`} codes={[row.expense_account]} values={row.expense_dimensions} onChange={value => updateAllocation(index,{expense_dimensions:value})} />
             <Button variant="ghost" onClick={() => { invalidate(); setAllocations(rows => rows.filter((_,i) => i !== index)); }}>Удалить распределение {index + 1}</Button>
           </fieldset>)}
           <Button variant="secondary" onClick={() => { invalidate(); setAllocations(rows => [...rows,{line_source:line.source,account:"",lot:"",quantity:"",expense_account:"",expense_dimensions:{}}]); }}>Добавить партию для строки {line.line_no} · {line.warehouse}</Button>
         </article>)}
-        {terms.map((row,index) => <fieldset key={row.line_no} aria-label={`Продажа строки ${row.line_no}`} className="grid gap-3 rounded border border-line p-3 md:grid-cols-2"><legend>Продажа по строке счёта {row.line_no} — вся отгруженная часть по всем складам</legend>
+        {displayTerms.map((row,index) => <fieldset key={row.line_no} aria-label={`Продажа строки ${row.line_no}`} className="grid gap-3 rounded border border-line p-3 md:grid-cols-2"><legend>Продажа по строке счёта {row.line_no} — вся отгруженная часть по всем складам</legend>
           {([['net_amount','Без НДС, BYN'],['vat_rate','Ставка НДС, %'],['vat_basis','Основание НДС']] as const).map(([field,label]) => <label key={field}>{label}<Input aria-label={`${label} · строка ${row.line_no}`} value={row[field]} onChange={event => updateTerms(index,{[field]:event.target.value})} /></label>)}
-          {([['buyer_account','Покупатель','62'],['revenue_account','Выручка','90.1'],['vat_revenue_account','НДС из выручки','90.2'],['vat_payable_account','НДС к уплате','68']] as const).map(([field,label,root]) => <div key={field}><AccountField accounts={accounts} label={`${label} · строка ${row.line_no}`} value={row[field]} root={root} onChange={value => updateTerms(index,{[field]:value})} /></div>)}
+          {([['buyer_account','Покупатель','62'],['revenue_account','Выручка','90.1'],['vat_revenue_account','НДС из выручки','90.2'],['vat_payable_account','НДС к уплате','68']] as const).map(([field,label,root]) => <div key={field}>{automatic ? <p>{label} · строка {row.line_no}: {rules?.[field] ?? "не настроен"}</p> : <AccountField accounts={accounts} label={`${label} · строка ${row.line_no}`} value={row[field]} root={root} onChange={value => updateTerms(index,{[field]:value})} />}</div>)}
           <Dimensions accounts={accounts} label={`Покупатель строки ${row.line_no}`} codes={[row.buyer_account]} values={row.buyer_dimensions} onChange={value => updateTerms(index,{buyer_dimensions:value})} required={['counterparty','contract','settlement_document']} />
           <Dimensions accounts={accounts} label={`Выручка строки ${row.line_no}`} codes={[row.revenue_account]} values={row.revenue_dimensions} onChange={value => updateTerms(index,{revenue_dimensions:value})} />
           <Dimensions accounts={accounts} label={`НДС строки ${row.line_no}`} codes={[row.vat_revenue_account,row.vat_payable_account]} values={row.vat_dimensions} onChange={value => updateTerms(index,{vat_dimensions:value})} />
         </fieldset>)}
-        <Button disabled={!policyId || !allocations.length} onClick={() => void calculate()}>Рассчитать проводки отгрузки</Button>
+        <Button disabled={!policyId || !allocations.length || (automatic && !rules)} onClick={() => void calculate()}>Рассчитать проводки отгрузки</Button>
       </fieldset>
     </>}
     {busy && <p role="status">Рассчитывается весь акт…</p>}
@@ -150,9 +187,9 @@ export function AccountingShipmentPreview({ org, source, accounts, date, policyI
       <label>Страница проводок<Select aria-label="Страница проводок" value={page} onChange={event => setPage(Number(event.target.value))}>{current.postings.map((_,index) => <option key={index} value={index}>{index + 1} из {current.postings.length}</option>)}</Select></label>
       <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th>Сторона</th><th>Счёт</th><th>BYN</th><th>Количество</th><th>Аналитика</th></tr></thead><tbody>{current.postings[page]?.posting.lines.map((line,index) => <tr key={index}><td>{line.side === 'debit' ? 'Дт' : 'Кт'}</td><td>{line.account}</td><td>{line.amount}</td><td>{line.quantity ?? '—'}</td><td>{Object.entries(line.dimensions).map(([field,value]) => `${names[field] ?? field}: ${value}`).join('; ')}</td></tr>)}</tbody></table></div>
     </section>}
-    {confirmation && (postingLocked || (current && !disabled && confirmation.scope === scope)) && <div>
+    {confirmation && (confirmationStarted || (current && !disabled && confirmation.scope === scope)) && <div>
       {confirmation.scope !== scope && <p role="alert">Подтверждение относится к предыдущему выбору: юрлицо {confirmation.org}, отгрузка {confirmation.sourceKey}. Завершите проверку ответа.</p>}
-      <AccountingShipmentConfirm key={`${confirmation.org}/${confirmation.sourceKey}/${confirmation.body}`} {...confirmation} onLock={setPostingLocked} onPosted={onPosted} />
+      <AccountingShipmentConfirm key={`${confirmation.org}/${confirmation.sourceKey}/${confirmation.body}`} {...confirmation} onLock={locked => { if (locked) setConfirmationStarted(true); setPostingLocked(locked); }} onPosted={onPosted} />
     </div>}
   </section>;
 }

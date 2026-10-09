@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { shipmentValidationMessage } from "@/lib/shipment-validation-message";
 
-export function AccountingShipmentConfirm({ org, sourceKey, source, body, onLock, onPosted }: {
+export function AccountingShipmentConfirm({ org, sourceKey, source, body, automatic = false, onLock, onPosted }: {
   org: string; sourceKey: string; source: string; body: string; onLock: (locked: boolean) => void;
+  automatic?: boolean;
   onPosted?: () => void | Promise<void>;
 }) {
   const [state, setState] = useState<"ready" | "sending" | "uncertain" | "done" | "rejected">("ready");
@@ -18,7 +19,7 @@ export function AccountingShipmentConfirm({ org, sourceKey, source, body, onLock
     if (state === "sending" || state === "done" || state === "rejected") return;
     setState("sending"); onLock(true); setMessage("");
     try {
-      const response = await fetch(`/api/accounting/organizations/${org}/shipments/${sourceKey}/confirm`, {
+      const response = await fetch(`/api/accounting/organizations/${org}/shipments/${sourceKey}/${automatic ? "auto-confirm" : "confirm"}`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body,
       });
       const value = await response.json();

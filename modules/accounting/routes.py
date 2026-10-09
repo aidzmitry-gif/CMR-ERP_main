@@ -30,6 +30,7 @@ from core.services.procurement import (
 from modules.accounting import (
     automatic_bank_import,
     automatic_receipts,
+    automatic_shipments,
     bank_account_mapping,
     bank_import,
     bank_statement,
@@ -469,6 +470,8 @@ async def create_policy(org_id: int, data: PolicyInput, ctx=Depends(member)):
         await automatic_receipts.validate_settings(ctx[0], org_id, data.effective_from, data.document_posting)
         if data.document_posting.bank is not None:
             await automatic_bank_import.validate_settings(ctx[0], org_id, data.effective_from, data.document_posting.bank)
+        if data.document_posting.sales is not None:
+            await automatic_shipments.validate_settings(ctx[0], org_id, data.effective_from, data.document_posting.sales)
     row = Policy(organization_id=org_id, approved_by=ctx[1], **data.model_dump(exclude_none=True))
     ctx[0].add(row)
     service.audit(ctx[0], org_id, ctx[1], "policy_approved", data.model_dump(mode="json"))
@@ -1555,6 +1558,42 @@ async def accounting_shipment_preview(org_id: int, key: UUID, data: ShipmentPlan
 
     result = await verified_shipment_source(ctx[0], org_id, key, core)
     return await prepare(ctx[0], org_id, result["receipt"], data, procurement=getattr(core.services, "procurement_source", None))
+
+
+@router.get("/organizations/{org_id}/shipments/auto-rules")
+async def automatic_shipment_rules(org_id: int, on: date, response: Response, ctx=Depends(member)):
+    response.headers["Cache-Control"] = "private, no-store"
+    try:
+        return await automatic_shipments.options(ctx[0], org_id, on)
+    except service.AccountingError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/organizations/{org_id}/shipments/{key}/auto-preview")
+async def automatic_shipment_preview(org_id: int, key: UUID, data: automatic_shipments.ShipmentAutomaticInput,
+                                     ctx=Depends(member), core=Depends(get_core)):
+    result = await verified_shipment_source(ctx[0], org_id, key, core)
+    try:
+        return await automatic_shipments.prepare(ctx[0], org_id, result["receipt"], data,
+            procurement=getattr(core.services, "procurement_source", None))
+    except service.AccountingError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/organizations/{org_id}/shipments/{key}/auto-confirm", status_code=201)
+async def automatic_shipment_confirm(org_id: int, key: UUID, data: ShipmentConfirmInput,
+                                     response: Response, ctx=Depends(member), core=Depends(get_core)):
+    result = await verified_shipment_source(ctx[0], org_id, key, core)
+    try:
+        saved = await automatic_shipments.confirm(ctx[0], org_id, result["receipt"], data,
+            ctx[1], core.services.event_bus, procurement=getattr(core.services, "procurement_source", None))
+    except service.AccountingError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    return {"organization_id": org_id, "source": saved.source, "receipt_id": saved.id,
+            "basis_digest": saved.basis_digest, "anchor_entry_id": saved.anchor_entry_id,
+            "entry_ids": [page["entry_id"] for page in saved.snapshot["pages"]],
+            "posted": True, "statutory_certified": False}
 
 
 @router.post("/organizations/{org_id}/shipments/{key}/confirm", status_code=201)
