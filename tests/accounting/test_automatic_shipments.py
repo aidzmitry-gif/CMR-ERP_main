@@ -40,7 +40,9 @@ async def test_auto_whole_act_accounts_native_amounts_and_durable_replay(client,
     receipt, original, body, gateway = await setup(client, db, book, posting)
     base = f"/accounting/organizations/{book[0]}/shipments/{receipt['source_key']}"
     options = await client.get(f"/accounting/organizations/{book[0]}/shipments/auto-rules?on=2026-09-02")
-    assert options.json() == {"organization_id": book[0], "policy_id": original["policy_id"], "accounts": ACCOUNTS}
+    assert options.json() == {"organization_id": book[0], "policy_id": original["policy_id"], "accounts": ACCOUNTS,
+                             "inventory_accounts": ["41.2"]}
+    assert all("account" not in row for row in body["allocations"])
     preview = await client.post(base + "/auto-preview", json=body)
     assert preview.status_code == 200, preview.text
     plan = preview.json()
@@ -139,7 +141,7 @@ async def test_missing_sales_settings_and_future_or_quantitative_accounts_hold(c
     receipt, raw = await fixture(db, book, posting)
     command = automatic_shipments.automatic_input(shipment_preview.ShipmentPlanInput(**raw))
     with pytest.raises(service.AccountingError, match="не настроены"):
-        await automatic_shipments.resolve_command(db, book[0], command)
+        await automatic_shipments.resolve_command(db, book[0], command, receipt)
     for i, attrs in enumerate([dict(valid_from=date(2026, 10, 1)), dict(quantity_tracking=True), dict(cash=True)]):
         code = f"62.{i+1}"
         values = dict(organization_id=book[0], code=code, title=code, category="asset", valid_from=date(2026, 1, 1),
@@ -148,3 +150,46 @@ async def test_missing_sales_settings_and_future_or_quantitative_accounts_hold(c
         await db.commit()
         response = await client.post(f"/accounting/organizations/{book[0]}/policies", json=policy({**ACCOUNTS, "buyer_account": code}))
         assert response.status_code == 422, response.text
+
+
+@pytest.mark.parametrize("case", ["ambiguous", "other_warehouse", "other_sku", "other_lot", "future"])
+async def test_inventory_account_resolution_uses_exact_source_and_cutoff(client, db, book, posting, case):
+    receipt, original, body, _ = await setup(client, db, book, posting)
+    db.add(models.Account(organization_id=book[0], code="41.3", title="Second stock account",
+        category="asset", valid_from=date(2026, 1, 1), required_dimensions=[], currency_tracking=False,
+        quantity_tracking=True, cash=False, normative_ref="Synthetic fixture only"))
+    await db.commit()
+    extra = posting("second-account", "41.3", "60", amount="1.00",
+                    posting_date="2026-09-03" if case == "future" else "2026-09-02")
+    extra.policy_id = original["policy_id"]
+    extra.lines[0].quantity = Decimal("1")
+    extra.lines[0].dimensions = {"warehouse": "other" if case == "other_warehouse" else "W",
+        "sku": "other" if case == "other_sku" else "SKU", "lot": "other" if case == "other_lot" else "lot1"}
+    await service.post(db, book[0], extra, "tester")
+    await db.commit()
+    count = await db.scalar(select(func.count()).select_from(models.Entry))
+    response = await client.post(f"/accounting/organizations/{book[0]}/shipments/{receipt['source_key']}/auto-preview", json=body)
+    assert response.status_code == (409 if case == "ambiguous" else 200), response.text
+    if case == "ambiguous":
+        assert "однозначно" in response.json()["detail"]
+    else:
+        assert {row["account"] for row in response.json()["resolved_command"]["allocations"]} == {"41.2"}
+    assert await db.scalar(select(func.count()).select_from(models.Entry)) == count
+    assert await db.scalar(select(models.SourceControl.entry_id)) is None
+
+
+@pytest.mark.parametrize("case", ["no_lot", "foreign_line", "wrong_legacy_account", "valid_legacy_account"])
+async def test_inventory_account_missing_and_override_controls(client, db, book, posting, case):
+    receipt, original, body, _ = await setup(client, db, book, posting)
+    if case == "no_lot":
+        body["allocations"][0]["lot"] = "absent"
+    elif case == "foreign_line":
+        body["allocations"][0]["line_source"] = "foreign"
+    else:
+        body["allocations"][0]["account"] = "41.2" if case == "valid_legacy_account" else "41.3"
+    response = await client.post(f"/accounting/organizations/{book[0]}/shipments/{receipt['source_key']}/auto-preview", json=body)
+    assert response.status_code == (200 if case == "valid_legacy_account" else 409), response.text
+    if case == "valid_legacy_account":
+        assert response.json()["resolved_command"]["allocations"][0]["account"] == original["allocations"][0]["account"]
+    assert await db.scalar(select(func.count()).select_from(models.Entry)) == 1
+    assert await db.scalar(select(models.SourceControl.entry_id)) is None

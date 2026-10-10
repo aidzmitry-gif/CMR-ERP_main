@@ -14,7 +14,7 @@ const result = { organization_id: 1, source, status: "preview", posted: false, c
   net_byn: "20.00", vat_byn: "4.00", gross_byn: "24.00", mapping: [], postings: [{ posting: { lines: [{ account: "62", side: "debit", amount: "24.00", quantity: null, dimensions: {} }] } }] };
 function resolved(body: string) {
   const command = JSON.parse(body);
-  return { ...command, allocations: command.allocations.map((row: object) => ({ ...row, expense_account: configured.expense_account })),
+  return { ...command, allocations: command.allocations.map((row: object) => ({ ...row, account: "41.2", expense_account: configured.expense_account })),
     commercial_lines: command.commercial_lines.map((row: object) => ({ ...row, buyer_account: configured.buyer_account, revenue_account: configured.revenue_account, vat_revenue_account: configured.vat_revenue_account, vat_payable_account: configured.vat_payable_account })) };
 }
 function fill(label: string, value: string) { fireEvent.change(screen.getByLabelText(label), { target: { value } }); }
@@ -22,11 +22,11 @@ async function complete() {
   await screen.findByLabelText("Партия 1");
   fireEvent.click(screen.getByLabelText("Использовать счета из учётной политики"));
   await screen.findByText("Счёт себестоимости 1: 90.4");
-  for (const [label, value] of Object.entries({ "Дата первичного документа": "2026-09-01", "Содержание операции": "Отгрузка", "Основание признания выручки": "Договор", "Основание соответствия единиц": "Штуки", "Распределение стоимости": "cumulative_floor_last", "Округление НДС": "commercial_line_half_up", "Счёт запасов 1": "41.2", "Партия 1": "L", "Расход 1 · Заказ": "Z", "Без НДС, BYN · строка 7": "20.00", "Ставка НДС, % · строка 7": "20", "Основание НДС · строка 7": "Проверено", "Покупатель строки 7 · Контрагент": "Buyer", "Покупатель строки 7 · Договор": "C" })) fill(label, value);
+  for (const [label, value] of Object.entries({ "Дата первичного документа": "2026-09-01", "Содержание операции": "Отгрузка", "Основание признания выручки": "Договор", "Основание соответствия единиц": "Штуки", "Распределение стоимости": "cumulative_floor_last", "Округление НДС": "commercial_line_half_up", "Партия 1": "L", "Расход 1 · Заказ": "Z", "Без НДС, BYN · строка 7": "20.00", "Ставка НДС, % · строка 7": "20", "Основание НДС · строка 7": "Проверено", "Покупатель строки 7 · Контрагент": "Buyer", "Покупатель строки 7 · Договор": "C" })) fill(label, value);
 }
 function fetcher(preview?: (body: string) => unknown) {
   return vi.fn().mockImplementation((url: string, options?: { body: string }) => url.endsWith("/source") ? reply(snapshot)
-    : url.includes("/auto-rules?") ? reply({ organization_id: 1, policy_id: 3, accounts: configured })
+    : url.includes("/auto-rules?") ? reply({ organization_id: 1, policy_id: 3, accounts: configured, inventory_accounts: ["41.2"] })
       : reply(preview?.(options!.body) ?? { ...result, resolved_command: resolved(options!.body) }));
 }
 
@@ -44,6 +44,7 @@ it("resolves accounts without per-line account input and freezes automatic retry
   await complete();
   expect(screen.queryByLabelText("Покупатель · строка 7")).toBeNull();
   expect(screen.queryByLabelText("Счёт себестоимости 1")).toBeNull();
+  expect(screen.queryByLabelText("Счёт запасов 1")).toBeNull();
   fireEvent.click(screen.getByText("Рассчитать проводки отгрузки"));
   fireEvent.click(await screen.findByText("Подтвердить проводки отгрузки"));
   await screen.findByText("Повторить подтверждение");
@@ -52,7 +53,8 @@ it("resolves accounts without per-line account input and freezes automatic retry
   const input = JSON.parse(preview[1].body);
   expect(input.allocations[0]).not.toHaveProperty("expense_account");
   expect(input.commercial_lines[0]).not.toHaveProperty("buyer_account");
-  expect(input.allocations[0]).toMatchObject({ account: "41.2", lot: "L", quantity: "1", expense_dimensions: { order: "Z" } });
+  expect(input.allocations[0]).not.toHaveProperty("account");
+  expect(input.allocations[0]).toMatchObject({ lot: "L", quantity: "1", expense_dimensions: { order: "Z" } });
   expect(input.commercial_lines[0]).toMatchObject({ net_amount: "20.00", vat_rate: "20", vat_basis: "Проверено", buyer_dimensions: { contract: "C" } });
   view.rerender(<AccountingShipmentPreview {...props} org="2" date="2026-09-02" />);
   fireEvent.click(screen.getByText("Повторить подтверждение"));
@@ -63,12 +65,14 @@ it("resolves accounts without per-line account input and freezes automatic retry
   expect(JSON.parse(calls[0][1].body)).toMatchObject({ ...resolved(preview[1].body), expected_basis_digest: basis });
 });
 
-it.each(["missing-command", "wrong-date", "wrong-account", "confirmation-held"])("withholds confirmation on %s", async kind => {
+it.each(["missing-command", "wrong-date", "wrong-account", "wrong-inventory-account", "wrong-lot", "confirmation-held"])("withholds confirmation on %s", async kind => {
   const mock = fetcher(body => ({ ...result,
     ...(kind === "confirmation-held" ? { confirmation_available: false } : {}),
     ...(kind === "missing-command" ? {} : { resolved_command: { ...resolved(body),
       ...(kind === "wrong-date" ? { posting_date: "2026-09-02" } : {}),
       ...(kind === "wrong-account" ? { commercial_lines: [{ ...resolved(body).commercial_lines[0], buyer_account: "51" }] } : {}),
+      ...(kind === "wrong-inventory-account" ? { allocations: [{ ...resolved(body).allocations[0], account: "10.1" }] } : {}),
+      ...(kind === "wrong-lot" ? { allocations: [{ ...resolved(body).allocations[0], lot: "foreign" }] } : {}),
     } }),
   }));
   vi.stubGlobal("fetch", mock);

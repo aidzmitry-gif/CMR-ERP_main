@@ -32,7 +32,7 @@ export function AccountingShipmentPreview({ org, source, accounts, date, policyI
   const [confirmationStarted, setConfirmationStarted] = useState(false);
   const [confirmation, setConfirmation] = useState<{ org: string; source: string; sourceKey: string; body: string; scope: string; automatic: boolean } | null>(null);
   const [automatic, setAutomatic] = useState(false);
-  const [ruleBundle, setRuleBundle] = useState<{ scope: string; accounts?: SalesPostingAccounts; error?: string } | null>(null);
+  const [ruleBundle, setRuleBundle] = useState<{ scope: string; accounts?: SalesPostingAccounts; inventoryAccounts?: string[]; error?: string } | null>(null);
   const [loading, setLoading] = useState(() => !!keyOf(org, source)), [busy, setBusy] = useState(false);
   const [allocations, setAllocations] = useState<Allocation[]>([]), [terms, setTerms] = useState<Terms[]>([]);
   const [form, setForm] = useState({ document_date: "", explanation: "", recognition_basis: "", unit_basis: "", cost_allocation: "", vat_rounding: "" });
@@ -40,6 +40,7 @@ export function AccountingShipmentPreview({ org, source, accounts, date, policyI
   const pending = useRef<AbortController | null>(null);
   const ruleScope = `${org}/${date}/${policyId}`;
   const rules = ruleBundle?.scope === ruleScope ? ruleBundle.accounts : undefined;
+  const inventoryAccounts = ruleBundle?.scope === ruleScope ? ruleBundle.inventoryAccounts ?? [] : [];
   const scope = `${org}/${source}/${date}/${policyId}/${automatic}`;
   const displayAllocations = automatic && rules ? allocations.map(row => ({ ...row, expense_account: rules.expense_account })) : allocations;
   const displayTerms = automatic && rules ? terms.map(row => ({ ...row, ...Object.fromEntries(saleAccountFields.filter(([field]) => field !== "expense_account").map(([field]) => [field, rules[field]])) })) : terms;
@@ -75,9 +76,11 @@ export function AccountingShipmentPreview({ org, source, accounts, date, policyI
         const data = await response.json();
         if (!response.ok) throw new Error(shipmentValidationMessage(data.detail));
         if (data.organization_id !== Number(org) || data.policy_id !== policyId || !data.accounts
+          || !Array.isArray(data.inventory_accounts) || new Set(data.inventory_accounts).size !== data.inventory_accounts.length
+          || !data.inventory_accounts.every((code: unknown) => typeof code === "string" && /^(41|43)(?:\.[0-9]+)*$/.test(code))
           || !saleAccountFields.every(([field, , root]) => typeof data.accounts[field] === "string"
             && (data.accounts[field] === root || data.accounts[field].startsWith(root + ".")))) throw new Error("Счета реализации относятся к другой организации или политике.");
-        if (!controller.signal.aborted) setRuleBundle({ scope: ruleScope, accounts: data.accounts });
+        if (!controller.signal.aborted) setRuleBundle({ scope: ruleScope, accounts: data.accounts, inventoryAccounts: data.inventory_accounts });
       } catch (reason) { if (!controller.signal.aborted) setRuleBundle({ scope: ruleScope, error: reason instanceof Error ? reason.message : "Счета реализации не настроены." }); }
     })();
     return () => controller.abort();
@@ -121,7 +124,7 @@ export function AccountingShipmentPreview({ org, source, accounts, date, policyI
     setBusy(true); setResult(null); setError("");
     try {
       const inputs = { ...form, expected_act_digest: act.digest, policy_id: policyId, posting_date: date, recognition: "sale_on_shipment",
-        allocations: automatic ? allocations.map(row => ({ ...row, expense_account: undefined })) : allocations,
+        allocations: automatic ? allocations.map(row => ({ ...row, account: undefined, expense_account: undefined })) : allocations,
         commercial_lines: automatic ? terms.map(row => ({ ...row, buyer_account: undefined, revenue_account: undefined, vat_revenue_account: undefined, vat_payable_account: undefined })) : terms };
       const response = await fetch(`/api/accounting/organizations/${org}/shipments/${key}/${automatic ? "auto-preview" : "preview"}`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify(inputs) });
       const data = await response.json();
@@ -131,7 +134,8 @@ export function AccountingShipmentPreview({ org, source, accounts, date, policyI
       const command = automatic ? data.resolved_command : inputs;
       if (automatic && (!command || command.expected_act_digest !== act.digest || command.policy_id !== policyId || command.posting_date !== date
         || !Array.isArray(command.allocations) || command.allocations.length !== allocations.length
-        || !command.allocations.every((row: Allocation) => row.expense_account === rules?.expense_account)
+        || !command.allocations.every((row: Allocation, index: number) => row.expense_account === rules?.expense_account
+          && inventoryAccounts.includes(row.account) && row.line_source === allocations[index].line_source && row.lot === allocations[index].lot)
         || !Array.isArray(command.commercial_lines) || command.commercial_lines.length !== terms.length
         || !command.commercial_lines.every((row: Terms) => saleAccountFields.filter(([field]) => field !== "expense_account").every(([field]) => row[field as keyof Terms] === rules?.[field])))) throw new Error("Ответ не содержит проверенную команду с настроенными счетами.");
       if (!controller.signal.aborted) {
@@ -161,9 +165,12 @@ export function AccountingShipmentPreview({ org, source, accounts, date, policyI
         </div>
         {act.snapshot.lines.map(line => <article key={line.source} className="space-y-3 rounded border border-line p-3"><h3>Строка счёта {line.line_no} · {line.sku_code} · Склад {line.warehouse} · Отгружено {line.qty}</h3>
           {displayAllocations.map((row,index) => row.line_source === line.source && <fieldset key={index} aria-label={`Распределение ${index + 1}`} className="grid gap-3 border-b border-line pb-3 md:grid-cols-2">
-            <AccountField accounts={accounts} label={`Счёт запасов ${index + 1}`} value={row.account} root='41' onChange={value => updateAllocation(index,{ account: value })} />
+            {automatic ? <p>Счёт запасов {index + 1} определяется по учтённой партии.</p> : <AccountField accounts={accounts} label={`Счёт запасов ${index + 1}`} value={row.account} root='41' onChange={value => updateAllocation(index,{ account: value })} />}
             <label>Партия<Input aria-label={`Партия ${index + 1}`} value={row.lot} onChange={event => updateAllocation(index,{lot:event.target.value})} /></label>
-            <AccountingLotPicker key={`${org}/${date}/${policyId}/${row.account}/${line.warehouse}/${line.sku_code}`} org={org} date={date} policyId={policyId} account={row.account} warehouse={line.warehouse} sku={line.sku_code} onSelect={lot => updateAllocation(index,{lot})} />
+            {(automatic ? inventoryAccounts : [row.account]).map(account => <div key={`${org}/${date}/${policyId}/${account}/${line.warehouse}/${line.sku_code}`}>
+              {automatic && <p className="text-sm">Учтённые партии на счёте {account}</p>}
+              <AccountingLotPicker org={org} date={date} policyId={policyId} account={account} warehouse={line.warehouse} sku={line.sku_code} onSelect={lot => updateAllocation(index,{lot})} />
+            </div>)}
             <label>Количество<Input aria-label={`Количество ${index + 1}`} value={row.quantity} onChange={event => updateAllocation(index,{quantity:event.target.value})} /></label>
             {automatic ? <p>Счёт себестоимости {index + 1}: {rules?.expense_account ?? "не настроен"}</p> : <AccountField accounts={accounts} label={`Счёт себестоимости ${index + 1}`} value={row.expense_account} root='90.4' onChange={value => updateAllocation(index,{expense_account:value,expense_dimensions:{}})} />}
             <Dimensions accounts={accounts} label={`Расход ${index + 1}`} codes={[row.expense_account]} values={row.expense_dimensions} onChange={value => updateAllocation(index,{expense_dimensions:value})} />
