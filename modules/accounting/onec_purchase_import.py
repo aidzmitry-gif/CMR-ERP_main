@@ -22,6 +22,7 @@ MAPPING_SCHEMA = "onec-purchase-map-v1"
 SOURCE_MAPPING_SCHEMA = "onec-purchase-map-v2"
 FX_MAPPING_SCHEMA = "onec-purchase-map-v3"
 PLAN_SCHEMA = "onec-purchase-draft-plan-v1"
+STAGED_PURCHASE_PREFIX = "onec:staged-purchase:"
 
 
 class PurchaseImportError(ValueError):
@@ -358,6 +359,70 @@ def build_receipt_drafts(
     if issues:
         raise UnmappedPurchaseDocuments(issues)
     return drafts
+
+
+def build_staged_receipt_draft(source, profile, *, organization_id, source_organization_guid):
+    """Bind a sealed observation using explicit chief-approved organization/catalog facts.
+
+    The native route resolves and locks the current observation. This function is
+    pure: it neither clears source holds nor accepts financial posting.
+    """
+    from core.services.native_catalog_import import digest
+    from core.services.native_document_stage import (
+        BOUND,
+        REQUIRED_HOLDS,
+        DocumentStageConflict,
+        _context,
+        _guid,
+        _parse,
+        _same_context,
+    )
+    from modules.procurement.receipt_documents import ReceiptCreate
+
+    mapping = validate_mapping_profile(profile)
+    if (mapping["schema_version"] not in (SOURCE_MAPPING_SCHEMA, FX_MAPPING_SCHEMA)
+            or mapping["organization_id"] != organization_id
+            or mapping["entity"] != "Document_ПриобретениеТоваровУслуг"
+            or mapping["entity"] != source.entity
+            or mapping["paths"]["document"]["lines"] != "/Товары"):
+        raise PurchaseImportError("SOURCE_INVENTORY_MAPPING_REQUIRED")
+    try:
+        scopes = json.loads(source.entity_scopes_text)
+        context = _context(scopes, source.organization_sha256, source.period_start, source.period_end)
+        if not _same_context(source, context):
+            raise DocumentStageConflict("SOURCE_CONTEXT_SEAL")
+        _parse(dict(entity=source.entity, source_guid=source.source_guid,
+                    data_version=source.data_version, source_text=source.source_text,
+                    source_sha256=source.source_sha, source_scope=source.source_scope,
+                    status="HELD_SOURCE_ONLY", holds=source.holds), scopes, context)
+        if (source.source_scope != BOUND
+                or digest(_guid(source_organization_guid)) != source.organization_sha256):
+            raise DocumentStageConflict("SOURCE_ORGANIZATION_BINDING")
+    except (DocumentStageConflict, ValueError, TypeError) as exc:
+        raise PurchaseImportError("SOURCE_OBSERVATION_BINDING_INVALID") from exc
+    if set(source.holds) != REQUIRED_HOLDS:
+        raise PurchaseImportError("SOURCE_ADDITIONAL_HOLDS")
+    row = json.loads(source.source_text, parse_float=Decimal)
+    if any(row.get(name) for name in ("Услуги", "ПрочиеАктивы")):
+        raise PurchaseImportError("SOURCE_NON_INVENTORY_LINES")
+    draft = build_receipt_drafts([row], dict(entity=source.entity,
+        date_from=source.period_start.isoformat(), date_to=source.period_end.isoformat()), mapping)[0]
+    if not source.period_start.date() <= date.fromisoformat(draft["document"]["operation_date"]) < source.period_end.date():
+        raise PurchaseImportError("SOURCE_OPERATION_PERIOD")
+    legacy_hash = draft["key"].removeprefix("onec:purchase:")
+    draft["key"] = STAGED_PURCHASE_PREFIX + legacy_hash + ":" + digest(source.namespace)
+    lot_identity = digest(source.namespace + "\0" + source.entity + "\0" + source.source_guid)
+    for index, item in enumerate(draft["document"]["items"], start=1):
+        item["lot"] = f"onec:{lot_identity}:{index}"
+    # The immutable staged row retains the raw version, including long DataVersion values.
+    provenance = dict(revision=source.id, namespace=source.namespace, entity=source.entity,
+                      guid=source.source_guid, version_sha256=digest(source.data_version),
+                      source_sha256=source.source_sha, mapping_sha256=digest(json.dumps(
+                          mapping, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)),
+                      source_organization_guid=source_organization_guid, organization_id=organization_id)
+    draft["document"]["explanation"] = "1C staged " + json.dumps(
+        provenance, ensure_ascii=False, separators=(",", ":"))
+    return ReceiptCreate.model_validate({"key": draft["key"], "document": draft["document"]})
 
 
 def _map_document(
