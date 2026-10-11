@@ -92,6 +92,10 @@ function parseSnapshot(value: unknown, org: string, month: string): Snapshot {
 }
 
 export function AccountingClosingControls({ org, month, disabled = false }: Props) {
+  return <ClosingControls key={`${org}/${month}`} org={org} month={month} disabled={disabled} />;
+}
+
+function ClosingControls({ org, month, disabled = false }: Props) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

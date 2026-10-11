@@ -1,5 +1,7 @@
 "use client";
 
+import { businessDate } from "@/lib/business-date";
+
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
@@ -12,7 +14,7 @@ type Report = { organization_id: number; from: string; to: string; status: strin
 type EntryDetail = { id: number; source: string; operation: string; posting_date: string; explanation: string; lines: { id: number; account_code: string; account_title: string; side: string; amount: string; currency: string }[] };
 const activityLabels: Record<string, string> = { operating: "Текущая деятельность", investing: "Инвестиционная деятельность", financing: "Финансовая деятельность", internal: "Внутреннее перемещение" };
 type Applied = { org: string; start: string; end: string };
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => businessDate();
 const cell = (value: unknown) => { const text = String(value ?? ""); return /[;"\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text; };
 export function cashflowCsv(report: Report, applied: Applied) {
   const summary = report.cashflow_ledger;

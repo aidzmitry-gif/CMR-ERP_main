@@ -29,6 +29,25 @@ const skus: SkuRow[] = [
 ];
 
 describe("SpravSkuCatalog", () => {
+  it("includes descendant groups, accepts reordered search terms, and resets combined filters", () => {
+    render(<SpravSkuCatalog skus={[...skus, { ...skus[0], code: "CHILD", category_id: 4 }]} groups={[...groups, { id: 4, code: "li", name: "Литиевые", parent_id: 1, is_active: true }]} vatRates={vatRates} />);
+    fireEvent.change(screen.getByLabelText("Группа номенклатуры"), { target: { value: "1" } });
+    expect(screen.getByText("CHILD")).toBeInTheDocument();
+    expect(screen.queryByText("SKU-002")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Поиск номенклатуры"), { target: { value: "18650 CHILD" } });
+    expect(screen.getByText("CHILD")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("1 из 4");
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить фильтры" }));
+    expect(screen.getByText("SKU-002")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("4 из 4");
+  });
+
+  it("shows an unavailable source rather than an empty catalog", () => {
+    render(<SpravSkuCatalog skus={[]} groups={groups} vatRates={vatRates} unavailable />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Список товаров неизвестен");
+    expect(screen.queryByText("Нет данных")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Повторить загрузку" })).toHaveAttribute("href", "/erp/spravochniki/sku");
+  });
   it("рендерит счётчик позиций и все строки без фильтра", () => {
     render(<SpravSkuCatalog skus={skus} groups={groups} vatRates={vatRates} />);
     expect(screen.getByText("3 позиций")).toBeInTheDocument();

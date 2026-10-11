@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FinanceView } from "@/components/erp/finance-view";
@@ -75,7 +75,8 @@ function ledgerResponses() {
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
-  fetchMock.mockClear();
+  fetchMock.mockReset();
+  fetchMock.mockImplementation((input: unknown) => Promise.resolve(respond(String(input))));
   // Безопасные значения по умолчанию для всех эндпоинтов (summary-таб стреляет на маунте).
   responders = {
     "finance/summary": SUMMARY,
@@ -100,6 +101,78 @@ afterEach(() => {
 const byn = (whole: string) => new RegExp(`${whole.replace(/\B(?=(\d{3})+(?!\d))/g, "\\s")}\\sBYN`);
 
 describe("FinanceView", () => {
+  it("возврат к прежнему счёту создаёт новый запрос и не восстанавливает прежние суммы; поздний ответ другого счёта игнорируется", async () => {
+    responders["finance/bank-accounts"] = [{ id: 2, code: "bank-2", title: "Банк 2", currency: "BYN", opening_balance: "0.00", is_active: true }];
+    const calendar = { as_of: "2026-07-19", currency: "BYN", mode: "day", opening_balance: "5678.00", weeks: [],
+      buckets: [{ bucket_start: "2026-07-20", inflow: "0.00", outflow: "0.00", net: "0.00", cumulative: "5678.00" }], not_dated: { inflow: "0.00", outflow: "0.00" } };
+    responders["finance/cashflow-forecast"] = calendar;
+    render(<FinanceView initialTab="calendar" />);
+    await screen.findAllByText(byn("5678"));
+    const resolves: ((value: ReturnType<typeof respond>) => void)[] = [];
+    fetchMock.mockImplementation(input => String(input).includes("cashflow-forecast")
+      ? new Promise(r => { resolves.push(r); }) : Promise.resolve(respond(String(input))));
+    fireEvent.change(screen.getByLabelText("Банк-счёт"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Банк-счёт"), { target: { value: "" } });
+    expect(screen.queryAllByText(byn("5678"))).toHaveLength(0);
+    expect(screen.getByText("Загрузка календаря…")).toBeInTheDocument();
+    await act(async () => resolves[0]({ ok: true, status: 200, json: async () => calendar }));
+    expect(screen.queryAllByText(byn("5678"))).toHaveLength(0);
+    await act(async () => resolves[1]({ ok: false, status: 500, json: async () => null }));
+    expect(await screen.findByText(/Нет связи с прогнозом/)).toBeInTheDocument();
+    expect(screen.queryAllByText(byn("5678"))).toHaveLength(0);
+  });
+  it("ошибка платежей не маскируется пустым списком при успешной сводке", async () => {
+    responders["finance/payments"] = "error";
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+    expect(await screen.findByText(/движение платежей недоступно/)).toBeInTheDocument();
+    expect(screen.queryByText("Платежей пока нет")).not.toBeInTheDocument();
+    expect(screen.getByText("Фактическая маржа (по фактам)")).toBeInTheDocument();
+  });
+
+  it("при смене банковского счёта старые суммы исчезают сразу и не возвращаются при 500", async () => {
+    responders["finance/bank-accounts"] = [1, 2].map(id => ({ id, code: `bank-${id}`, title: `Банк ${id}`, currency: "BYN", opening_balance: "0.00", is_active: true }));
+    responders["finance/cashflow-forecast"] = {
+      as_of: "2026-07-19", currency: "BYN", mode: "day", opening_balance: "1234.00", weeks: [],
+      buckets: [{ bucket_start: "2026-07-20", inflow: "0.00", outflow: "0.00", net: "0.00", cumulative: "1234.00" }],
+      not_dated: { inflow: "0.00", outflow: "0.00" },
+    };
+    render(<FinanceView initialTab="calendar" />);
+    await screen.findByRole("option", { name: /bank-1/ });
+    await screen.findAllByText(byn("1234"));
+    let resolve!: (value: ReturnType<typeof respond>) => void;
+    fetchMock.mockImplementation((input) => String(input).includes("account_id=2")
+      ? new Promise((r) => { resolve = r; }) : Promise.resolve(respond(String(input))));
+    fireEvent.change(screen.getByLabelText("Банк-счёт"), { target: { value: "2" } });
+    expect(screen.queryAllByText(byn("1234"))).toHaveLength(0);
+    expect(screen.getByText("Загрузка календаря…")).toBeInTheDocument();
+    await act(async () => resolve({ ok: false, status: 500, json: async () => null }));
+    expect(await screen.findByText(/Нет связи с прогнозом/)).toBeInTheDocument();
+    expect(screen.queryAllByText(byn("1234"))).toHaveLength(0);
+  });
+
+  it.each(["100.001", "1e3", "9007199254740991", "70368744177664.01"])("банковский остаток %s не отправляется с ошибочной точностью", async (opening) => {
+    render(<FinanceView initialTab="calendar" />);
+    fireEvent.click(await screen.findByRole("button", { name: "+ Завести счёт" }));
+    fireEvent.change(screen.getByPlaceholderText("main"), { target: { value: "bank" } });
+    fireEvent.change(screen.getByPlaceholderText("Расчётный счёт BYN"), { target: { value: "Банк" } });
+    fireEvent.change(screen.getByLabelText("Сальдо на старте"), { target: { value: opening } });
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    expect(screen.getByText(/Сальдо должно быть числом/)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toHaveLength(0);
+  });
+
+  it.each(["0", "100.01", "-100.01", "999999999999.99"])("допустимый банковский остаток %s сохраняется", async (opening) => {
+    render(<FinanceView initialTab="calendar" />);
+    fireEvent.click(await screen.findByRole("button", { name: "+ Завести счёт" }));
+    fireEvent.change(screen.getByPlaceholderText("main"), { target: { value: "bank" } });
+    fireEvent.change(screen.getByPlaceholderText("Расчётный счёт BYN"), { target: { value: "Банк" } });
+    fireEvent.change(screen.getByLabelText("Сальдо на старте"), { target: { value: opening } });
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toBe(true));
+    const posted = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "POST");
+    expect(JSON.parse(String((posted![1] as RequestInit).body)).opening_balance).toBe(opening === "0" ? "0.00" : opening);
+  });
   it("opens the ledger P&L requested by the accountant workspace link", async () => {
     ledgerResponses();
     render(<FinanceView initialTab="pnl" />);

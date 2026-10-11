@@ -1,5 +1,7 @@
 "use client";
 
+import { businessDate } from "@/lib/business-date";
+
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -28,7 +30,7 @@ type EntryDetail = {
 const categoryLabels: Record<Category, string> = {
   asset: "Актив", liability: "Обязательство", equity: "Капитал", income: "Доход", expense: "Расход",
 };
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => businessDate();
 const isAmount = (value: unknown): value is string => typeof value === "string" && /^-?\d+\.\d{2}$/.test(value);
 const isCount = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 const isDimensions = (value: unknown): value is Record<string, string> => value !== null && typeof value === "object"

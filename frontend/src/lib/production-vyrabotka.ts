@@ -78,35 +78,38 @@ function roleHeaders(roles?: string): Record<string, string> | undefined {
   return roles ? { "X-User-Roles": roles } : undefined;
 }
 
-export async function fetchPayrollServer(roles?: string): Promise<Payroll> {
+export async function fetchPayrollServer(roles?: string, strict = false): Promise<Payroll> {
   try {
     const res = await fetch(`${BASE}/production/payroll`, {
       cache: "no-store",
       headers: roleHeaders(roles),
     });
-    if (!res.ok) return EMPTY_PAYROLL;
+    if (!res.ok) throw new Error("Выработка недоступна.");
     return (await res.json()) as Payroll;
-  } catch {
+  } catch (error) {
+    if (strict) throw error;
     return EMPTY_PAYROLL;
   }
 }
 
-export async function fetchPayroll(): Promise<Payroll> {
+export async function fetchPayroll(strict = false): Promise<Payroll> {
   try {
     const res = await fetch("/api/production/payroll", { cache: "no-store" });
-    if (!res.ok) return EMPTY_PAYROLL;
+    if (!res.ok) throw new Error("Выработка недоступна.");
     return (await res.json()) as Payroll;
-  } catch {
+  } catch (error) {
+    if (strict) throw error;
     return EMPTY_PAYROLL;
   }
 }
 
-export async function fetchWorkers(): Promise<Worker[]> {
+export async function fetchWorkers(strict = false): Promise<Worker[]> {
   try {
     const res = await fetch("/api/production/workers", { cache: "no-store" });
-    if (!res.ok) return [];
+    if (!res.ok) throw new Error("Список сборщиков недоступен.");
     return (await res.json()) as Worker[];
-  } catch {
+  } catch (error) {
+    if (strict) throw error;
     return [];
   }
 }

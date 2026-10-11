@@ -39,11 +39,11 @@ function ProfitReport({ org, start, end, onEntry }: { org: string; start: string
     <p className="text-sm text-muted">Выручка без НДС минус себестоимость, зафиксированная при проведении каждой отгрузки. Текущие закупочные цены не меняют эти значения. Это прибыль на момент проведения: последующие корректировки затрат и возвраты здесь не учтены. Непроведённые отгрузки появятся после проведения.</p>
     {!org ? <p>Выберите организацию.</p> : !active ? <p role="status">Загрузка отчёта…</p> : active.error ? <p role="alert" className="text-red-700">{active.error}</p> : null}
     <Button variant="secondary" disabled={!org || !active} onClick={() => setReload(value => value + 1)}>Обновить отчёт</Button>
-    {report && (!report.rows.length ? <p>За выбранный период проведённых отгрузок нет.</p> : <>
+    {report && (!report.rows.length ? <p>{offset === 0 ? "За выбранный период проведённых отгрузок нет." : "На этой странице отгрузок нет. Вернитесь на предыдущую страницу."}</p> : <>
       <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr>{["Отгрузка / счёт", "Товары", "Выручка без НДС", "Себестоимость", "Валовая прибыль", "Валовая маржа"].map(label => <th className="p-2 text-left" key={label}>{label}</th>)}</tr></thead><tbody>
         {report.rows.map(row => <tr key={row.receipt_id} className="border-t border-line"><td className="p-2"><Button variant="secondary" onClick={() => onEntry(row.entry_id)}>Отгрузка № {row.receipt_id}</Button><p>{row.operation_date} · счёт № {row.document_id}</p></td><td className="p-2">{row.items.map((item, i) => <div key={i}>{item.sku} × {item.quantity}</div>)}</td>{cells(row)}</tr>)}
       </tbody><tfoot><tr className="border-t border-line font-semibold"><td colSpan={2} className="p-2">Итого на странице</td>{cells(report.page_subtotal)}</tr></tfoot></table></div>
-      <div className="flex items-center gap-3"><Button variant="secondary" disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 100))}>Назад</Button><span>Страница {offset / 100 + 1}</span><Button variant="secondary" disabled={!report.has_more} onClick={() => setOffset(value => value + 100)}>Далее</Button></div>
     </>)}
+    {org && <div className="flex items-center gap-3"><Button variant="secondary" disabled={offset === 0 || !active} onClick={() => setOffset(value => Math.max(0, value - 100))}>Назад</Button><span>Страница {offset / 100 + 1}</span><Button variant="secondary" disabled={!report?.has_more} onClick={() => setOffset(value => value + 100)}>Далее</Button></div>}
   </section>;
 }

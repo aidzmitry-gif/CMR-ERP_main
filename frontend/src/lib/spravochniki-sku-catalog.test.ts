@@ -38,6 +38,15 @@ describe("filterSkusBySearch", () => {
 });
 
 describe("filterSkusByCategory", () => {
+  it("traverses nested categories and terminates on cyclic group data", () => {
+    const groups: NomenclatureGroup[] = [
+      { id: 1, code: "A", name: "A", parent_id: 3, is_active: true },
+      { id: 2, code: "B", name: "B", parent_id: 1, is_active: true },
+      { id: 3, code: "C", name: "C", parent_id: 2, is_active: true },
+    ];
+    const rows = [sku({ category_id: 3 }), sku({ category_id: 99 })];
+    expect(filterSkusByCategory(rows, 1, groups)).toEqual([rows[0]]);
+  });
   it("returns all rows when categoryId is null", () => {
     const rows = [sku({ category_id: 1 }), sku({ category_id: null })];
     expect(filterSkusByCategory(rows, null)).toHaveLength(2);

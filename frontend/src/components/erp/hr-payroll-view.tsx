@@ -1,5 +1,7 @@
 "use client";
 
+import { businessDate } from "@/lib/business-date";
+
 import { Printer } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -349,7 +351,7 @@ function PayrollPolicyPanel({ employees, onPrint, legacyPreviewOpen }: {
   const [drafts, setDrafts] = useState<PolicyDraft[]>([]);
   const [employeeId, setEmployeeId] = useState("");
   const [role, setRole] = useState<PolicyRole>("salary");
-  const [period, setPeriod] = useState(() => new Date().toISOString().slice(0, 7));
+  const [period, setPeriod] = useState(() => businessDate().slice(0, 7));
   const [result, setResult] = useState<PolicyResult | null>(null);
   const [canManual, setCanManual] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -662,11 +664,16 @@ export function HrPayrollView() {
   const [expandedPeriod, setExpandedPeriod] = useState<string | null>(null);
   const [periodEntries, setPeriodEntries] = useState<PayrollEntry[]>([]);
   const [loadingPeriod, setLoadingPeriod] = useState(false);
+  const [periodError, setPeriodError] = useState("");
+  const periodRequest = useRef(0);
+  const [payError, setPayError] = useState("");
+  const [paying, setPaying] = useState(false);
+  const payInFlight = useRef(false);
 
   // Форма начисления
   const [showForm, setShowForm] = useState(false);
   const [empId, setEmpId] = useState("");
-  const [period, setPeriod] = useState(() => new Date().toISOString().slice(0, 7));
+  const [period, setPeriod] = useState(() => businessDate().slice(0, 7));
   const [amount, setAmount] = useState("");
   const [posting, setPosting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -710,23 +717,27 @@ export function HrPayrollView() {
 
   const togglePeriod = useCallback(
     async (p: string) => {
+      const request = ++periodRequest.current;
+      setPeriodError("");
       if (expandedPeriod === p) {
         setExpandedPeriod(null);
         setPeriodEntries([]);
         return;
       }
       setExpandedPeriod(p);
+      setPeriodEntries([]);
       setLoadingPeriod(true);
       try {
         const r = await fetch(`/api/hr/payroll?period=${encodeURIComponent(p)}`, {
           cache: "no-store",
         });
         if (!r.ok) throw new Error(String(r.status));
-        setPeriodEntries((await r.json()) as PayrollEntry[]);
+        const rows = (await r.json()) as PayrollEntry[];
+        if (request === periodRequest.current) setPeriodEntries(rows);
       } catch {
-        setPeriodEntries([]);
+        if (request === periodRequest.current) { setPeriodEntries([]); setPeriodError("Начисления месяца недоступны. Закройте и откройте месяц для повторной загрузки."); }
       } finally {
-        setLoadingPeriod(false);
+        if (request === periodRequest.current) setLoadingPeriod(false);
       }
     },
     [expandedPeriod],
@@ -782,6 +793,9 @@ export function HrPayrollView() {
 
   const onPay = useCallback(
     async (entry: PayrollEntry) => {
+      if (payInFlight.current) return;
+      const detailToken = periodRequest.current;
+      payInFlight.current = true; setPaying(true); setPayError("");
       try {
         const r = await fetch("/api/hr/payroll/pay", {
           method: "POST",
@@ -796,10 +810,13 @@ export function HrPayrollView() {
             `/api/hr/payroll?period=${encodeURIComponent(entry.period)}`,
             { cache: "no-store" },
           );
-          if (r2.ok) setPeriodEntries((await r2.json()) as PayrollEntry[]);
+          const rows = r2.ok ? (await r2.json()) as PayrollEntry[] : null;
+          if (rows && detailToken === periodRequest.current) setPeriodEntries(rows);
         }
       } catch {
-        // молчаливый fallback — UI обновится при следующей загрузке
+        setPayError("Выплата не подтверждена. Обновите ведомость и проверьте статус перед повтором.");
+      } finally {
+        payInFlight.current = false; setPaying(false);
       }
     },
     [loadEntries, loadSummaries, expandedPeriod],
@@ -867,6 +884,7 @@ export function HrPayrollView() {
     <>
     <main className={`flex-1 overflow-auto p-6 pr-24 print:pr-6${preview ? " print:hidden" : ""}`}>
       {/* Заголовок + кнопка */}
+      {payError && <p role="alert" className="text-sm text-red-700">{payError}</p>}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-ink">Начисления зарплаты</h1>
@@ -1201,6 +1219,8 @@ export function HrPayrollView() {
                           <td colSpan={6} className="px-6 py-3">
                             {loadingPeriod ? (
                               <p className="text-xs text-muted">Загрузка…</p>
+                            ) : periodError ? (
+                              <p role="alert" className="text-xs text-red-700">{periodError}</p>
                             ) : periodEntries.length === 0 ? (
                               <p className="text-xs text-muted">Нет данных.</p>
                             ) : (
@@ -1227,6 +1247,7 @@ export function HrPayrollView() {
                                         {e.status === "pending" && (
                                           <button
                                             type="button"
+                                            disabled={paying}
                                             onClick={(ev) => {
                                               ev.stopPropagation();
                                               void onPay(e);
@@ -1320,6 +1341,7 @@ export function HrPayrollView() {
                             <button
                               type="button"
                               onClick={() => onPay(e)}
+                              disabled={paying}
                               className="rounded-md bg-emerald-600/10 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-600/20 dark:text-emerald-300"
                             >
                               Выплатить

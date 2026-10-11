@@ -31,7 +31,7 @@ import {
   X,
 } from "lucide-react";
 import { FaTelegramPlane, FaWeixin, FaWhatsapp } from "react-icons/fa";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createFunnelCard, fetchFunnelBoard, moveFunnelCard } from "@/lib/funnel-api";
 import { formatMoney, formatNextStep } from "@/lib/format";
 import Gate1PickerModal from "./gate1-picker-modal";
@@ -517,7 +517,7 @@ const AVATAR_TONE: Record<string, string> = {
 // Строки чат-рейки: аватарка с инициалами (общее правило чатов — как в глобальной ChatsPanel),
 // бейдж непрочитанных на углу аватарки; текст появляется при раскрытии по hover.
 function ChatRows({ panel }: { panel: FunnelPanel }) {
-  const hide = "opacity-0 transition-opacity duration-200 group-hover:opacity-100";
+  const hide = "chat-rail-detail transition-opacity duration-200";
   return (
     <div className="flex-1 overflow-y-auto overflow-x-hidden thin-scroll">
       {panel.items.map((it, i) => (
@@ -546,19 +546,24 @@ function ChatRows({ panel }: { panel: FunnelPanel }) {
 }
 
 function RightPanel({ panel }: { panel: FunnelPanel }) {
+  const [chatOpen, setChatOpen] = useState(false);
+  const chatContentId = useId();
   // Чат (`panel.chat`) — сворачивается в узкую рейку-аватарки, раскрывается по hover (общее
   // правило чат-рейки; z-40 поверх глобального ChatsPanel). Оперативные ленты — AI-агенты,
   // «Цех · сегодня», «Мои дедлайны» — НЕ чат: остаются полностью видимыми, ничего не прячем.
   if (panel.chat) {
     return (
       <aside className="relative w-0 shrink-0">
-        <div className="group absolute inset-y-0 right-0 z-40 flex w-[68px] flex-col overflow-hidden border-l border-line bg-surface shadow-sm transition-[width] duration-300 ease-out hover:w-[300px] hover:shadow-xl">
-          <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3.5">
-            <span className="truncate font-semibold text-ink opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+        <div tabIndex={0} role="region" aria-label={panel.title} data-expanded={chatOpen} className="chat-rail absolute inset-y-0 right-0 z-40 flex flex-col overflow-hidden border-l border-line bg-surface shadow-sm transition-[width] duration-300 ease-out">
+          <div className="flex items-center justify-between border-b border-line px-3 py-3">
+            <span className="chat-rail-detail min-w-0 flex-1 truncate font-semibold text-ink transition-opacity duration-200">
               {panel.title}
             </span>
+            <button type="button" aria-label={chatOpen ? "Свернуть чаты раздела" : "Развернуть чаты раздела"} aria-expanded={chatOpen} aria-controls={chatContentId} onClick={() => setChatOpen((open) => !open)} className="chat-rail-toggle h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-sunken">
+              {chatOpen ? <X size={18} /> : <Plus size={18} />}
+            </button>
           </div>
-          <ChatRows panel={panel} />
+          <div id={chatContentId} className="flex min-h-0 flex-1 flex-col"><ChatRows panel={panel} /></div>
         </div>
       </aside>
     );
@@ -633,7 +638,7 @@ function DetailDrawer({
             <h3 className="truncate text-lg font-bold text-ink">{card.title}</h3>
             {card.subtitle && <div className="text-sm text-muted">{card.subtitle}</div>}
           </div>
-          <button onClick={onClose} className="shrink-0 text-faint hover:text-muted">
+          <button onClick={onClose} aria-label="Закрыть карточку" className="shrink-0 text-faint hover:text-muted">
             <X size={20} />
           </button>
         </div>
@@ -821,8 +826,17 @@ export function FunnelBoard({
   boardTabs,
 }: FunnelBoardProps) {
   const [stages, setStages] = useState<FunnelStage[]>([]);
+  const [reload, setReload] = useState(0);
   const [loadedPath, setLoadedPath] = useState<string | null>(null);
-  const loaded = loadedPath === boardPath;
+  const loadKey = `${boardPath}:${reload}`;
+  const loaded = loadedPath === loadKey;
+  const [loadFailure, setLoadError] = useState<string | null>(null);
+  const loadError = loaded ? loadFailure : null;
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
+  const mutation = useRef(false);
+  const currentPath = useRef(boardPath);
+  useEffect(() => { currentPath.current = boardPath; }, [boardPath]);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<Record<string, string | number>>(() => blankForm(fields));
@@ -833,48 +847,75 @@ export function FunnelBoard({
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
-  async function refresh() {
-    setStages(await fetchFunnelBoard(boardPath));
-  }
+  function refresh() { setReload((value) => value + 1); }
 
   useEffect(() => {
+    let alive = true;
     void fetchFunnelBoard(boardPath).then((s) => {
+      if (!alive || currentPath.current !== boardPath) return;
       setStages(s);
-      setLoadedPath(boardPath);
+      setLoadError(null);
+      setLoadedPath(loadKey);
+    }).catch(() => {
+      if (!alive || currentPath.current !== boardPath) return;
+      setStages([]);
+      setLoadError("Не удалось загрузить доску. Проверьте связь и повторите загрузку.");
+      setLoadedPath(loadKey);
     });
-  }, [boardPath]);
+    return () => { alive = false; };
+  }, [boardPath, loadKey]);
 
   function handleDragStart(e: DragStartEvent) {
     const id = Number(e.active.id);
     setActive(stages.flatMap((s) => s.cards).find((c) => c.id === id) ?? null);
   }
 
-  function handleDragEnd(e: DragEndEvent) {
+  async function handleDragEnd(e: DragEndEvent) {
     setActive(null);
     const id = Number(e.active.id);
     const target = e.over ? String(e.over.id) : null;
-    if (!target) return;
-    setStages((prev) => moveCard(prev, id, target));
-    void moveFunnelCard(patchPath, id, target);
     const targetStage = stages.find((s) => s.id === target);
-    if (targetStage?.title.includes("Gate 1")) {
-      setGate1DealId(id);
+    const sourceStage = stages.find((s) => s.cards.some((card) => card.id === id));
+    if (!loaded || loadError || mutation.current || !targetStage || !sourceStage || sourceStage.id === target) return;
+    mutation.current = true;
+    setMoving(true);
+    setActionError(null);
+    try {
+      if (!await moveFunnelCard(patchPath, id, targetStage.id)) throw new Error("move");
+      if (currentPath.current !== boardPath) return;
+      setStages((prev) => moveCard(prev, id, targetStage.id));
+      if (targetStage.title.includes("Gate 1")) setGate1DealId(id);
+    } catch {
+      if (currentPath.current === boardPath) setActionError("Смена стадии не подтверждена. Обновите доску и проверьте результат перед повтором.");
+    } finally {
+      mutation.current = false;
+      setMoving(false);
     }
   }
 
   async function onCreate() {
+    if (mutation.current) return;
+    mutation.current = true;
     setBusy(true);
-    await createFunnelCard(createPath, form);
-    setBusy(false);
-    setOpen(false);
-    setForm(blankForm(fields));
-    await refresh();
+    setActionError(null);
+    try {
+      if (!await createFunnelCard(createPath, form)) throw new Error("create");
+      if (currentPath.current !== boardPath) return;
+      setOpen(false);
+      setForm(blankForm(fields));
+      refresh();
+    } catch {
+      if (currentPath.current === boardPath) setActionError("Сохранение карточки не подтверждено. Введённые данные остались в форме. Обновите доску и проверьте, что карточка не создана, перед повторной отправкой.");
+    } finally {
+      mutation.current = false;
+      setBusy(false);
+    }
   }
 
   const q = query.trim().toLowerCase();
   const filtered = useMemo(
     () =>
-      stages.map((s) => ({
+      (loaded && !loadError ? stages : []).map((s) => ({
         ...s,
         cards: q
           ? s.cards.filter((c) =>
@@ -882,7 +923,7 @@ export function FunnelBoard({
             )
           : s.cards,
       })),
-    [stages, q],
+    [stages, q, loaded, loadError],
   );
 
   const computed = useMemo(() => {
@@ -974,6 +1015,7 @@ export function FunnelBoard({
                 <input
                   type={f.type ?? "text"}
                   value={form[f.key]}
+                  disabled={busy}
                   onChange={(e) =>
                     setForm({
                       ...form,
@@ -986,10 +1028,10 @@ export function FunnelBoard({
             ))}
             <button
               onClick={onCreate}
-              disabled={busy}
+              disabled={busy || moving}
               className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
             >
-              Сохранить
+              {busy ? "Сохранение…" : "Сохранить"}
             </button>
           </div>
         )}
@@ -1023,8 +1065,12 @@ export function FunnelBoard({
 
         {/* Статус-бар над воронкой */}
         <div className="mt-5 flex items-center gap-2 text-xs text-muted">
-          {statusNote ? <span>{statusNote}</span> : <span>Перетащите карточку, чтобы сменить стадию.</span>}
+          {moving ? <span role="status">Сохраняем смену стадии…</span> : statusNote ? <span>{statusNote}</span> : <span>Перетащите карточку, чтобы сменить стадию.</span>}
         </div>
+        {actionError && <p role="alert" className="mt-3 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{actionError} <button type="button" onClick={refresh} disabled={busy || moving} className="ml-2 underline disabled:opacity-60">Обновить доску</button></p>}
+        {loaded && loadError && <div role="alert" className="mt-3 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">
+          {loadError} <button type="button" onClick={refresh} className="ml-2 underline">Повторить загрузку</button>
+        </div>}
 
         {/* Канбан */}
         <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
@@ -1043,9 +1089,9 @@ export function FunnelBoard({
                 ))}
               </Column>
             ))}
-            {filtered.length === 0 && (
+            {filtered.length === 0 && !loadError && (
               <p className="p-6 text-sm text-muted">
-                {loaded ? "Доска пуста или модуль недоступен" : "Загрузка доски…"}
+                {loaded ? "Доска пуста" : "Загрузка доски…"}
               </p>
             )}
           </div>
@@ -1059,7 +1105,7 @@ export function FunnelBoard({
         </DndContext>
 
         {/* Итоги */}
-        <div className="mt-4 rounded-xl bg-surface p-5 shadow-card">
+        {loaded && !loadError && <div className="mt-4 rounded-xl bg-surface p-5 shadow-card">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="font-semibold text-ink">Итоги по воронке</h3>
             <span className="text-xs text-muted">за период</span>
@@ -1084,10 +1130,10 @@ export function FunnelBoard({
               </div>
             ))}
           </div>
-        </div>
+        </div>}
 
         {/* Конверсия по воронке (реальные счётчики стадий) */}
-        {conversion && stages.length > 0 && (
+        {conversion && loaded && !loadError && stages.length > 0 && (
           <div className="mt-4 rounded-xl bg-surface p-5 shadow-card">
             <h3 className="mb-4 font-semibold text-ink">Конверсия по воронке</h3>
             <div className="space-y-2">

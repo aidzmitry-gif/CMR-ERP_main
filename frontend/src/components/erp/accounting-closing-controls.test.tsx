@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { AccountingClosingControls } from "./accounting-closing-controls";
@@ -66,5 +66,25 @@ it("rejects a response for another organization or month", async () => {
   render(<AccountingClosingControls org="7" month="2026-10" />);
   fireEvent.click(screen.getByRole("button", { name: "Проверить регистры" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("не соответствует выбранной организации или месяцу");
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+});
+
+it("removes the previous snapshot when the selected month changes", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => snapshot() }));
+  const view = render(<AccountingClosingControls org="7" month="2026-10" />);
+  fireEvent.click(screen.getByRole("button", { name: "Проверить регистры" }));
+  await screen.findByRole("status");
+  view.rerender(<AccountingClosingControls org="7" month="2026-11" />);
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Документы ожидают проведения/)).not.toBeInTheDocument();
+});
+
+it("ignores an old in-flight closing snapshot after organization changes", async () => {
+  let done!: (value: unknown) => void;
+  vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(resolve => { done = resolve; })));
+  const view = render(<AccountingClosingControls org="7" month="2026-10" />);
+  fireEvent.click(screen.getByRole("button", { name: "Проверить регистры" }));
+  view.rerender(<AccountingClosingControls org="8" month="2026-10" />);
+  await act(async () => done({ ok: true, json: async () => snapshot() }));
   expect(screen.queryByRole("status")).not.toBeInTheDocument();
 });

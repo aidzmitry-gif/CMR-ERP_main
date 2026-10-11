@@ -212,12 +212,7 @@ async function post(path: string, body?: unknown): Promise<boolean> {
 
 // ---- SSR ----
 export const fetchDashboardServer = (r?: string) =>
-  ssr<Dashboard>("/wms/dashboard", r, {
-    receipts_pending_qc: 0, tasks_putaway_open: 0, tasks_pick_open: 0, alerts_count: 0,
-    alerts_deficit_value: 0, inventory_value: 0,
-    inventories_open: 0, recon_max_diff_value: 0, recon_total_diff_value: 0,
-    movements_today_in: 0, movements_today_out: 0, gateway: false,
-  });
+  ssr<Dashboard | null>("/wms/dashboard", r, null);
 export async function fetchReceiptsServer(r?: string, authHeaders?: Record<string, string>): Promise<Receipt[]> {
   const response = await fetch(`${BASE}/wms/receipts`, { cache: "no-store", headers: authHeaders ?? roleHeaders(r) });
   if (!response.ok) throw new Error(`Receipt list unavailable (${response.status})`);

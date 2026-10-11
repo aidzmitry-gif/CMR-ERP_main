@@ -108,26 +108,20 @@ describe("SSR fetch-обёртки (ssr helper)", () => {
     expect(res).toEqual(data);
   });
 
-  it("fetchDashboardServer: без ролей — headers undefined; !ok — дефолт с нулями", async () => {
+  it("fetchDashboardServer: без ролей — headers undefined; !ok — данные неизвестны", async () => {
     const fn = stubFetch({}, false);
     const res = await fetchDashboardServer();
     expect(fn).toHaveBeenCalledWith(
       "http://127.0.0.1:8000/wms/dashboard",
       expect.objectContaining({ headers: undefined }),
     );
-    expect(res).toEqual({
-      receipts_pending_qc: 0, tasks_putaway_open: 0, tasks_pick_open: 0, alerts_count: 0,
-      alerts_deficit_value: 0, inventory_value: 0,
-      inventories_open: 0, recon_max_diff_value: 0, recon_total_diff_value: 0,
-      movements_today_in: 0, movements_today_out: 0, gateway: false,
-    });
+    expect(res).toBeNull();
   });
 
-  it("fetchDashboardServer: сетевая ошибка — дефолт с gateway:false", async () => {
+  it("fetchDashboardServer: сетевая ошибка не подменяет остатки нулями", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
     const res = await fetchDashboardServer();
-    expect(res.gateway).toBe(false);
-    expect(res.inventory_value).toBe(0);
+    expect(res).toBeNull();
   });
 
   it("fetchReceiptsServer / fetchTasksServer / fetchCyclePlansServer / fetchThresholdsServer — пустой fallback при ошибке", async () => {

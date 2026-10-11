@@ -1,5 +1,7 @@
 "use client";
 
+import { businessDate } from "@/lib/business-date";
+
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useUnsavedDocumentGuard } from "@/lib/use-unsaved-document-guard";
@@ -742,7 +744,7 @@ function FixedAssetDimensionPicker({ org, index, dimensions, assets, assetsOrg, 
 }
 
 export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?: string; suggestedEntry?: string }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = businessDate();
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [organizationRefresh, setOrganizationRefresh] = useState(0);
   const [organizationError, setOrganizationError] = useState("");

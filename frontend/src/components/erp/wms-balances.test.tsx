@@ -38,18 +38,54 @@ const asMock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  asMock(wms.fetchBalances).mockResolvedValue({ rows: [], sku_count: 0 });
+  asMock(wms.fetchBalances).mockReset().mockResolvedValue({ rows: [], sku_count: 0 });
 });
 
 describe("WmsBalances", () => {
+  it("сужает один SKU по юрлицу, складу и партии; сброс возвращает все строки", () => {
+    render(<WmsBalances initial={{ rows: [
+      row({ organization_id: 7, warehouse: "Главный", batch_ref: "A" }),
+      row({ organization_id: 8, warehouse: "Главный", batch_ref: "B" }),
+      row({ organization_id: 7, warehouse: "Цех", batch_ref: "C" }),
+    ], sku_count: 1 }} />);
+    fireEvent.change(screen.getByLabelText("Юрлицо остатков"), { target: { value: "7" } });
+    expect(screen.getByText("Строк: 2 из 3")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Склад остатков"), { target: { value: JSON.stringify("Цех") } });
+    const table = within(screen.getByRole("table"));
+    expect(table.getByText("C")).toBeInTheDocument();
+    expect(table.queryByText("A")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Поиск остатков по коду, названию, ячейке или партии"), { target: { value: "B" } });
+    expect(screen.getByText("Нет строк по выбранным условиям")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить фильтры" }));
+    expect(screen.getByText("Строк: 3 из 3")).toBeInTheDocument();
+  });
+
+  it("можно отдельно найти строки без указанного склада", () => {
+    render(<WmsBalances initial={{ rows: [row({ warehouse: "" }), row({ warehouse: "Цех" })], sku_count: 1 }} />);
+    fireEvent.change(screen.getByLabelText("Склад остатков"), { target: { value: JSON.stringify("") } });
+    expect(screen.getByText("Строк: 1 из 2")).toBeInTheDocument();
+  });
+  it("находит конкретную партию и ячейку среди одинаковых SKU", () => {
+    render(<WmsBalances initial={{ rows: [
+      row({ location_code: "A-01", batch_ref: "П-1" }),
+      row({ location_code: "C-02", batch_ref: "П-2" }),
+    ], sku_count: 1 }} />);
+    const search = screen.getByLabelText("Поиск остатков по коду, названию, ячейке или партии");
+    fireEvent.change(search, { target: { value: "п-2" } });
+    expect(within(screen.getByRole("table")).getByText("C-02")).toBeInTheDocument();
+    expect(within(screen.getByRole("table")).queryByText("A-01")).not.toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "a-01" } });
+    expect(within(screen.getByRole("table")).getByText("П-1")).toBeInTheDocument();
+    expect(within(screen.getByRole("table")).queryByText("П-2")).not.toBeInTheDocument();
+  });
   it("shows separate owners and preserves rows when reload fails", async () => {
     asMock(wms.fetchBalances).mockRejectedValueOnce(new Error("unavailable"));
     render(<WmsBalances initial={{ rows: [row({ organization_id: 7 }), row({ organization_id: 8, qty: 2 })], sku_count: 1 }} />);
-    expect(screen.getByText("Юрлицо №7")).toBeInTheDocument();
-    expect(screen.getByText("Юрлицо №8")).toBeInTheDocument();
+    expect(within(screen.getByRole("table")).getByText("Юрлицо №7")).toBeInTheDocument();
+    expect(within(screen.getByRole("table")).getByText("Юрлицо №8")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Обновить/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Показаны ранее загруженные данные");
-    expect(screen.getByText("Юрлицо №7")).toBeInTheDocument();
+    expect(within(screen.getByRole("table")).getByText("Юрлицо №7")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Обновить/ })).toBeEnabled();
   });
   it("рендерит строки остатков: код, номенклатура, склад, ячейка, партия и число", () => {
@@ -105,7 +141,7 @@ describe("WmsBalances", () => {
     };
     render(<WmsBalances initial={initial} />);
 
-    fireEvent.change(screen.getByPlaceholderText("Поиск по коду или названию"), {
+    fireEvent.change(screen.getByPlaceholderText("Код, название, ячейка или партия"), {
       target: { value: "6ст" },
     });
 
@@ -120,12 +156,12 @@ describe("WmsBalances", () => {
     };
     render(<WmsBalances initial={initial} />);
 
-    fireEvent.change(screen.getByPlaceholderText("Поиск по коду или названию"), {
+    fireEvent.change(screen.getByPlaceholderText("Код, название, ячейка или партия"), {
       target: { value: "аккум" },
     });
     expect(screen.getByText("Аккумулятор")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText("Поиск по коду или названию"), {
+    fireEvent.change(screen.getByPlaceholderText("Код, название, ячейка или партия"), {
       target: { value: "нет такого" },
     });
     expect(

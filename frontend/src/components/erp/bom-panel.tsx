@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { Check, ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   addBomItem,
@@ -47,11 +47,18 @@ function Kpi({ label, value }: { label: string; value: string | number }) {
   );
 }
 
-export function BomPanel({ initial }: { initial: Bom[] }) {
-  const [boms, setBoms] = useState<Bom[]>(initial);
+export function BomPanel({ initial }: { initial: Bom[] | null }) {
+  const [boms, setBoms] = useState<Bom[]>(initial ?? []);
+  const [known, setKnown] = useState(initial !== null);
   const [openId, setOpenId] = useState<number | null>(null);
   const [detail, setDetail] = useState<BomDetail | null>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(initial === null ? "Спецификации неизвестны. Повторите загрузку." : "");
+  const [detailError, setDetailError] = useState("");
+  const [search, setSearch] = useState("");
+  const detailRequest = useRef(0);
+  const listRequest = useRef(0);
+  const mutation = useRef(false);
 
   // создание спецификации
   const [product, setProduct] = useState("");
@@ -67,25 +74,43 @@ export function BomPanel({ initial }: { initial: Bom[] }) {
   const [componentError, setComponentError] = useState(false);
 
   async function refreshList() {
-    setBoms(await fetchBoms());
+    const request = ++listRequest.current;
+    try {
+      const rows = await fetchBoms(true);
+      if (request === listRequest.current) { setBoms(rows); setKnown(true); setError(""); }
+    } catch (reason) {
+      if (request === listRequest.current) setError(reason instanceof Error ? reason.message : "Не удалось обновить спецификации.");
+    }
   }
 
   useEffect(() => {
     // первичные данные пришли с SSR; тихо перечитываем на клиенте
-    void fetchBoms().then(setBoms);
-  }, []);
+    let alive = true;
+    const request = ++listRequest.current;
+    void fetchBoms(true).then(rows => { if (alive && request === listRequest.current) { setBoms(rows); setKnown(true); setError(""); } })
+      .catch(() => { if (alive && request === listRequest.current) setError(initial === null ? "Список спецификаций недоступен. Данные неизвестны." : "Список спецификаций не обновлён. Показаны ранее загруженные данные."); });
+    return () => { alive = false; detailRequest.current += 1; listRequest.current += 1; };
+  }, [initial]);
 
   const counts = useMemo(() => bomCounts(boms), [boms]);
   const underCovered = useMemo(() => boms.filter((b) => b.coverage < 100).length, [boms]);
 
   async function loadDetail(id: number) {
-    setDetail(await fetchBom(id));
+    const request = ++detailRequest.current;
+    setDetailError("");
+    const value = await fetchBom(id);
+    if (request !== detailRequest.current) return;
+    if (!value || value.id !== id || !Array.isArray(value.items)) { setDetailError("Не удалось загрузить состав. Повторите открытие спецификации."); return; }
+    setDetail(value);
   }
 
   async function toggle(id: number) {
+    if (mutation.current) return;
     if (openId === id) {
+      detailRequest.current += 1;
       setOpenId(null);
       setDetail(null);
+      setDetailError("");
       return;
     }
     setOpenId(id);
@@ -95,8 +120,22 @@ export function BomPanel({ initial }: { initial: Bom[] }) {
 
   /** перечитать список и (если открыта) деталь — coverage/статус меняются после правок состава */
   async function refreshAll() {
+    const detailGeneration = detailRequest.current;
     await refreshList();
-    if (openId != null) await loadDetail(openId);
+    if (openId != null && detailGeneration === detailRequest.current) await loadDetail(openId);
+  }
+
+  async function change(action: () => Promise<unknown>, confirmed: () => void = () => {}, refreshDetail = true) {
+    if (mutation.current) return;
+    mutation.current = true; setBusy(true); setError("");
+    listRequest.current += 1;
+    try {
+      if (!await action()) throw new Error("Изменение спецификации не подтверждено. Данные сохранены в форме. Обновите список и проверьте результат перед повтором.");
+      confirmed();
+      await refreshList();
+      if (refreshDetail && openId !== null) await loadDetail(openId);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось изменить спецификацию."); }
+    finally { mutation.current = false; setBusy(false); }
   }
 
   async function onCreate() {
@@ -105,31 +144,19 @@ export function BomPanel({ initial }: { initial: Bom[] }) {
       setTimeout(() => setProductError(false), 900);
       return;
     }
-    setBusy(true);
-    await createBom({ product: product.trim(), version: version.trim() || undefined });
-    setProduct("");
-    setVersion("");
-    await refreshList();
-    setBusy(false);
+    await change(() => createBom({ product: product.trim(), version: version.trim() || undefined }), () => {
+      setProduct(""); setVersion("");
+    });
   }
 
   async function onApprove(id: number) {
-    setBusy(true);
-    // 409 для пустого состава — бэк отказал; просто перечитываем фактическое состояние
-    await approveBom(id);
-    await refreshAll();
-    setBusy(false);
+    await change(() => approveBom(id));
   }
 
   async function onDelete(id: number) {
-    setBusy(true);
-    await deleteBom(id);
-    if (openId === id) {
-      setOpenId(null);
-      setDetail(null);
-    }
-    await refreshList();
-    setBusy(false);
+    await change(() => deleteBom(id), () => {
+      if (openId === id) { detailRequest.current += 1; setOpenId(null); setDetail(null); }
+    }, openId !== id);
   }
 
   async function onAddItem() {
@@ -139,40 +166,40 @@ export function BomPanel({ initial }: { initial: Bom[] }) {
       setTimeout(() => setComponentError(false), 900);
       return;
     }
-    setBusy(true);
-    await addBomItem(openId, {
+    const numeric = [normQty, stock, reserved].map(value => Number(value.trim().replace(",", ".")));
+    if (!normQty.trim() || !Number.isFinite(numeric[0]) || numeric[0] < 0 || numeric.some(value => !Number.isFinite(value))) {
+      setError("Норма должна быть задана неотрицательным числом, склад и резерв — числами."); return;
+    }
+    await change(() => addBomItem(openId, {
       component: component.trim(),
-      norm_qty: Number(normQty.replace(",", ".")) || 0,
+      norm_qty: numeric[0],
       unit: unit.trim() || undefined,
-      stock: Number(stock.replace(",", ".")) || 0,
-      reserved: Number(reserved.replace(",", ".")) || 0,
+      stock: numeric[1],
+      reserved: numeric[2],
+    }), () => {
+      setComponent(""); setNormQty(""); setUnit(""); setStock(""); setReserved("");
     });
-    setComponent("");
-    setNormQty("");
-    setUnit("");
-    setStock("");
-    setReserved("");
-    await refreshAll();
-    setBusy(false);
   }
 
   async function onDeleteItem(itemId: number) {
-    setBusy(true);
-    await deleteBomItem(itemId);
-    await refreshAll();
-    setBusy(false);
+    await change(() => deleteBomItem(itemId));
   }
 
   return (
     <div className="flex-1 overflow-auto p-6">
       <div className="grid grid-cols-4 gap-3">
-        <Kpi label="Спецификаций" value={counts.total} />
-        <Kpi label="Утверждено" value={counts.approved} />
-        <Kpi label="Черновиков" value={counts.draft} />
-        <Kpi label="Не обеспечено" value={underCovered} />
+        <Kpi label="Спецификаций" value={known ? counts.total : "—"} />
+        <Kpi label="Утверждено" value={known ? counts.approved : "—"} />
+        <Kpi label="Черновиков" value={known ? counts.draft : "—"} />
+        <Kpi label="Не обеспечено" value={known ? underCovered : "—"} />
       </div>
 
       <div className="mt-5 text-sm font-semibold text-ink">Справочник спецификаций (BOM)</div>
+      {error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
+      <div className="my-2 flex flex-wrap gap-2">
+        <input aria-label="Поиск спецификации" placeholder="Изделие или версия" value={search} onChange={event => setSearch(event.target.value)} className="rounded border border-line p-2" />
+        <button disabled={busy} onClick={() => { setError(""); void refreshAll(); }}>Обновить спецификации</button>
+      </div>
       <div className="mt-2 overflow-hidden rounded-xl border border-line bg-surface">
         <table className="w-full text-sm">
           <thead>
@@ -187,14 +214,15 @@ export function BomPanel({ initial }: { initial: Bom[] }) {
             </tr>
           </thead>
           <tbody>
-            {boms.length === 0 && (
+            {known && boms.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-4 py-6 text-center text-muted">
                   Спецификаций пока нет
                 </td>
               </tr>
             )}
-            {boms.map((b) => {
+            {boms.length > 0 && search.trim() && !boms.some(b => `${b.product} ${b.version}`.toLocaleLowerCase("ru").includes(search.trim().toLocaleLowerCase("ru"))) && <tr><td colSpan={7} className="p-4 text-muted">Спецификация не найдена</td></tr>}
+            {boms.filter(b => `${b.product} ${b.version}`.toLocaleLowerCase("ru").includes(search.trim().toLocaleLowerCase("ru"))).map((b) => {
               const open = openId === b.id;
               return (
                 <Fragment key={b.id}>
@@ -254,7 +282,8 @@ export function BomPanel({ initial }: { initial: Bom[] }) {
                   {open && (
                     <tr className="bg-sunken/60">
                       <td colSpan={7} className="px-4 py-3">
-                        <BomComposition
+                        {detailError && <p role="alert" className="text-red-700">{detailError}</p>}
+                        {!detailError && <BomComposition
                           detail={detail}
                           loadingFor={b.id}
                           busy={busy}
@@ -271,7 +300,7 @@ export function BomPanel({ initial }: { initial: Bom[] }) {
                           setReserved={setReserved}
                           onAddItem={onAddItem}
                           onDeleteItem={onDeleteItem}
-                        />
+                        />}
                       </td>
                     </tr>
                   )}
@@ -282,7 +311,7 @@ export function BomPanel({ initial }: { initial: Bom[] }) {
         </table>
 
         <div className="flex items-center gap-2 border-t border-line px-4 py-3">
-          <input
+          <input disabled={busy}
             value={product}
             onChange={(e) => setProduct(e.target.value)}
             placeholder="Изделие новой спецификации"
@@ -291,7 +320,7 @@ export function BomPanel({ initial }: { initial: Bom[] }) {
               productError ? "border-amber-500" : "border-line",
             )}
           />
-          <input
+          <input disabled={busy}
             value={version}
             onChange={(e) => setVersion(e.target.value)}
             placeholder="Версия (v1)"
@@ -407,7 +436,7 @@ function BomComposition(props: CompositionProps) {
         </table>
 
         <div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2.5">
-          <input
+          <input disabled={busy}
             value={props.component}
             onChange={(e) => props.setComponent(e.target.value)}
             placeholder="Комплектующее"
@@ -416,27 +445,27 @@ function BomComposition(props: CompositionProps) {
               props.componentError ? "border-amber-500" : "border-line",
             )}
           />
-          <input
+          <input disabled={busy}
             value={props.normQty}
             onChange={(e) => props.setNormQty(e.target.value)}
             inputMode="decimal"
             placeholder="Норма"
             className="w-20 shrink-0 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
           />
-          <input
+          <input disabled={busy}
             value={props.unit}
             onChange={(e) => props.setUnit(e.target.value)}
             placeholder="Ед."
             className="w-16 shrink-0 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
           />
-          <input
+          <input disabled={busy}
             value={props.stock}
             onChange={(e) => props.setStock(e.target.value)}
             inputMode="decimal"
             placeholder="Склад"
             className="w-20 shrink-0 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
           />
-          <input
+          <input disabled={busy}
             value={props.reserved}
             onChange={(e) => props.setReserved(e.target.value)}
             inputMode="decimal"

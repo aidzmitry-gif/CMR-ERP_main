@@ -1,7 +1,7 @@
 "use client";
 
 import { Plus, Trophy } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   contributionShare,
@@ -24,8 +24,8 @@ function Kpi({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function VyrabotkaTable({ initial }: { initial: Payroll }) {
-  const [payroll, setPayroll] = useState<Payroll>(initial);
+export function VyrabotkaTable({ initial }: { initial: Payroll | null }) {
+  const [payroll, setPayroll] = useState<Payroll | null>(initial);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [name, setName] = useState("");
   const [salary, setSalary] = useState("");
@@ -33,51 +33,71 @@ export function VyrabotkaTable({ initial }: { initial: Payroll }) {
   const [nh, setNh] = useState("");
   const [nameError, setNameError] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(initial ? "" : "Выработка неизвестна. Повторите загрузку.");
+  const sending = useRef(false);
+  const readRequest = useRef(0);
+  const [reading, setReading] = useState(true);
 
-  async function refresh() {
-    const [p, w] = await Promise.all([fetchPayroll(), fetchWorkers()]);
-    setPayroll(p);
-    setWorkers(w);
-  }
-
-  useEffect(() => {
-    void Promise.all([fetchPayroll(), fetchWorkers()]).then(([p, w]) => {
-      setPayroll(p);
-      setWorkers(w);
-    });
+  const refresh = useCallback(async () => {
+    const request = ++readRequest.current;
+    setReading(true);
+    try {
+      const [p, w] = await Promise.all([fetchPayroll(true), fetchWorkers(true)]);
+      if (request !== readRequest.current) return;
+      setPayroll(p); setWorkers(w); setError("");
+    } catch {
+      if (request !== readRequest.current) return;
+      setPayroll(null); setError("Не удалось загрузить выработку. Итоги и список сборщиков неизвестны.");
+    } finally {
+      if (request === readRequest.current) setReading(false);
+    }
   }, []);
 
-  const total = totalContribution(payroll.rows);
+  useEffect(() => {
+    let alive = true;
+    void Promise.resolve().then(() => { if (alive) void refresh(); });
+    return () => { alive = false; readRequest.current += 1; };
+  }, [refresh]);
+
+  const total = totalContribution(payroll?.rows ?? []);
 
   async function onAdd() {
+    if (sending.current) return;
     if (!name.trim()) {
       setNameError(true);
       setTimeout(() => setNameError(false), 900);
       return;
     }
-    setBusy(true);
-    await createWorker({
+    sending.current = true; setBusy(true); setError("");
+    // An older read must not erase a later write acknowledgement or failure.
+    readRequest.current += 1; setReading(false);
+    try {
+    const created = await createWorker({
       name: name.trim(),
       salary: Number(salary.replace(",", ".")) || 0,
       days_worked: Number(days) || 0,
       nh_output: Number(nh.replace(",", ".")) || 0,
     });
+    if (!created) throw new Error("Добавление сборщика не подтверждено. Поля сохранены. Обновите табель и проверьте результат перед повтором.");
     setName("");
     setSalary("");
     setDays("");
     setNh("");
     await refresh();
-    setBusy(false);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Не удалось добавить сборщика."); }
+    finally { sending.current = false; setBusy(false); }
   }
 
   return (
     <div className="flex-1 overflow-auto p-6">
       <div className="grid grid-cols-4 gap-3">
-        <Kpi label="Выработка цеха" value={`${formatNh(payroll.total_nh)} н.ч`} />
-        <Kpi label="Оклад (база)" value={formatByn(payroll.total_base)} />
-        <Kpi label="Премия от н.ч" value={formatByn(payroll.total_premium)} />
-        <Kpi label="Плановый ФОТ" value={formatByn(payroll.total_payroll)} />
+        <Kpi label="Выработка цеха" value={payroll ? `${formatNh(payroll.total_nh)} н.ч` : "—"} />
+        <Kpi label="Оклад (база)" value={payroll ? formatByn(payroll.total_base) : "—"} />
+        <Kpi label="Премия от н.ч" value={payroll ? formatByn(payroll.total_premium) : "—"} />
+        <Kpi label="Плановый ФОТ" value={payroll ? formatByn(payroll.total_payroll) : "—"} />
       </div>
+      {error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
+      <button disabled={busy || reading} onClick={() => void refresh()}>Обновить табель</button>
 
       <div className="mt-5 text-sm font-semibold text-ink">Табель и плановая оценка оплаты</div>
       <p className="mt-1 text-xs text-amber-700" role="note">
@@ -96,14 +116,14 @@ export function VyrabotkaTable({ initial }: { initial: Payroll }) {
             </tr>
           </thead>
           <tbody>
-            {payroll.rows.length === 0 && (
+            {payroll?.rows.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-4 py-6 text-center text-muted">
                   Табель пуст — добавьте сборщика
                 </td>
               </tr>
             )}
-            {payroll.rows.map((r, i) => (
+            {(payroll?.rows ?? []).map((r, i) => (
               <tr key={r.id} className="border-b border-line last:border-0">
                 <td className="px-4 py-2.5">
                   <span className="inline-flex items-center gap-1.5 text-muted">
@@ -132,7 +152,7 @@ export function VyrabotkaTable({ initial }: { initial: Payroll }) {
         </table>
 
         <div className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3">
-          <input
+          <input disabled={busy}
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Имя сборщика"
@@ -140,21 +160,21 @@ export function VyrabotkaTable({ initial }: { initial: Payroll }) {
               nameError ? "border-amber-500" : "border-line"
             }`}
           />
-          <input
+          <input disabled={busy}
             value={salary}
             onChange={(e) => setSalary(e.target.value)}
             inputMode="decimal"
             placeholder="Оклад BYN"
             className="w-28 shrink-0 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
           />
-          <input
+          <input disabled={busy}
             value={days}
             onChange={(e) => setDays(e.target.value)}
             inputMode="numeric"
             placeholder="Дни"
             className="w-16 shrink-0 rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent"
           />
-          <input
+          <input disabled={busy}
             value={nh}
             onChange={(e) => setNh(e.target.value)}
             inputMode="decimal"
@@ -171,7 +191,7 @@ export function VyrabotkaTable({ initial }: { initial: Payroll }) {
         </div>
       </div>
       <p className="mt-2 text-xs text-muted">
-        Оценка = оклад × отработанные дни / 22 + выработка (н.ч) × 6,25 BYN. Это допущения производственного планирования. Записей в табеле: {workers.length}.
+        Оценка = оклад × отработанные дни / 22 + выработка (н.ч) × 6,25 BYN. Это допущения производственного планирования. Записей в табеле: {payroll ? workers.length : "неизвестно"}.
       </p>
     </div>
   );

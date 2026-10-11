@@ -39,9 +39,9 @@ export function ChatsPanel({ compact = false }: { compact?: boolean }) {
   }
 
   const panel = (
-      <div className={compact ? "flex max-h-[80dvh] flex-col bg-surface" : "group absolute inset-y-0 right-0 z-30 flex w-[68px] flex-col overflow-hidden border-l border-line bg-surface shadow-sm transition-[width] duration-300 ease-out hover:w-[300px] focus-within:w-[300px] hover:shadow-xl"}>
+      <div className={compact ? "flex max-h-[80dvh] flex-col bg-surface" : "chat-rail absolute inset-y-0 right-0 z-30 flex flex-col overflow-hidden border-l border-line bg-surface shadow-sm transition-[width] duration-300 ease-out"}>
         <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3.5">
-          <h3 id={titleId} className={`truncate font-semibold text-ink ${compact ? "" : "opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"}`}>
+          <h3 id={titleId} className={`truncate font-semibold text-ink ${compact ? "" : "chat-rail-detail transition-opacity duration-200"}`}>
             Лента
           </h3>
           {compact && <button type="button" aria-label="Закрыть чаты" onClick={() => dialog.current?.close()} className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-lg hover:bg-sunken"><X size={18} /></button>}
@@ -57,7 +57,7 @@ export function ChatsPanel({ compact = false }: { compact?: boolean }) {
 
         <div className="flex-1 overflow-y-auto overflow-x-hidden thin-scroll">
           {chats.length === 0 && (
-            <p className={`px-4 py-6 text-sm text-muted ${compact ? "" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}`}>
+            <p className={`px-4 py-6 text-sm text-muted ${compact ? "" : "chat-rail-detail"}`}>
               Диалогов пока нет
             </p>
           )}
@@ -81,7 +81,7 @@ export function ChatsPanel({ compact = false }: { compact?: boolean }) {
                     </span>
                   )}
                 </span>
-                <div className={`min-w-0 flex-1 ${compact ? "" : "opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"}`}>
+                <div className={`min-w-0 flex-1 ${compact ? "" : "chat-rail-detail transition-opacity duration-200"}`}>
                   <div className="flex items-center justify-between">
                     <span className="truncate text-sm font-medium text-ink">{c.company}</span>
                     <span className="ml-2 shrink-0 text-xs text-muted">{c.number}</span>
@@ -96,9 +96,8 @@ export function ChatsPanel({ compact = false }: { compact?: boolean }) {
           })}
         </div>
 
-        {/* pointer-events-none: opacity-0 не отключает клики — невидимый футер перехватывал
-            клики по тулбару доски под рейкой (находка ui-crawl). Кликабелен только по ховеру. */}
-        <div className={`border-t border-line px-4 py-3 text-right ${compact ? "" : "pointer-events-none opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"}`}>
+        {/* Скрытый футер не перехватывает мышь; доступен при раскрытии и с клавиатуры. */}
+        <div className={`border-t border-line px-4 py-3 text-right ${compact ? "" : "chat-rail-detail chat-rail-actions transition-opacity duration-200"}`}>
           <Link onClick={closeOnNavigation} href="/crm/deals" className="text-sm font-medium text-accent-ink">
             Все сделки →
           </Link>

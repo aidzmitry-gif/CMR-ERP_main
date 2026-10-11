@@ -1,5 +1,7 @@
 "use client";
 
+import { businessDate } from "@/lib/business-date";
+
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AccountingReopening } from "./accounting-reopening";
 import { AccountingClosingHistory } from "./accounting-closing-history";
@@ -158,7 +160,7 @@ async function sourceFileDigest(file: File): Promise<string> {
 }
 
 export function AccountingControls({ org, onChanged, initialSection = "setup", onBusyChange, onShipment, onEntry }: { org: string; onChanged: () => void; initialSection?: string; onBusyChange?: (busy: boolean) => void; onShipment?: (source: string) => void; onEntry?: (id: number) => void }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = businessDate();
   const [section, setSection] = useState(initialSection);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");

@@ -5,7 +5,7 @@ import { currentRole } from "@/lib/role-server";
 
 export default async function ProductionBomPage() {
   const role = await currentRole();
-  const boms = await fetchBomsServer(role);
+  const boms = await fetchBomsServer(role, true).catch(() => null);
 
   return (
     <AppShell crumbs={["ERP", "Производство", "Спецификации · BOM"]}>

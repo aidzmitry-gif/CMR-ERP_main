@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { SourceTag } from "@/components/source-tag";
 import { formatByn } from "@/lib/format";
@@ -285,25 +285,22 @@ export function FinanceView({ initialTab }: { initialTab?: string } = {}) {
 // ──────────────────────────── Хук для GET-таба ────────────────────────────
 
 function useFetch<T>(path: string): { data: T | null; loading: boolean; error: boolean } {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const request = useMemo(() => ({ path }), [path]);
+  const [result, setResult] = useState<{ request: { path: string }; data: T | null; error: boolean } | null>(null);
   useEffect(() => {
     let alive = true;
-    setLoading(true);
-    setError(false);
-    fetch(path, { cache: "no-store" })
+    fetch(request.path, { cache: "no-store" })
       .then((r) => (r.ok ? (r.json() as Promise<T>) : Promise.reject()))
       .then((d) => {
-        if (alive) setData(d);
+        if (alive) setResult({ request, data: d, error: false });
       })
-      .catch(() => alive && setError(true))
-      .finally(() => alive && setLoading(false));
+      .catch(() => alive && setResult({ request, data: null, error: true }));
     return () => {
       alive = false;
     };
-  }, [path]);
-  return { data, loading, error };
+  }, [request]);
+  if (result?.request !== request) return { data: null, loading: true, error: false };
+  return { data: result.data, loading: false, error: result.error };
 }
 
 function State({ loading, error, empty, what }: { loading: boolean; error: boolean; empty?: boolean; what: string }) {
@@ -330,8 +327,8 @@ function SummaryTab() {
   const payments = useFetch<Payment[]>("/api/finance/payments");
   const stateBar = (
     <State
-      loading={summary.loading || payments.loading}
-      error={summary.error || payments.error}
+      loading={summary.loading}
+      error={summary.error}
       what="сводка"
     />
   );
@@ -400,7 +397,8 @@ function SummaryTab() {
 
       {/* Движение платежей (краткое) */}
       <h2 className="mt-6 text-sm font-semibold text-muted">Движение платежей</h2>
-      <div className="mt-2 overflow-hidden rounded-xl bg-surface shadow-card">
+      <State loading={payments.loading} error={payments.error || (!payments.loading && payments.data === null)} what="движение платежей" />
+      {!payments.loading && !payments.error && payments.data !== null && <div className="mt-2 overflow-x-auto rounded-xl bg-surface shadow-card">
         <table className="w-full text-sm">
           <thead className="border-b border-line text-left text-xs text-muted">
             <tr>
@@ -435,7 +433,7 @@ function SummaryTab() {
             ))}
           </tbody>
         </table>
-      </div>
+      </div>}
     </>
   );
 }
@@ -1163,6 +1161,15 @@ function BankAccountForm({ onCreated }: { onCreated?: () => void }) {
       setError("Код и название обязательны");
       return;
     }
+    const amountText = opening.trim() || "0";
+    const [whole, fraction = ""] = amountText.replace(/^-/, "").split(".");
+    const wholeDigits = whole.replace(/^0+(?=\d)/, "");
+    if (!/^-?\d+(\.\d{1,2})?$/.test(amountText) || wholeDigits.length > 12) {
+      setError("Сальдо должно быть числом: до 12 цифр до точки и не более двух после точки.");
+      return;
+    }
+    // API MoneyStr и Numeric(14, 2): передаём точную строку без округления через Number.
+    const openingBalance = `${amountText.startsWith("-") ? "-" : ""}${wholeDigits}.${fraction.padEnd(2, "0")}`;
     setPosting(true);
     setError(null);
     try {
@@ -1173,7 +1180,7 @@ function BankAccountForm({ onCreated }: { onCreated?: () => void }) {
           code: code.trim(),
           title: title.trim(),
           currency,
-          opening_balance: Number(opening) || 0,
+          opening_balance: openingBalance,
         }),
       });
       if (!r.ok) throw new Error(String(r.status));

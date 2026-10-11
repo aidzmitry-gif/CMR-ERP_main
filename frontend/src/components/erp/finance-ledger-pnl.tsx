@@ -1,5 +1,7 @@
 "use client";
 
+import { businessDate } from "@/lib/business-date";
+
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -21,7 +23,7 @@ type Report = {
 type Applied = { org: string; start: string; end: string };
 type EntryDetail = { id: number; source: string; operation: string; explanation: string; posting_date: string; lines: { id: number; account_code: string; account_title: string; side: string; amount: string; currency?: string; dimensions: Record<string, string> }[] };
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => businessDate();
 
 function csvCell(value: unknown) {
   const text = String(value ?? "");

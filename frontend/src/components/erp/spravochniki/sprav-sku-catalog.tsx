@@ -12,11 +12,12 @@ interface Props {
   skus: SkuRow[];
   groups: NomenclatureGroup[];
   vatRates: VatRateRow[];
+  unavailable?: boolean;
 }
 
 /** Каталог SKU (232 реальных позиции из 1С): таблица код/название/ед./категория/НДС/активность
  * + поиск + фильтр по категории. Хаб → сюда → карточка `/erp/spravochniki/sku/[code]`. */
-export function SpravSkuCatalog({ skus, groups, vatRates }: Props) {
+export function SpravSkuCatalog({ skus, groups, vatRates, unavailable = false }: Props) {
   const [search, setSearch] = useState("");
   const [categoryId, setCategoryId] = useState<number | null>(null);
 
@@ -30,11 +31,13 @@ export function SpravSkuCatalog({ skus, groups, vatRates }: Props) {
   );
 
   const filtered = useMemo(() => {
-    const byCategory = filterSkusByCategory(skus, categoryId);
+    const byCategory = filterSkusByCategory(skus, categoryId, groups);
     return filterSkusBySearch(byCategory, search);
-  }, [skus, categoryId, search]);
+  }, [skus, categoryId, search, groups]);
 
   const atCap = skus.length >= CATALOG_ROW_LIMIT;
+
+  if (unavailable) return <section className="p-6"><h2 className="font-bold">Номенклатура (SKU)</h2><p role="alert">Не удалось загрузить номенклатуру. Список товаров неизвестен.</p><Link href="/erp/spravochniki/sku" className="text-accent underline">Повторить загрузку</Link></section>;
 
   return (
     // min-w-0 — без него флекс-цепочка AppShell (overflow-y-auto без overflow-x) растягивает
@@ -72,11 +75,13 @@ export function SpravSkuCatalog({ skus, groups, vatRates }: Props) {
             <input
               className="w-full bg-transparent text-ink text-sm outline-none placeholder:text-faint"
               placeholder="Найти по коду или наименованию…"
+              aria-label="Поиск номенклатуры"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
           <select
+            aria-label="Группа номенклатуры"
             value={categoryId ?? ""}
             onChange={(e) => setCategoryId(e.target.value === "" ? null : Number(e.target.value))}
             className="rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent focus:ring-1 focus:ring-accent/20"
@@ -88,6 +93,8 @@ export function SpravSkuCatalog({ skus, groups, vatRates }: Props) {
               </option>
             ))}
           </select>
+          <button onClick={() => { setSearch(""); setCategoryId(null); }} className="text-sm text-accent">Сбросить фильтры</button>
+          <span role="status" className="text-sm text-muted">Найдено {filtered.length} из {skus.length} загруженных позиций</span>
         </div>
 
         {atCap && (

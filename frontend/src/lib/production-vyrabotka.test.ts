@@ -29,6 +29,15 @@ const EMPTY_PAYROLL: Payroll = {
   statutory_payroll_certified: false,
 };
 
+it("strict payroll and worker reads reject unavailable data instead of manufacturing zero", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({}, false)));
+  await expect(fetchPayroll(true)).rejects.toThrow();
+  await expect(fetchPayrollServer("director", true)).rejects.toThrow();
+  await expect(fetchWorkers(true)).rejects.toThrow();
+  await expect(fetchPayroll()).resolves.toEqual(EMPTY_PAYROLL);
+  await expect(fetchWorkers()).resolves.toEqual([]);
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();

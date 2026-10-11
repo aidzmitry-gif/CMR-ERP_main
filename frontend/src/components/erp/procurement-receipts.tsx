@@ -1,5 +1,7 @@
 "use client";
 
+import { businessDate } from "@/lib/business-date";
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -22,7 +24,7 @@ async function get<T>(path: string): Promise<T> {
 export function ProcurementReceipts({ initialOrganization, initialReceipt }: { initialOrganization?: string; initialReceipt?: string } = {}) {
   const [organizations, setOrganizations] = useState<Organization[]>([]), [org, setOrg] = useState("");
   const [pendingDocument, setPendingDocument] = useState(false);
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(businessDate());
   const [generation, setGeneration] = useState(0), [error, setError] = useState("");
   const [loaded, setLoaded] = useState<{ key: string; accounts: Account[]; policies: Policy[]; entries: Entry[] } | null>(null);
   useEffect(() => {

@@ -13,21 +13,21 @@ describe("funnel-api", () => {
     expect(await fetchFunnelBoard("/x/board")).toEqual([{ id: "a" }]);
   });
 
-  it("fetchFunnelBoard при HTTP-ошибке → []", async () => {
+  it("fetchFunnelBoard при HTTP-ошибке отклоняет запрос", async () => {
     mockFetch(async () => ({ ok: false }));
-    expect(await fetchFunnelBoard("/x/board")).toEqual([]);
+    await expect(fetchFunnelBoard("/x/board")).rejects.toThrow();
   });
 
-  it("fetchFunnelBoard без поля stages → []", async () => {
+  it("fetchFunnelBoard без поля stages не выдаёт ответ за пустую доску", async () => {
     mockFetch(async () => ({ ok: true, json: async () => ({}) }));
-    expect(await fetchFunnelBoard("/x/board")).toEqual([]);
+    await expect(fetchFunnelBoard("/x/board")).rejects.toThrow();
   });
 
-  it("fetchFunnelBoard при исключении → []", async () => {
+  it("fetchFunnelBoard при исключении отклоняет запрос", async () => {
     mockFetch(async () => {
       throw new Error("net");
     });
-    expect(await fetchFunnelBoard("/x/board")).toEqual([]);
+    await expect(fetchFunnelBoard("/x/board")).rejects.toThrow();
   });
 
   it("createFunnelCard шлёт POST через /api и возвращает true", async () => {

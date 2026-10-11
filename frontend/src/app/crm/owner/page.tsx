@@ -52,13 +52,14 @@ export default async function OwnerPage() {
     );
   }
   const { metrics, stages, kpis } = data;
-  const active = stages.filter((s) => s.id !== "won");
+  const active = stages.filter((s) => s.id !== "won" && s.id !== "lost");
   const activeCount = active.reduce((a, s) => a + s.count, 0);
   const activeSum = active.reduce((a, s) => a + s.sum, 0);
   const wonCount = stages.find((s) => s.id === "won")?.count ?? 0;
-  const avgKpi = kpis.length
-    ? Math.round(kpis.reduce((a, k) => a + k.percent, 0) / kpis.length)
-    : 0;
+  const plannedKpis = kpis.filter((k) => k.target > 0 && Number.isFinite(k.percent));
+  const avgKpi = plannedKpis.length
+    ? `${Math.round(plannedKpis.reduce((a, k) => a + k.percent, 0) / plannedKpis.length)}%`
+    : "Нет данных";
 
   return (
     <AppShell crumbs={["CRM", "Панель владельца"]}>
@@ -72,7 +73,7 @@ export default async function OwnerPage() {
           <Metric Icon={Workflow} label="Сделок в работе" value={String(activeCount)} tone="bg-accent-soft text-accent-ink" />
           <Metric Icon={Wallet} label="Сумма в работе" value={formatMoney(activeSum)} tone="bg-emerald-50 text-emerald-600" />
           <Metric Icon={Trophy} label="Выиграно сделок" value={String(wonCount)} tone="bg-amber-50 text-amber-600" />
-          <Metric Icon={Gauge} label="Выполнение плана" value={`${avgKpi}%`} tone="bg-indigo-50 text-indigo-600" />
+          <Metric Icon={Gauge} label="Среднее выполнение KPI с планом" value={avgKpi} tone="bg-indigo-50 text-indigo-600" />
           <Metric Icon={CheckSquare} label="Согласований ждут" value={String(metrics.approvals_pending)} tone="bg-amber-50 text-amber-600" />
           <Metric Icon={Radio} label="Событий в шине" value={String(metrics.events_count)} tone="bg-cyan-50 text-cyan-600" />
           <Metric Icon={FileText} label="Записей аудита" value={String(metrics.audit_count)} tone="bg-sunken text-muted" />

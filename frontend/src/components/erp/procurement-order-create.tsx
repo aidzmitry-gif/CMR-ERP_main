@@ -264,7 +264,8 @@ function OrderWorkspace({ org }: { org: number }) {
           {line.sku_id && !skuOptions?.items.some(item => item.id === line.sku_id) && <option value={line.sku_id}>{line.sku_code} · {line.sku_title} · {line.sku_unit}</option>}
           {skuOptions?.items.map(item => <option value={item.id} key={item.id}>{item.code} · {item.title} · {item.unit}</option>)}
         </Select></label>
-        {(["qty", "goods_value_byn", "weight", "volume"] as const).map(field => <label key={field}>{({ qty: "Количество", goods_value_byn: "Стоимость товара, BYN", weight: "Вес, кг", volume: "Объём, м³" })[field]} {index + 1}<Input value={line[field]} onChange={e => setLines(a => a.map((x, i) => i === index ? { ...x, [field]: e.target.value } : x))} /></label>)}
+        {(["qty", "goods_value_byn", "weight", "volume"] as const).map(field => <label key={field}>{({ qty: "Количество", goods_value_byn: "Сумма строки, BYN", weight: "Вес, кг", volume: "Объём, м³" })[field]} {index + 1}<Input value={line[field]} onChange={e => setLines(a => a.map((x, i) => i === index ? { ...x, [field]: e.target.value } : x))} /></label>)}
+        <p className="text-sm text-muted">Сумма строки — стоимость всего указанного количества, а не цена одной единицы. При количестве 10 и цене 20 BYN укажите сумму 200 BYN.</p>
         <Button disabled={lines.length === 1} variant="secondary" onClick={() => setLines(a => a.filter((_, i) => i !== index))}>Удалить позицию {index + 1}</Button>
       </div>)}
       <Button disabled={lines.length >= 200} variant="secondary" onClick={() => setLines(a => [...a, blankLine()])}>Добавить позицию</Button><Button onClick={() => dispatch("new")}>Создать заказ</Button>

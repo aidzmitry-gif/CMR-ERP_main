@@ -41,9 +41,13 @@ it("requires supplier and SKU selections and creates the order with immutable sn
   expect(await screen.findByRole("alert")).toHaveTextContent("Выберите номенклатуру");
   expect(fetcher.mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
   fireEvent.change(screen.getByLabelText("Номенклатура из справочника 1"), { target: { value: "42" } });
+  fireEvent.change(screen.getByLabelText("Количество 1"), { target: { value: "10.00" } });
+  fireEvent.change(screen.getByLabelText("Сумма строки, BYN 1"), { target: { value: "200.00" } });
+  expect(screen.getByText(/При количестве 10 и цене 20 BYN/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Создать заказ" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Создан заказ PO-2026-000007"));
   const command = JSON.parse(String(fetcher.mock.calls.find(([path, init]) => path.endsWith("/orders") && init?.method)?.[1]?.body));
   expect(command.document).toMatchObject({ supplier: "Поставщик", supplier_id: 17, supplier_unp: "190000001" });
   expect(command.document.lines[0]).toMatchObject({ sku_id: 42, sku_code: "SKU-A", sku_title: "Товар А", sku_unit: "шт" });
+  expect(command.document.lines[0]).toMatchObject({ qty: "10.00", goods_value_byn: "200.00" });
 });

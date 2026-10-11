@@ -2,6 +2,62 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  /* Mouse focus must not pin a rail after navigation. Keyboard focus reveals
+     it; module rails also have an explicit toggle for touch and narrow screens. */
+  .chat-rail {
+    @apply w-[68px];
+  }
+
+  .chat-rail-detail {
+    @apply opacity-0;
+  }
+
+  .chat-rail-actions {
+    @apply pointer-events-none;
+  }
+
+  .chat-rail:is([data-expanded="true"], :focus-visible, :has(:focus-visible)) {
+    @apply w-[300px] shadow-xl;
+  }
+
+  .chat-rail:is([data-expanded="true"], :focus-visible, :has(:focus-visible)) .chat-rail-detail {
+    @apply opacity-100;
+  }
+
+  .chat-rail:is([data-expanded="true"], :focus-visible, :has(:focus-visible)) .chat-rail-actions {
+    @apply pointer-events-auto;
+  }
+
+  .chat-rail-toggle {
+    @apply hidden;
+  }
+
+  .chat-rail[data-expanded="true"] .chat-rail-toggle {
+    @apply flex;
+  }
+
+  @media (max-width: 767px), (hover: none), (pointer: coarse) {
+    .chat-rail-toggle {
+      @apply flex;
+    }
+  }
+
+  @media (min-width: 768px) and (hover: hover) and (pointer: fine) {
+    .chat-rail:hover {
+      @apply w-[300px] shadow-xl;
+    }
+
+    .chat-rail:hover .chat-rail-detail {
+      @apply opacity-100;
+    }
+
+    .chat-rail:hover .chat-rail-actions {
+      @apply pointer-events-auto;
+    }
+  }
+}
+
 /* ─── Дизайн-токены C+D (светлая/тёмная) как CSS-переменные ───
    Семантические цвета интерфейса (canvas/surface/ink/…) меняются при .dark на <html>.
    Любой класс bg-surface / text-ink / border-line автоматически работает в обеих темах.

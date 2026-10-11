@@ -166,6 +166,53 @@ afterEach(() => {
 });
 
 describe("HrPayrollView", () => {
+  it("shows failed month detail explicitly and supports reopening", async () => {
+    const original = fetchMock.getMockImplementation()!;
+    let failure = true;
+    fetchMock.mockImplementation(input => String(input).includes("period=2026-06") && failure
+      ? jsonResponse({}, false, 503) : original(input));
+    render(<HrPayrollView />);
+    fireEvent.click(await screen.findByText("2026-06"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Начисления месяца недоступны");
+    expect(screen.queryByText("Начислений нет")).not.toBeInTheDocument();
+    failure = false;
+    fireEvent.click(screen.getByText("2026-06"));
+    fireEvent.click(screen.getByText("2026-06"));
+    expect(await screen.findByRole("button", { name: "Выплатить" })).toBeInTheDocument();
+  });
+
+  it("does not mix a delayed June detail into May", async () => {
+    const original = fetchMock.getMockImplementation()!;
+    let done!: (value: Response) => void;
+    fetchMock.mockImplementation(input => {
+      if (String(input).includes("period=2026-06")) return new Promise(resolve => { done = resolve; });
+      if (String(input).includes("period=2026-05")) return jsonResponse([{ ...allEntries[1], period: "2026-05" }]);
+      return original(input);
+    });
+    render(<HrPayrollView />);
+    fireEvent.click(await screen.findByText("2026-06"));
+    fireEvent.click(screen.getByText("2026-05"));
+    await screen.findByText("Петрова Анна");
+    await act(async () => done(await jsonResponse(junePeriodEntries)));
+    expect(screen.queryByText("Иванов Иван")).not.toBeInTheDocument();
+    expect(screen.getByText("Петрова Анна")).toBeInTheDocument();
+  });
+
+  it("prevents duplicate payroll payments and makes missing acknowledgement visible", async () => {
+    const original = fetchMock.getMockImplementation()!;
+    let done!: (value: Response) => void;
+    fetchMock.mockImplementation(input => String(input) === "/api/hr/payroll/pay"
+      ? new Promise(resolve => { done = resolve; }) : original(input));
+    render(<HrPayrollView />);
+    fireEvent.click(await screen.findByText("2026-06"));
+    const pay = await screen.findByRole("button", { name: "Выплатить" });
+    fireEvent.click(pay); fireEvent.click(pay);
+    expect(pay).toBeDisabled();
+    await act(async () => done(await jsonResponse({}, false, 503)));
+    expect(fetchCalls(fetchMock).filter(url => url === "/api/hr/payroll/pay")).toHaveLength(1);
+    expect(screen.getByRole("alert")).toHaveTextContent("Выплата не подтверждена");
+    expect(screen.getByRole("button", { name: "Выплатить" })).toBeEnabled();
+  });
   it("строит черновую ведомость из серверного расчёта, с днями, налогами и подготовительными карточками", async () => {
     render(<HrPayrollView />);
     await screen.findByText("2026-06");

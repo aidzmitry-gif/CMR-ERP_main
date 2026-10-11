@@ -44,3 +44,19 @@ it("does not publish a delayed response after the period changes", async () => {
   expect(await screen.findByText("За выбранный период проведённых отгрузок нет.")).toBeInTheDocument();
   expect(screen.queryByText("Отгрузка № 7")).not.toBeInTheDocument();
 });
+
+it.each(["empty", "error"])("keeps Back available after a %s second page", async outcome => {
+  const fetcher = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ ...report, has_more: true }) })
+    .mockResolvedValueOnce({ ok: outcome === "empty", json: async () => outcome === "empty" ? { ...report, offset: 100, rows: [] } : { detail: "503" } })
+    .mockResolvedValue({ ok: true, json: async () => report });
+  vi.stubGlobal("fetch", fetcher);
+  render(<AccountingShipmentProfit {...props} />);
+  await screen.findByText("Отгрузка № 7");
+  fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+  if (outcome === "empty") await screen.findByText(/На этой странице отгрузок нет/);
+  else await screen.findByRole("alert");
+  expect(screen.queryByText("За выбранный период проведённых отгрузок нет.")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+  expect(await screen.findByText("Отгрузка № 7")).toBeInTheDocument();
+  expect(fetcher.mock.calls[2][0]).toContain("offset=0");
+});

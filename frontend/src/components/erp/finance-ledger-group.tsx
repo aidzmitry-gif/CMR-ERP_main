@@ -1,5 +1,7 @@
 "use client";
 
+import { businessDate } from "@/lib/business-date";
+
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -17,7 +19,7 @@ type LedgerReport = {
 type Result = { organization: Organization; report?: LedgerReport; error?: string };
 type Period = { start: string; end: string };
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => businessDate();
 const money = (value: unknown): value is string => typeof value === "string" && /^-?\d+\.\d{2}$/.test(value);
 const positiveId = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 const cents = (value: string) => {
@@ -61,6 +63,7 @@ export function FinanceLedgerGroup() {
   const initial = today();
   const [organizations, setOrganizations] = useState<Organization[] | null>(null);
   const [organizationsError, setOrganizationsError] = useState("");
+  const [organizationReload, setOrganizationReload] = useState(0);
   const [start, setStart] = useState(`${initial.slice(0, 7)}-01`);
   const [end, setEnd] = useState(initial);
   const [period, setPeriod] = useState<Period>({ start: `${initial.slice(0, 7)}-01`, end: initial });
@@ -80,7 +83,7 @@ export function FinanceLedgerGroup() {
       .then(rows => { if (!controller.signal.aborted) setOrganizations(rows); })
       .catch(reason => { if (!controller.signal.aborted) setOrganizationsError(reason instanceof Error ? reason.message : "Не удалось загрузить доступные организации."); });
     return () => controller.abort();
-  }, []);
+  }, [organizationReload]);
 
   useEffect(() => {
     if (!organizations) return;
@@ -105,6 +108,7 @@ export function FinanceLedgerGroup() {
   function apply() {
     if (!start || !end || start > end) { setOrganizationsError("Проверьте даты периода."); return; }
     setOrganizationsError("");
+    if (organizations === null) setOrganizationReload(value => value + 1);
     setPeriod({ start, end });
   }
 

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { FinanceLedgerGroup } from "./finance-ledger-group";
@@ -34,4 +34,16 @@ it("явно помечает сумму отдельных результато
   render(<FinanceLedgerGroup />);
   await waitFor(() => expect(screen.getByText(/Сумма отдельных результатов — не консолидация:/)).toBeInTheDocument());
   expect(screen.getByText(/Внутригрупповые исключения, консолидированная прибыль и налоговая отчётность не рассчитаны/)).toBeInTheDocument();
+});
+
+it("retries organizations after the initial list request failed", async () => {
+  const fetcher = vi.mocked(fetch);
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementationOnce(async () => response({ detail: "Нет связи" }, false, 503) as Response)
+    .mockImplementation(original);
+  render(<FinanceLedgerGroup />);
+  await screen.findByText(/Нет связи/);
+  fireEvent.click(screen.getByRole("button", { name: "Обновить обзор" }));
+  expect(await screen.findByText("Первая компания · 111111111")).toBeInTheDocument();
+  expect(fetcher.mock.calls.filter(call => call[0] === "/api/accounting/organizations")).toHaveLength(2);
 });

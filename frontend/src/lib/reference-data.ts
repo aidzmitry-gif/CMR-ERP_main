@@ -129,7 +129,7 @@ export async function fetchSkusByCategory(categoryId: number, limit = 50): Promi
 /** Все товары номенклатуры (SSR) — каталог SKU (REF-showcase). Сервер отдаёт активные,
  * до `_QUERY_LIMIT_MAX` (see core/runtime/system_routes.py) за один запрос — не пагинация,
  * а защита от DoS большим limit; каталогу проекта (232 позиции) хватает одним запросом. */
-export async function fetchAllSkus(roles?: string, limit = CATALOG_ROW_LIMIT): Promise<SkuRow[]> {
+export async function fetchAllSkus(roles?: string, limit = CATALOG_ROW_LIMIT, strict = false): Promise<SkuRow[]> {
   try {
     const res = await fetch(`${BASE}/system/references/query`, {
       method: "POST",
@@ -138,8 +138,11 @@ export async function fetchAllSkus(roles?: string, limit = CATALOG_ROW_LIMIT): P
       body: JSON.stringify({ ref: "core.skus", limit }),
     });
     if (!res.ok) throw new Error(String(res.status));
-    return rowsFromResult(await res.json()) as unknown as SkuRow[];
-  } catch {
+    const payload = await res.json();
+    if (strict && !Array.isArray(payload?.result)) throw new Error("Некорректный ответ каталога номенклатуры.");
+    return rowsFromResult(payload) as unknown as SkuRow[];
+  } catch (error) {
+    if (strict) throw error;
     return [];
   }
 }

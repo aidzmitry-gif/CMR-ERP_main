@@ -35,7 +35,13 @@ function Card({
   );
 }
 
-export function WmsDashboard({ initial }: { initial: Dashboard }) {
+export function WmsDashboard({ initial }: { initial: Dashboard | null }) {
+  if (!initial) return <div className="flex-1 overflow-auto p-6">
+    <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-700">
+      Не удалось загрузить сводку склада. Остатки, дефицит и задачи неизвестны.
+    </p>
+    <button type="button" onClick={() => window.location.reload()} className="mt-3 rounded-lg border border-line px-3 py-2 text-sm">Повторить загрузку</button>
+  </div>;
   const d = initial;
   return (
     <div className="flex-1 overflow-auto p-6">
@@ -65,15 +71,15 @@ export function WmsDashboard({ initial }: { initial: Dashboard }) {
         <Card href="/erp/wms/inventory" icon={<Boxes size={15} />} label="Инвентаризации"
               value={formatNumber(d.inventories_open)} sub="открытых" />
         <Card href="/erp/wms/alerts" icon={<AlertTriangle size={15} />} label="Дефицит (low-stock)"
-              value={formatNumber(d.alerts_count)} tone={d.alerts_count ? "text-red-600" : undefined} source />
+              value={d.gateway ? formatNumber(d.alerts_count) : "—"} tone={d.gateway && d.alerts_count ? "text-red-600" : undefined} source />
         <Card href="/erp/wms/alerts" icon={<Banknote size={15} />} label="Дефицит в деньгах"
-              value={formatByn(d.alerts_deficit_value)} tone={d.alerts_deficit_value ? "text-red-600" : undefined}
-              sub="к дозаказу" source />
+              value={d.gateway ? formatByn(d.alerts_deficit_value) : "—"} tone={d.gateway && d.alerts_deficit_value ? "text-red-600" : undefined}
+              sub={d.gateway ? "к дозаказу" : "нет данных источника"} source />
         <Card href="/erp/wms/balances" icon={<Coins size={15} />} label="Стоимость остатка"
-              value={formatByn(d.inventory_value)} sub="оценка по себес. 1С" source />
+              value={d.gateway ? formatByn(d.inventory_value) : "—"} sub={d.gateway ? "оценка по себес. 1С" : "нет данных источника"} source />
         <Card href="/erp/wms/reconciliation" icon={<Scale size={15} />} label="Расхождение с 1С"
-              value={formatByn(d.recon_total_diff_value)} tone={d.recon_total_diff_value ? "text-red-600" : undefined}
-              sub={`макс ${formatByn(d.recon_max_diff_value)}`} source />
+              value={d.gateway ? formatByn(d.recon_total_diff_value) : "—"} tone={d.gateway && d.recon_total_diff_value ? "text-red-600" : undefined}
+              sub={d.gateway ? `макс ${formatByn(d.recon_max_diff_value)}` : "нет данных источника"} source />
         <Card href="/erp/wms/movements" icon={<RefreshCw size={15} />} label="Приход сегодня"
               value={formatNumber(d.movements_today_in)} tone="text-green-600" />
         <Card href="/erp/wms/movements" icon={<RefreshCw size={15} />} label="Расход сегодня"

@@ -1,5 +1,7 @@
 "use client";
 
+import { businessDate } from "@/lib/business-date";
+
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
@@ -37,7 +39,7 @@ export function AccountingChart() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [organizations, setOrganizations] = useState<Org[]>([]);
   const [org, setOrg] = useState("");
-  const [on, setOn] = useState(new Date().toISOString().slice(0, 10));
+  const [on, setOn] = useState(businessDate());
   const [mode, setMode] = useState("catalog");
   const [query, setQuery] = useState("");
   const [working, setWorking] = useState<ChartRow[] | null>(null);

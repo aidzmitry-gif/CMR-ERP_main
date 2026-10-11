@@ -24,6 +24,15 @@ import {
 
 afterEach(() => vi.restoreAllMocks());
 
+it("strict BOM reads reject HTTP and malformed replies while preserving legacy defaults", async () => {
+  stubFetch({}, false);
+  await expect(fetchBoms(true)).rejects.toThrow();
+  await expect(fetchBomsServer("director", true)).rejects.toThrow();
+  await expect(fetchBoms()).resolves.toEqual([]);
+  stubFetch({ detail: "unexpected" });
+  await expect(fetchBoms(true)).rejects.toThrow();
+});
+
 function stubFetch(data: unknown, ok = true) {
   const fn = vi.fn().mockResolvedValue({ ok, json: async () => data });
   vi.stubGlobal("fetch", fn);
