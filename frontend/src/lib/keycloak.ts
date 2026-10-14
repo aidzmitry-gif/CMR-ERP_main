@@ -36,6 +36,28 @@ export function pkceChallenge(verifier: string): string {
   return createHash("sha256").update(verifier).digest("base64url");
 }
 
+/** Server-only override: NEXT_PUBLIC_APP_ORIGIN is fixed when Next builds the artifact. */
+export function oidcAppOrigin(requestUrl: string): string {
+  const configured = (process.env.AIOS_OIDC_APP_ORIGIN ?? "").trim();
+  if (configured) {
+    let origin: URL;
+    try {
+      origin = new URL(configured);
+    } catch {
+      throw new Error("Invalid AIOS_OIDC_APP_ORIGIN");
+    }
+    if (
+      !["http:", "https:"].includes(origin.protocol) ||
+      origin.username || origin.password || origin.pathname !== "/" ||
+      origin.search || origin.hash
+    ) {
+      throw new Error("Invalid AIOS_OIDC_APP_ORIGIN");
+    }
+    return origin.origin;
+  }
+  return (process.env.NEXT_PUBLIC_APP_ORIGIN ?? "").replace(/\/$/, "") || new URL(requestUrl).origin;
+}
+
 export function resolveKeycloakConfig(requestUrl: string): {
   issuer: string;
   clientId: string;
@@ -43,8 +65,7 @@ export function resolveKeycloakConfig(requestUrl: string): {
 } | null {
   const base = keycloakPublicConfig();
   if (!base) return null;
-  if (base.redirectUri) return base;
-  const origin = new URL(requestUrl).origin;
+  const origin = oidcAppOrigin(requestUrl);
   return { ...base, redirectUri: `${origin}/api/auth/oidc/callback` };
 }
 

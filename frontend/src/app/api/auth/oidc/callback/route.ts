@@ -11,21 +11,15 @@ import {
   REFRESH_COOKIE,
   displayNameFromAccessToken,
   exchangeCode,
+  oidcAppOrigin,
   resolveKeycloakConfig,
   rolesFromAccessToken,
 } from "@/lib/keycloak";
 
 const YEAR = 60 * 60 * 24 * 365;
 
-/** Public site origin for redirects (Caddy→:3100 otherwise becomes localhost). */
-function appOrigin(req: NextRequest): string {
-  const fromEnv = (process.env.NEXT_PUBLIC_APP_ORIGIN ?? "").replace(/\/$/, "");
-  if (fromEnv) return fromEnv;
-  return new URL(req.url).origin;
-}
-
 function redirectTo(req: NextRequest, path: string): NextResponse {
-  return NextResponse.redirect(new URL(path, appOrigin(req)));
+  return NextResponse.redirect(new URL(path, oidcAppOrigin(req.url)));
 }
 
 export async function GET(req: NextRequest): Promise<Response> {
