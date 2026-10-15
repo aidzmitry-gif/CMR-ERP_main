@@ -1,9 +1,9 @@
 import { webcrypto } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clearPending, createShipment, findShipment, fingerprint, lineKey, loadPending, parsePreview, prepare, quantity, savePending, shipmentHistory, type Pending, type Preview, type Receipt } from "./invoice-physical-shipment-api";
+import { clearPending, createShipment, findShipment, fingerprint, lineKey, loadPending, parsePreview, prepare, quantity, savePending, shipmentHistory, type Pending, type Preview, type Receipt, type StockIssue } from "./invoice-physical-shipment-api";
 
 const scope={organization_id:7,deal_id:3,document_id:11},h="a".repeat(64);
-const preview:Preview={identity:{organization_id:7,document_id:11,document_version:2,content_sha256:h},reservation_digest:h,remaining_digest:h,physical_digest:h,lines:[1,2].map(line_no=>({execution_mode:"wms" as const,line_no,sku_code:"A",warehouse:"W",original_qty:"3.00",remaining_qty:"3.00",physical:"10.00",reserved:"6.00",free:"4.00",blocking_reason:null}))};
+const preview:Preview={identity:{organization_id:7,document_id:11,document_version:2,content_sha256:h},reservation_digest:h,remaining_digest:h,physical_digest:h,lines:[1,2].map(line_no=>({execution_mode:"wms" as const,prohibit_negative_stock:true,stock_issue:null,line_no,sku_code:"A",warehouse:"W",original_qty:"3.00",remaining_qty:"3.00",physical:"10.00",reserved:"6.00",free:"4.00",blocking_reason:null}))};
 const make=()=>prepare(scope,preview,{[lineKey(preview.lines[0])]:"1",[lineKey(preview.lines[1])]:"2.30"},"2026-01-01","Выдача товара");
 const ok=(data:unknown,status=200)=>({ok:status<400,status,json:async()=>data});
 async function receipt(p:Pending){const request_hash=await fingerprint({organization_id:7,document_id:11,data:p.body});const snapshot={organization_id:7,document_id:11,document_version:2,content_sha256:h,source_key:p.body.source_key,request_hash,reservation_digest:h,kind:"internal_physical_shipment",operation_date:p.body.operation_date,evidence:p.body.evidence,actor:"picker",before:{},physical:{},lines:p.body.lines.map((l,i)=>({...l,sku_code:"A",source:`address-${i}`,movement_id:i+1,before_id:i+1,after_id:i+3}))};return{act_id:5,source_key:p.body.source_key,request_hash,snapshot,digest:await fingerprint(snapshot)};}
@@ -17,6 +17,20 @@ describe("exact shipment adapter",()=>{
  it("persists the same request before create and reuses identical body",async()=>{const p=make();savePending(p);const saved=loadPending(scope)!;expect(saved).toEqual(p);const r=await receipt(p),f=vi.fn().mockResolvedValue(ok(r,201));vi.stubGlobal("fetch",f);await createShipment(saved);await createShipment(saved);expect(f.mock.calls[0][1].body).toBe(f.mock.calls[1][1].body);expect(loadPending({...scope,document_id:99})).toBeNull();});
  it.each(["identity","key","quantity","hash","actor"])("rejects mismatched receipt %s",async change=>{const p=make(),r=await receipt(p);if(change==="identity")r.snapshot.organization_id=8;if(change==="key")r.source_key=crypto.randomUUID();if(change==="quantity")r.snapshot.lines[0].qty="9.00";if(change==="hash")r.digest=h;if(change==="actor")r.snapshot.actor="";vi.stubGlobal("fetch",vi.fn().mockResolvedValue(ok(r)));await expect(createShipment(p)).rejects.toThrow();});
  it("keeps unknown and forbidden responses as errors, 404 does not create",async()=>{const f=vi.fn().mockResolvedValue(ok({detail:"missing"},404));vi.stubGlobal("fetch",f);await expect(findShipment(make())).rejects.toMatchObject({status:404});expect(f).toHaveBeenCalledOnce();f.mockResolvedValue(ok({},403));await expect(createShipment(make())).rejects.toMatchObject({status:403});});
+it("preserves structured shortages for physical and document shipment requests",async()=>{
+ const issue:StockIssue={code:"stock_shortage",reason:"reserved_by_other_documents",message:"Недостаточно остатка",sku_code:"A",warehouse:"W",requested:"2.00",physical:"5.00",reserved:"4.00",reserved_other:"3.00",available:null,shortage:null};
+ const blockedPreview={...preview,lines:[{...preview.lines[0],stock_issue:issue,blocking_reason:"stock_shortage" as const}]};
+ expect(parsePreview(blockedPreview,preview.identity).lines[0].stock_issue).toEqual(issue);
+ const allowedNegative=parsePreview({...preview,lines:[{...preview.lines[0],prohibit_negative_stock:false,physical:"0.00",free:"-2.00"}]},preview.identity);
+ expect(allowedNegative.lines[0].free).toBe("-2.00");
+ for(const mode of ["wms","document"] as const){
+  const p=prepare(scope,{...preview,lines:[{...preview.lines[0],execution_mode:mode}]},{[lineKey(preview.lines[0])] : "1"},"2026-01-01","Выдача");
+  const f=vi.fn().mockResolvedValue(ok({detail:issue},409));vi.stubGlobal("fetch",f);
+  await expect(createShipment(p)).rejects.toMatchObject({status:409,code:"stock_shortage",stockIssue:issue,
+   message:expect.stringContaining("Товар A, склад W; запрошено 2.00; доступно не определён; дефицит не определён; причина: остаток зарезервирован другими документами.")});
+  expect(f.mock.calls[0][0]).toContain(mode==="document"?"/api/accounting/":"/api/wms/");
+ }
+});
  it("validates history identity, each immutable receipt, cursor and order",async()=>{const r=await receipt(make()),f=vi.fn().mockResolvedValue(ok({identity:preview.identity,items:[r],next_after_id:5}));vi.stubGlobal("fetch",f);expect((await shipmentHistory(scope,preview.identity)).items).toHaveLength(1);f.mockResolvedValue(ok({identity:preview.identity,items:[r,r],next_after_id:null}));await expect(shipmentHistory(scope,preview.identity)).rejects.toThrow();f.mockResolvedValue(ok({identity:{...preview.identity,organization_id:8},items:[],next_after_id:null}));await expect(shipmentHistory(scope,preview.identity)).rejects.toThrow();const bad=structuredClone(r) as Receipt;bad.snapshot.document_id=12;bad.digest=await fingerprint(bad.snapshot);f.mockResolvedValue(ok({identity:preview.identity,items:[bad],next_after_id:null}));await expect(shipmentHistory(scope,preview.identity)).rejects.toThrow();});
 });
 

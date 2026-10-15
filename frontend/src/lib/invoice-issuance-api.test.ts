@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { allocationError, exact, invoiceItems, issueInvoice, loadPending, prepareCommand, savePending, validatePreview } from "./invoice-issuance-api";
+import type { StockIssue } from "./invoice-physical-shipment-api";
 
 import { input, preview, result, response, command } from "@/test/invoice-issuance-fixtures";
 
@@ -35,6 +36,26 @@ describe("ERP invoice exact contract", () => {
     if (field === "currency") p.currency = "USD";
     if (field === "availability") p.availability.organization_id = 8;
     expect(() => validatePreview(p, "1", input)).toThrow();
+  });
+  it("allows explicit negative-stock policy only without reserves and shows structured issuance shortages", async () => {
+    const p = preview();
+    p.availability.rows[0] = { ...p.availability.rows[0], physical: "1.00", reserved: "0.00", free: "-1.00", prohibit_negative_stock: false };
+    expect(validatePreview(p, "1", input).availability?.rows[0].prohibit_negative_stock).toBe(false);
+    expect(allocationError(p, [{ line_no: 1, warehouse: "W", qty: "2" }])).toBeNull();
+
+    const withOtherReserve = preview();
+    withOtherReserve.availability.rows[0] = { ...withOtherReserve.availability.rows[0], physical: "1.00", reserved: "0.01", free: "-1.01", prohibit_negative_stock: false };
+    expect(allocationError(withOtherReserve, [{ line_no: 1, warehouse: "W", qty: "2" }])).toMatch(/зарезервирован/);
+    const legacy = preview();
+    legacy.availability.rows[0].free = "-1.00";
+    expect(allocationError(legacy, [{ line_no: 1, warehouse: "W", qty: "2" }])).not.toBeNull();
+
+    const issue: StockIssue = { code: "stock_shortage", reason: "insufficient_stock", message: "Остатка недостаточно",
+      sku_code: "SKU", warehouse: "W", requested: "2.00", physical: "1.00", reserved: "0.00", reserved_other: "0.00",
+      available: "1.00", shortage: "1.00" };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ detail: issue }, 409)));
+    await expect(issueInvoice(command())).rejects.toMatchObject({ status: 409, uncertain: false,
+      message: expect.stringContaining("Товар SKU, склад W; запрошено 2.00; доступно 1.00; дефицит 1.00; причина: недостаточно физического остатка.") });
   });
   it("keeps HTTP 403 visible instead of empty goods", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({}, 403)));

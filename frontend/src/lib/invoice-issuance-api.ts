@@ -1,11 +1,12 @@
 import type { DealDoc } from "./api";
+import { formatStockIssue, isStockIssue } from "./invoice-physical-shipment-api";
 
 export type Price = { item_id: number; unit_price_net: string; vat_rate: string };
 export type InvoiceInput = { reserve_mode?: "stock" | "on_order"; organization_id: number; currency: string; document_date: string; valid_until: string; pricing: Price[]; pricing_evidence: string };
 export type Allocation = { line_no: number; warehouse: string; qty: string };
 export type InvoiceCommand = InvoiceInput & { request_key: string; expected_document_version: number; expected_basis_digest: string; allocations: Allocation[]; evidence?: string; journal_complete?: true; unreserved_confirmed?: true };
 export type InvoiceLine = { line_no: number; item_id: number; sku_code: string; name: string; unit: string; qty: string; price: string; vat_rate: string; net: string; tax: string; total: string; currency: string };
-export type Availability = { organization_id: number; source: "wms_physical"; rows: { sku_code: string; warehouse: string; physical: string | null; reserved: string; free: string | null }[]; basis_by_warehouse: Record<string, { version: string | null; cutoff: number | null }> };
+export type Availability = { organization_id: number; source: "wms_physical"; rows: { sku_code: string; warehouse: string; physical: string | null; reserved: string; free: string | null; prohibit_negative_stock?: boolean }[]; basis_by_warehouse: Record<string, { version: string | null; cutoff: number | null }> };
 export type InvoicePreview = InvoiceInput & { deal_id: number; document_id: number | null; document_version: number; basis_digest: string; amount: string; lines: InvoiceLine[]; seller_profile: { profile_id: number; revision: number; digest: string; effective_from: string }; seller: Record<string, string | null>; buyer: { counterparty_id: number; revision: number; name: string; unp: string | null; requisites: Record<string, unknown>; requisites_digest: string }; availability: Availability | null };
 export type InvoiceResult = { document: DealDoc; status: "issued"; organization_id: number; document_version: number; content_sha256: string; reservation_digest: string | null; replayed: boolean };
 export type InvoiceItem = { id: number; sku_code: string; name: string; qty: number };
@@ -25,6 +26,11 @@ export function units(value: string): bigint {
   const [whole, fraction] = exact(value).split(".");
   return BigInt(whole) * 100n + BigInt(fraction);
 }
+function signedUnits(value: string): bigint {
+  const negative = value.startsWith("-");
+  const magnitude = units(negative ? value.slice(1) : value);
+  return negative ? -magnitude : magnitude;
+}
 export class InvoiceError extends Error {
   constructor(message: string, public status?: number, public uncertain = false) { super(message); }
 }
@@ -40,7 +46,9 @@ async function request(url: string, body?: string, issuance = false): Promise<un
   if (!response.ok) {
     const labels: Record<number, string> = { 401: "Требуется вход.", 403: "Нет доступа к операции или выбранному юрлицу.", 404: "Сделка или документ недоступны.", 409: "Данные изменились, остатка недостаточно либо ключ требует сверки.", 422: "Проверьте реквизиты запроса, цены, ставки и распределение.", 503: "Сервис выпуска временно недоступен." };
     const detail = await response.json().catch(() => null);
-    const text = obj(detail) && typeof detail.detail === "string" ? ` ${detail.detail}` : "";
+    const issue = obj(detail) && isStockIssue(detail.detail) ? detail.detail : null;
+    const text = issue ? ` ${formatStockIssue(issue)}`
+      : obj(detail) && typeof detail.detail === "string" ? ` ${detail.detail}` : "";
     throw new InvoiceError(`${response.status}: ${labels[response.status] ?? "Ошибка запроса."}${text}`, response.status, issuance && response.status >= 500);
   }
   try { return await response.json(); }
@@ -78,7 +86,8 @@ export function validatePreview(value: unknown, dealId: string, input: InvoiceIn
   const pairs = new Set<string>();
   for (const row of availability.rows) {
     if (!obj(row) || typeof row.sku_code !== "string" || typeof row.warehouse !== "string" || !row.warehouse.trim() || !decimal(row.reserved)
-      || !(row.physical === null || decimal(row.physical)) || !(row.free === null || decimal(row.free))) invalid();
+      || !(row.physical === null || decimal(row.physical)) || !(row.free === null || decimal(row.free))
+      || (row.prohibit_negative_stock !== undefined && typeof row.prohibit_negative_stock !== "boolean")) invalid();
     const pair = JSON.stringify([row.sku_code, row.warehouse]);
     if (pairs.has(pair)) invalid();
     pairs.add(pair);
@@ -110,7 +119,12 @@ export function allocationError(preview: Pick<InvoicePreview, "reserve_mode" | "
       pairs.add(pair);
       const stockKey = JSON.stringify([line.sku_code, allocation.warehouse]);
       used.set(stockKey, (used.get(stockKey) ?? 0n) + qty);
-      if (row.free.startsWith("-") || (used.get(stockKey) ?? 0n) > units(row.free)) return "Распределение превышает наблюдаемый свободный остаток.";
+      const free = signedUnits(row.free);
+      if (row.prohibit_negative_stock === false) {
+        if (units(row.reserved) !== 0n) return "Нельзя разрешить отрицательный остаток, пока товар зарезервирован другими документами.";
+      } else if (row.free.startsWith("-") || (used.get(stockKey) ?? 0n) > free) {
+        return "Распределение превышает наблюдаемый свободный остаток.";
+      }
     }
     for (const line of preview.lines) {
       if (allocations.filter(a => a.line_no === line.line_no).reduce((s, a) => s + units(a.qty), 0n) !== units(line.qty)) return `Распределите полностью строку ${line.line_no}.`;

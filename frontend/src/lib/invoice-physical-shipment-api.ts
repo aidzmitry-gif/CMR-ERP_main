@@ -3,7 +3,9 @@ import { fetchRegisterDocument } from "./document-register-api";
 export type Scope = { organization_id: number; deal_id: number; document_id: number };
 export type Identity = { organization_id: number; document_id: number; document_version: number; content_sha256: string };
 export type ExecutionMode = "document" | "wms";
-export type Line = { execution_mode?: ExecutionMode; line_no: number; sku_code: string; warehouse: string; original_qty: string; remaining_qty: string; physical: string | null; reserved: string | null; free: string | null; blocking_reason: null | "fully_shipped" | "remainder_released" | "physical_stock_unknown" | "physical_reserves_exceed_stock" };
+export type StockIssueReason = "unknown_stock" | "reserved_by_other_documents" | "insufficient_stock";
+export type StockIssue = { code: "stock_shortage"; reason: StockIssueReason; message: string; sku_code: string; warehouse: string; requested: string; physical: string | null; reserved: string; reserved_other: string; available: string | null; shortage: string | null };
+export type Line = { execution_mode?: ExecutionMode; prohibit_negative_stock?: boolean; stock_issue?: StockIssue | null; line_no: number; sku_code: string; warehouse: string; original_qty: string; remaining_qty: string; physical: string | null; reserved: string | null; free: string | null; blocking_reason: null | "fully_shipped" | "remainder_released" | "physical_stock_unknown" | "physical_reserves_exceed_stock" | "stock_shortage" };
 export type Preview = { identity: Identity; lines: Line[]; reservation_digest: string; remaining_digest: string; physical_digest: string };
 export type Body = { source_key: string; expected_version: number; expected_content_sha256: string; expected_reservation_digest: string; expected_remaining_digest: string; expected_physical_digest: string; operation_date: string; evidence: string; lines: { line_no: number; warehouse: string; qty: string }[] };
 export type Pending = { execution_mode?: ExecutionMode; scope: Scope; body: Body; skus: { line_no: number; warehouse: string; sku_code: string }[] };
@@ -19,6 +21,23 @@ export function units(x: string): bigint {
   const [whole, fraction = ""] = x.split(".");
   return BigInt(whole) * BigInt(100) + BigInt(fraction.padEnd(2, "0"));
 }
+export function selectableLimit(lines: readonly Line[], target: Line): bigint | null {
+  if (target.blocking_reason && target.blocking_reason !== "stock_shortage") return null;
+  const remaining = units(target.remaining_qty);
+  if (remaining <= 0n) return null;
+  const shortageGroup = lines.filter(line => line.sku_code === target.sku_code
+    && line.warehouse === target.warehouse && line.blocking_reason === "stock_shortage");
+  if (!shortageGroup.length) return target.blocking_reason === null ? remaining : null;
+  let available: bigint | null = null;
+  for (const line of shortageGroup) {
+    const value = line.stock_issue?.available;
+    if (value === undefined || value === null || value.startsWith("-")) return null;
+    const amount = units(value);
+    if (amount <= 0n) return null;
+    if (available === null || amount < available) available = amount;
+  }
+  return available;
+}
 export function quantity(x: string): string {
   const n = units(x);
   if (n <= BigInt(0) || n >= BigInt("100000000000000")) throw new Error("Количество должно быть положительным.");
@@ -26,9 +45,29 @@ export function quantity(x: string): string {
 }
 export function today() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
 export class ShipmentError extends Error {
-  constructor(message: string, readonly status?: number, readonly code?: string) { super(message); }
+  constructor(message: string, readonly status?: number, readonly code?: string, readonly stockIssue?: StockIssue) { super(message); }
 }
 function invalid(): never { throw new ShipmentError("Ответ не соответствует выбранному счёту или операции. Результат требует проверки."); }
+const stockIssueReasons: Record<StockIssueReason, string> = {
+  unknown_stock: "физический остаток неизвестен",
+  reserved_by_other_documents: "остаток зарезервирован другими документами",
+  insufficient_stock: "недостаточно физического остатка",
+};
+export function isStockIssue(value: unknown): value is StockIssue {
+  return obj(value) && value.code === "stock_shortage"
+    && ["unknown_stock", "reserved_by_other_documents", "insufficient_stock"].includes(value.reason as string)
+    && typeof value.message === "string" && !!value.message.trim()
+    && typeof value.sku_code === "string" && !!value.sku_code.trim()
+    && typeof value.warehouse === "string" && !!value.warehouse.trim()
+    && amount(value.requested) && amount(value.reserved) && amount(value.reserved_other)
+    && [value.physical, value.available, value.shortage].every(x => x === null || amount(x));
+}
+export function formatStockIssue(issue: StockIssue): string {
+  const reason = stockIssueReasons[issue.reason];
+  const available = issue.available ?? "не определён";
+  const shortage = issue.shortage ?? "не определён";
+  return `${issue.message} Товар ${issue.sku_code}, склад ${issue.warehouse}; запрошено ${issue.requested}; доступно ${available}; дефицит ${shortage}; причина: ${reason}.`;
+}
 function base(s: Scope, mode: ExecutionMode = "wms") {
   if (![s.organization_id, s.document_id, s.deal_id].every(id)) invalid();
   return `/api/${mode === "document" ? "accounting" : "wms"}/organizations/${s.organization_id}/invoices/${s.document_id}/${mode === "document" ? "document-shipments" : "physical-shipments"}`;
@@ -41,7 +80,12 @@ async function json(url: string, body?: unknown) {
   try { data = await r.json(); } catch { throw new ShipmentError("Не удалось прочитать ответ. Результат операции требует проверки."); }
   if (!r.ok) {
     const messages: Record<number, string> = { 401: "Войдите в систему.", 403: "Недостаточно прав для этого юрлица или действия.", 404: "Акт пока не найден. Запрос ещё мог выполняться.", 409: "Основания или состояние операции изменились.", 422: "Проверьте дату, строки и количества." };
-    throw new ShipmentError(messages[r.status] || "Сервис недоступен. Результат требует проверки.", r.status, obj(data) && typeof data.detail === "string" ? data.detail : undefined);
+    const detail = obj(data) ? data.detail : undefined;
+    const issue = isStockIssue(detail) ? detail : undefined;
+    const code = typeof detail === "string" ? detail
+      : obj(detail) && typeof detail.code === "string" ? detail.code : undefined;
+    throw new ShipmentError(issue ? formatStockIssue(issue)
+      : messages[r.status] || "Сервис недоступен. Результат требует проверки.", r.status, code, issue);
   }
   return data;
 }
@@ -52,12 +96,17 @@ export function parsePreview(x: unknown, expected: Identity): Preview {
   for (const r of x.lines) {
     if (!obj(r) || !id(r.line_no) || typeof r.sku_code !== "string" || !r.sku_code || typeof r.warehouse !== "string" || !r.warehouse
       || !["document", "wms"].includes(r.execution_mode as string)
+      || typeof r.prohibit_negative_stock !== "boolean" || !(r.stock_issue === null || isStockIssue(r.stock_issue))
       || !amount(r.original_qty) || !amount(r.remaining_qty) || ![r.physical,r.reserved,r.free].every(v => v === null || amount(v))
-      || ![null,"fully_shipped","remainder_released","physical_stock_unknown","physical_reserves_exceed_stock"].includes(r.blocking_reason as string | null)) invalid();
+      || ![null,"fully_shipped","remainder_released","physical_stock_unknown","physical_reserves_exceed_stock","stock_shortage"].includes(r.blocking_reason as string | null)) invalid();
     if (units(r.original_qty) <= BigInt(0) || units(r.remaining_qty) > units(r.original_qty)) invalid();
     if (["fully_shipped", "remainder_released"].includes(r.blocking_reason as string) && units(r.remaining_qty) !== BigInt(0)) invalid();
+    if ((r.blocking_reason === "stock_shortage") !== (r.stock_issue !== null)
+      || (r.stock_issue !== null && (r.stock_issue.sku_code !== r.sku_code || r.stock_issue.warehouse !== r.warehouse))) invalid();
     const key = lineKey(r as Line); if (seen.has(key)) invalid(); seen.add(key);
-    if (r.blocking_reason === null && (units(r.remaining_qty) === BigInt(0) || r.physical === null || r.free === null || (r.free as string).startsWith("-"))) invalid();
+    if (r.blocking_reason === null && units(r.remaining_qty) === BigInt(0)) invalid();
+    if (r.blocking_reason === null && r.prohibit_negative_stock
+      && (r.physical === null || r.free === null || (r.free as string).startsWith("-"))) invalid();
   }
   return x as Preview;
 }
@@ -80,7 +129,23 @@ export function prepare(s: Scope, p: Preview, values: Record<string,string>, dat
   const modes = new Set(selected.map(l => l.execution_mode ?? "wms"));
   if (modes.size !== 1) throw new ShipmentError("Проведите отдельно строки складов с WMS и без WMS.");
   const execution_mode = [...modes][0];
-  const lines = selected.map(l => { const qty = quantity(values[lineKey(l)]); if (l.blocking_reason || units(qty) > units(l.remaining_qty)) throw new ShipmentError("Количество превышает доступный остаток строки."); return { line_no:l.line_no,warehouse:l.warehouse,qty }; });
+  const groupLimits = new Map<string,bigint|null>();
+  for (const line of p.lines) {
+    if (line.blocking_reason !== "stock_shortage") continue;
+    groupLimits.set(JSON.stringify([line.sku_code,line.warehouse]), selectableLimit(p.lines,line));
+  }
+  const groupUsed = new Map<string,bigint>();
+  const lines = selected.map(l => {
+    const qty = quantity(values[lineKey(l)]), qtyUnits = units(qty), limit = selectableLimit(p.lines,l);
+    if (limit === null || qtyUnits > units(l.remaining_qty)) throw new ShipmentError("Количество превышает доступный остаток строки.");
+    const key = JSON.stringify([l.sku_code,l.warehouse]);
+    if (groupLimits.has(key)) {
+      const total = (groupUsed.get(key) ?? 0n) + qtyUnits, cap = groupLimits.get(key);
+      if (cap === null || cap === undefined || total > cap) throw new ShipmentError("Суммарная отгрузка товара со склада превышает подтверждённый доступный остаток.");
+      groupUsed.set(key,total);
+    }
+    return { line_no:l.line_no,warehouse:l.warehouse,qty };
+  });
   return { execution_mode, scope:s, body: { source_key:crypto.randomUUID(),expected_version:p.identity.document_version,expected_content_sha256:p.identity.content_sha256,expected_reservation_digest:p.reservation_digest,expected_remaining_digest:p.remaining_digest,expected_physical_digest:p.physical_digest,operation_date:date,evidence:evidence.trim(),lines }, skus:selected.map(l => ({line_no:l.line_no,warehouse:l.warehouse,sku_code:l.sku_code})) };
 }
 function canonical(x: unknown): string {
