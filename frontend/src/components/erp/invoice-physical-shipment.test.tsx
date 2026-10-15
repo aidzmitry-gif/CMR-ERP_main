@@ -5,7 +5,7 @@ import { InvoicePhysicalShipment } from "./invoice-physical-shipment";
 import * as api from "@/lib/invoice-physical-shipment-api";
 vi.mock("@/lib/invoice-physical-shipment-api",async()=>({...await vi.importActual("@/lib/invoice-physical-shipment-api"),previewShipment:vi.fn(),shipmentIdentity:vi.fn(),shipmentHistory:vi.fn(),createShipment:vi.fn(),findShipment:vi.fn()}));
 const scope={organization_id:7,deal_id:3,document_id:11},h="a".repeat(64);
-const preview:api.Preview={identity:{organization_id:7,document_id:11,document_version:2,content_sha256:h},reservation_digest:h,remaining_digest:h,physical_digest:h,lines:[1,2].map(line_no=>({line_no,sku_code:"A",warehouse:"W",original_qty:"3.00",remaining_qty:"3.00",physical:"10.00",reserved:"6.00",free:"4.00",blocking_reason:null}))};
+const preview:api.Preview={identity:{organization_id:7,document_id:11,document_version:2,content_sha256:h},reservation_digest:h,remaining_digest:h,physical_digest:h,lines:[1,2].map(line_no=>({execution_mode:"wms" as const,line_no,sku_code:"A",warehouse:"W",original_qty:"3.00",remaining_qty:"3.00",physical:"10.00",reserved:"6.00",free:"4.00",blocking_reason:null}))};
 const receipt={act_id:5,snapshot:{operation_date:"2026-01-01",actor:"picker",evidence:"Выдача",lines:[{line_no:1,sku_code:"A",warehouse:"W",qty:"1.00"}]}} as api.Receipt;
 beforeEach(()=>{vi.resetAllMocks();vi.stubGlobal("crypto",webcrypto);sessionStorage.clear();vi.mocked(api.previewShipment).mockResolvedValue(preview);vi.mocked(api.shipmentIdentity).mockResolvedValue(preview.identity);vi.mocked(api.shipmentHistory).mockResolvedValue({items:[],next_after_id:null});});
 afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals();});

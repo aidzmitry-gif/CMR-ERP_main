@@ -271,9 +271,9 @@ async def organization_role(session, org_id, actor):
     return role
 
 
-async def member(request: Request, session=Depends(transaction, scope="function"), user=Depends(get_current_user)):
+async def current_member(session, org_id, user):
+    """Book membership and effective identity, both checked after the book lock."""
     actor = subject(user)
-    org_id = int(request.path_params["org_id"])
     role = await organization_role(session, org_id, actor)
     # Middleware identity predates a possible wait on the organization lock.
     # Reuse the same local-status/claim policy against current persisted data.
@@ -291,6 +291,11 @@ async def member(request: Request, session=Depends(transaction, scope="function"
     if (subject(fresh) != actor or fresh.local_status not in {None, "active"}
             or fresh.crm_restricted or not is_package_allowed("accounting", fresh.roles)):
         raise HTTPException(403, "Accounting access denied")
+    return actor, role
+
+
+async def member(request: Request, session=Depends(transaction, scope="function"), user=Depends(get_current_user)):
+    actor, role = await current_member(session, int(request.path_params["org_id"]), user)
     if request.method != "GET" and role == "reader":
         raise HTTPException(403, "Read-only accounting access")
     return session, actor, role

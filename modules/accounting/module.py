@@ -32,6 +32,22 @@ class AccountingModule(ModuleContract):
         core.services.accounting = AccountingService(core.services)
         core.include_router(routes.router, prefix=self.api_prefix)
         core.include_router(expense_routes.router, prefix=self.api_prefix)
+        # Document-driven stock issue belongs to accounting access. Reuse the
+        # guarded shipment engine without granting access to the WMS package.
+        from fastapi import APIRouter
+        from modules.wms.invoice_shipments import (
+            document_preview_route, document_create_route,
+            document_read_route, document_history_route,
+        )
+        from modules.accounting.stock_issue_source import router as stock_issue_router
+        core.include_router(stock_issue_router, prefix=self.api_prefix)
+        shipment_router = APIRouter()
+        prefix = "/organizations/{org}/invoices/{document}/document-shipments"
+        shipment_router.add_api_route(prefix + "/preview", document_preview_route, methods=["POST"])
+        shipment_router.add_api_route(prefix, document_create_route, methods=["POST"], status_code=201)
+        shipment_router.add_api_route(prefix + "/by-key/{key}", document_read_route, methods=["GET"])
+        shipment_router.add_api_route(prefix + "/history", document_history_route, methods=["POST"])
+        core.include_router(shipment_router, prefix=self.api_prefix)
         core.subscribe("accounting.posting.requested", on_posting_requested)
         core.register_widget(Widget("accounting", "Бухгалтерия", source="accounting.entries"))
         core.register_reference(Reference(

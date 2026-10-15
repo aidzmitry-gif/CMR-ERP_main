@@ -1,4 +1,5 @@
 import { AppShell } from "@/components/app-shell";
+import Link from "next/link";
 import { WmsDashboard } from "@/components/erp/wms-dashboard";
 import { backendAuthHeaders } from "@/lib/auth-headers-server";
 import { currentRole } from "@/lib/role-server";
@@ -10,6 +11,7 @@ export default async function WmsPage() {
 
   return (
     <AppShell crumbs={["ERP", "Склад"]}>
+      <Link className="mb-4 inline-block text-accent underline" href="/erp/wms/settings">Настроить режим WMS по складам</Link>
       <WmsDashboard initial={data} />
     </AppShell>
   );

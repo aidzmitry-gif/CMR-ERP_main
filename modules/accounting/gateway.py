@@ -3,7 +3,7 @@ from sqlalchemy import or_, select
 
 from config.access import is_package_allowed
 from modules.accounting.models import AccessGrant, Organization, Period, SourceControl
-from modules.accounting.routes import organization_role, serialize, subject
+from modules.accounting.routes import current_member, organization_role, serialize, subject
 from modules.accounting.service import lock_organization
 
 
@@ -290,6 +290,20 @@ class AccountingService:
         # Serialize source operations in the same book, including creation of
         # keys that do not exist yet. The caller owns transaction completion.
         await organization_role(session, organization_id, actor)
+        return actor
+
+    async def document_shipment_member(self, session, organization_id, user):
+        """Authorize document-driven stock issues under the book's write lock."""
+        actor, role = await current_member(session, organization_id, user)
+        if role not in {"accountant", "chief"}:
+            raise HTTPException(403, "Accounting write access required")
+        return actor
+
+    async def warehouse_mode_admin(self, session, organization_id, user):
+        """Changing execution mode requires the book owner's chief membership."""
+        actor, role = await current_member(session, organization_id, user)
+        if role != "chief":
+            raise HTTPException(403, "Chief accounting access required")
         return actor
 
     async def source_warehouse_options(self, session, organization_id, user, query=""):
