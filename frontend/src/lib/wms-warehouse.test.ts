@@ -92,6 +92,15 @@ describe("canEmitAlerts", () => {
 });
 
 describe("SSR fetch-обёртки (ssr helper)", () => {
+  it("dashboard forwards verified OIDC headers and preserves unknown on denial", async () => {
+    const headers = { Authorization: "Bearer synthetic-token" };
+    const fetchMock = stubFetch({}, false);
+    expect(await fetchDashboardServer("director", headers)).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/wms/dashboard",
+      expect.objectContaining({ cache: "no-store", headers }),
+    );
+  });
   it("fetchDashboardServer: URL/заголовки-роли, маппинг ответа", async () => {
     const data = {
       receipts_pending_qc: 3, tasks_putaway_open: 1, tasks_pick_open: 2, alerts_count: 4,

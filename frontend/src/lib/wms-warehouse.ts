@@ -179,9 +179,9 @@ export function canEmitAlerts(a: Alerts): boolean {
 function roleHeaders(roles?: string): Record<string, string> | undefined {
   return roles ? { "X-User-Roles": roles } : undefined;
 }
-async function ssr<T>(path: string, roles: string | undefined, fallback: T): Promise<T> {
+async function ssr<T>(path: string, roles: string | undefined, fallback: T, authHeaders?: Record<string, string>): Promise<T> {
   try {
-    const res = await fetch(`${BASE}${path}`, { cache: "no-store", headers: roleHeaders(roles) });
+    const res = await fetch(`${BASE}${path}`, { cache: "no-store", headers: authHeaders ?? roleHeaders(roles) });
     if (!res.ok) return fallback;
     return (await res.json()) as T;
   } catch {
@@ -211,8 +211,8 @@ async function post(path: string, body?: unknown): Promise<boolean> {
 }
 
 // ---- SSR ----
-export const fetchDashboardServer = (r?: string) =>
-  ssr<Dashboard | null>("/wms/dashboard", r, null);
+export const fetchDashboardServer = (r?: string, authHeaders?: Record<string, string>) =>
+  ssr<Dashboard | null>("/wms/dashboard", r, null, authHeaders);
 export async function fetchReceiptsServer(r?: string, authHeaders?: Record<string, string>): Promise<Receipt[]> {
   const response = await fetch(`${BASE}/wms/receipts`, { cache: "no-store", headers: authHeaders ?? roleHeaders(r) });
   if (!response.ok) throw new Error(`Receipt list unavailable (${response.status})`);

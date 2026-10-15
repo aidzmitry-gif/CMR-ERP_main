@@ -1,5 +1,9 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { fetchDashboardServer } from "@/lib/wms-warehouse";
+vi.mock("@/lib/auth-headers-server", () => ({
+  backendAuthHeaders: vi.fn().mockResolvedValue({ Authorization: "Bearer synthetic-token" }),
+}));
 
 // Страницы App Router — тонкие обёртки: дочерние компоненты и API мокаем,
 // проверяем, что страница собирает данные и монтирует нужный компонент.
@@ -184,14 +188,15 @@ describe("страницы (src/app)", () => {
     expect(screen.getByText(/Нет данных/)).toBeInTheDocument();
   });
 
-  it("OwnerPage с пустыми KPI показывает 0% плана", async () => {
+  it("OwnerPage с пустыми KPI показывает отсутствие данных о плане", async () => {
     mock(api.fetchOwnerDashboard).mockResolvedValue({
       metrics: { approvals_pending: 0, approvals_total: 0, audit_count: 0, events_count: 0, counterparties: 0, skus: 0, modules: [], widgets: [] },
       stages: [],
       kpis: [],
     });
     render(await OwnerPage());
-    expect(screen.getByText("0%")).toBeInTheDocument();
+    expect(screen.getByText("Нет данных")).toBeInTheDocument();
+    expect(screen.queryByText("0%")).not.toBeInTheDocument();
   });
 
   it("ERP-воронки монтируют FunnelBoard", () => {
@@ -222,6 +227,7 @@ describe("страницы (src/app)", () => {
 
   it("WmsPage монтирует дашборд склада (bespoke, async)", async () => {
     render(await WmsPage());
+    expect(fetchDashboardServer).toHaveBeenCalledWith("director", { Authorization: "Bearer synthetic-token" });
     expect(screen.getByText("wms-dashboard")).toBeInTheDocument();
   });
 
