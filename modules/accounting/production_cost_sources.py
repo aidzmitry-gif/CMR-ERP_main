@@ -7,6 +7,7 @@ from fractions import Fraction
 
 from sqlalchemy import select
 
+from modules.accounting import order_snapshot
 from modules.accounting.models import (
     Entry,
     Line,
@@ -55,11 +56,18 @@ async def cost_sources(session, org_id, month, policy_id, *, correction_of=None)
     for entry, line in rows:
         wip = line.account_code == settings.wip_account
         required = set(settings.pool_dimensions) | ({settings.order_dimension} if wip else set())
+        owned_order = (wip and settings.order_dimension == 'order'
+            and isinstance(line.dimensions, dict)
+            and bool(set(line.dimensions) & (order_snapshot.ORDER_DIMENSION_KEYS - {'order'})))
+        if owned_order:
+            required |= order_snapshot.ORDER_DIMENSION_KEYS
         if (line.currency != 'BYN' or line.cash or line.quantity is not None
             or line.category not in ({'asset'} if wip else {'asset', 'expense'})
             or not isinstance(line.dimensions, dict) or set(line.dimensions) != required
             or any(not isinstance(v, str) or not v.strip() for v in line.dimensions.values())):
             raise AccountingError('Production cost history has incompatible currency, tracking or analytics; reconcile first')
+        if owned_order:
+            await order_snapshot.verify_reference(session, org_id, line.dimensions)
         cents = Fraction(line.amount) * 100
         if cents.denominator != 1 or cents < 0 or line.side not in {'debit', 'credit'}:
             raise AccountingError('Production cost history has invalid monetary values')
