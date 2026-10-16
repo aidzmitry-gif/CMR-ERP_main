@@ -136,7 +136,7 @@ async def confirm(session, org_id, receipt, data, expected_basis_digest, actor, 
         snapshot=json.loads(
             json.dumps(
                 {
-                    "act": receipt,
+                    "act": {key: value for key, value in receipt.items() if key != "execution_mode"},
                     "mapping": plan["mapping"],
                     "costs": plan["costs"],
                     "commercial": plan["commercial"],

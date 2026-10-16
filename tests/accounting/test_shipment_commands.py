@@ -15,6 +15,41 @@ async def prepared(db, book, posting):
     return receipt, data, plan
 
 
+@pytest.mark.parametrize("mode", ["document", "wms", None])
+async def test_stored_act_keeps_sql_identity_and_immutable_execution_mode(db, book, posting, mode):
+    receipt, data, plan = await prepared(db, book, posting)
+    receipt.update(act_id=11, request_hash="b" * 64, execution_mode=mode or "wms")
+    if mode is not None:
+        receipt["snapshot"]["execution_mode"] = mode
+    original = deepcopy(receipt)
+    saved = await shipment_commands.confirm(
+        db, book[0], receipt, data, plan["basis_digest"], "tester"
+    )
+    await db.commit()
+    assert saved.snapshot["act"] == {
+        key: value for key, value in original.items() if key != "execution_mode"
+    }
+    assert set(saved.snapshot["act"]) == {"act_id", "source_key", "request_hash", "digest", "snapshot"}
+    assert saved.snapshot["act"]["snapshot"] == original["snapshot"]
+    assert receipt == original
+    repeated = await shipment_commands.confirm(
+        db, book[0], receipt, data, plan["basis_digest"], "tester"
+    )
+    assert repeated.id == saved.id
+
+
+async def test_unknown_act_evidence_is_retained_for_strict_sql_validation(db, book, posting):
+    receipt, data, plan = await prepared(db, book, posting)
+    receipt.update(execution_mode="document", future_evidence={"must_remain": "unrecognized"})
+    receipt["snapshot"]["execution_mode"] = "document"
+    saved = await shipment_commands.confirm(
+        db, book[0], receipt, data, plan["basis_digest"], "tester"
+    )
+    # SQLite cannot prove SQL rejection; retain this field so PostgreSQL can reject it.
+    assert saved.snapshot["act"]["future_evidence"] == receipt["future_evidence"]
+    assert saved.snapshot["act"]["snapshot"]["execution_mode"] == "document"
+
+
 async def test_complete_receipt_replays_without_consuming_stock_again(db, book, posting):
     receipt, data, plan = await prepared(db, book, posting)
     saved = await shipment_commands.confirm(
