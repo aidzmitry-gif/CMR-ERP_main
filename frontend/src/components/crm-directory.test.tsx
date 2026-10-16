@@ -18,6 +18,7 @@ describe("CRM directory pages", () => {
     expect(screen.queryByText(/Найдено/)).not.toBeInTheDocument();
     await act(async () => finish(ok()));
     expect(screen.getByText("Visible company")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Visible company" })).toHaveAttribute("href", "/erp/spravochniki/counterparty/1");
     expect(screen.getByRole("link", { name: "Открыть сделку" })).toHaveAttribute("href", "/crm/deals/9");
   });
   it("separates a load failure from empty and retries", async () => {
@@ -68,7 +69,17 @@ describe("CRM directory pages", () => {
     expect(await screen.findByText("Person")).toBeInTheDocument();
     expect(screen.getByText("Company")).toBeInTheDocument();
     expect(screen.getByText("Телефон не указан")).toBeInTheDocument();
-    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Company" })).toHaveAttribute("href", "/erp/spravochniki/counterparty/1");
+    expect(screen.queryByRole("link", { name: "Открыть сделку" })).not.toBeInTheDocument();
+  });
+  it("keeps CRM and shared company IDs in their own card routes", async () => {
+    load.mockResolvedValue({ status: "ok", total: 2, rows: [
+      { ...row, id: 42, name: "Shared company", deal_id: null },
+      { ...row, id: 42, name: "CRM company", deal_id: null, source: "crm" },
+    ] });
+    render(<CrmDirectory kind="clients" />);
+    expect(await screen.findByRole("link", { name: "Shared company" })).toHaveAttribute("href", "/erp/spravochniki/counterparty/42");
+    expect(screen.getByRole("link", { name: "CRM company" })).toHaveAttribute("href", "/crm/clients/42");
   });
   it("aborts and ignores late results after unmount", async () => {
     let finish!: (value: DirectoryResult) => void;

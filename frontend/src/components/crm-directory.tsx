@@ -37,7 +37,7 @@ export function CrmDirectory({ kind }: { kind: DirectoryKind }) {
     <section className="space-y-5 p-4 md:p-6" aria-label={title}>
       <div>
         <h1 className="text-xl font-semibold text-ink">{title}</h1>
-        <p className="mt-1 text-sm text-muted">Показаны доступные вам записи. Работу с клиентом можно продолжить в его сделке.</p>
+        <p className="mt-1 text-sm text-muted">Показаны доступные вам записи. Нажмите на название компании, чтобы открыть её карточку.</p>
       </div>
       {!isContacts && (creating ? <CreateCrmClient onCancel={() => setCreating(false)} onCreated={(name) => {
         setCreating(false);
@@ -78,13 +78,15 @@ export function CrmDirectory({ kind }: { kind: DirectoryKind }) {
               <tbody>{result.rows.map((row) => <tr key={`${"source" in row ? row.source : "mdm"}:${row.id}`} className="border-t border-line">
                 <td className="p-3 font-medium text-ink">
                   {"full_name" in row ? row.full_name : row.source === "crm"
-                    ? <Link className="underline" href={`/crm/clients/${row.id}`}>{row.name}</Link> : row.name}
+                    ? <Link className="underline" href={`/crm/clients/${row.id}`}>{row.name}</Link>
+                    : <Link className="underline" href={`/erp/spravochniki/counterparty/${row.id}`}>{row.name}</Link>}
                   {"source" in row && row.source === "crm" && <span className="ml-2 text-xs text-muted">Создан в CRM</span>}
                   {"is_primary" in row && row.is_primary && <span className="ml-2 text-xs text-muted">Основной</span>}
                   {"is_active" in row && !row.is_active && <span className="ml-2 text-xs text-muted">Архив</span>}
                 </td>
                 <td className="p-3 text-muted">{"counterparty_name" in row
-                  ? row.crm_client_id ? <Link className="underline" href={`/crm/clients/${row.crm_client_id}`}>{row.counterparty_name}</Link> : row.counterparty_name
+                  ? row.crm_client_id ? <Link className="underline" href={`/crm/clients/${row.crm_client_id}`}>{row.counterparty_name}</Link>
+                    : <Link className="underline" href={`/erp/spravochniki/counterparty/${row.counterparty_id}`}>{row.counterparty_name}</Link>
                   : row.unp ?? "Не указан"}</td>
                 {"full_name" in row && <td className="p-3 text-muted"><div>{row.phone ?? "Телефон не указан"}</div><div>{row.email ?? "Email не указан"}</div></td>}
                 <td className="p-3">{row.deal_id === null ? <span className="text-muted">Нет доступной ссылки</span>

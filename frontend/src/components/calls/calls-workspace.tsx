@@ -124,9 +124,11 @@ export function CallsWorkspace() {
                     <td className="px-4 py-2.5 text-muted">
                       {Number.isSafeInteger(c.crm_client_id) && (c.crm_client_id ?? 0) > 0
                         ? <Link className="underline" href={`/crm/clients/${c.crm_client_id}`}>Открыть карточку</Link>
-                        : "—"}
+                        : Number.isSafeInteger(c.counterparty_id) && (c.counterparty_id ?? 0) > 0
+                          ? <Link className="underline" href={`/erp/spravochniki/counterparty/${c.counterparty_id}`}>Открыть карточку</Link>
+                          : "Не определён по номеру"}
                     </td>
-                    <td className="px-4 py-2.5 text-muted">{c.owner || "—"}</td>
+                    <td className="px-4 py-2.5 text-muted">{c.owner || "Не назначен"}</td>
                     <td className="px-4 py-2.5">
                       <span
                         className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${st.cls}`}

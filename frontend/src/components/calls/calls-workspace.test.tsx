@@ -37,7 +37,10 @@ describe("CallsWorkspace", () => {
     ] });
     render(<CallsWorkspace />);
 
-    expect(await screen.findByRole("link", { name: "Открыть карточку" })).toHaveAttribute("href", "/crm/clients/420");
+    await screen.findAllByRole("link", { name: "Открыть карточку" });
+    expect(screen.getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual([
+      "/crm/clients/420", "/erp/spravochniki/counterparty/42",
+    ]);
     expect(screen.getAllByRole("link").map((link) => link.getAttribute("href"))).not.toContain("/crm/clients/42");
     fireEvent.click(screen.getByRole("checkbox", { name: "Без привязанной сделки" }));
     await waitFor(() => expect(api.fetchCallsResult).toHaveBeenLastCalledWith({ unlinked: true }));
