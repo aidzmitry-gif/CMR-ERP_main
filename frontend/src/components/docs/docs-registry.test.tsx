@@ -51,6 +51,16 @@ it("opens source preview with contents and a clear original/posting distinction"
   fireEvent.click(within(dialog).getByRole("button", { name: "Закрыть документ" }));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
+it("links_source_preview_client_only_after_authorized_preview", async () => {
+  const confirmedPreview = { ...preview, client: { id: 42, name: "Synthetic confirmed company" } };
+  request.mockImplementation(async (path: string) => path.endsWith("/organizations") ? response(organizations)
+    : path.includes("/source/1?") ? response(confirmedPreview) : response(page([row()])));
+  render(<DocsRegistry />); await selectOrganization();
+  fireEvent.click(await screen.findByRole("button", { name: "Открыть / предпросмотр" }));
+  const dialog = await screen.findByRole("dialog");
+  const link = await within(dialog).findByRole("link", { name: "Открыть связанную карточку" });
+  expect(link).toHaveAttribute("href", "/erp/spravochniki/counterparty/42#counterparty-relationships");
+});
 it("drops an old response and preview when the organization changes", async () => {
   let finish!: (value: Response) => void;
   request.mockImplementation((path: string) => {

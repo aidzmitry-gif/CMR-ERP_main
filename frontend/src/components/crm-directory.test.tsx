@@ -82,6 +82,29 @@ describe("CRM directory pages", () => {
     expect(screen.getByRole("link", { name: "Company" })).toHaveAttribute("href", "/erp/spravochniki/counterparty/1");
     expect(screen.queryByRole("link", { name: "Открыть сделку" })).not.toBeInTheDocument();
   });
+  it("links_contact_only_to_confirmed_company_context", async () => {
+    load.mockResolvedValue({ status: "ok", total: 4, rows: [
+      { id: 7, full_name: "Synthetic MDM Contact", phone: null, email: "mdm@example.invalid", is_primary: false,
+        counterparty_id: 42, counterparty_name: "Synthetic Company", deal_id: null },
+      { id: 8, full_name: "Synthetic CRM Contact", phone: null, email: null, is_primary: false,
+        counterparty_id: null, crm_client_id: 420, source: "crm", counterparty_name: "Synthetic CRM Client", deal_id: null },
+      { id: 9, full_name: "Synthetic Unlinked MDM Contact", phone: null, email: null, is_primary: false,
+        counterparty_id: null, counterparty_name: null, deal_id: null },
+      { id: 10, full_name: "Synthetic Unlinked CRM Contact", phone: null, email: null, is_primary: false,
+        counterparty_id: null, crm_client_id: null, source: "crm", counterparty_name: null, deal_id: null },
+    ] });
+    render(<CrmDirectory kind="contacts" />);
+
+    expect(await screen.findByRole("link", { name: "Synthetic MDM Contact" })).toHaveAttribute(
+      "href", "/erp/spravochniki/counterparty/42?contact=7#counterparty-contact-7",
+    );
+    expect(screen.getByRole("link", { name: "Synthetic CRM Contact" })).toHaveAttribute(
+      "href", "/crm/clients/420?contact=8#crm-contact-8",
+    );
+    expect(screen.queryByRole("link", { name: "Synthetic Unlinked MDM Contact" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Synthetic Unlinked CRM Contact" })).not.toBeInTheDocument();
+    expect(screen.getAllByText("Контекст не связан")).toHaveLength(4);
+  });
   it("keeps CRM and shared company IDs in their own card routes", async () => {
     load.mockResolvedValue({ status: "ok", total: 2, rows: [
       { ...row, id: 42, name: "Shared company", deal_id: null },

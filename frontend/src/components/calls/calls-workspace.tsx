@@ -17,19 +17,26 @@ const STATUS: Record<string, { label: string; cls: string }> = {
 // Тестовый номер используется только в dev-сборке.
 const DEMO_PHONE = "+375291112233";
 
-export function CallsWorkspace() {
+export function CallsWorkspace({ initialCounterpartyId, initialCallId }: { initialCounterpartyId?: number; initialCallId?: number }) {
   const [unlinked, setUnlinked] = useState(false);
   const [revision, setRevision] = useState(0);
-  const [loaded, setLoaded] = useState<{ unlinked: boolean; revision: number; result: FetchCallsResult } | null>(null);
+  const [loaded, setLoaded] = useState<{ counterpartyId?: number; unlinked: boolean; revision: number; result: FetchCallsResult } | null>(null);
   const [busy, setBusy] = useState(false);
-  const result = loaded && loaded.unlinked === unlinked && loaded.revision === revision ? loaded.result : null;
+  const result = loaded && loaded.counterpartyId === initialCounterpartyId
+    && loaded.unlinked === unlinked && loaded.revision === revision ? loaded.result : null;
   useEffect(() => {
     let current = true;
-    void fetchCallsResult({ unlinked }).then((next) => {
-      if (current) setLoaded({ unlinked, revision, result: next });
+    void fetchCallsResult({ unlinked, ...(initialCounterpartyId ? { counterparty_id: initialCounterpartyId } : {}) }).then((next) => {
+      if (current) setLoaded({ counterpartyId: initialCounterpartyId, unlinked, revision, result: next });
     });
     return () => { current = false; };
-  }, [unlinked, revision]);
+  }, [unlinked, revision, initialCounterpartyId]);
+
+  useEffect(() => {
+    if (!initialCallId || !result?.ok || !result.rows.some((call) => call.id === initialCallId)) return;
+    const node = document.getElementById(`call-${initialCallId}`);
+    if (node && typeof node.scrollIntoView === "function") node.scrollIntoView({ block: "center" });
+  }, [initialCallId, result]);
 
   async function simulate() {
     setBusy(true);
@@ -54,6 +61,7 @@ export function CallsWorkspace() {
             <p className="mt-0.5 text-sm text-muted">
               Журнал звонков и входящие через облачную АТС. Окно звонка всплывает на любом экране.
             </p>
+            {initialCounterpartyId != null && <p className="mt-1 text-xs text-muted">Фильтр по подтверждённому контрагенту ID {initialCounterpartyId}</p>}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -116,17 +124,25 @@ export function CallsWorkspace() {
               {result?.ok && result.rows.map((c: CallRow) => {
                 const st = STATUS[c.status] ?? STATUS.ended;
                 return (
-                  <tr key={c.id} className="border-b border-line last:border-0 hover:bg-sunken">
+                  <tr id={`call-${c.id}`} key={c.id} className="border-b border-line last:border-0 hover:bg-sunken">
                     <td className="px-4 py-2.5 font-medium text-ink">{c.phone_e164 ?? "—"}</td>
                     <td className="px-4 py-2.5 text-muted">
                       {c.direction === "out" ? "Исходящий" : "Входящий"}
                     </td>
                     <td className="px-4 py-2.5 text-muted">
-                      {Number.isSafeInteger(c.crm_client_id) && (c.crm_client_id ?? 0) > 0
-                        ? <Link className="underline" href={`/crm/clients/${c.crm_client_id}`}>Открыть карточку</Link>
-                        : Number.isSafeInteger(c.counterparty_id) && (c.counterparty_id ?? 0) > 0
-                          ? <Link className="underline" href={`/erp/spravochniki/counterparty/${c.counterparty_id}`}>Открыть карточку</Link>
-                          : "Не определён по номеру"}
+                      <div className="flex flex-wrap gap-x-3 gap-y-1">
+                        {Number.isSafeInteger(c.crm_client_id) && (c.crm_client_id ?? 0) > 0
+                          && <Link className="underline" href={`/crm/clients/${c.crm_client_id}`}>CRM-клиент</Link>}
+                        {Number.isSafeInteger(c.counterparty_id) && (c.counterparty_id ?? 0) > 0
+                          && <Link className="underline" href={`/erp/spravochniki/counterparty/${c.counterparty_id}`}>Компания</Link>}
+                        {Number.isSafeInteger(c.contact_id) && (c.contact_id ?? 0) > 0
+                          && Number.isSafeInteger(c.counterparty_id) && (c.counterparty_id ?? 0) > 0
+                          && <Link className="underline" href={`/erp/spravochniki/counterparty/${c.counterparty_id}?contact=${c.contact_id}#counterparty-contact-${c.contact_id}`}>Контакт</Link>}
+                        {Number.isSafeInteger(c.deal_id) && (c.deal_id ?? 0) > 0
+                          && <Link className="underline" href={`/crm/deals/${c.deal_id}`}>Сделка</Link>}
+                        {!Number.isSafeInteger(c.crm_client_id) && !Number.isSafeInteger(c.counterparty_id)
+                          && <span>Контекст не сопоставлен по точному ID</span>}
+                      </div>
                     </td>
                     <td className="px-4 py-2.5 text-muted">{c.owner || "Не назначен"}</td>
                     <td className="px-4 py-2.5">
