@@ -3,13 +3,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CrmDirectory } from "./crm-directory";
 import { loadDirectory, type DirectoryResult } from "@/lib/crm-directory";
 
-vi.mock("@/lib/crm-directory", () => ({ DIRECTORY_PAGE_SIZE: 50, loadDirectory: vi.fn() }));
+vi.mock("@/lib/crm-directory", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/crm-directory")>(), loadDirectory: vi.fn() }));
 const load = vi.mocked(loadDirectory);
 const row = { id: 1, name: "Visible company", unp: "123456789", is_active: true, deal_id: 9 };
 const ok = (total = 1): DirectoryResult => ({ status: "ok", rows: [row], total });
 beforeEach(() => vi.resetAllMocks());
 
 describe("CRM directory pages", () => {
+  it("shows assigned managers and explicitly unassigned clients", async () => {
+    load.mockResolvedValue({ status: "ok", total: 2, rows: [
+      { ...row, responsible_manager: { employee_id: 7, name: "Артём", active: true } },
+      { ...row, id: 2, name: "Без назначения", responsible_manager: null },
+    ] });
+    render(<CrmDirectory kind="clients" />);
+    expect(await screen.findByRole("columnheader", { name: "Ответственный менеджер" })).toBeInTheDocument();
+    expect(screen.getByText("Артём")).toBeInTheDocument();
+    expect(screen.getByText("Не назначен")).toBeInTheDocument();
+  });
   it("shows loading, real rows and only the supplied deal link", async () => {
     let finish!: (value: DirectoryResult) => void;
     load.mockReturnValue(new Promise((resolve) => { finish = resolve; }));

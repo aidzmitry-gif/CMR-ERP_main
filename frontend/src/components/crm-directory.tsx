@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { CreateCrmClient } from "@/components/create-crm-client";
 import { useEffect, useState, type FormEvent } from "react";
-import { DIRECTORY_PAGE_SIZE, loadDirectory, type DirectoryKind, type DirectoryResult } from "@/lib/crm-directory";
+import { DIRECTORY_PAGE_SIZE, loadDirectory, responsibleManagerText, type DirectoryKind, type DirectoryResult } from "@/lib/crm-directory";
 
 export function CrmDirectory({ kind }: { kind: DirectoryKind }) {
   const [draft, setDraft] = useState("");
@@ -73,6 +73,7 @@ export function CrmDirectory({ kind }: { kind: DirectoryKind }) {
                 <th scope="col" className="p-3">{isContacts ? "Контакт" : "Клиент"}</th>
                 <th scope="col" className="p-3">{isContacts ? "Компания" : "УНП"}</th>
                 {isContacts && <th scope="col" className="p-3">Связь</th>}
+                {!isContacts && <th scope="col" className="p-3">Ответственный менеджер</th>}
                 <th scope="col" className="p-3">Сделка</th>
               </tr></thead>
               <tbody>{result.rows.map((row) => <tr key={`${"source" in row ? row.source : "mdm"}:${row.id}`} className="border-t border-line">
@@ -89,6 +90,7 @@ export function CrmDirectory({ kind }: { kind: DirectoryKind }) {
                     : <Link className="underline" href={`/erp/spravochniki/counterparty/${row.counterparty_id}`}>{row.counterparty_name}</Link>
                   : row.unp ?? "Не указан"}</td>
                 {"full_name" in row && <td className="p-3 text-muted"><div>{row.phone ?? "Телефон не указан"}</div><div>{row.email ?? "Email не указан"}</div></td>}
+                {!("full_name" in row) && <td className="p-3">{responsibleManagerText(row.responsible_manager)}</td>}
                 <td className="p-3">{row.deal_id === null ? <span className="text-muted">Нет доступной ссылки</span>
                   : <Link className="whitespace-nowrap underline" href={`/crm/deals/${row.deal_id}`}>Открыть сделку</Link>}</td>
               </tr>)}</tbody>

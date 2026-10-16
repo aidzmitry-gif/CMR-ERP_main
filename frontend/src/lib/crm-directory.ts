@@ -1,5 +1,18 @@
 export type DirectoryKind = "clients" | "contacts";
 export const DIRECTORY_PAGE_SIZE = 50;
+export type ResponsibleManager = { employee_id: number; name: string; active: boolean };
+
+export function validResponsibleManager(value: unknown): value is ResponsibleManager | null {
+  if (value === null) return true;
+  if (typeof value !== "object") return false;
+  const manager = value as Record<string, unknown>;
+  return positiveId(manager.employee_id) && typeof manager.name === "string" && !!manager.name.trim() && typeof manager.active === "boolean";
+}
+
+export function responsibleManagerText(value: ResponsibleManager | null | undefined): string {
+  if (value === undefined) return "Назначение не загружено";
+  return value ? `${value.name}${value.active ? "" : " (неактивен)"}` : "Не назначен";
+}
 
 export interface ClientRow {
   id: number;
@@ -8,6 +21,7 @@ export interface ClientRow {
   is_active: boolean;
   deal_id: number | null;
   source?: "crm";
+  responsible_manager?: ResponsibleManager | null;
 }
 
 export interface ContactRow {
@@ -42,6 +56,7 @@ function validRow(value: unknown, kind: DirectoryKind): value is ClientRow | Con
   return kind === "clients"
     ? typeof row.name === "string" && nullableText(row.unp) && typeof row.is_active === "boolean"
       && (row.source === undefined || row.source === "crm")
+      && (row.responsible_manager === undefined || validResponsibleManager(row.responsible_manager))
     : typeof row.full_name === "string" && nullableText(row.phone) && nullableText(row.email)
       && typeof row.is_primary === "boolean"
       && (row.source === "crm" ? row.counterparty_id === null && positiveId(row.crm_client_id)

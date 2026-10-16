@@ -76,7 +76,8 @@ async def test_counterparty_link_uses_active_master_record_and_reuses_per_owner(
     assert first.status_code == 201, first.text
     client = first.json()
     assert client == {"id": client["id"], "name": cp.name, "unp": cp.unp,
-                      "owner_id": 491, "counterparty_id": cp.id, "source": "crm"}
+                      "owner_id": 491, "counterparty_id": cp.id, "source": "crm",
+                      "responsible_manager": {"employee_id": 491, "name": "Owner", "active": True}}
     assert (await api.post("/sales/clients", headers=OWN, json=data)).json() == client
     reused = await api.post("/sales/clients", headers=OWN,
                             json={"counterparty_id": cp.id, "request_key": "link-request-2"})

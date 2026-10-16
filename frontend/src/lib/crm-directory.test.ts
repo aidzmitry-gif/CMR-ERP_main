@@ -12,6 +12,12 @@ function response(data: unknown, status = 200) {
 }
 
 describe("CRM directory HTTP contract", () => {
+  it("accepts confirmed manager metadata and rejects malformed identities", async () => {
+    response({ rows: [{ ...client, responsible_manager: { employee_id: 7, name: "Manager", active: true } }], total: 1 });
+    expect((await loadDirectory("clients", "", 0)).status).toBe("ok");
+    response({ rows: [{ ...client, responsible_manager: { employee_id: "7", name: "Manager", active: true } }], total: 1 });
+    expect((await loadDirectory("clients", "", 0)).status).toBe("error");
+  });
   it("keeps CRM and master-data identities separate when numeric IDs coincide", async () => {
     response({ rows: [client, { ...client, source: "crm", deal_id: null }], total: 2 });
     expect((await loadDirectory("clients", "", 0)).status).toBe("ok");

@@ -5,8 +5,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { DealContacts } from "@/components/deal-contacts";
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
 import { callLinkDeal, createDeal, fetchCallsResult, type CallRow } from "@/lib/api";
+import { responsibleManagerText, validResponsibleManager, type ResponsibleManager } from "@/lib/crm-directory";
 
-type Client = { id: number; name: string; owner_id: number; unp: string | null; source: "crm"; counterparty_id?: number | null };
+type Client = { id: number; name: string; owner_id: number; unp: string | null; source: "crm"; counterparty_id?: number | null; responsible_manager?: ResponsibleManager | null };
 type LinkedDeal = { id: number; number: string; title: string };
 type ClientDocument = { id: number; deal_id: number; deal_number: string; number: string; kind: string; version: number; original_state: string };
 
@@ -154,6 +155,7 @@ export function CrmClientDetail({ clientId }: { clientId: number }) {
         if (client?.id !== clientId || client.source !== "crm" || typeof client.name !== "string"
           || (client.unp !== null && typeof client.unp !== "string")
           || !Number.isSafeInteger(client.owner_id) || client.owner_id <= 0
+          || (client.responsible_manager !== undefined && !validResponsibleManager(client.responsible_manager))
           || (client.counterparty_id !== undefined && client.counterparty_id !== null
             && (!Number.isSafeInteger(client.counterparty_id) || client.counterparty_id <= 0))
           || !Array.isArray(deals) || !deals.every((deal) => deal && Number.isSafeInteger(deal.id) && deal.id > 0 && typeof deal.number === "string" && typeof deal.title === "string")) {
@@ -174,6 +176,7 @@ export function CrmClientDetail({ clientId }: { clientId: number }) {
     {state?.client && <>
       <h1 className="text-xl font-semibold">{state.client.name}</h1>
       <p className="text-sm text-muted">УНП: {state.client.unp ?? "Не указан"}</p>
+      <p>Ответственный менеджер: {responsibleManagerText(state.client.responsible_manager)}</p>
       <DealContacts key={`contacts:${clientId}`} clientId={clientId} />
       <ClientCallHistory key={`calls:${clientId}:${state.client.counterparty_id ?? "none"}`} counterpartyId={state.client.counterparty_id} deals={state.deals ?? []} />
       <ClientDocuments key={`documents:${clientId}`} clientId={clientId} />

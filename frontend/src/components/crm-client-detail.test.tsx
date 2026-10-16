@@ -16,6 +16,14 @@ vi.mock("@/lib/api", () => ({ createDeal: vi.fn(), callLinkDeal: vi.fn(), fetchC
 beforeEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe("CrmClientDetail", () => {
+  it("shows the stored CRM manager in the client card", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => Promise.resolve(Response.json(
+      url.endsWith('/documents') || url.endsWith('/deals') ? [] : { id: 12, name: "Buyer", owner_id: 34, unp: null, source: "crm",
+        responsible_manager: { employee_id: 34, name: "Артём", active: true } },
+    ))));
+    render(<CrmClientDetail clientId={12} />);
+    expect(await screen.findByText("Ответственный менеджер: Артём")).toBeInTheDocument();
+  });
   it("shows document versions and links without inventing unavailable originals", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => Promise.resolve(Response.json(url.endsWith('/documents') ? [
       {id:5,deal_id:7,deal_number:"D7",number:"INV5",kind:"invoice",version:2,original_state:"issued"},
