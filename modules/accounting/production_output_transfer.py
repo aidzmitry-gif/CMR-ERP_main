@@ -23,6 +23,7 @@ from modules.accounting.models import (
     ProductionOutputTransferReceipt,
     SourceControl,
 )
+from modules.accounting.order_snapshot import ORDER_DIMENSION_KEYS, verify_reference
 from modules.accounting.production_cost_policy import validate_accounts
 from modules.accounting.production_output_cost import preview_output_cost_basis
 from modules.accounting.schemas import Input, LineInput, PostingInput, ProductionCostPolicyInput
@@ -118,10 +119,14 @@ async def output_transfer_source_state(session, receipt: ProductionOutputTransfe
                 return "unavailable"
             if entry.id == receipt.entry_id or entry.id in own_corrections or line.dimensions.get(settings.order_dimension) != analytical_order:
                 continue
+            owned_order = (settings.order_dimension == "order"
+                and set(line.dimensions) == required | ORDER_DIMENSION_KEYS)
             if (line.currency != "BYN" or line.cash or line.quantity is not None or line.category != "asset"
-                    or set(line.dimensions) != required
+                    or (set(line.dimensions) != required and not owned_order)
                     or any(not isinstance(value, str) or not value.strip() for value in line.dimensions.values())):
                 return "unavailable"
+            if owned_order:
+                await verify_reference(session, receipt.organization_id, line.dimensions)
             current.append(_source_trace(entry, line))
         if revisions:
             from decimal import Decimal
