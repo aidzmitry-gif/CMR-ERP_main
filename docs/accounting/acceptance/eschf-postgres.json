@@ -1,0 +1,22 @@
+{
+  "scope": "local PostgreSQL with synthetic adapters; no native signature or portal proof",
+  "repository_and_api": {
+    "passed": 79,
+    "seconds": 50.45,
+    "following_fixture_error": "source fixture omitted integrated CRM guard tables; corrected without disabling guards"
+  },
+  "source_and_freshness": {
+    "passed": 89,
+    "seconds": 72.28
+  },
+  "fixture_integration": "Stage, Organization, DealLossRequest and DealLossResolution added in UUID-translated source schema",
+  "unique_selected_checks_passed": 168,
+  "isolated_endpoint": "127.0.0.1:15439/eschf_g04_test",
+  "owned_ephemeral_containers_removed": true,
+  "github_ci_service_configured": true,
+  "github_ci_result": "pending",
+  "evidence_directories": [
+    "reports/CRM-ACC-001/crm-acc-eschf-057b6edbf523",
+    "reports/CRM-ACC-001/crm-acc-eschf-ed23a8eb49ac"
+  ]
+}

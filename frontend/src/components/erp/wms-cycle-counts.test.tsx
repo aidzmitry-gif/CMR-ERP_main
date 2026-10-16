@@ -1,144 +1,90 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { WmsCycleCounts } from "./wms-cycle-counts";
+import { deferred, detail, jsonResponse, organizations, plan } from "@/test/inventory-fixtures";
 
-const pushMock = vi.fn();
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: pushMock }),
-}));
-
-// Мокаем ТОЛЬКО сетевые функции слоя WMS; dueState — настоящий чистый хелпер.
-vi.mock("@/lib/wms-warehouse", async (importActual) => {
-  const actual = await importActual<typeof import("@/lib/wms-warehouse")>();
-  return {
-    ...actual,
-    createCyclePlan: vi.fn(),
-    fetchCyclePlans: vi.fn().mockResolvedValue([]),
-    runCyclePlan: vi.fn(),
-  };
-});
-
-import { WmsCycleCounts } from "@/components/erp/wms-cycle-counts";
-import * as wh from "@/lib/wms-warehouse";
-import type { CyclePlan } from "@/lib/wms-warehouse";
-
-const asMock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
-
-const TODAY = "2026-07-19";
-
-function plan(over: Partial<CyclePlan> = {}): CyclePlan {
-  return {
-    id: 1,
-    warehouse: "Главный",
-    zone: null,
-    cadence_days: 30,
-    next_due_date: null,
-    last_run_at: null,
-    active: true,
-    abc_class: null,
-    ...over,
-  };
+const { push } = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+beforeEach(() => { push.mockReset(); });
+afterEach(() => vi.unstubAllGlobals());
+const props = { initial: [plan()], organizations, initialOrganizationId: 1, today: "2026-09-09" };
+function confirm(scope: ReturnType<typeof within> = screen) {
+  fireEvent.change(scope.getByLabelText("Источник ожидаемого остатка"), { target: { value: "wms_physical" } });
+  fireEvent.change(scope.getByLabelText("Основание проверки полноты"), { target: { value: "Полнота проверена" } });
+  fireEvent.click(scope.getByRole("checkbox"));
 }
 
-beforeEach(() => {
-  vi.clearAllMocks();
-  asMock(wh.fetchCyclePlans).mockResolvedValue([]);
-  asMock(wh.createCyclePlan).mockResolvedValue(undefined);
-  asMock(wh.runCyclePlan).mockResolvedValue(null);
+it("создание плана требует org/склад/корректный период/подтверждение", async () => {
+  const fetcher = vi.fn().mockResolvedValue(jsonResponse(plan({ id: 4, warehouse: "Новый" }))); vi.stubGlobal("fetch", fetcher);
+  render(<WmsCycleCounts {...props} />);
+  expect(screen.getByRole("button", { name: "Создать план" })).toBeDisabled();
+  expect(screen.getByRole("checkbox")).not.toBeChecked();
+  fireEvent.change(screen.getByLabelText("Склад"), { target: { value: "Новый" } }); confirm();
+  fireEvent.change(screen.getByLabelText("Период, дней"), { target: { value: "0" } });
+  expect(screen.getByRole("button", { name: "Создать план" })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Период, дней"), { target: { value: "7" } });
+  fireEvent.click(screen.getByRole("button", { name: "Создать план" }));
+  await screen.findByText("Новый");
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ organization_id: 1, warehouse: "Новый", zone: null, cadence_days: 7, next_due_date: "2026-09-09", expected_source: "wms_physical", source_evidence: "Полнота проверена", journal_complete: true });
+  expect(screen.getByRole("checkbox")).not.toBeChecked();
 });
 
-describe("WmsCycleCounts", () => {
-  it("пустой список планов показывает заглушку «Планов пока нет»", () => {
-    render(<WmsCycleCounts initial={[]} today={TODAY} />);
-    expect(screen.getByText("Планов пока нет")).toBeInTheDocument();
-  });
+it("run требует новое незаполненное подтверждение и передаёт его без org из клиента", async () => {
+  const fetcher = vi.fn().mockResolvedValue(jsonResponse(detail())); vi.stubGlobal("fetch", fetcher);
+  render(<WmsCycleCounts {...props} />);
+  expect(screen.getByText("Просрочено")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Запустить" }));
+  const scope = within(screen.getByRole("region", { name: "Подтверждение запуска" }));
+  expect(scope.getByRole("checkbox")).not.toBeChecked();
+  expect(scope.getByRole("button", { name: "Подтвердить и запустить" })).toBeDisabled();
+  expect(fetcher).not.toHaveBeenCalled(); confirm(scope);
+  fireEvent.click(scope.getByRole("button", { name: "Подтвердить и запустить" }));
+  await waitFor(() => expect(push).toHaveBeenCalledWith("/erp/wms/inventory/7"));
+  expect(fetcher.mock.calls[0][0]).toBe("/api/wms/cycle-plans/3/run");
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ expected_source: "wms_physical", source_evidence: "Полнота проверена", journal_complete: true });
+});
 
-  it("рендерит строки с реальными due-состояниями (просрочено/сегодня/предстоит/—)", () => {
-    const overdue = plan({ id: 1, warehouse: "Склад-1", next_due_date: "2026-07-01" });
-    const today = plan({ id: 2, warehouse: "Склад-2", next_due_date: TODAY });
-    const upcoming = plan({ id: 3, warehouse: "Склад-3", next_due_date: "2026-08-01" });
-    const none = plan({ id: 4, warehouse: "Склад-4", next_due_date: null, zone: "Зона А" });
+it("отмена и повторный выбор run не переиспользуют подтверждение", () => {
+  render(<WmsCycleCounts {...props} />);
+  fireEvent.click(screen.getByRole("button", { name: "Запустить" }));
+  const scope = within(screen.getByRole("region", { name: "Подтверждение запуска" })); confirm(scope);
+  fireEvent.click(scope.getByRole("button", { name: "Отмена" }));
+  fireEvent.click(screen.getByRole("button", { name: "Запустить" }));
+  const fresh = within(screen.getByRole("region", { name: "Подтверждение запуска" }));
+  expect(fresh.getByRole("checkbox")).not.toBeChecked();
+  expect(fresh.getByLabelText("Основание проверки полноты")).toHaveValue("");
+});
 
-    render(<WmsCycleCounts initial={[overdue, today, upcoming, none]} today={TODAY} />);
+it("409 run не превращается в обновление пустого списка или переход", async () => {
+  const fetcher = vi.fn().mockResolvedValue(jsonResponse({ detail: "Журнал изменился" }, 409)); vi.stubGlobal("fetch", fetcher);
+  render(<WmsCycleCounts {...props} />); fireEvent.click(screen.getByRole("button", { name: "Запустить" }));
+  const scope = within(screen.getByRole("region", { name: "Подтверждение запуска" })); confirm(scope);
+  fireEvent.click(scope.getByRole("button", { name: "Подтвердить и запустить" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Журнал изменился");
+  expect(fetcher).toHaveBeenCalledTimes(1); expect(push).not.toHaveBeenCalled();
+  expect(scope.getByRole("checkbox")).not.toBeChecked();
+  expect(scope.getByRole("button", { name: "Подтвердить и запустить" })).toBeDisabled();
+  expect(screen.queryByText("Планов пока нет")).not.toBeInTheDocument();
+});
 
-    expect(screen.getByText("Просрочено")).toBeInTheDocument();
-    expect(screen.getByText("Сегодня")).toBeInTheDocument();
-    expect(screen.getByText("Предстоит")).toBeInTheDocument();
-    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+it("смена страницы игнорирует поздний run прежнего плана", async () => {
+  const old = deferred<Response>(); vi.stubGlobal("fetch", vi.fn(() => old.promise));
+  const view = render(<WmsCycleCounts {...props} />); fireEvent.click(screen.getByRole("button", { name: "Запустить" }));
+  const scope = within(screen.getByRole("region", { name: "Подтверждение запуска" })); confirm(scope);
+  fireEvent.click(scope.getByRole("button", { name: "Подтвердить и запустить" }));
+  view.rerender(<WmsCycleCounts {...props} initial={[plan({ id: 9, organization_id: 2, warehouse: "Другой" })]} initialOrganizationId={2} />);
+  await act(async () => old.resolve(jsonResponse(detail())));
+  expect(screen.getByText("Другой")).toBeInTheDocument(); expect(push).not.toHaveBeenCalled();
+});
 
-    // зона: указанная выводится как есть, пустая — «весь склад»
-    expect(screen.getByText("Зона А")).toBeInTheDocument();
-    expect(screen.getAllByText("весь склад").length).toBe(3);
-    // период выводится с суффиксом «дн»
-    expect(screen.getAllByText("30 дн").length).toBe(4);
-  });
-
-  it("создание плана шлёт trimmed поля и число периода, затем обновляет список из бэкенда", async () => {
-    asMock(wh.fetchCyclePlans).mockResolvedValue([
-      plan({ id: 9, warehouse: "Новый склад", cadence_days: 14, next_due_date: TODAY }),
-    ]);
-
-    render(<WmsCycleCounts initial={[]} today={TODAY} />);
-
-    fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "  Новый склад  " } });
-    fireEvent.change(screen.getByPlaceholderText("Зона (опц.)"), { target: { value: "  Б  " } });
-    fireEvent.change(screen.getByPlaceholderText("Период, дн"), { target: { value: "14" } });
-    fireEvent.click(screen.getByRole("button", { name: /План/ }));
-
-    await waitFor(() =>
-      expect(wh.createCyclePlan).toHaveBeenCalledWith({
-        warehouse: "Новый склад",
-        zone: "Б",
-        cadence_days: 14,
-        next_due_date: TODAY,
-      }),
-    );
-    expect(wh.fetchCyclePlans).toHaveBeenCalled();
-    expect(await screen.findByText("Новый склад")).toBeInTheDocument();
-  });
-
-  it("пустая зона отправляется как null, а нечисловой период — как 30 по умолчанию", async () => {
-    render(<WmsCycleCounts initial={[]} today={TODAY} />);
-
-    fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "Склад X" } });
-    fireEvent.change(screen.getByPlaceholderText("Период, дн"), { target: { value: "abc" } });
-    fireEvent.click(screen.getByRole("button", { name: /План/ }));
-
-    await waitFor(() =>
-      expect(wh.createCyclePlan).toHaveBeenCalledWith({
-        warehouse: "Склад X",
-        zone: null,
-        cadence_days: 30,
-        next_due_date: TODAY,
-      }),
-    );
-  });
-
-  it("пустой склад (после очистки поля по умолчанию) не отправляет запрос на создание плана", () => {
-    render(<WmsCycleCounts initial={[]} today={TODAY} />);
-    fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "   " } });
-    fireEvent.click(screen.getByRole("button", { name: /План/ }));
-    expect(wh.createCyclePlan).not.toHaveBeenCalled();
-  });
-
-  it("запуск плана с возвращённым документом переходит на страницу инвентаризации", async () => {
-    asMock(wh.runCyclePlan).mockResolvedValue({ id: 555 });
-    render(<WmsCycleCounts initial={[plan({ id: 3 })]} today={TODAY} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /Запустить/ }));
-
-    await waitFor(() => expect(wh.runCyclePlan).toHaveBeenCalledWith(3));
-    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/erp/wms/inventory/555"));
-    expect(wh.fetchCyclePlans).not.toHaveBeenCalled();
-  });
-
-  it("запуск плана без документа не переходит, а обновляет список планов", async () => {
-    asMock(wh.runCyclePlan).mockResolvedValue(null);
-    render(<WmsCycleCounts initial={[plan({ id: 7 })]} today={TODAY} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /Запустить/ }));
-
-    await waitFor(() => expect(wh.runCyclePlan).toHaveBeenCalledWith(7));
-    await waitFor(() => expect(wh.fetchCyclePlans).toHaveBeenCalled());
-    expect(pushMock).not.toHaveBeenCalled();
-  });
+it("смена org игнорирует поздний сбой списка предыдущего юрлица", async () => {
+  const old = deferred<Response>();
+  vi.stubGlobal("fetch", vi.fn((url: string) => url.endsWith("=1") ? old.promise : Promise.resolve(jsonResponse([plan({ id: 9, organization_id: 2, warehouse: "Компания Б склад" })]))));
+  render(<WmsCycleCounts {...props} initial={[]} initialOrganizationId={null} />);
+  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "1" } });
+  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "2" } });
+  await screen.findByText("Компания Б склад");
+  await act(async () => old.reject(new Error("Old connection failed")));
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(screen.getByText("Компания Б склад")).toBeInTheDocument();
 });

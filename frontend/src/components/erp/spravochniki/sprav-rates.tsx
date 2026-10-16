@@ -1,5 +1,7 @@
 "use client";
 
+import { businessDate } from "@/lib/business-date";
+
 import { useState } from "react";
 import { CalendarDays, Clock, Percent, Plus } from "lucide-react";
 import {
@@ -70,7 +72,7 @@ function computeBars<T extends { start_date: string; end_date: string | null }>(
 // ── Component ────────────────────────────────────────────────────────────────
 
 export function SpravRates({ initialCurrencyRates, initialVatRates }: Props) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = businessDate();
 
   const currencies = [...new Set(initialCurrencyRates.map((r) => r.currency_code))];
   const tabs = [...currencies, "НДС"];

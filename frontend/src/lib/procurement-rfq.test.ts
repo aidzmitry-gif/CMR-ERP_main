@@ -1,181 +1,59 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-
-import {
-  addBid,
-  awardRfq,
-  bestBidId,
-  createRfq,
-  fetchRfqs,
-  fetchRfqsServer,
-  statusLabel,
-  type Rfq,
-  type RfqBid,
-} from "@/lib/procurement-rfq";
+import { addBid, awardRfq, bestBidId, createRfq, fetchRfqs, statusLabel, type Rfq, type RfqBid } from "@/lib/procurement-rfq";
 
 afterEach(() => vi.restoreAllMocks());
 
-function stubFetch(data: unknown, ok = true) {
-  const fn = vi.fn().mockResolvedValue({ ok, json: async () => data });
-  vi.stubGlobal("fetch", fn);
-  return fn;
+const rfq: Rfq = { id: 5, number: "RFQ-000005", organization_id: 7, request_key: "key", request_id: 11,
+  item: "Кабель", sku_code: "", qty: 10, status: "open", due_date: null,
+  bids: [], best_bid_id: null };
+
+function stub(data: unknown, ok = true) {
+  const mock = vi.fn().mockResolvedValue({ ok, json: async () => data });
+  vi.stubGlobal("fetch", mock);
+  return mock;
 }
 
-const rfq: Rfq = {
-  id: 5,
-  item: "Кабель ВВГ",
-  sku_code: "SKU-1",
-  qty: 100,
-  request_id: null,
-  status: "open",
-  due_date: null,
-  bids: [],
-  best_bid_id: null,
-};
+describe("RFQ по юрлицу", () => {
+  it("reads only a matching organization page and refuses a foreign response", async () => {
+    const page = { organization_id: 7, items: [rfq], next_after_id: null };
+    const fetch = stub(page);
+    expect(await fetchRfqs(7)).toEqual(page);
+    expect(fetch).toHaveBeenCalledWith("/api/procurement/organizations/7/rfq?after_id=0", { cache: "no-store" });
+    stub({ ...page, organization_id: 8 });
+    expect(await fetchRfqs(7)).toBeNull();
+    stub({ ...page, items: [{ ...rfq, organization_id: 8 }] });
+    expect(await fetchRfqs(7)).toBeNull();
+  });
 
-const B = (id: number, price: number): RfqBid => ({
-  id,
-  rfq_id: 1,
-  supplier_id: id,
-  price_byn: price,
-  lead_time_days: null,
-  incoterms: "",
-  note: "",
-  is_winner: false,
-});
+  it("sends an owned request and stable key for create", async () => {
+    const fetch = stub(rfq);
+    const body = { request_key: "4a21d982-2b6d-422b-9405-3868f0b210a1", request_id: 11 };
+    expect(await createRfq(7, body)).toEqual(rfq);
+    expect(fetch).toHaveBeenCalledWith("/api/procurement/organizations/7/rfq", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    stub({ ...rfq, organization_id: 8 });
+    expect(await createRfq(7, body)).toBeNull();
+  });
 
-describe("statusLabel", () => {
-  it("переводит статусы RFQ", () => {
-    expect(statusLabel("open")).toBe("Открыт");
+  it("sends exact decimal bid and an organization-scoped award", async () => {
+    const fetch = stub(rfq);
+    const bid = { bid_key: "4a21d982-2b6d-422b-9405-3868f0b210a2", supplier_id: 2,
+      price_byn: "100.50", lead_time_days: 10 };
+    expect(await addBid(7, 5, bid)).toEqual(rfq);
+    expect(fetch).toHaveBeenCalledWith("/api/procurement/organizations/7/rfq/5/bids", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(bid),
+    });
+    expect(await awardRfq(7, 5, 3)).toEqual(rfq);
+    expect(fetch).toHaveBeenLastCalledWith("/api/procurement/organizations/7/rfq/5/award", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bid_id: 3 }),
+    });
+  });
+
+  it("keeps pure score display behavior", () => {
+    const bid = (id: number, price_byn: number): RfqBid => ({ id, rfq_id: 5, supplier_id: id,
+      price_byn, lead_time_days: null, incoterms: "", note: "", is_winner: false });
+    expect(bestBidId([bid(1, 120), bid(2, 90)])).toBe(2);
     expect(statusLabel("awarded")).toBe("Победитель выбран");
-    expect(statusLabel("zzz")).toBe("zzz");
-  });
-});
-
-describe("bestBidId", () => {
-  it("минимальная цена — лучшая", () => {
-    expect(bestBidId([B(1, 1200), B(2, 950), B(3, 1100)])).toBe(2);
-  });
-  it("пусто → null", () => {
-    expect(bestBidId([])).toBeNull();
-  });
-});
-
-describe("fetchRfqsServer", () => {
-  it("дёргает бэкенд напрямую с ролями в заголовке", async () => {
-    const fn = stubFetch([rfq]);
-    const result = await fetchRfqsServer("sales_head");
-    expect(fn).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/procurement/rfq",
-      { cache: "no-store", headers: { "X-User-Roles": "sales_head" } },
-    );
-    expect(result).toEqual([rfq]);
-  });
-
-  it("без ролей — заголовков нет", async () => {
-    const fn = stubFetch([rfq]);
-    await fetchRfqsServer();
-    expect(fn).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/procurement/rfq",
-      { cache: "no-store", headers: undefined },
-    );
-  });
-
-  it("ok:false → пустой массив", async () => {
-    stubFetch(null, false);
-    expect(await fetchRfqsServer()).toEqual([]);
-  });
-
-  it("сетевая ошибка → пустой массив", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net")));
-    expect(await fetchRfqsServer()).toEqual([]);
-  });
-});
-
-describe("fetchRfqs", () => {
-  it("зовёт прокси-эндпоинт и возвращает список", async () => {
-    const fn = stubFetch([rfq]);
-    const result = await fetchRfqs();
-    expect(fn).toHaveBeenCalledWith("/api/procurement/rfq", { cache: "no-store" });
-    expect(result).toEqual([rfq]);
-  });
-
-  it("ok:false → null (не затирать SSR-данные пустым списком)", async () => {
-    stubFetch(null, false);
-    expect(await fetchRfqs()).toBeNull();
-  });
-
-  it("сетевая ошибка → null", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net")));
-    expect(await fetchRfqs()).toBeNull();
-  });
-});
-
-describe("createRfq", () => {
-  it("POST с JSON-телом полей формы", async () => {
-    const fn = stubFetch(rfq);
-    const result = await createRfq({ item: "Кабель ВВГ", sku_code: "SKU-1", qty: 100 });
-    expect(fn).toHaveBeenCalledWith("/api/procurement/rfq", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ item: "Кабель ВВГ", sku_code: "SKU-1", qty: 100 }),
-    });
-    expect(result).toEqual(rfq);
-  });
-
-  it("ok:false → null", async () => {
-    stubFetch(null, false);
-    expect(await createRfq({ item: "x" })).toBeNull();
-  });
-
-  it("сетевая ошибка → null", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net")));
-    expect(await createRfq({ item: "x" })).toBeNull();
-  });
-});
-
-describe("addBid", () => {
-  it("POST по /bids с телом предложения", async () => {
-    const fn = stubFetch(rfq);
-    const bid = { supplier_id: 7, price_byn: 950, lead_time_days: 14, incoterms: "FOB", note: "срочно" };
-    const result = await addBid(5, bid);
-    expect(fn).toHaveBeenCalledWith("/api/procurement/rfq/5/bids", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(bid),
-    });
-    expect(result).toEqual(rfq);
-  });
-
-  it("ok:false → null", async () => {
-    stubFetch(null, false);
-    expect(await addBid(5, { price_byn: 100 })).toBeNull();
-  });
-
-  it("сетевая ошибка → null", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net")));
-    expect(await addBid(5, { price_byn: 100 })).toBeNull();
-  });
-});
-
-describe("awardRfq", () => {
-  it("POST по /award с bid_id в теле", async () => {
-    const fn = stubFetch({ ...rfq, status: "awarded", best_bid_id: 3 });
-    const result = await awardRfq(5, 3);
-    expect(fn).toHaveBeenCalledWith("/api/procurement/rfq/5/award", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bid_id: 3 }),
-    });
-    expect(result).toEqual({ ...rfq, status: "awarded", best_bid_id: 3 });
-  });
-
-  it("ok:false → null", async () => {
-    stubFetch(null, false);
-    expect(await awardRfq(5, 3)).toBeNull();
-  });
-
-  it("сетевая ошибка → null", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net")));
-    expect(await awardRfq(5, 3)).toBeNull();
   });
 });

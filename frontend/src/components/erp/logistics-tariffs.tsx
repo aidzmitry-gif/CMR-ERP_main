@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Card, EmptyState, GhostButton, Loading, Pill } from "@/components/erp/logistics-ui";
 import { quoteTariff } from "@/lib/logistics-domain";
@@ -22,6 +22,8 @@ export function LogisticsTariffs() {
   const [tariffs, setTariffs] = useState<CarrierTariff[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const zoneScope = useRef(zone);
+  const writing = useRef(false);
 
   // параметры калькулятора котировки
   const [weight, setWeight] = useState(8);
@@ -46,21 +48,30 @@ export function LogisticsTariffs() {
   }
 
   async function saveEdit(carrierCode: string) {
+    if (writing.current || !editing) return;
+    const targetZone = zone;
     setTariffError(null);
     const patch: TariffPatch = {};
     for (const key of ["price_w5", "price_w10", "price_w30", "over30_per_kg", "pickup_fee"] as const) {
-      const v = parseFloat(draft[key]);
-      if (Number.isFinite(v) && v >= 0) patch[key] = v;
+      const raw = draft[key]?.trim() ?? "";
+      const v = Number(raw.replace(",", "."));
+      if (!/^(?:\d+(?:[.,]\d+)?|[.,]\d+)$/.test(raw) || !Number.isFinite(v)) {
+        setTariffError("Заполните все ставки неотрицательными числами. Неверное поле не будет пропущено."); return;
+      }
+      patch[key] = v;
     }
-    setBusy(true);
-    const updated = await patchTariff(carrierCode, zone, patch);
-    setBusy(false);
+    writing.current = true; setBusy(true);
+    try {
+    const updated = await patchTariff(carrierCode, targetZone, patch);
     if (!updated) {
       setTariffError("Не удалось сохранить тариф.");
       return;
     }
     setEditing(null);
-    setTariffs(await fetchTariffs(zone));
+    const rows = await fetchTariffs(targetZone);
+    if (zoneScope.current === targetZone) setTariffs(rows);
+    } catch { setTariffError("Сохранение тарифа не подтверждено. Проверьте результат перед повтором."); }
+    finally { writing.current = false; setBusy(false); }
   }
 
   function cancelEdit() {
@@ -85,8 +96,11 @@ export function LogisticsTariffs() {
   }, []);
 
   useEffect(() => {
+    zoneScope.current = zone;
     if (!zone) return;
-    void fetchTariffs(zone).then(setTariffs);
+    let alive = true;
+    void fetchTariffs(zone).then(rows => { if (alive) setTariffs(rows); });
+    return () => { alive = false; };
   }, [zone]);
 
   async function onSeed() {
@@ -121,7 +135,8 @@ export function LogisticsTariffs() {
           {zones.map((z) => (
             <button
               key={z.code}
-              onClick={() => setZone(z.code)}
+              disabled={busy}
+              onClick={() => { if (writing.current || z.code === zone) return; cancelEdit(); setTariffs([]); setZone(z.code); }}
               className={
                 z.code === zone
                   ? "rounded-lg border border-accent bg-blue-50 px-3 py-2 text-left text-sm"

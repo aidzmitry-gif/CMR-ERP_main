@@ -10,6 +10,7 @@ vi.mock("@/lib/api", () => ({
 vi.mock("@/lib/role-server", () => ({
   currentRole: vi.fn().mockResolvedValue("sales"),
   currentAccessToken: vi.fn().mockResolvedValue("synthetic-test-token"),
+  currentDevUsername: vi.fn().mockResolvedValue("manager"),
 }));
 vi.mock("@/components/app-shell", () => ({ AppShell: vi.fn() }));
 vi.mock("@/components/kanban/deals-workspace", () => ({ DealsWorkspace: vi.fn() }));
@@ -30,7 +31,7 @@ describe("deal board and KPI access are independent", () => {
     expect(Boolean(workspace.props.authError)).toBe(false);
     expect(workspace.props.kpiAccessDenied).toBe(true);
     expect(workspace.props.initialKpis).toEqual([]);
-    expect(fetchBoardResult).toHaveBeenCalledWith("sales", "new_clients", "synthetic-test-token");
+    expect(fetchBoardResult).toHaveBeenCalledWith("sales", "new_clients", "synthetic-test-token", "manager");
   });
 
   it("preserves a board permission failure even when KPIs succeed", async () => {

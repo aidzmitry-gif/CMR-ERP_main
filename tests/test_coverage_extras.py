@@ -44,11 +44,12 @@ async def test_stock_reserve_skip_branches(session):
     from modules.integrations.stock import StockService
 
     svc = StockService()
-    # пустой список / без кода / нулевое qty / неизвестный SKU — всё пропускается
+    # Пустые позиции пропускаются; неизвестный SKU теперь отклоняет всю корзину.
     assert await svc.reserve(session, []) == []
     assert await svc.reserve(session, [{"sku_code": "", "qty": 1}]) == []
     assert await svc.reserve(session, [{"sku_code": "X", "qty": 0}]) == []
-    assert await svc.reserve(session, [{"sku_code": "НЕТ", "qty": 5}]) == []
+    with pytest.raises(ValueError, match="Нет складского остатка"):
+        await svc.reserve(session, [{"sku_code": "НЕТ", "qty": 5}])
 
     session.add(StockItem(sku_code="RS-1", warehouse="Главный", qty_available=100, qty_reserved=2))
     await session.commit()
@@ -107,28 +108,29 @@ async def test_ai_endpoints_404_when_enabled(ai_api):
     ).status_code == 404
 
 
-# --- Защитные ветки: интеграции не подключены (503) ---
+# --- Локальный lifecycle без исходящей 1С ---
 
 
-async def test_document_503_without_onec(api_no_gateways):
+async def test_document_issues_locally_without_onec(api_no_gateways):
     deal = (
         await api_no_gateways.post("/sales/deals", json={"number": "NO-1", "title": "t", "counterparty": "c"})
     ).json()
-    r = await api_no_gateways.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
-    assert r.status_code == 503
+    r = await api_no_gateways.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "order"})
+    assert r.status_code == 201, r.text
+    assert r.json()["status"] == "posted" and r.json()["onec_ref"] is None
 
 
-async def test_decide_503_without_onec(session, api_no_gateways):
-    from modules.sales.models import Deal, DealDocument
-
-    deal = Deal(number="DEC-NO", title="t", counterparty="c")
-    session.add(deal)
-    await session.flush()
-    doc = DealDocument(deal_id=deal.id, kind="contract", number="ДГ-DEC", status="pending_approval")
-    session.add(doc)
-    await session.commit()
-    r = await api_no_gateways.post(f"/sales/documents/{doc.id}/decide", json={"approved": True})
-    assert r.status_code == 503
+async def test_approved_contract_issues_locally_without_onec(api_no_gateways):
+    deal = (await api_no_gateways.post(
+        "/sales/deals", json={"number": "DEC-NO", "title": "t", "counterparty": "c"}
+    )).json()
+    pending = await api_no_gateways.post(
+        f"/sales/deals/{deal['id']}/documents", json={"kind": "contract"}
+    )
+    assert pending.status_code == 201, pending.text
+    r = await api_no_gateways.post(f"/sales/documents/{pending.json()['id']}/decide", json={"approved": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "posted" and r.json()["onec_ref"] is None
 
 
 async def test_egr_503_without_registry(api_no_gateways):
@@ -141,7 +143,11 @@ async def test_create_activity_with_explicit_date(api):
     assert r.status_code == 201 and r.json()["date"] == "2026-06-01"
 
 
-async def test_lead_requalify_keeps_routed_status(api):
+async def test_lead_requalify_keeps_routed_status(api, session):
+    from core.domain.models import User
+    session.add(User(username="coverage-owner", full_name="Coverage Owner", employee_id=902,
+                     department="Продажи", role="sales", status="active"))
+    await session.commit()
     lead = (await api.post("/leads", json={"source": "site", "company": "ООО Реквал"})).json()
     await api.post(f"/leads/{lead['id']}/qualify")  # new → qualified
     await api.post(f"/leads/{lead['id']}/route")  # → routed

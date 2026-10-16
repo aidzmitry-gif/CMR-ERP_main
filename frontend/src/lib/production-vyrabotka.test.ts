@@ -24,7 +24,19 @@ const EMPTY_PAYROLL: Payroll = {
   total_base: 0,
   total_premium: 0,
   total_payroll: 0,
+  calculation_scope: "management_estimate",
+  accounting_posting_available: false,
+  statutory_payroll_certified: false,
 };
+
+it("strict payroll and worker reads reject unavailable data instead of manufacturing zero", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({}, false)));
+  await expect(fetchPayroll(true)).rejects.toThrow();
+  await expect(fetchPayrollServer("director", true)).rejects.toThrow();
+  await expect(fetchWorkers(true)).rejects.toThrow();
+  await expect(fetchPayroll()).resolves.toEqual(EMPTY_PAYROLL);
+  await expect(fetchWorkers()).resolves.toEqual([]);
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -93,6 +105,9 @@ describe("fetchPayrollServer", () => {
       total_base: 500,
       total_premium: 62.5,
       total_payroll: 562.5,
+      calculation_scope: "management_estimate",
+      accounting_posting_available: false,
+      statutory_payroll_certified: false,
     };
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(payload));
     vi.stubGlobal("fetch", fetchMock);

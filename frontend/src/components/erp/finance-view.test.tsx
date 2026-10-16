@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FinanceView } from "@/components/erp/finance-view";
@@ -41,9 +41,42 @@ const SUMMARY = {
   ],
 };
 
+const LEDGER_REPORT = {
+  organization_id: 7,
+  from: "2026-09-01",
+  to: "2026-09-30",
+  status: "preliminary",
+  pending_documents: 0,
+  review_items: [],
+  pnl: { income: "20.00", expenses: "3.33", profit: "16.67" },
+  pnl_movements: [],
+  balance: { assets: "31.67", liabilities: "14.00", equity: "0.00", current_result: "16.67", difference: "1.00" },
+  balance_movements: [
+    { entry_id: 9, source: "opening-import", date: "2026-09-01", account: "51", title: "Банк", line_id: 10, currency: "BYN", side: "debit", amount: "15.00", dimensions: {}, category: "asset", period_bucket: "opening" },
+  ],
+  cashflow_ledger: {
+    opening: "50.00", external_inflow: "100.00", external_outflow: "40.00", external_net: "60.00",
+    internal_net: "0.00", internal_count: 0, unclassified_inflow: "0.00", unclassified_outflow: "0.00",
+    unclassified_net: "0.00", unclassified_count: 0, opening_adjustment_net: "0.00", opening_adjustment_count: 0,
+    closing: "110.00",
+    activities: {
+      operating: { inflow: "100.00", outflow: "40.00", net: "60.00" },
+      investing: { inflow: "0.00", outflow: "0.00", net: "0.00" },
+      financing: { inflow: "0.00", outflow: "0.00", net: "0.00" },
+    },
+  },
+  cash_movements: [],
+};
+
+function ledgerResponses() {
+  responders["accounting/organizations"] = [{ id: 7, name: "Организация", unp: "123" }];
+  responders["accounting/organizations/7/reports"] = LEDGER_REPORT;
+}
+
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
-  fetchMock.mockClear();
+  fetchMock.mockReset();
+  fetchMock.mockImplementation((input: unknown) => Promise.resolve(respond(String(input))));
   // Безопасные значения по умолчанию для всех эндпоинтов (summary-таб стреляет на маунте).
   responders = {
     "finance/summary": SUMMARY,
@@ -60,15 +93,99 @@ beforeEach(() => {
   };
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 // ru-RU разделитель разрядов — неразрывный пробел; \s покрывает его в regexp.
 const byn = (whole: string) => new RegExp(`${whole.replace(/\B(?=(\d{3})+(?!\d))/g, "\\s")}\\sBYN`);
 
 describe("FinanceView", () => {
+  it("возврат к прежнему счёту создаёт новый запрос и не восстанавливает прежние суммы; поздний ответ другого счёта игнорируется", async () => {
+    responders["finance/bank-accounts"] = [{ id: 2, code: "bank-2", title: "Банк 2", currency: "BYN", opening_balance: "0.00", is_active: true }];
+    const calendar = { as_of: "2026-07-19", currency: "BYN", mode: "day", opening_balance: "5678.00", weeks: [],
+      buckets: [{ bucket_start: "2026-07-20", inflow: "0.00", outflow: "0.00", net: "0.00", cumulative: "5678.00" }], not_dated: { inflow: "0.00", outflow: "0.00" } };
+    responders["finance/cashflow-forecast"] = calendar;
+    render(<FinanceView initialTab="calendar" />);
+    await screen.findAllByText(byn("5678"));
+    const resolves: ((value: ReturnType<typeof respond>) => void)[] = [];
+    fetchMock.mockImplementation(input => String(input).includes("cashflow-forecast")
+      ? new Promise(r => { resolves.push(r); }) : Promise.resolve(respond(String(input))));
+    fireEvent.change(screen.getByLabelText("Банк-счёт"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Банк-счёт"), { target: { value: "" } });
+    expect(screen.queryAllByText(byn("5678"))).toHaveLength(0);
+    expect(screen.getByText("Загрузка календаря…")).toBeInTheDocument();
+    await act(async () => resolves[0]({ ok: true, status: 200, json: async () => calendar }));
+    expect(screen.queryAllByText(byn("5678"))).toHaveLength(0);
+    await act(async () => resolves[1]({ ok: false, status: 500, json: async () => null }));
+    expect(await screen.findByText(/Нет связи с прогнозом/)).toBeInTheDocument();
+    expect(screen.queryAllByText(byn("5678"))).toHaveLength(0);
+  });
+  it("ошибка платежей не маскируется пустым списком при успешной сводке", async () => {
+    responders["finance/payments"] = "error";
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+    expect(await screen.findByText(/движение платежей недоступно/)).toBeInTheDocument();
+    expect(screen.queryByText("Платежей пока нет")).not.toBeInTheDocument();
+    expect(screen.getByText("Фактическая маржа (по фактам)")).toBeInTheDocument();
+  });
+
+  it("при смене банковского счёта старые суммы исчезают сразу и не возвращаются при 500", async () => {
+    responders["finance/bank-accounts"] = [1, 2].map(id => ({ id, code: `bank-${id}`, title: `Банк ${id}`, currency: "BYN", opening_balance: "0.00", is_active: true }));
+    responders["finance/cashflow-forecast"] = {
+      as_of: "2026-07-19", currency: "BYN", mode: "day", opening_balance: "1234.00", weeks: [],
+      buckets: [{ bucket_start: "2026-07-20", inflow: "0.00", outflow: "0.00", net: "0.00", cumulative: "1234.00" }],
+      not_dated: { inflow: "0.00", outflow: "0.00" },
+    };
+    render(<FinanceView initialTab="calendar" />);
+    await screen.findByRole("option", { name: /bank-1/ });
+    await screen.findAllByText(byn("1234"));
+    let resolve!: (value: ReturnType<typeof respond>) => void;
+    fetchMock.mockImplementation((input) => String(input).includes("account_id=2")
+      ? new Promise((r) => { resolve = r; }) : Promise.resolve(respond(String(input))));
+    fireEvent.change(screen.getByLabelText("Банк-счёт"), { target: { value: "2" } });
+    expect(screen.queryAllByText(byn("1234"))).toHaveLength(0);
+    expect(screen.getByText("Загрузка календаря…")).toBeInTheDocument();
+    await act(async () => resolve({ ok: false, status: 500, json: async () => null }));
+    expect(await screen.findByText(/Нет связи с прогнозом/)).toBeInTheDocument();
+    expect(screen.queryAllByText(byn("1234"))).toHaveLength(0);
+  });
+
+  it.each(["100.001", "1e3", "9007199254740991", "70368744177664.01"])("банковский остаток %s не отправляется с ошибочной точностью", async (opening) => {
+    render(<FinanceView initialTab="calendar" />);
+    fireEvent.click(await screen.findByRole("button", { name: "+ Завести счёт" }));
+    fireEvent.change(screen.getByPlaceholderText("main"), { target: { value: "bank" } });
+    fireEvent.change(screen.getByPlaceholderText("Расчётный счёт BYN"), { target: { value: "Банк" } });
+    fireEvent.change(screen.getByLabelText("Сальдо на старте"), { target: { value: opening } });
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    expect(screen.getByText(/Сальдо должно быть числом/)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toHaveLength(0);
+  });
+
+  it.each(["0", "100.01", "-100.01", "999999999999.99"])("допустимый банковский остаток %s сохраняется", async (opening) => {
+    render(<FinanceView initialTab="calendar" />);
+    fireEvent.click(await screen.findByRole("button", { name: "+ Завести счёт" }));
+    fireEvent.change(screen.getByPlaceholderText("main"), { target: { value: "bank" } });
+    fireEvent.change(screen.getByPlaceholderText("Расчётный счёт BYN"), { target: { value: "Банк" } });
+    fireEvent.change(screen.getByLabelText("Сальдо на старте"), { target: { value: opening } });
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toBe(true));
+    const posted = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "POST");
+    expect(JSON.parse(String((posted![1] as RequestInit).body)).opening_balance).toBe(opening === "0" ? "0.00" : opening);
+  });
+  it("opens the ledger P&L requested by the accountant workspace link", async () => {
+    ledgerResponses();
+    render(<FinanceView initialTab="pnl" />);
+    expect(await screen.findByRole("region", { name: "Бухгалтерский P&L" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Касса (ДДС-lite)" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/finance/summary"))).toBe(false);
+  });
+
   it("рендерит заголовок и все вкладки финансов", () => {
     render(<FinanceView />);
     expect(screen.getByRole("heading", { name: "Финансы" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Бухгалтерии" })).toHaveAttribute("href", "/erp/accounting");
+    expect(screen.getByText(/1С остаётся архивом истории и источником сверки до приёмки пилота/)).toBeInTheDocument();
     for (const label of ["Касса и маржа", "Платежи", "Aging", "Cash-flow", "P&L", "Баланс", "Сверка 1С"]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
@@ -193,53 +310,37 @@ describe("FinanceView", () => {
     ).toBe(false);
   });
 
-  it("вкладка «Баланс» рендерит активы/пассивы и «нет связи с 1С» для пустых полей", async () => {
-    responders["finance/balance-sheet"] = {
-      as_of: "2026-07-18",
-      currency: "BYN",
-      accounts_receivable: "9000.00",
-      cash: null,
-      inventory_value: null,
-      total_assets: "9000.00",
-      accounts_payable: "3000.00",
-      payroll_payable: "1000.00",
-      tax_payable: "500.00",
-      total_liabilities: "4500.00",
-      equity: "4500.00",
-    };
+  it("вкладка «Баланс» монтирует отчёт бухгалтерской книги, а не legacy balance-sheet", async () => {
+    ledgerResponses();
     render(<FinanceView />);
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "Баланс" }));
 
-    expect(await screen.findByText("Дебиторская задолженность")).toBeInTheDocument();
-    expect(screen.getByText("ИТОГО Активы")).toBeInTheDocument();
-    expect(screen.getByText("Капитал (Equity)")).toBeInTheDocument();
-    // cash и inventory = null → две пометки «нет связи с 1С»
-    expect(screen.getAllByText("нет связи с 1С").length).toBe(2);
+    await screen.findByRole("option", { name: "Организация · 123" });
+    fireEvent.change(screen.getByLabelText("Организация баланса"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("Начало периода баланса"), { target: { value: "2026-09-01" } });
+    fireEvent.change(screen.getByLabelText("Конец периода баланса"), { target: { value: "2026-09-30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Применить" }));
+
+    expect(await screen.findByText("31.67 BYN")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Расхождение баланса: 1.00 BYN");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/finance/balance-sheet"))).toBe(false);
   });
 
-  it("вкладка «P&L» показывает строки отчёта и итоговую операционную прибыль", async () => {
-    responders["finance/pnl"] = {
-      from_date: "2026-01-01",
-      to_date: "2026-07-18",
-      currency: "BYN",
-      revenue: "50000.00",
-      cogs: "30000.00",
-      freight: "2000.00",
-      gross_profit: "18000.00",
-      payroll: "6000.00",
-      opex: "1000.00",
-      tax: "500.00",
-      bank_fee: "100.00",
-      operating_profit: "10400.00",
-    };
+  it("вкладка «P&L» монтирует отчёт бухгалтерской книги, а не legacy P&L", async () => {
+    ledgerResponses();
     render(<FinanceView />);
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "P&L" }));
 
-    expect(await screen.findByText("Выручка (признанная, accrual)")).toBeInTheDocument();
-    expect(screen.getByText("Операционная прибыль")).toBeInTheDocument();
-    expect(screen.getByText(byn("10400"))).toBeInTheDocument(); // operating_profit
+    await screen.findByRole("option", { name: "Организация · 123" });
+    fireEvent.change(screen.getByLabelText("Организация P&L"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("Начало периода P&L"), { target: { value: "2026-09-01" } });
+    fireEvent.change(screen.getByLabelText("Конец периода P&L"), { target: { value: "2026-09-30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Применить" }));
+
+    expect(await screen.findByText("16.67 BYN")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/finance/pnl"))).toBe(false);
   });
 
   it("вкладка «Сверка 1С» без источника показывает «сверка не настроена»", async () => {
@@ -395,26 +496,20 @@ describe("FinanceView", () => {
     expect(await screen.findByText(/Не удалось получить сверку/)).toBeInTheDocument();
   });
 
-  it("вкладка «ДДС» рендерит KPI-карточки, разбивку и «нет связи с 1С» для остатка", async () => {
-    responders["finance/cashflow"] = {
-      period_from: "2026-01-01",
-      period_to: "2026-07-19",
-      currency: "BYN",
-      inflows: "12000.00",
-      outflows: "5000.00",
-      net_cashflow: "7000.00",
-      bank_balance: null,
-      breakdown: { receivable: "12000.00", payroll: "3000.00" },
-    };
+  it("вкладка «ДДС» монтирует отчёт бухгалтерской книги, а не legacy ДДС", async () => {
+    ledgerResponses();
     render(<FinanceView />);
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "ДДС" }));
 
-    expect(await screen.findByText("Остаток на счёте")).toBeInTheDocument();
-    expect(screen.getByText("нет связи с 1С")).toBeInTheDocument();
-    expect(screen.getByText("Поступления (счета)")).toBeInTheDocument();
-    expect(screen.getByText("ФОТ")).toBeInTheDocument();
-    expect(screen.getByText(byn("7000"))).toBeInTheDocument(); // net
+    await screen.findByRole("option", { name: "Организация · 123" });
+    fireEvent.change(screen.getByLabelText("Организация ДДС"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("Начало периода ДДС"), { target: { value: "2026-09-01" } });
+    fireEvent.change(screen.getByLabelText("Конец периода ДДС"), { target: { value: "2026-09-30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Применить" }));
+
+    expect(await screen.findByText("60.00 BYN")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/finance/cashflow"))).toBe(false);
   });
 
   it("вкладка «Сверка 1С» с источником показывает совпавшие и расхождения по сторонам", async () => {
@@ -425,6 +520,8 @@ describe("FinanceView", () => {
       matched: [{ ref: "П-1", amount: "100.00", counterparty_ref: "192766048" }],
       only_in_erp: [{ ref: "П-2", amount: "50.00", counterparty_ref: null }],
       only_in_1c: [{ ref: null, amount: "75.00", counterparty_ref: null }],
+      amount_mismatch: [{ ref: "П-3", erp_amount: "300.00", one_c_amount: "301.00", counterparty_ref: null }],
+      invalid_source_rows: [{ ref: "П-4", counterparty_ref: null, reason: "invalid_amount" }],
     };
     render(<FinanceView />);
     await screen.findByText("Касса (ДДС-lite)");
@@ -435,6 +532,24 @@ describe("FinanceView", () => {
     expect(screen.getByText(/Совпало · 1/)).toBeInTheDocument();
     expect(screen.getByText(/Только в ERP · 1/)).toBeInTheDocument();
     expect(screen.getByText(/Только в 1С · 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Расхождение сумм · 1/)).toBeInTheDocument();
+    expect(screen.getByText(/П-3: ERP 300.00 BYN, 1С 301.00 BYN/)).toBeInTheDocument();
+    expect(screen.getByText(/Ошибки данных 1С · 1/)).toBeInTheDocument();
+    expect(screen.getByText(/П-4: некорректная сумма/)).toBeInTheDocument();
+  });
+
+  it("вкладка «Сверка 1С» показывает причину отсутствия проверенного источника", async () => {
+    responders["finance/reconcile-1c"] = {
+      as_of: "2026-07-19",
+      source: "1c",
+      source_available: false,
+      source_reason: "Платёжный OData-адаптер ещё не проверен",
+      matched: [], only_in_erp: [], only_in_1c: [],
+    };
+    render(<FinanceView />);
+    await screen.findByText("Касса (ДДС-lite)");
+    fireEvent.click(screen.getByRole("button", { name: "Сверка 1С" }));
+    expect(await screen.findByText(/Платёжный OData-адаптер ещё не проверен/)).toBeInTheDocument();
   });
 
   it("вкладка «Календарь» позволяет завести счёт и показывает пустой горизонт без платежей", async () => {
@@ -488,21 +603,35 @@ describe("FinanceView", () => {
     ).toBe(false);
   });
 
-  it("вкладка «P&L» показывает ошибку при сбое сети", async () => {
-    responders["finance/pnl"] = "error";
+  it("вкладка «P&L» показывает ошибку доступа к бухгалтерской книге", async () => {
+    responders["accounting/organizations"] = [{ id: 7, name: "Организация", unp: "123" }];
+    responders["accounting/organizations/7/reports"] = "error";
     render(<FinanceView />);
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "P&L" }));
 
-    expect(await screen.findByText(/Нет данных P&L/)).toBeInTheDocument();
+    await screen.findByRole("option", { name: "Организация · 123" });
+    fireEvent.change(screen.getByLabelText("Организация P&L"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("Начало периода P&L"), { target: { value: "2026-09-01" } });
+    fireEvent.change(screen.getByLabelText("Конец периода P&L"), { target: { value: "2026-09-30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Применить" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить P&L бухгалтерской книги");
   });
 
   it("вкладка «Баланс» показывает ошибку при сбое сети", async () => {
-    responders["finance/balance-sheet"] = "error";
+    responders["accounting/organizations"] = [{ id: 7, name: "Организация", unp: "123" }];
+    responders["accounting/organizations/7/reports"] = "error";
     render(<FinanceView />);
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "Баланс" }));
 
-    expect(await screen.findByText(/Нет данных баланса/)).toBeInTheDocument();
+    await screen.findByRole("option", { name: "Организация · 123" });
+    fireEvent.change(screen.getByLabelText("Организация баланса"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("Начало периода баланса"), { target: { value: "2026-09-01" } });
+    fireEvent.change(screen.getByLabelText("Конец периода баланса"), { target: { value: "2026-09-30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Применить" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить баланс бухгалтерской книги");
   });
 });

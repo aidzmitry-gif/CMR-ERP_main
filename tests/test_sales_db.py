@@ -90,6 +90,64 @@ async def test_update_deal_flags(api):
     assert r2["starred"] is True
 
 
+async def test_deal_field_history_records_actor_time_before_after_and_exact_deal(api):
+    deal = (await api.post("/sales/deals", json={
+        "number": "AUD-1", "title": "Первый", "counterparty": "ООО Тест", "amount": 100,
+    })).json()
+    other = (await api.post("/sales/deals", json={
+        "number": "AUD-2", "title": "Другой", "counterparty": "ООО Тест", "amount": 50,
+    })).json()
+    path = f"/sales/deals/{deal['id']}"
+    assert (await api.patch(path, json={"title": "Второй", "amount": 120})).status_code == 200
+    first = (await api.get(f"{path}/field-history")).json()
+    assert first["deal_id"] == deal["id"]
+    assert first["next_before_id"] is None
+    assert len(first["items"]) == 1
+    row = first["items"][0]
+    assert row["actor"] and row["changed_at"] and row["deal_number"] == "AUD-1"
+    assert row["organization_id"] is None  # No inferred owner for an unbound legacy deal.
+    assert row["changes"] == {"title": {"before": "Первый", "after": "Второй"},
+                              "amount": {"before": "100.00", "after": "120.00"}}
+    assert (await api.patch(path, json={"title": "Второй"})).status_code == 200
+    assert len((await api.get(f"{path}/field-history")).json()["items"]) == 1
+    assert (await api.patch(path, json={"title": "Третий"})).status_code == 200
+    latest = (await api.get(f"{path}/field-history?limit=1")).json()
+    assert latest["items"][0]["changes"]["title"]["after"] == "Третий"
+    assert latest["next_before_id"] == latest["items"][0]["id"]
+    older = (await api.get(f"{path}/field-history?limit=1&before_id={latest['next_before_id']}")).json()
+    assert older["items"][0]["id"] == row["id"]
+    assert (await api.get(f"/sales/deals/{other['id']}/field-history")).json()["items"] == []
+    assert (await api.get("/sales/deals/999999/field-history")).status_code == 404
+
+
+async def test_deal_card_edit_rejects_stale_snapshot_without_changing_fields(api):
+    deal = (await api.post("/sales/deals", json={
+        "number": "EDIT-CAS-1", "title": "Первый", "counterparty": "ООО Тест", "amount": 100,
+    })).json()
+    path = f"/sales/deals/{deal['id']}"
+    original = (await api.get(path)).json()
+    token = original["edit_token"]
+    assert len(token) == 64
+    assert (await api.patch(path, json={"title": "Второй"})).status_code == 200
+    stale = await api.patch(path, json={"title": "Затёртый", "expected_edit_token": token})
+    assert stale.status_code == 409
+    current = (await api.get(path)).json()
+    assert current["title"] == "Второй"
+    assert current["edit_token"] != token
+    edited = await api.patch(path, json={"expected_edit_token": current["edit_token"],
+                                         "title": "Третий"})
+    assert edited.status_code == 200
+    saved = (await api.get(path)).json()
+    assert saved["title"] == "Третий"
+    assert saved["edit_token"] != current["edit_token"]
+    assert edited.json()["id"] == deal["id"]
+    assert edited.json()["title"] == saved["title"]
+    assert edited.json()["edit_token"] == saved["edit_token"]
+    history = (await api.get(f"{path}/field-history")).json()["items"]
+    assert len(history) == 2  # Rejected edit is absent from the audit.
+    assert (await api.patch(path, json={"expected_edit_token": None, "title": "Нет"})).status_code == 422
+
+
 async def test_update_deal_next_step_at(api):
     """next_step_at (дата+время шага) сохраняется и читается независимо от next_step (текст)."""
     created = (
@@ -298,6 +356,57 @@ async def test_deal_contacts(api):
     assert len(primary) == 1 and primary[0]["id"] == c2["id"]
 
 
+async def test_ambiguous_counterparty_name_never_selects_or_changes_arbitrary_record(session, api):
+    from sqlalchemy import select
+
+    from core.domain.models import Contact, Counterparty, User
+
+    session.add(User(username="duplicate-owner", full_name="Duplicate Owner", employee_id=301,
+                     department="Продажи", role="sales", status="active", deal_visibility="own"))
+    first = Counterparty(name="Same client", unp="111111111")
+    second = Counterparty(name="Same client", unp="222222222")
+    session.add_all([first, second])
+    await session.flush()
+    primary = Contact(counterparty_id=first.id, full_name="Private first", is_primary=True)
+    candidate = Contact(counterparty_id=first.id, full_name="Private second")
+    foreign = Contact(counterparty_id=second.id, full_name="Other client", is_primary=True)
+    session.add_all([primary, candidate, foreign])
+    await session.commit()
+    rejected = await api.post("/sales/deals", json={
+        "number": "CP-AMBIGUOUS", "title": "Ambiguous client", "counterparty": "Same client",
+        "owner_id": 301,
+    })
+    assert rejected.status_code == 409, rejected.text
+    from modules.sales.models import Deal
+    assert (await session.scalar(select(Deal.id).where(Deal.number == "CP-AMBIGUOUS"))) is None
+    # Historical unresolved row: names alone must never bind shared MDM records.
+    legacy = Deal(number="CP-AMBIGUOUS", title="Ambiguous client", counterparty="Same client", owner_id=301)
+    session.add(legacy)
+    await session.commit()
+    headers = {"X-User": "duplicate-owner", "X-User-Roles": "sales"}
+    detail = await api.get(f"/sales/deals/{legacy.id}", headers=headers)
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["counterparty_ref"] is None
+    contacts = await api.get(f"/sales/deals/{legacy.id}/contacts", headers=headers)
+    assert contacts.status_code == 200 and contacts.json() == []
+    added = await api.post(f"/sales/deals/{legacy.id}/contacts",
+                           json={"full_name": "New", "is_primary": True}, headers=headers)
+    assert added.status_code == 409, added.text
+    changed = await api.patch(f"/sales/contacts/{candidate.id}/primary", headers=headers)
+    assert changed.status_code == 404, changed.text
+    await session.refresh(legacy)
+    assert legacy.counterparty_id is None
+
+    for contact, is_primary in ((primary, True), (candidate, False), (foreign, True)):
+        await session.refresh(contact)
+        assert contact.is_primary == is_primary
+    assert len((await session.execute(select(Contact))).scalars().all()) == 3
+    assert len((await session.execute(select(Counterparty))).scalars().all()) == 2
+    await session.refresh(first)
+    await session.refresh(second)
+    assert (first.unp, second.unp) == ("111111111", "222222222")
+
+
 async def test_skus_for_picker_excludes_demo(session, api):
     from core.domain.models import Sku
 
@@ -410,46 +519,40 @@ async def test_deal_create_emits_outbox(session, api):
     assert rows[0].payload["number"] == "OBX-1"
 
 
-async def test_create_invoice_writes_to_1c(session, api):
+async def test_create_invoice_uses_erp_issuance_contract(session, api):
     from sqlalchemy import select
 
     from core.domain.models import AuditLog, OutboxEvent
     from core.services.eventbus import OutboxEventBus
+    from tests.test_invoice_issuance import command, create, seed
 
-    deal = (
-        await api.post(
-            "/sales/deals",
-            json={"number": "DOC-1", "title": "Поставка АКБ", "counterparty": "ООО Альфа", "amount": 5000},
-        )
-    ).json()
-
-    # формируем счёт → он записывается в 1С (mock) и помечается posted
-    r = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
+    ids, base = await seed(api, session, suffix="-DB")
+    request, _ = await command(api, ids, base, key="db-issue")
+    r = await create(api, ids, request)
     assert r.status_code == 201
-    doc = r.json()
+    doc = r.json()["document"]
     assert doc["kind"] == "invoice"
-    assert doc["number"] == "СЧ-DOC-1"
-    assert doc["status"] == "posted"
-    assert doc["onec_ref"] == "1С-СЧ-DOC-1"
-    assert doc["amount"] == 5000
+    assert doc["number"].startswith("ERP-INV-")
+    assert doc["status"] == "issued"
+    assert doc["onec_ref"] is None
+    assert Decimal(str(doc["amount"])) == Decimal("240.00")
 
     # документ виден в карточке сделки
-    detail = (await api.get(f"/sales/deals/{deal['id']}")).json()
-    assert len(detail["documents"]) == 1
-    assert detail["documents"][0]["onec_ref"] == "1С-СЧ-DOC-1"
+    detail = (await api.get(f"/sales/deals/{ids['deal']}")).json()
+    assert any(row["id"] == doc["id"] and row["status"] == "issued" for row in detail["documents"])
 
-    # запись в 1С → доменное событие в шину (часть 3) → проекция в audit (часть 5)
+    # ERP issuance → outbox event → audit projection after relay.
     rows = (await session.execute(select(OutboxEvent))).scalars().all()
-    posted = [e for e in rows if e.event_type == "sales.document.posted"]
-    assert len(posted) == 1
-    assert posted[0].payload["onec_ref"] == "1С-СЧ-DOC-1"
+    issued = [e for e in rows if e.event_type == "sales.invoice.issued"]
+    assert len(issued) == 1
+    assert issued[0].payload["document_id"] == doc["id"]
 
     await OutboxEventBus().relay_once(session)
     audit = (await session.execute(select(AuditLog))).scalars().all()
-    assert any(a.action == "sales.document.posted" and a.entity_ref == f"deal:{deal['id']}" for a in audit)
+    assert any(a.action == "sales.invoice.issued" and a.entity_ref == f"deal:{ids['deal']}" for a in audit)
 
-    # несуществующая сделка → 404
-    assert (await api.post("/sales/deals/999999/documents", json={"kind": "invoice"})).status_code == 404
+    # A valid ERP command for a missing deal still reaches the route and returns 404.
+    assert (await api.post("/sales/deals/999999/documents", json={"kind": "invoice", **request})).status_code == 404
 
 
 async def test_contract_goes_through_approval(session, api):
@@ -464,7 +567,7 @@ async def test_contract_goes_through_approval(session, api):
         )
     ).json()
 
-    # договор НЕ пишется в 1С сразу — сначала уходит на согласование юристу (ч.4)
+    # договор НЕ выпускается сразу — сначала уходит на согласование юристу (ч.4)
     r = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "contract"})
     assert r.status_code == 201
     doc = r.json()
@@ -484,20 +587,20 @@ async def test_contract_goes_through_approval(session, api):
     assert appr.route == "Юрист"
     assert appr.status == "pending"
 
-    # одобрение → документ проводится в 1С
+    # Одобрение фиксирует внутренний документ; ссылку 1С не выдумываем.
     d = await api.post(
         f"/sales/documents/{doc['id']}/decide", json={"approved": True, "by": "Юрист Юрьев"}
     )
     assert d.status_code == 200
     body = d.json()
     assert body["status"] == "posted"
-    assert body["onec_ref"] == "1С-ДГ-CT-1"
+    assert body["onec_ref"] is None
 
     # связанное согласование закрыто
     await session.refresh(appr)
     assert appr.status == "approved"
 
-    # события: создание документа + решение согласования + проведение в 1С
+    # События: создание документа, решение согласования и внутреннее проведение.
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
     assert "sales.document.created" in types
     assert "approval.approved" in types
@@ -559,13 +662,14 @@ async def test_order_reserves_stock(session, api):
     session.add(StockItem(sku_code="RSV-1", warehouse="Главный", qty_available=100, qty_reserved=3))
     await session.commit()
 
-    # заказ проводится в 1С и резервирует остатки по позициям сделки
+    # Старый заказ фиксируется в ERP и обновляет legacy-остаток; адресный резерв
+    # для счёта CRM создаётся отдельным сценарием выпуска счёта.
     r = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "order"})
     assert r.status_code == 201
     body = r.json()
     assert body["kind"] == "order"
     assert body["status"] == "posted"
-    assert body["onec_ref"] == "1С-ЗК-OR-1"
+    assert body["onec_ref"] is None
 
     item = (
         await session.execute(select(StockItem).where(StockItem.sku_code == "RSV-1"))
@@ -576,77 +680,70 @@ async def test_order_reserves_stock(session, api):
     assert "sales.stock.reserved" in types
     assert "sales.document.posted" in types
 
+    # Legacy order events cannot authorize an owned invoice pick.
+    import pytest
+
+    from modules.wms.events import on_stock_reserved
+    from modules.wms.models import StockMovement, Task
+    from tests.reservation_source import event_context
+    event = await session.scalar(select(OutboxEvent).where(OutboxEvent.event_type == "sales.stock.reserved"))
+    with pytest.raises(ValueError, match="explicitly confirmed"):
+        await on_stock_reserved(event.payload, event_context(session))
+    await session.flush()
+    movement = await session.scalar(select(StockMovement))
+    task = await session.scalar(select(Task))
+    assert movement is None
+    assert task is None
+
 
 async def test_invoice_reserves_stock(session, api):
-    """SALES-51: счёт (invoice), как и заказ, резервирует остатки и держит срок 5 дней."""
-    from datetime import timedelta
+    """ERP-счёт создаёт адресный WMS-резерв, а не меняет старый StockItem."""
+    from sqlalchemy import func, select
 
-    from sqlalchemy import select
+    from core.domain.models import OutboxEvent
+    from modules.wms.invoice_reservations import InvoiceReservation
+    from modules.wms.models import ReservationVersion
+    from tests.test_invoice_issuance import command, create, seed
 
-    from core.domain.models import OutboxEvent, Sku
-    from modules.integrations.models import StockItem
-    from modules.sales.models import DealItem
-    from modules.sales.routes import _utcnow
-
-    deal = (
-        await api.post("/sales/deals", json={"number": "INV-RSV-1", "title": "t", "counterparty": "c"})
-    ).json()
-    sku = Sku(code="RSV-INV", title="Резерв под счёт", unit="шт")
-    session.add(sku)
-    await session.flush()
-    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=4))
-    session.add(StockItem(sku_code="RSV-INV", warehouse="Главный", qty_available=50, qty_reserved=1))
-    from modules.sales.models import PriceQuote
-    session.add(PriceQuote(sku_code=sku.code, counterparty="c", price=Decimal("100")))
-    await session.commit()
-
-    # счёт проводится в 1С и (SALES-51) резервирует остатки по позициям сделки
-    r = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
-    assert r.status_code == 201
-    body = r.json()
-    assert body["kind"] == "invoice"
-    assert body["status"] == "posted"
+    ids, base = await seed(api, session, suffix="-RSV")
+    request, preview = await command(api, ids, base, key="reserve-issue")
+    r = await create(api, ids, request)
+    assert r.status_code == 201, r.text
+    body = r.json()["document"]
+    assert body["kind"] == "invoice" and body["status"] == "issued"
     assert body["reserve_status"] == "reserved"
-    # срок действия счёта = 5 дней со дня выставления (счёт-протокол)
-    assert body["valid_until"] == (_utcnow().date() + timedelta(days=5)).isoformat()
+    assert body["valid_until"] == base["valid_until"]
 
-    item = (
-        await session.execute(select(StockItem).where(StockItem.sku_code == "RSV-INV"))
-    ).scalars().first()
-    assert float(item.qty_reserved) == 5  # было 1 + 4 по счёту
+    reservation = await session.get(InvoiceReservation, body["id"])
+    assert reservation is not None and reservation.organization_id == ids["org"]
+    assert await session.scalar(select(func.sum(ReservationVersion.qty)).where(
+        ReservationVersion.organization_id == ids["org"],
+    )) == Decimal("2.00")
+    assert preview["lines"][0]["qty"] == "2.00"
 
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
-    assert "sales.stock.reserved" in types
-    assert "sales.document.posted" in types
+    assert "sales.stock.reserved" in types and "sales.invoice.issued" in types
+    assert "sales.document.posted" not in types
 
 
 async def test_tick_reminds_before_invoice_expiry(session, api, services, monkeypatch):
     """SALES-51: за день до конца срока tick шлёт sales.invoice.expiring (однократно)."""
-    from datetime import timedelta
+    from datetime import datetime
 
     from sqlalchemy import select
 
-    from core.domain.models import OutboxEvent, Sku
-    from modules.integrations.models import StockItem
-    from modules.sales.models import DealDocument, DealItem
+    from core.domain.models import OutboxEvent
+    from modules.sales.models import DealDocument
     from modules.sales.reserve import tick_invoice_reserve
-    from modules.sales.routes import _utcnow
+    from tests.test_invoice_issuance import command, create, seed
 
-    deal = (
-        await api.post("/sales/deals", json={"number": "EXP-1", "title": "t", "counterparty": "c"})
-    ).json()
-    sku = Sku(code="EXP-SKU", title="t", unit="шт")
-    session.add(sku)
-    await session.flush()
-    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=2))
-    session.add(StockItem(sku_code="EXP-SKU", warehouse="Главный", qty_available=10, qty_reserved=0))
-    from modules.sales.models import PriceQuote
-    session.add(PriceQuote(sku_code=sku.code, counterparty="c", price=Decimal("100")))
-    await session.commit()
-    await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
-
-    doc = (await session.execute(select(DealDocument))).scalars().first()
-    monkeypatch.setattr("modules.sales.reserve._utcnow", lambda: _utcnow() + timedelta(days=4))
+    ids, base = await seed(api, session, suffix="-EXP")
+    request, _ = await command(api, ids, base, key="expiry-issue")
+    issued = await create(api, ids, request)
+    assert issued.status_code == 201, issued.text
+    doc = await session.get(DealDocument, issued.json()["document"]["id"])
+    # The fixture's immutable invoice expires on 2026-09-06; test the day before.
+    monkeypatch.setattr("modules.sales.reserve._utcnow", lambda: datetime(2026, 9, 5, 12, 0, 0))
 
     await tick_invoice_reserve(session, services)
     await session.commit()
@@ -665,83 +762,63 @@ async def test_tick_reminds_before_invoice_expiry(session, api, services, monkey
 
 
 async def test_tick_cancels_expired_invoice_and_releases_stock(session, api, services, monkeypatch):
-    """SALES-51: после срока счёт аннулируется, резерв снимается (stock.release)."""
-    from datetime import timedelta
+    """Истечение ERP-счёта только создаёт проверяемое уведомление; резерв не снимается автоматически."""
+    from datetime import datetime
 
     from sqlalchemy import select
 
-    from core.domain.models import OutboxEvent, Sku
-    from modules.integrations.models import StockItem
-    from modules.sales.models import DealDocument, DealItem
+    from core.domain.models import OutboxEvent
+    from modules.sales.models import DealDocument
     from modules.sales.reserve import tick_invoice_reserve
-    from modules.sales.routes import _utcnow
+    from tests.test_invoice_issuance import command, create, seed
 
-    deal = (
-        await api.post("/sales/deals", json={"number": "CANCEL-1", "title": "t", "counterparty": "c"})
-    ).json()
-    sku = Sku(code="CNL-SKU", title="t", unit="шт")
-    session.add(sku)
-    await session.flush()
-    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=3))
-    session.add(StockItem(sku_code="CNL-SKU", warehouse="Главный", qty_available=20, qty_reserved=0))
-    from modules.sales.models import PriceQuote
-    session.add(PriceQuote(sku_code=sku.code, counterparty="c", price=Decimal("100")))
-    await session.commit()
-    await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
-
-    item = (
-        await session.execute(select(StockItem).where(StockItem.sku_code == "CNL-SKU"))
-    ).scalars().first()
-    assert float(item.qty_reserved) == 3  # счёт зарезервировал
-
-    doc = (await session.execute(select(DealDocument))).scalars().first()
-    monkeypatch.setattr("modules.sales.reserve._utcnow", lambda: _utcnow() + timedelta(days=6))
+    ids, base = await seed(api, session, suffix="-CANCEL")
+    request, _ = await command(api, ids, base, key="expiry-cancel-review")
+    issued = await create(api, ids, request)
+    assert issued.status_code == 201, issued.text
+    doc = await session.get(DealDocument, issued.json()["document"]["id"])
+    monkeypatch.setattr("modules.sales.reserve._utcnow", lambda: datetime(2026, 9, 7, 12, 0, 0))
 
     await tick_invoice_reserve(session, services)
     await session.commit()
     await session.refresh(doc)
-    await session.refresh(item)
-    assert doc.status == "cancelled"
-    assert doc.reserve_status == "released"
-    assert doc.cancelled_at is not None
-    assert float(item.qty_reserved) == 0  # резерв снят
+    assert doc.status == "issued"
+    assert doc.reserve_status == "reserved"
+    assert doc.cancelled_at is None
 
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
-    assert "sales.invoice.cancelled" in types
-    assert "sales.stock.released" in types
+    assert "sales.invoice.expiring" in types
+    assert "sales.stock.released" not in types
+    event = await session.scalar(select(OutboxEvent).where(OutboxEvent.event_type == "sales.invoice.expiring"))
+    assert event.payload["expiry_state"] == "review_required"
 
 
-async def test_payment_consumes_invoice_reserve(session, api):
-    """SALES-51: оплата счёта → reserve_status=consumed (finance.payment.paid → sales)."""
-    from core.domain.models import Sku
+async def test_payment_preserves_invoice_reserve(session, api):
+    """Payment events do not consume an ERP reservation; shipment owns the issue."""
+    from sqlalchemy import select
+
+    from core.domain.models import OutboxEvent
     from core.services.eventbus import EventContext
-    from modules.integrations.models import StockItem
     from modules.sales.events import on_payment_paid
-    from modules.sales.models import DealDocument, DealItem
+    from modules.sales.models import DealDocument
+    from tests.test_invoice_issuance import command, create, seed
 
-    deal = (
-        await api.post("/sales/deals", json={"number": "PAID-1", "title": "t", "counterparty": "c"})
-    ).json()
-    sku = Sku(code="PAID-SKU", title="t", unit="шт")
-    session.add(sku)
-    await session.flush()
-    session.add(DealItem(deal_id=deal["id"], sku_id=sku.id, qty=1))
-    session.add(StockItem(sku_code="PAID-SKU", warehouse="Главный", qty_available=5, qty_reserved=0))
-    from modules.sales.models import PriceQuote
-    session.add(PriceQuote(sku_code=sku.code, counterparty="c", price=Decimal("100")))
-    await session.commit()
-    doc_body = (
-        await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
-    ).json()
+    ids, base = await seed(api, session, suffix="-PAID")
+    request, _ = await command(api, ids, base, key="paid-issue")
+    issued = await create(api, ids, request)
+    assert issued.status_code == 201, issued.text
+    doc_body = issued.json()["document"]
     assert doc_body["reserve_status"] == "reserved"
 
-    # имитируем приход события оплаты из finance (привязка по номеру счёта)
+    # Legacy ref-only payment does not transfer an ERP-issued invoice to a
+    # warehouse state; settlement evidence is handled by accounting routes.
     await on_payment_paid({"ref": doc_body["number"]}, EventContext(session, None))
     await session.commit()
 
     doc = await session.get(DealDocument, doc_body["id"])
-    assert doc.status == "paid"
-    assert doc.reserve_status == "consumed"
+    assert doc.status == "issued"
+    assert doc.reserve_status == "reserved"
+    assert await session.scalar(select(OutboxEvent).where(OutboxEvent.event_type == "sales.stock.reserved")) is not None
 
 
 async def test_chats(api):

@@ -7,6 +7,7 @@
 from datetime import datetime
 
 import pytest
+from sqlalchemy import select
 
 from core.domain.models import Counterparty
 from modules.sales.models import CallLog, Deal, Message
@@ -25,7 +26,9 @@ async def _seed_counterparty(session, name: str) -> Counterparty:
 
 
 async def _seed_deal(session, number: str, counterparty: str, ts: datetime) -> Deal:
-    deal = Deal(number=number, title="Сделка", counterparty=counterparty, created_at=ts)
+    cp_id = await session.scalar(select(Counterparty.id).where(Counterparty.name == counterparty))
+    deal = Deal(number=number, title="Сделка", counterparty=counterparty,
+                counterparty_id=cp_id, created_at=ts)
     session.add(deal)
     await session.flush()
     return deal

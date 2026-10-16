@@ -1,4 +1,4 @@
-"""Тесты выработки: табель сборщиков и расчёт ЗП (оклад × дни/22 + н.ч × 6,25)."""
+"""Управленческая оценка выработки по фиксированным допущениям."""
 from __future__ import annotations
 
 import pytest
@@ -25,7 +25,11 @@ async def test_create_and_list_workers(api):
 async def test_payroll_formula(api):
     # оклад 660 × 22/22 + 40 н.ч × 6,25 = 660 + 250 = 910; вклад = 40 × 25 = 1000
     await _add(api, "Николай", 660.0, 22, 40.0)
-    row = (await api.get("/production/payroll")).json()["rows"][0]
+    response = (await api.get("/production/payroll")).json()
+    assert response["calculation_scope"] == "management_estimate"
+    assert response["accounting_posting_available"] is False
+    assert response["statutory_payroll_certified"] is False
+    row = response["rows"][0]
     assert row["base"] == 660.0
     assert row["premium"] == 250.0
     assert row["total"] == 910.0

@@ -47,6 +47,7 @@ class EventContext:
     session: AsyncSession
     services: object
     _after_commit: list[Callable[[], object]] | None = field(default=None, repr=False)
+    event_id: int | None = None
     occurred_at: datetime | None = None
 
     def after_commit(self, callback: Callable[[], object]) -> object | None:
@@ -70,6 +71,7 @@ class OutboxEventBus:
 
     def __init__(self) -> None:
         self._handlers: dict[str, list[Callable]] = defaultdict(list)
+        self._relay_cursors: dict[tuple[str, ...] | None, int] = {}
 
     def subscribe(self, event_type: str, handler: Callable) -> None:
         self._handlers[event_type].append(handler)
@@ -93,13 +95,16 @@ class OutboxEventBus:
         # Keep the shared relay context: handlers attach batch deduplication state
         # to it, and older callers also use duck-typed contexts.
         previous_date = getattr(ctx, "occurred_at", None)
+        previous_event_id = getattr(ctx, "event_id", None)
         if ctx is not None:
             ctx.occurred_at = event.created_at
+            ctx.event_id = event.id
         try:
             await self.dispatch(event.event_type, event.payload, ctx)
         finally:
             if ctx is not None:
                 ctx.occurred_at = previous_date
+                ctx.event_id = previous_event_id
         event.processed_at = datetime.now(timezone.utc)
         # Successful delivery and its immutable audit share the same transaction.
         session.add(
@@ -111,12 +116,56 @@ class OutboxEventBus:
             )
         )
 
+    async def relay_pending(self, session_factory, services, *, event_types=None, limit=100) -> int:
+        """Deliver a bounded snapshot with a fresh transaction per event.
+
+        This worker owns its sessions. It never commits an ambient caller's work
+        or carries one event's domain locks into another event. All handlers of
+        one event, derived outbox rows, its audit and processed_at remain atomic.
+        Newly emitted events are picked up on the next pass. Ordinary failures
+        stop this pass; already committed earlier events remain durable.
+        """
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise ValueError("Relay limit must be between 1 and 1000")
+        filter_key = tuple(sorted(set(event_types))) if event_types is not None else None
+        cursor = self._relay_cursors.get(filter_key, 0)
+        async with session_factory() as discovery:
+            query = select(OutboxEvent.id).where(OutboxEvent.processed_at.is_(None))
+            if filter_key is not None:
+                query = query.where(OutboxEvent.event_type.in_(filter_key))
+            ordered = query.order_by(OutboxEvent.id).limit(limit)
+            ids = (await discovery.scalars(ordered.where(OutboxEvent.id > cursor))).all()
+            if not ids and cursor:
+                ids = (await discovery.scalars(ordered)).all()
+        delivered = 0
+        for event_id in ids:
+            notifications = []
+            async with session_factory() as session:
+                ctx = EventContext(session, services, _after_commit=notifications)
+                try:
+                    delivered += await self.relay_once(session, ctx, event_types=filter_key,
+                                                       _only_event_id=event_id)
+                except BaseException:
+                    self._relay_cursors[filter_key] = event_id - 1
+                    await session.rollback()
+                    raise
+            # Scheduling hint only. Isolated poison/locked rows must not starve
+            # the next page. Ordinary errors stop before advancing this cursor.
+            self._relay_cursors[filter_key] = event_id
+            for notify in notifications:
+                try:
+                    notify()
+                except Exception as exc:
+                    logger.error("post-commit relay notification error (%s)", type(exc).__name__)
+        return delivered
+
     async def relay_once(
         self,
         session: AsyncSession,
         ctx: "EventContext | None" = None,
         *,
         event_types=None,
+        _only_event_id: int | None = None,
     ) -> int:
         """Доставить необработанные события подписчикам и пометить processed_at.
 
@@ -135,6 +184,8 @@ class OutboxEventBus:
         )
         if event_types is not None:
             stmt = stmt.where(OutboxEvent.event_type.in_(event_types))
+        if _only_event_id is not None:
+            stmt = stmt.where(OutboxEvent.id == _only_event_id)
         if session.get_bind().dialect.name == "postgresql":
             stmt = stmt.with_for_update(skip_locked=True)
         rows = (await session.execute(stmt)).scalars().all()

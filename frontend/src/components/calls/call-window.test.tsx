@@ -300,6 +300,28 @@ describe("CallWindow — заказ по контексту", () => {
 });
 
 describe("CallWindow — документы и повтор (только сделка)", () => {
+  it("явный выбор применяется только к счёту, повтор сохраняет ключ, другой звонок сбрасывает выбор", async () => {
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    mock(api.issueDocument).mockResolvedValue({ ok: false, message: "Повторите запрос" });
+    const { rerender } = render(<CallWindow context={dealCtx} onClose={vi.fn()} />);
+    await toLive();
+    const choice = screen.getByRole("checkbox", { name: "Под заказ — без резерва" });
+    expect(choice).not.toBeChecked();
+    fireEvent.click(choice);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Счёт" })); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Счёт" })); });
+    const first = mock(api.issueDocument).mock.calls[0];
+    expect(first).toEqual(["42", "invoice", { reserve_mode: "on_order", request_key: expect.any(String) }]);
+    expect(mock(api.issueDocument).mock.calls[1]).toEqual(first);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Договор" })); });
+    expect(api.issueDocument).toHaveBeenLastCalledWith("42", "contract");
+    rerender(<CallWindow context={{ ...dealCtx, dealId: "43" }} onClose={vi.fn()} />);
+    expect(screen.getByRole("checkbox", { name: "Под заказ — без резерва" })).not.toBeChecked();
+    rerender(<CallWindow context={leadCtx} onClose={vi.fn()} />);
+    expect(screen.queryByRole("checkbox", { name: "Под заказ — без резерва" })).toBeNull();
+    openSpy.mockRestore();
+  });
+
   it("счёт: успех открывает печать и ставит шаг «Проверить оплату»", async () => {
     const win = { location: { href: "" }, close: vi.fn() };
     const openSpy = vi.spyOn(window, "open").mockReturnValue(win as unknown as Window);
@@ -309,6 +331,7 @@ describe("CallWindow — документы и повтор (только сде
       fireEvent.click(screen.getByRole("button", { name: "Счёт" }));
     });
     expect(win.location.href).toBe("/r");
+    expect(api.issueDocument).toHaveBeenCalledWith("42", "invoice");
     expect(mock(api.updateDeal).mock.calls[0][0]).toBe("42");
     expect(mock(api.updateDeal).mock.calls[0][1]).toMatchObject({ next_step: "Проверить оплату счёта" });
     openSpy.mockRestore();

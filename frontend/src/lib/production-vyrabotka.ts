@@ -1,5 +1,6 @@
 // Домен «Выработка и оценка» поверх backend-API `/production/workers` и `/production/payroll`.
-// Расчёт ЗП делает бэкенд (оклад × дни/22 + выработка н.ч × 6,25 BYN); фронт отображает.
+// Бэкенд возвращает управленческую оценку по фиксированным допущениям;
+// она не служит бухгалтерским начислением или основанием для отчётности.
 
 import { formatNh } from "@/lib/production-norms";
 
@@ -38,6 +39,9 @@ export interface Payroll {
   total_base: number;
   total_premium: number;
   total_payroll: number;
+  calculation_scope: "management_estimate";
+  accounting_posting_available: boolean;
+  statutory_payroll_certified: boolean;
 }
 
 const EMPTY_PAYROLL: Payroll = {
@@ -46,6 +50,9 @@ const EMPTY_PAYROLL: Payroll = {
   total_base: 0,
   total_premium: 0,
   total_payroll: 0,
+  calculation_scope: "management_estimate",
+  accounting_posting_available: false,
+  statutory_payroll_certified: false,
 };
 
 /** Сумма в BYN, русский формат: 910 → «910 BYN», 910.5 → «910,5 BYN». */
@@ -71,35 +78,38 @@ function roleHeaders(roles?: string): Record<string, string> | undefined {
   return roles ? { "X-User-Roles": roles } : undefined;
 }
 
-export async function fetchPayrollServer(roles?: string): Promise<Payroll> {
+export async function fetchPayrollServer(roles?: string, strict = false): Promise<Payroll> {
   try {
     const res = await fetch(`${BASE}/production/payroll`, {
       cache: "no-store",
       headers: roleHeaders(roles),
     });
-    if (!res.ok) return EMPTY_PAYROLL;
+    if (!res.ok) throw new Error("Выработка недоступна.");
     return (await res.json()) as Payroll;
-  } catch {
+  } catch (error) {
+    if (strict) throw error;
     return EMPTY_PAYROLL;
   }
 }
 
-export async function fetchPayroll(): Promise<Payroll> {
+export async function fetchPayroll(strict = false): Promise<Payroll> {
   try {
     const res = await fetch("/api/production/payroll", { cache: "no-store" });
-    if (!res.ok) return EMPTY_PAYROLL;
+    if (!res.ok) throw new Error("Выработка недоступна.");
     return (await res.json()) as Payroll;
-  } catch {
+  } catch (error) {
+    if (strict) throw error;
     return EMPTY_PAYROLL;
   }
 }
 
-export async function fetchWorkers(): Promise<Worker[]> {
+export async function fetchWorkers(strict = false): Promise<Worker[]> {
   try {
     const res = await fetch("/api/production/workers", { cache: "no-store" });
-    if (!res.ok) return [];
+    if (!res.ok) throw new Error("Список сборщиков недоступен.");
     return (await res.json()) as Worker[];
-  } catch {
+  } catch (error) {
+    if (strict) throw error;
     return [];
   }
 }

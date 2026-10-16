@@ -1,6 +1,7 @@
 "use client";
 
 import clsx from "clsx";
+import Link from "next/link";
 import { RefreshCw, Ship } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -30,7 +31,8 @@ const STATUS_TONE: Record<string, string> = {
 };
 
 /** ETA с цветовой подсказкой: просрочено — красным, ≤7 дней — янтарным. */
-function EtaCell({ eta }: { eta: string | null }) {
+function EtaCell({ eta, active = true }: { eta: string | null; active?: boolean }) {
+  if (!active) return <span className="text-muted">{eta || "—"}</span>;
   const days = daysToEta(eta);
   if (!eta || days === null) return <span className="text-faint">—</span>;
   const tone = days < 0 ? "text-red-600" : days <= 7 ? "text-amber-600" : "text-ink";
@@ -47,18 +49,18 @@ function EtaCell({ eta }: { eta: string | null }) {
   );
 }
 
-export function ProcurementOpenOrdersTable({ initial }: { initial: OpenOrder[] }) {
+export function ProcurementOpenOrdersTable({ initial, all = false }: { initial: OpenOrder[]; all?: boolean }) {
   const [orders, setOrders] = useState<OpenOrder[]>(initial);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     // первичные данные с SSR; тихо перечитываем актуальные на клиенте
-    void fetchOpenOrders().then(setOrders);
-  }, []);
+    void fetchOpenOrders(all).then(setOrders);
+  }, [all]);
 
   async function refresh() {
     setBusy(true);
-    setOrders(await fetchOpenOrders());
+    setOrders(await fetchOpenOrders(all));
     setBusy(false);
   }
 
@@ -68,8 +70,7 @@ export function ProcurementOpenOrdersTable({ initial }: { initial: OpenOrder[] }
     <div className="flex-1 overflow-auto p-6">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-muted">
-          Размещённые заказы поставщикам, по которым товар <b>ещё не принят</b> (заказан / отгружен /
-          таможня) — «в пути». Продажи вычитают это в нетто-доступности по номенклатуре.
+          {all ? "Все заказы поставщикам: черновики, размещённые, полученные и отменённые." : "Заказы поставщикам в пути: заказан, отгружен или проходит таможню. Товар ещё не принят."}
         </p>
         <button
           onClick={refresh}
@@ -81,10 +82,10 @@ export function ProcurementOpenOrdersTable({ initial }: { initial: OpenOrder[] }
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Kpi label="Открытых заказов" value={formatNumber(totals.orders)} />
-        <Kpi label="Позиций в пути" value={formatNumber(totals.positions)} />
-        <Kpi label="Товар в пути" value={formatByn(totals.goods)} />
-        <Kpi label="Фрахт в пути" value={formatByn(totals.freight)} />
+        <Kpi label={all ? "Всего заказов" : "Открытых заказов"} value={formatNumber(totals.orders)} />
+        <Kpi label={all ? "Позиций в заказах" : "Позиций в пути"} value={formatNumber(totals.positions)} />
+        <Kpi label={all ? "Товар по всем заказам" : "Товар в пути"} value={formatByn(totals.goods)} />
+        <Kpi label={all ? "Фрахт по всем заказам" : "Фрахт в пути"} value={formatByn(totals.freight)} />
       </div>
 
       <div className="mt-5 overflow-hidden rounded-xl border border-line bg-surface">
@@ -105,7 +106,7 @@ export function ProcurementOpenOrdersTable({ initial }: { initial: OpenOrder[] }
               <tr>
                 <td colSpan={7} className="px-4 py-6 text-center text-muted">
                   <Ship size={18} className="mx-auto mb-1 text-faint" />
-                  Открытых заказов нет — всё принято или ничего не в пути.
+                  {all ? "Заказов поставщикам пока нет." : "Открытых заказов нет — всё принято или ничего не в пути."}
                 </td>
               </tr>
             )}
@@ -113,7 +114,7 @@ export function ProcurementOpenOrdersTable({ initial }: { initial: OpenOrder[] }
               const goods = o.lines.reduce((s, l) => s + l.goods_value_byn, 0);
               return (
                 <tr key={o.id} className="border-b border-line align-top last:border-0">
-                  <td className="px-4 py-2.5 font-mono text-xs text-muted">{o.number}</td>
+                  <td className="px-4 py-2.5 font-mono text-xs text-muted"><Link className="text-accent underline" href={`/erp/procurement/orders/${o.id}`}>{o.number || `№ ${o.id}`}</Link></td>
                   <td className="px-4 py-2.5 text-ink">{o.supplier || "—"}</td>
                   <td className="px-4 py-2.5">
                     <span
@@ -126,7 +127,7 @@ export function ProcurementOpenOrdersTable({ initial }: { initial: OpenOrder[] }
                     </span>
                   </td>
                   <td className="px-4 py-2.5 text-sm">
-                    <EtaCell eta={o.eta_date} />
+                    <EtaCell eta={o.eta_date} active={["ordered", "shipped", "customs"].includes(o.status)} />
                   </td>
                   <td className="px-4 py-2.5 text-muted">
                     {o.lines.length === 0 ? (

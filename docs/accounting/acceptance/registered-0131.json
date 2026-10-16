@@ -1,0 +1,21 @@
+{
+  "database": "acc_install_b4c3dd57a5914c5489cc221ec2e7d9eb",
+  "baseline": "pass",
+  "proposal": "pass",
+  "cleanup": true,
+  "registered_revision": "0131",
+  "registered_accounting_upgrade": "pass",
+  "legacy_import_preserved": true,
+  "accounting_tables": 51,
+  "migration_sha256": "3c3ea91d3d4ff3981ef47a35ceb173bcb68414579f624970222ad3d596797d1e",
+  "wms_upstream": "b73c41be4d65846593c499262b7ed0c0314b9ac5",
+  "restore": "not rerun for 0131",
+  "api_and_physical_tests": {
+    "passed": 72,
+    "duration_seconds": 238.81
+  },
+  "postgres_remainder_tests": {
+    "passed": 4,
+    "duration_seconds": 33.31
+  }
+}

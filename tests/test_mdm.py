@@ -5,6 +5,7 @@ from sqlalchemy import insert
 from core.domain.models import Contact, Counterparty
 from core.services import mdm
 from core.services.eventbus import OutboxEventBus
+from modules.sales.touch_history import SalesTouchHistory
 
 #: реальная шина: ``emit`` лишь добавляет OutboxEvent в сессию (без I/O) — тестирует реальный путь
 bus = OutboxEventBus()
@@ -22,7 +23,7 @@ async def test_duplicate_clusters_and_merge(session):
     assert clusters[0]["unp"] == "191234567"
     assert {m["id"] for m in clusters[0]["members"]} == {a.id, b.id}
 
-    survivor = await mdm.merge(session, bus, a.id, b.id)
+    survivor = await mdm.merge(session, bus, a.id, b.id, reference_guard=SalesTouchHistory().has_deals)
     assert survivor.id == a.id
     assert b.is_active is False
     assert b.merged_into_id == a.id
@@ -40,7 +41,7 @@ async def test_survivorship_fills_empty_survivor_field(session):
     ])).scalars().all()
     a, b = await session.get(Counterparty, a_id), await session.get(Counterparty, b_id)
 
-    await mdm.merge(session, bus, a.id, b.id)
+    await mdm.merge(session, bus, a.id, b.id, reference_guard=SalesTouchHistory().has_deals)
     assert a.name == "ОАО Имя"  # непустое из дубля заполнило пустое эталона
 
 
@@ -50,7 +51,7 @@ async def test_unmerge_reverses(session):
     ])).scalars().all()
     a, b = await session.get(Counterparty, a_id), await session.get(Counterparty, b_id)
 
-    await mdm.merge(session, bus, a.id, b.id)
+    await mdm.merge(session, bus, a.id, b.id, reference_guard=SalesTouchHistory().has_deals)
     await mdm.unmerge(session, bus, b.id)
 
     assert b.is_active is True
@@ -111,7 +112,7 @@ async def test_counterparty_card(api, session):
     dup = await session.get(Counterparty, dup_id)
     await session.flush()
     await mdm.add_source_alias(session, etalon.id, "1c", "0000-77")  # источник 1С
-    await mdm.merge(session, bus, etalon.id, dup.id)                  # даст merge-alias + слитый дубль
+    await mdm.merge(session, bus, etalon.id, dup.id, reference_guard=SalesTouchHistory().has_deals)
     await session.commit()
 
     card = (await api.get(f"/system/mdm/counterparty/{etalon.id}")).json()
@@ -133,7 +134,7 @@ async def test_merge_unmerge_emit_audit_events(api, session):
     ])).scalars().all()
     a, b = await session.get(Counterparty, a_id), await session.get(Counterparty, b_id)
 
-    await mdm.merge(session, bus, a.id, b.id, by="director")
+    await mdm.merge(session, bus, a.id, b.id, by="director", reference_guard=SalesTouchHistory().has_deals)
     await mdm.unmerge(session, bus, b.id, by="director")
     await session.commit()
     # прогоняем доставку: проекция событий в AuditLog по entity_ref=counterparty:<id>

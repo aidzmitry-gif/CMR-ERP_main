@@ -1,0 +1,1203 @@
+"""A multi-component workpaper must keep every source explicit and stay read-only."""
+import base64
+import hashlib
+from datetime import date
+from uuid import uuid4
+
+import pytest
+import pytest_asyncio
+from sqlalchemy import func, select, update
+
+from modules.accounting import payroll_evidence_files, statutory_requirements
+from modules.accounting.models import (
+    AccessGrant,
+    Account,
+    Entry,
+    Line,
+    Organization,
+    PayrollWorkpaperReview,
+    Period,
+)
+from modules.hr.models import Employee
+from tests.accounting.test_payroll_calculation import rate_input
+from tests.accounting.test_timesheet_preflight import make_timesheet
+from tests.accounting.test_work_schedule_norm import make_schedule
+
+
+@pytest_asyncio.fixture
+async def workpaper_sources(client, db, book):
+    employee = Employee(full_name="Synthetic Employee", department="repair",
+                        position="technician")
+    db.add(employee)
+    await db.flush()
+    employee_id = employee.id
+    await db.commit()
+    binding = await client.post(f"/accounting/organizations/{book[0]}/payroll-employments", json={
+        "request_key": str(uuid4()),
+        "employee_id": employee_id,
+        "contract_ref": "contract-2026-7",
+        "effective_from": "2026-01-01",
+        "state": "active",
+        "source_document": "signed-contract-2026-7",
+        "personnel_identifier": "worker-a",
+        "personnel_identifier_evidence": "Synthetic personnel number checked against the staff register",
+        "evidence": "Synthetic accountant supplied contract evidence",
+    })
+    assert binding.status_code == 200, binding.text
+    deduction = await statutory_requirements.create(db, book[0], rate_input(
+        request_key=str(uuid4()), code="SYNTHETIC-EMPLOYEE-DEDUCTION", value="10",
+    ), "tester")
+    contribution = await statutory_requirements.create(db, book[0], rate_input(
+        request_key=str(uuid4()), code="SYNTHETIC-EMPLOYER-CONTRIBUTION", value="20",
+    ), "tester")
+    await db.commit()
+    ruleset = await client.post(f"/accounting/organizations/{book[0]}/payroll-rule-sets", json={
+        "request_key": str(uuid4()),
+        "policy_id": book[1],
+        "effective_from": "2026-01-01",
+        "gross_method": "monthly_salary_by_hours",
+        "rounding": "half_up_cent",
+        "rate_rules": [
+            {"code": "SYNTHETIC-EMPLOYEE-DEDUCTION", "role": "employee_deduction",
+             "base_mode": "gross", "classification_evidence": "Synthetic documented deduction classification"},
+            {"code": "SYNTHETIC-EMPLOYER-CONTRIBUTION", "role": "employer_contribution",
+             "base_mode": "gross_less_adjustment",
+             "classification_evidence": "Synthetic documented contribution classification"},
+        ],
+        "source_reference": "synthetic-reviewed-payroll-policy",
+        "source_digest": "c" * 64,
+        "evidence": "Synthetic accountant supplied gross method and rounding policy evidence",
+    })
+    assert ruleset.status_code == 200, ruleset.text
+    return binding.json(), deduction, contribution, ruleset.json()
+
+
+def command(policy_id, binding_id, deduction_id, contribution_id, ruleset_id, **changes):
+    payload = {
+        "policy_id": policy_id,
+        "rule_set_id": ruleset_id,
+        "employment_binding_id": binding_id,
+        "work_from": "2026-10-01",
+        "work_to": "2026-10-31",
+        "monthly_salary_byn": "1500.00",
+        "contract_document": "signed-contract-2026-7",
+        "contract_digest": "a" * 64,
+        "contract_amount_evidence": "Synthetic contract salary line and date evidence",
+        "timesheet_document": "reviewed-timesheet-2026-10-7",
+        "timesheet_digest": "b" * 64,
+        "timesheet_evidence": "Synthetic reviewed October hours evidence",
+        "month_norm_hours": "160.00",
+        "worked_hours": "80.00",
+        "components": [
+            {
+                "requirement_id": deduction_id,
+                "adjustment_byn": "0.00",
+            },
+            {
+                "requirement_id": contribution_id,
+                "adjustment_byn": "100.00",
+                "adjustment_document": "synthetic-adjustment-source",
+                "adjustment_evidence": "Synthetic explicit rate base adjustment evidence",
+            },
+        ],
+    }
+    payload.update(changes)
+    return payload
+
+
+async def test_workpaper_calculates_listed_components_without_posting(
+        client, db, book, workpaper_sources):
+    binding, deduction, contribution, ruleset = workpaper_sources
+    access = await client.get(f"/accounting/organizations/{book[0]}/payroll-workpaper-access")
+    assert access.status_code == 200
+    assert access.json() == {
+        "organization_id": book[0], "can_preview": True,
+        "can_upload": True, "can_review": True,
+    }
+    assert access.headers["cache-control"] == "private, no-store"
+    before = await db.scalar(select(func.count(Entry.id)))
+    url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-preview"
+    payload = command(book[1], binding["binding_id"],
+                      deduction["requirement_id"], contribution["requirement_id"],
+                      ruleset["rule_set_id"])
+    response = await client.post(url, json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["gross_byn"] == "750.00"
+    assert body["listed_employee_deductions_byn"] == "75.00"
+    assert body["after_listed_deductions_byn"] == "675.00"
+    assert body["listed_employer_contributions_byn"] == "130.00"
+    assert body["cost_including_listed_contributions_byn"] == "880.00"
+    assert body["basis"]["employment_binding_digest"] == binding["digest"]
+    assert body["basis"]["rule_set_digest"] == ruleset["digest"]
+    assert body["basis"]["components"][1]["base_byn"] == "650.00"
+    assert len(body["basis_digest"]) == 64
+    assert body["status"] == "arithmetic_workpaper_only"
+    assert body["posting_available"] is False
+    assert body["statutory_payroll_certified"] is False
+    assert body["contract_and_timesheet_hashes_verified"] is False
+    assert body["rule_set_configured"] is True
+    assert "unlisted_components" in body["not_calculated"]
+    assert response.headers["cache-control"] == "private, no-store"
+    assert await db.scalar(select(func.count(Entry.id))) == before
+    unbacked_review = await client.post(
+        f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-reviews",
+        json={**payload, "request_key": str(uuid4()),
+              "basis_digest": body["basis_digest"],
+              "reviewer_evidence": "Synthetic review without stored source files"},
+    )
+    assert unbacked_review.status_code == 422
+    assert "requires stored contract" in unbacked_review.text
+
+    rounded = command(book[1], binding["binding_id"],
+                      deduction["requirement_id"], contribution["requirement_id"],
+                      ruleset["rule_set_id"],
+                      monthly_salary_byn="1000.00", month_norm_hours="3.00",
+                      worked_hours="1.00")
+    second = await client.post(url, json=rounded)
+    assert second.status_code == 200, second.text
+    assert second.json()["gross_byn"] == "333.33"
+    assert second.json()["listed_employee_deductions_byn"] == "33.33"
+    assert second.json()["basis_digest"] != body["basis_digest"]
+
+
+async def test_workpaper_requires_rule_set_review_after_rate_revision(
+        client, db, book, workpaper_sources):
+    binding, deduction, contribution, ruleset = workpaper_sources
+    updated_rate = await statutory_requirements.create(db, book[0], rate_input(
+        request_key=str(uuid4()), code="SYNTHETIC-EMPLOYEE-DEDUCTION",
+        value="12", effective_from="2026-10-01",
+    ), "tester")
+    await db.commit()
+
+    url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-preview"
+    stale_rules = await client.post(url, json=command(
+        book[1], binding["binding_id"], updated_rate["requirement_id"],
+        contribution["requirement_id"], ruleset["rule_set_id"],
+    ))
+    assert stale_rules.status_code == 422
+    assert "payroll rule set" in stale_rules.text
+
+    september = await client.post(
+        f"/accounting/organizations/{book[0]}/periods/2026-09/payroll-workpaper-preview",
+        json=command(
+            book[1], binding["binding_id"], deduction["requirement_id"],
+            contribution["requirement_id"], ruleset["rule_set_id"],
+            work_from="2026-09-01", work_to="2026-09-30",
+            timesheet_document="reviewed-timesheet-2026-09-7",
+        ),
+    )
+    assert september.status_code == 200, september.text
+    assert september.json()["listed_employee_deductions_byn"] == "75.00"
+
+    renewed = await client.post(
+        f"/accounting/organizations/{book[0]}/payroll-rule-sets", json={
+            "request_key": str(uuid4()),
+            "policy_id": book[1],
+            "effective_from": "2026-10-01",
+            "gross_method": "monthly_salary_by_hours",
+            "rounding": "half_up_cent",
+            "rate_rules": ruleset["rate_rules"],
+            "source_reference": "synthetic-reviewed-october-payroll-policy",
+            "source_digest": "d" * 64,
+            "evidence": "Synthetic chief review of the changed October rate version",
+        },
+    )
+    assert renewed.status_code == 200, renewed.text
+    current = await client.post(url, json=command(
+        book[1], binding["binding_id"], updated_rate["requirement_id"],
+        contribution["requirement_id"], renewed.json()["rule_set_id"],
+    ))
+    assert current.status_code == 200, current.text
+    assert current.json()["listed_employee_deductions_byn"] == "90.00"
+    assert current.json()["basis"]["rule_set_digest"] == renewed.json()["digest"]
+
+
+async def test_workpaper_rejects_unproven_shape_and_partial_period_binding(
+        client, db, book, workpaper_sources):
+    binding, deduction, contribution, ruleset = workpaper_sources
+    url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-preview"
+    args = (book[1], binding["binding_id"], deduction["requirement_id"],
+            contribution["requirement_id"], ruleset["rule_set_id"])
+    for changes in (
+        {"monthly_salary_byn": 1500.00},
+        {"worked_hours": "161.00"},
+        {"contract_digest": "missing"},
+        {"contract_document": "unrelated-contract"},
+        {"work_to": "2026-11-01"},
+    ):
+        response = await client.post(url, json=command(*args, **changes))
+        assert response.status_code == 422, (changes, response.text)
+
+    wrong_adjustment = command(*args)
+    wrong_adjustment["components"][0]["adjustment_byn"] = "1.00"
+    assert (await client.post(url, json=wrong_adjustment)).status_code == 422
+    missing_evidence = command(*args)
+    del missing_evidence["components"][1]["adjustment_evidence"]
+    assert (await client.post(url, json=missing_evidence)).status_code == 422
+
+    incomplete = command(*args)
+    incomplete["components"].pop()
+    missing_rate = await client.post(url, json=incomplete)
+    assert missing_rate.status_code == 422
+    assert "every configured payroll rate" in missing_rate.text
+
+    newer_rule_set = await client.post(
+        f"/accounting/organizations/{book[0]}/payroll-rule-sets",
+        json={
+            "request_key": str(uuid4()),
+            "policy_id": book[1],
+            "effective_from": "2026-01-01",
+            "gross_method": "monthly_salary_by_hours",
+            "rounding": "half_up_cent",
+            "rate_rules": ruleset["rate_rules"],
+            "source_reference": "synthetic-corrected-policy",
+            "source_digest": "d" * 64,
+            "evidence": "Synthetic reviewed replacement policy evidence",
+        },
+    )
+    assert newer_rule_set.status_code == 200, newer_rule_set.text
+    stale = await client.post(url, json=command(*args))
+    assert stale.status_code == 422
+    assert "current payroll rule set" in stale.text
+    args = (*args[:-1], newer_rule_set.json()["rule_set_id"])
+
+    ended = await client.post(f"/accounting/organizations/{book[0]}/payroll-employments", json={
+        "request_key": str(uuid4()),
+        "employee_id": binding["employee_id"],
+        "contract_ref": binding["contract_ref"],
+        "effective_from": "2026-10-15",
+        "state": "ended",
+        "source_document": "synthetic-contract-end-7",
+        "evidence": "Synthetic accountant supplied termination evidence",
+    })
+    assert ended.status_code == 200, ended.text
+    blocked = await client.post(url, json=command(*args))
+    assert blocked.status_code == 422
+    assert "ended or superseded" in blocked.text
+
+
+async def test_workpaper_rejects_foreign_rate_and_reader(
+        client, db, book, workpaper_sources):
+    binding, deduction, contribution, ruleset = workpaper_sources
+    other = Organization(name="Other synthetic employer", unp="777777777")
+    db.add(other)
+    await db.flush()
+    foreign_rate = await statutory_requirements.create(db, other.id, rate_input(
+        request_key=str(uuid4()), code="FOREIGN-RATE", value="10",
+    ), "tester")
+    await db.commit()
+    url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-preview"
+    response = await client.post(url, json=command(
+        book[1], binding["binding_id"], foreign_rate["requirement_id"],
+        contribution["requirement_id"], ruleset["rule_set_id"],
+    ))
+    assert response.status_code == 422
+    assert "not effective for this organization" in response.text
+
+    grant = await db.scalar(select(AccessGrant).where(
+        AccessGrant.organization_id == book[0], AccessGrant.subject == "tester",
+    ))
+    grant.role = "reader"
+    await db.commit()
+    reader_access = (await client.get(
+        f"/accounting/organizations/{book[0]}/payroll-workpaper-access",
+    )).json()
+    assert reader_access == {"organization_id": book[0], "can_preview": False,
+                             "can_upload": False, "can_review": False}
+    denied = await client.post(url, json=command(
+        book[1], binding["binding_id"], deduction["requirement_id"],
+        contribution["requirement_id"], ruleset["rule_set_id"],
+    ))
+    assert denied.status_code == 403
+
+
+async def test_monthly_summary_exposes_unreviewed_known_employment(
+        client, book, workpaper_sources):
+    binding, _, _, _ = workpaper_sources
+    url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-arithmetic-summary"
+    empty = await client.get(url)
+    assert empty.status_code == 200, empty.text
+    assert empty.json()["review_count"] == 0
+    assert empty.json()["known_binding_coverage"] == {
+        "active_binding_count": 1,
+        "expected_intervals": [{"employment_binding_id": binding["binding_id"],
+                                "work_from": "2026-10-01", "work_to": "2026-10-31"}],
+        "known_binding_coverage_complete": False,
+        "organization_payroll_population_verified": False,
+        "issues": [{"kind": "unreviewed_interval",
+                    "employment_binding_id": binding["binding_id"],
+                    "work_from": "2026-10-01", "work_to": "2026-10-31"}],
+    }
+    assert empty.json()["coverage_verified"] is False
+
+    ended = await client.post(f"/accounting/organizations/{book[0]}/payroll-employments", json={
+        "request_key": str(uuid4()),
+        "employee_id": binding["employee_id"],
+        "contract_ref": binding["contract_ref"],
+        "effective_from": "2026-10-15",
+        "state": "ended",
+        "source_document": "synthetic-contract-end-7",
+        "evidence": "Synthetic accountant supplied termination evidence",
+    })
+    assert ended.status_code == 200, ended.text
+    shortened = (await client.get(url)).json()["known_binding_coverage"]
+    assert shortened["expected_intervals"][0]["work_to"] == "2026-10-14"
+    assert shortened["issues"][0]["work_from"] == "2026-10-01"
+    assert shortened["issues"][0]["work_to"] == "2026-10-14"
+
+
+async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
+        client, db, book, workpaper_sources, tmp_path, monkeypatch):
+    binding, deduction, contribution, ruleset = workpaper_sources
+    root = tmp_path / "payroll"
+    root.mkdir()
+    monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
+    url = f"/accounting/organizations/{book[0]}/payroll-evidence-files"
+
+    async def upload(kind, reference, month=None):
+        raw = (f"%PDF-1.7\nsynthetic {kind} evidence\n").encode()
+        response = await client.post(url, json={
+            "request_key": str(uuid4()), "kind": kind,
+            "employment_binding_id": None if kind == "payroll_policy" else binding["binding_id"],
+            "month": month,
+            "reference": reference, "filename": f"{kind}.pdf",
+            "data_url": "data:application/pdf;base64," + base64.b64encode(raw).decode(),
+            "evidence": "Synthetic source for byte verification test",
+        })
+        assert response.status_code == 200, response.text
+        return response.json(), raw
+
+    contract, _ = await upload("employment_contract", "signed-contract-2026-7")
+    timesheet, _ = await upload("timesheet", "reviewed-timesheet-2026-10-7", "2026-10")
+    schedule, schedule_raw = await upload("work_schedule", "approved-work-schedule-2026-10", "2026-10")
+    adjustment, _ = await upload("base_adjustment", "synthetic-adjustment-source", "2026-10")
+    policy_file, _ = await upload("payroll_policy", "synthetic-reviewed-payroll-policy")
+    bad_rule = await client.post(
+        f"/accounting/organizations/{book[0]}/payroll-rule-sets", json={
+            "request_key": str(uuid4()), "policy_id": book[1],
+            "effective_from": "2026-01-01", "gross_method": "monthly_salary_by_hours",
+            "rounding": "half_up_cent", "rate_rules": ruleset["rate_rules"],
+            "source_reference": policy_file["reference"],
+            "source_digest": "0" * 64,
+            "source_file_id": policy_file["file_id"],
+            "evidence": "Synthetic accountant supplied file-backed payroll policy",
+        },
+    )
+    assert bad_rule.status_code == 422
+    mapped_rules = [{**row, "obligation_code": (
+        "period_fszn_rules_and_limits" if row["role"] == "employer_contribution"
+        else "period_income_tax_withholding_rule"),
+        **({"fszn_scheme": "general"} if row["role"] == "employer_contribution" else {})}
+        for row in ruleset["rate_rules"]]
+    new_rule = await client.post(
+        f"/accounting/organizations/{book[0]}/payroll-rule-sets", json={
+            "request_key": str(uuid4()), "policy_id": book[1],
+            "effective_from": "2026-01-01", "gross_method": "monthly_salary_by_hours",
+            "rounding": "half_up_cent", "rate_rules": mapped_rules,
+            "source_reference": policy_file["reference"],
+            "source_digest": policy_file["sha256"],
+            "source_file_id": policy_file["file_id"],
+            "evidence": "Synthetic accountant supplied file-backed payroll policy",
+        },
+    )
+    assert new_rule.status_code == 200, new_rule.text
+    assert new_rule.json()["source_file_verified_at_configuration"] is True
+    preview_url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-preview"
+    args = (book[1], binding["binding_id"], deduction["requirement_id"],
+            contribution["requirement_id"], new_rule.json()["rule_set_id"])
+    fields = {
+        "contract_file_id": contract["file_id"], "contract_digest": contract["sha256"],
+        "timesheet_file_id": timesheet["file_id"], "timesheet_digest": timesheet["sha256"],
+        "work_schedule_document": schedule["reference"],
+        "work_schedule_digest": schedule["sha256"],
+        "work_schedule_file_id": schedule["file_id"],
+        "norm_hours_evidence": "Approved monthly norm in the work schedule",
+    }
+    reviewed_command = command(*args, **fields)
+    reviewed_command["components"][1]["adjustment_file_id"] = adjustment["file_id"]
+    missing_schedule = command(*args, **{key: value for key, value in fields.items()
+                                       if not key.startswith("work_schedule")
+                                       and key != "norm_hours_evidence"})
+    missing_schedule["components"][1]["adjustment_file_id"] = adjustment["file_id"]
+    preliminary = await client.post(preview_url, json=missing_schedule)
+    assert preliminary.status_code == 200, preliminary.text
+    assert preliminary.json()["schedule_file_bytes_verified"] is False
+    accepted = await client.post(preview_url, json=reviewed_command)
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["contract_and_timesheet_hashes_verified"] is True
+    assert accepted.json()["schedule_file_bytes_verified"] is True
+    assert accepted.json()["basis"]["work_schedule_file_id"] == schedule["file_id"]
+    assert accepted.json()["basis"]["norm_hours_evidence"] == fields["norm_hours_evidence"]
+    assert accepted.json()["rule_source_file_bytes_verified"] is True
+    assert accepted.json()["basis"]["contract_file_id"] == contract["file_id"]
+
+    schedule_xlsx_path = tmp_path / "october-schedule.xlsx"
+    make_schedule(schedule_xlsx_path)
+    schedule_xlsx = await client.post(url, json={
+        "request_key": str(uuid4()), "kind": "work_schedule",
+        "employment_binding_id": binding["binding_id"], "month": "2026-10",
+        "reference": "approved-xlsx-work-schedule-2026-10",
+        "filename": schedule_xlsx_path.name,
+        "data_url": "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,"
+                    + base64.b64encode(schedule_xlsx_path.read_bytes()).decode(),
+        "evidence": "Fictional approved monthly schedule with a numeric norm cell",
+    })
+    assert schedule_xlsx.status_code == 200, schedule_xlsx.text
+    xlsx_schedule = schedule_xlsx.json()
+    xlsx_schedule_command = {
+        **reviewed_command,
+        "work_schedule_document": xlsx_schedule["reference"],
+        "work_schedule_digest": xlsx_schedule["sha256"],
+        "work_schedule_file_id": xlsx_schedule["file_id"],
+        "work_schedule_cell": "B5",
+    }
+    assert (await client.post(preview_url, json={
+        key: value for key, value in xlsx_schedule_command.items()
+        if key != "work_schedule_cell"
+    })).status_code == 422
+    checked_norm = await client.post(preview_url, json=xlsx_schedule_command)
+    assert checked_norm.status_code == 200, checked_norm.text
+    assert checked_norm.json()["schedule_numeric_hours_verified"] is True
+    assert checked_norm.json()["basis"]["work_schedule_cell"] == "B5"
+    missing_cell_review = await client.post(
+        f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-reviews",
+        json={
+            **{key: value for key, value in xlsx_schedule_command.items()
+               if key != "work_schedule_cell"},
+            "request_key": str(uuid4()),
+            "basis_digest": checked_norm.json()["basis_digest"],
+            "reviewer_evidence": "Synthetic chief review cannot accept an unverified norm",
+        },
+    )
+    assert missing_cell_review.status_code == 422
+    assert (await client.post(preview_url, json={
+        **xlsx_schedule_command, "month_norm_hours": "161.00",
+    })).status_code == 422
+    assert (await client.post(preview_url, json={
+        **xlsx_schedule_command, "work_schedule_cell": "C5",
+    })).status_code == 422
+
+    schedule_path = root / str(book[0]) / (schedule["request_key"].replace("-", "") + ".pdf")
+    schedule_path.write_bytes(b"%PDF-1.7\ntampered schedule\n")
+    assert (await client.post(preview_url, json=reviewed_command)).status_code == 409
+    schedule_path.write_bytes(schedule_raw)
+    assert (await client.post(preview_url, json={
+        **reviewed_command, "work_schedule_file_id": adjustment["file_id"],
+    })).status_code == 422
+    september_schedule, _ = await upload("work_schedule", "approved-work-schedule-2026-09", "2026-09")
+    assert (await client.post(preview_url, json={
+        **reviewed_command, "work_schedule_file_id": september_schedule["file_id"],
+        "work_schedule_document": september_schedule["reference"],
+        "work_schedule_digest": september_schedule["sha256"],
+    })).status_code == 422
+
+    xlsx_path = tmp_path / "october.xlsx"
+    make_timesheet(xlsx_path, month="2026-10", coded_day=True,
+                   name_1="Synthetic Employee", name_2="Synthetic Employee", hours_2=8)
+    xlsx_upload = await client.post(url, json={
+        "request_key": str(uuid4()), "kind": "timesheet",
+        "employment_binding_id": binding["binding_id"], "month": "2026-10",
+        "reference": "synthetic-october-xlsx", "filename": xlsx_path.name,
+        "data_url": "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,"
+                    + base64.b64encode(xlsx_path.read_bytes()).decode(),
+        "evidence": "Fictional row-level XLSX comparison",
+    })
+    assert xlsx_upload.status_code == 200, xlsx_upload.text
+    xlsx_source = xlsx_upload.json()
+    xlsx_command = {
+        **reviewed_command,
+        "work_to": "2026-10-02",
+        "timesheet_document": xlsx_source["reference"],
+        "timesheet_file_id": xlsx_source["file_id"],
+        "timesheet_digest": xlsx_source["sha256"],
+        "worked_hours": "8.00",
+    }
+    xlsx_command["components"] = [
+        reviewed_command["components"][0],
+        {**reviewed_command["components"][1], "adjustment_byn": "50.00"},
+    ]
+    assert (await client.post(preview_url, json=xlsx_command)).status_code == 422
+    assert (await client.post(preview_url, json={
+        **xlsx_command, "timesheet_row": 13,
+    })).status_code == 422
+    assert (await client.post(preview_url, json={
+        **xlsx_command, "timesheet_row": 11, "worked_hours": "7.00",
+    })).status_code == 422
+    wrong_person = await client.post(preview_url, json={
+        **xlsx_command, "timesheet_row": 12,
+    })
+    assert wrong_person.status_code == 422
+    assert "personnel code differs" in wrong_person.text
+    assert "worker-b" not in wrong_person.text
+    checked_xlsx = await client.post(preview_url, json={**xlsx_command, "timesheet_row": 11})
+    assert checked_xlsx.status_code == 200, checked_xlsx.text
+    assert checked_xlsx.json()["timesheet_numeric_hours_verified"] is True
+    assert checked_xlsx.json()["basis"]["timesheet_row"] == 11
+    assert checked_xlsx.json()["basis"]["timesheet_name_matches_binding"] is True
+    assert checked_xlsx.json()["basis"]["timesheet_identifier_matches_binding"] is True
+    assert checked_xlsx.json()["basis"]["timesheet_uninterpreted_code_days"] == 1
+
+    review_url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-reviews"
+    missing_schedule_review = await client.post(review_url, json={
+        **missing_schedule, "request_key": str(uuid4()),
+        "basis_digest": preliminary.json()["basis_digest"],
+        "reviewer_evidence": "Synthetic preview lacks the monthly norm source",
+    })
+    assert missing_schedule_review.status_code == 422
+    broken_path = tmp_path / "broken-october.xlsx"
+    make_timesheet(broken_path, month="2026-10", truncated=True)
+    broken_upload = await client.post(url, json={
+        "request_key": str(uuid4()), "kind": "timesheet",
+        "employment_binding_id": binding["binding_id"], "month": "2026-10",
+        "reference": "synthetic-broken-october", "filename": broken_path.name,
+        "data_url": "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,"
+                    + base64.b64encode(broken_path.read_bytes()).decode(),
+        "evidence": "Fictional defective workbook for investigation",
+    })
+    assert broken_upload.status_code == 200, broken_upload.text
+    broken_source = broken_upload.json()
+    broken_command = {
+        **xlsx_command,
+        "timesheet_document": broken_source["reference"],
+        "timesheet_file_id": broken_source["file_id"],
+        "timesheet_digest": broken_source["sha256"],
+    }
+    investigation = await client.post(preview_url, json=broken_command)
+    assert investigation.status_code == 200, investigation.text
+    blocked_xlsx_review = await client.post(review_url, json={
+        **broken_command, "request_key": str(uuid4()),
+        "basis_digest": investigation.json()["basis_digest"],
+        "reviewer_evidence": "Synthetic investigation of defective XLSX",
+    })
+    assert blocked_xlsx_review.status_code == 422
+    assert await db.scalar(select(func.count(PayrollWorkpaperReview.id))) == 0
+
+    review_command = {
+        **reviewed_command,
+        "request_key": str(uuid4()),
+        "basis_digest": accepted.json()["basis_digest"],
+        "reviewer_evidence": "Synthetic chief reviewed source-backed arithmetic only",
+    }
+    original_preflight = payroll_evidence_files.timesheet_preflight
+    monkeypatch.setattr(payroll_evidence_files, "timesheet_preflight",
+                        lambda _row: {"status": "structure_failed"})
+    blocked = await client.post(review_url, json={**review_command, "request_key": str(uuid4())})
+    assert blocked.status_code == 422
+    assert "preflight" in blocked.text.lower()
+    assert await db.scalar(select(func.count(PayrollWorkpaperReview.id))) == 0
+    monkeypatch.setattr(payroll_evidence_files, "timesheet_preflight", original_preflight)
+    reviewed = await client.post(review_url, json=review_command)
+    assert reviewed.status_code == 200, reviewed.text
+    receipt = reviewed.json()
+    assert receipt["revision"] == 1
+    assert receipt["bytes_verified_at_review"] is True
+    assert receipt["current_file_bytes_verified"] is False
+    assert receipt["source_facts_attested_by_chief"] is False
+    assert receipt["posting_available"] is False
+    assert receipt["statutory_payroll_certified"] is False
+    assert receipt["snapshot"]["basis_digest"] == accepted.json()["basis_digest"]
+    assert (await client.post(review_url, json=review_command)).json() == receipt
+    assert (await client.get(
+        f"/accounting/organizations/{book[0]}/payroll-workpaper-reviews/{review_command['request_key']}"
+    )).json() == receipt
+    candidate_url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-own-candidate"
+    unconfirmed_candidate = (await client.get(candidate_url)).json()
+    assert unconfirmed_candidate["included_segment_count"] == 0
+    assert unconfirmed_candidate["totals"]["gross_byn"] == "0.00"
+    assert "source_facts_not_attested" in unconfirmed_candidate["blockers"]
+    assert unconfirmed_candidate["unattested_review_ids"] == [receipt["review_id"]]
+    assert await db.scalar(select(func.count(PayrollWorkpaperReview.id))) == 1
+    assert (await client.post(review_url, json={
+        **review_command, "reviewer_evidence": "Changed evidence on same key",
+    })).status_code == 409
+    assert (await client.post(review_url, json={
+        **review_command, "request_key": str(uuid4()),
+        "reviewer_evidence": "           ",
+    })).status_code == 422
+
+    overlapping_command = {**reviewed_command, "work_from": "2026-10-02"}
+    overlapping_preview = await client.post(preview_url, json=overlapping_command)
+    assert overlapping_preview.status_code == 200
+    overlap = await client.post(review_url, json={
+        **overlapping_command, "request_key": str(uuid4()),
+        "basis_digest": overlapping_preview.json()["basis_digest"],
+        "reviewer_evidence": "Synthetic review of an overlapping work segment",
+    })
+    assert overlap.status_code == 422
+    assert "overlaps" in overlap.text
+
+    corrected_command = {**reviewed_command, "monthly_salary_byn": "1600.00"}
+    corrected_preview = await client.post(preview_url, json=corrected_command)
+    assert corrected_preview.status_code == 200
+    correction = {
+        **corrected_command, "request_key": str(uuid4()),
+        "basis_digest": corrected_preview.json()["basis_digest"],
+        "reviewer_evidence": "Synthetic correction of the salary input source",
+    }
+    assert (await client.post(review_url, json=correction)).status_code == 422
+    correction["supersedes_review_id"] = receipt["review_id"]
+    corrected = await client.post(review_url, json=correction)
+    assert corrected.status_code == 200, corrected.text
+    assert corrected.json()["revision"] == 2
+    assert corrected.json()["supersedes_review_id"] == receipt["review_id"]
+    summary_url = f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-arithmetic-summary"
+    summary_response = await client.get(summary_url)
+    assert summary_response.status_code == 200, summary_response.text
+    summary = summary_response.json()
+    assert summary_response.headers["cache-control"] == "private, no-store"
+    assert summary["review_count"] == 2
+    assert summary["selected_segment_count"] == 1
+    assert summary["bindings"][0]["segments"][0]["review_id"] == corrected.json()["review_id"]
+    assert summary["totals"] == {
+        "gross_byn": "800.00",
+        "listed_employee_deductions_byn": "80.00",
+        "after_listed_deductions_byn": "720.00",
+        "listed_employer_contributions_byn": "140.00",
+        "cost_including_listed_contributions_byn": "940.00",
+    }
+    assert len(summary["selection_digest"]) == 64
+    assert summary["coverage_verified"] is False
+    assert summary["known_binding_coverage"]["known_binding_coverage_complete"] is True
+    assert summary["known_binding_coverage"]["organization_payroll_population_verified"] is False
+    assert summary["current_file_bytes_verified"] is True
+    assert summary["posting_available"] is False
+    assert summary["statutory_payroll_certified"] is False
+    assert summary["source_fact_attested_segment_count"] == 0
+    assert summary["source_fact_unattested_review_ids"] == [corrected.json()["review_id"]]
+    attestation = {
+        **correction, "request_key": str(uuid4()),
+        "supersedes_review_id": corrected.json()["review_id"],
+        "source_fact_attestation": "contract_salary_time_norm_checked",
+        "source_fact_evidence": "Synthetic contract salary clause, timesheet row and schedule norm cell checked",
+    }
+    assert (await client.post(review_url, json={
+        **attestation, "source_fact_evidence": "short",
+    })).status_code == 422
+    attested_response = await client.post(review_url, json=attestation)
+    assert attested_response.status_code == 200, attested_response.text
+    attested = attested_response.json()
+    assert attested["revision"] == 3
+    assert attested["source_facts_attested_by_chief"] is True
+    assert attested["snapshot"]["source_fact_attestation"]["evidence"] == attestation["source_fact_evidence"]
+    assert (await client.post(review_url, json=attestation)).json() == attested
+    assert (await client.post(review_url, json=review_command)).json() == receipt
+    assert (await client.post(review_url, json={
+        **attestation, "source_fact_evidence": "Changed attestation on the same request key",
+    })).status_code == 409
+    attested_summary = (await client.get(summary_url)).json()
+    assert attested_summary["selected_segment_count"] == 1
+    assert attested_summary["source_fact_attested_segment_count"] == 1
+    assert attested_summary["source_fact_unattested_review_ids"] == []
+    assert attested_summary["all_selected_source_facts_attested_by_chief"] is True
+    assert attested_summary["source_facts_verified"] is False
+    assert attested_summary["posting_available"] is False
+    candidate_response = await client.get(candidate_url)
+    assert candidate_response.status_code == 200, candidate_response.text
+    assert candidate_response.headers["cache-control"] == "private, no-store"
+    candidate = candidate_response.json()
+    assert candidate["included_segment_count"] == 1
+    assert candidate["totals"] == attested_summary["totals"]
+    assert candidate["source_basis"]["included_reviews"] == [{
+        "review_id": attested["review_id"], "snapshot_digest": attested["snapshot_digest"],
+    }]
+    assert candidate["blockers"] == [
+        "population_review_missing_or_stale", "payroll_rate_obligation_unreviewed",
+        "fszn_base_classification_unreviewed",
+        "statutory_rule_completeness_unverified",
+    ]
+    assert candidate["fszn_base_unclassified_review_ids"] == [attested["review_id"]]
+    assert candidate["fszn_monthly_cap_preview"] is None
+    assert candidate["posting_available"] is False
+    assert candidate["statutory_payroll_certified"] is False
+    applicability = candidate["applicability"]
+    assert applicability["population_scope"] == "known_erp_bindings_only"
+    assert applicability["statutory_completeness_verified"] is False
+    assert applicability["bindings"] == [{
+        "employment_binding_id": binding["binding_id"],
+        "review_id": None,
+        "review_digest": None,
+        "reviewed_fact_codes": [],
+        "fszn_minimum_condition": None,
+        "unrecorded_fact_codes": [
+            "income_kind_and_tax_agent_treatment", "year_to_date_taxable_income",
+            "main_workplace_and_deduction_basis",
+            "dependants_special_status_and_deduction_documents",
+            "other_deduction_claims_and_documents", "insurance_applicability_and_base",
+            "fszn_minimum_condition",
+        ],
+    }]
+    assert applicability["reference_scope"] == "selected_mns_topics_only"
+    assert all(source["url"].startswith("https://nalog.gov.by/")
+               for source in applicability["references"])
+    assert candidate["source_basis"]["applicability"] == applicability
+    assert (await client.get(candidate_url)).json()["candidate_digest"] == candidate["candidate_digest"]
+    base_review_command = {
+        **attestation, "request_key": str(uuid4()),
+        "supersedes_review_id": attested["review_id"],
+        "fszn_base_attestation": "listed_salary_base_checked",
+        "fszn_base_evidence": "Synthetic chief checked salary and the documented base adjustment against policy",
+        "fszn_base_contract_locator": "page 1, salary clause",
+    }
+    assert (await client.post(review_url, json={
+        **base_review_command, "fszn_base_contract_locator": "bad\x00locator",
+    })).status_code == 422
+    assert (await client.post(review_url, json={
+        **base_review_command, "source_fact_attestation": None,
+        "source_fact_evidence": None,
+    })).status_code == 422
+    base_review = await client.post(review_url, json=base_review_command)
+    assert base_review.status_code == 200, base_review.text
+    attested = base_review.json()
+    assert attested["fszn_base_classified_by_chief"] is True
+    assert (await client.post(review_url, json=base_review_command)).json() == attested
+    attested_summary = (await client.get(summary_url)).json()
+    candidate = (await client.get(candidate_url)).json()
+    assert candidate["fszn_base_unclassified_review_ids"] == []
+    assert "fszn_base_classification_unreviewed" not in candidate["blockers"]
+    reconcile_url = (f"/accounting/organizations/{book[0]}/periods/2026-10/"
+                     "payroll-source-reconciliation")
+    empty_reconcile = await client.get(reconcile_url)
+    assert empty_reconcile.status_code == 200, empty_reconcile.text
+    assert empty_reconcile.headers["cache-control"] == "private, no-store"
+    assert empty_reconcile.json()["status"] == "not_ready"
+    assert empty_reconcile.json()["missing_gross_binding_ids"] == [binding["binding_id"]]
+
+    for code, category in (("26", "expense"), ("70", "liability"),
+                           ("68.1", "liability"), ("69", "liability")):
+        db.add(Account(
+            organization_id=book[0], code=code, title=f"Synthetic payroll {code}",
+            category=category, valid_from=date(2026, 1, 1),
+            required_dimensions=[], currency_tracking=False,
+            quantity_tracking=False, cash=False, normative_ref="Synthetic payroll source",
+        ))
+    await db.commit()
+
+    async def imported(kind, source_document, lines):
+        body = {
+            "request_key": str(uuid4()), "source_document": source_document,
+            "source_version": 1, "source_digest": "b" * 64,
+            "verified_by": "tester", "source_evidence": "Synthetic reviewed external payroll file",
+            "policy_id": book[1], "posting_date": "2026-10-31",
+            "payroll_account": "70", "lines": lines,
+        }
+        path = (f"/accounting/organizations/{book[0]}/periods/2026-10/"
+                f"payroll-{kind}-import-")
+        preview = await client.post(path + "preview", json=body)
+        assert preview.status_code == 200, preview.text
+        confirmed = await client.post(path + "confirm", json={
+            **body, "digest": preview.json()["digest"],
+        }, headers={"X-Expected-Principal": "tester"})
+        assert confirmed.status_code == 201, confirmed.text
+        await db.commit()
+
+    await imported("accrual", "gross-reviewed", [{
+        "source_line_id": "gross-1", "employment_binding_id": binding["binding_id"],
+        "employee": "Synthetic Employee", "department": "repair",
+        "debit_account": "26", "amount_byn": "800.00",
+        "evidence": "Synthetic gross line from external payroll",
+    }])
+    without_statutory = (await client.get(reconcile_url)).json()
+    assert without_statutory["comparison_ready"] is False
+    assert without_statutory["missing_statutory_binding_ids"] == [binding["binding_id"]]
+    await imported("statutory", "statutory-reviewed", [
+        {"source_line_id": "deduction-1", "employment_binding_id": binding["binding_id"],
+         "employee": "Synthetic Employee", "department": "repair",
+         "kind": "employee_deduction", "liability_account": "68.1",
+         "amount_byn": "80.00", "evidence": "Synthetic external deduction line"},
+        {"source_line_id": "contribution-1", "employment_binding_id": binding["binding_id"],
+         "employee": "Synthetic Employee", "department": "repair",
+         "kind": "employer_contribution", "liability_account": "69",
+         "cost_account": "26", "amount_byn": "140.00",
+         "evidence": "Synthetic external contribution line"},
+    ])
+    no_roster = (await client.get(reconcile_url)).json()
+    assert no_roster["status"] == "not_ready"
+    assert no_roster["bindings"][0]["difference_import_less_review"] == {
+        "gross_byn": "0.00", "listed_employee_deductions_byn": "0.00",
+        "listed_employer_contributions_byn": "0.00",
+    }
+    roster_file = await client.post(url, json={
+        "request_key": str(uuid4()), "kind": "payroll_population", "month": "2026-10",
+        "reference": "one-worker-roster", "filename": "roster.pdf",
+        "data_url": "data:application/pdf;base64," + base64.b64encode(
+            b"%PDF-1.7\nsynthetic roster source\n").decode(),
+        "evidence": "Synthetic chief reviewed the monthly employee roster",
+    })
+    assert roster_file.status_code == 200, roster_file.text
+    roster_review = await client.post(
+        f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-population-reviews",
+        json={
+            "request_key": str(uuid4()), "source_file_id": roster_file.json()["file_id"],
+            "source_system": "synthetic-hr", "source_document": "one-worker-roster",
+            "source_employee_count": 1, "binding_ids": [binding["binding_id"]],
+            "employee_ids": [binding["employee_id"]],
+            "evidence": "Synthetic chief matched the employee to ERP binding",
+        })
+    assert roster_review.status_code == 200, roster_review.text
+    roster_candidate = (await client.get(candidate_url)).json()
+    assert roster_candidate["arithmetic_scope_complete"] is True
+    assert roster_candidate["blockers"] == [
+        "payroll_rate_obligation_unreviewed", "statutory_rule_completeness_unverified",
+    ]
+    assert roster_candidate["candidate_digest"] != candidate["candidate_digest"]
+    assert roster_candidate["source_basis"]["population_review_id"] == roster_review.json()["review_id"]
+    roster_path = root / str(book[0]) / (roster_file.json()["request_key"].replace("-", "") + ".pdf")
+    roster_raw = roster_path.read_bytes()
+    roster_path.write_bytes(b"%PDF-1.7\ntampered roster for own candidate\n")
+    assert (await client.get(candidate_url)).status_code == 409
+    roster_path.write_bytes(roster_raw)
+    matched = (await client.get(reconcile_url)).json()
+    assert matched["status"] == "matched_arithmetic_only"
+    assert matched["comparison_ready"] is True
+    assert matched["current_file_bytes_verified"] is True
+    assert matched["missing_statutory_binding_ids"] == []
+    assert matched["statutory_payroll_certified"] is False
+    assert matched["posting_available"] is False
+    for source in (policy_file, contract, timesheet, adjustment):
+        source_path = root / str(book[0]) / (source["request_key"].replace("-", "") + ".pdf")
+        original = source_path.read_bytes()
+        source_path.write_bytes(b"%PDF-1.7\ntampered after chief review\n")
+        assert (await client.get(summary_url)).status_code == 409
+        source_path.write_bytes(original)
+    schedule_path.write_bytes(b"%PDF-1.7\ntampered after chief review\n")
+    assert (await client.get(summary_url)).status_code == 409
+    assert (await client.get(candidate_url)).status_code == 409
+    assert (await client.get(reconcile_url)).status_code == 409
+    stale_controls = (await client.get(
+        f"/accounting/organizations/{book[0]}/periods/2026-10/closing-controls")).json()
+    assert stale_controls["payroll"]["arithmetic_reconciliation_status"] == "unavailable"
+    assert "payroll_arithmetic_reconciliation_unavailable" in {
+        item["code"] for item in stale_controls["review_items"]}
+    historical = await client.get(
+        f"/accounting/organizations/{book[0]}/payroll-workpaper-reviews/{review_command['request_key']}")
+    assert historical.status_code == 200
+    assert historical.json() == receipt
+    schedule_path.write_bytes(schedule_raw)
+    assert (await client.get(reconcile_url)).json()["comparison_ready"] is True
+    first_gross_entry = matched["receipt_entry_ids"]["gross"][0]
+    first_line = await db.scalar(select(Line).where(Line.entry_id == first_gross_entry)
+                                 .order_by(Line.id))
+    first_line_id = first_line.id
+    await db.execute(update(Line).where(Line.id == first_line_id).values(amount="801.00"))
+    await db.commit()
+    assert (await client.get(reconcile_url)).status_code == 409
+    await db.execute(update(Line).where(Line.id == first_line_id).values(amount="800.00"))
+    await db.commit()
+    await imported("accrual", "extra-gross-reviewed", [{
+        "source_line_id": "extra-gross-1", "employment_binding_id": binding["binding_id"],
+        "employee": "Synthetic Employee", "department": "repair",
+        "debit_account": "26", "amount_byn": "10.00",
+        "evidence": "Synthetic additional external gross line",
+    }])
+    changed = (await client.get(reconcile_url)).json()
+    assert changed["status"] == "differences"
+    assert changed["bindings"][0]["difference_import_less_review"]["gross_byn"] == "10.00"
+    closing_controls = (await client.get(
+        f"/accounting/organizations/{book[0]}/periods/2026-10/closing-controls")).json()
+    assert closing_controls["payroll"]["arithmetic_reconciliation_status"] == "differences"
+    assert "payroll_arithmetic_difference" in {
+        item["code"] for item in closing_controls["review_items"]}
+    grant = await db.scalar(select(AccessGrant).where(
+        AccessGrant.organization_id == book[0], AccessGrant.subject == "tester"))
+    grant.role = "reader"
+    await db.commit()
+    reader_controls = (await client.get(
+        f"/accounting/organizations/{book[0]}/periods/2026-10/closing-controls")).json()
+    assert reader_controls["payroll"]["arithmetic_reconciliation_status"] == "not_requested"
+    assert "payroll_arithmetic_difference" not in {
+        item["code"] for item in reader_controls["review_items"]}
+    assert (await client.get(reconcile_url)).status_code == 403
+    assert (await client.get(candidate_url)).status_code == 403
+    grant.role = "chief"
+    await db.commit()
+    assert (await client.post(review_url, json={
+        **review_command, "request_key": str(uuid4()),
+        "supersedes_review_id": receipt["review_id"],
+    })).status_code == 422
+
+    contradictory_zero = await client.post(url, json={
+        "request_key": str(uuid4()), "kind": "payroll_stat_zero_person",
+        "employment_binding_id": binding["binding_id"], "month": "2026-10",
+        "reference": "contradictory-statutory-zero", "filename": "stat-zero.pdf",
+        "data_url": "data:application/pdf;base64," + base64.b64encode(
+            b"%PDF-1.7\nsynthetic contradictory statutory zero\n").decode(),
+        "evidence": "Synthetic contradictory zero statement for mapped employee",
+    })
+    assert contradictory_zero.status_code == 200, contradictory_zero.text
+    conflicted = (await client.get(reconcile_url)).json()
+    assert conflicted["comparison_ready"] is False
+    assert conflicted["conflicting_statutory_zero_binding_ids"] == [binding["binding_id"]]
+    assert conflicted["statutory_person_zero_file_ids"] == [
+        contradictory_zero.json()["file_id"]]
+
+    wrong_claim = await client.post(preview_url, json=command(*args, **{
+        **fields, "timesheet_digest": hashlib.sha256(b"different").hexdigest(),
+    }))
+    assert wrong_claim.status_code == 422
+    assert "differ from stored" in wrong_claim.text
+    partial = await client.post(preview_url, json=command(*args, **{
+        **fields, "timesheet_file_id": None,
+    }))
+    assert partial.status_code == 422
+
+    # Corrupt both possible files: whichever is selected must fail byte verification.
+    stored_pdf_bytes = {path: path.read_bytes() for path in (root / str(book[0])).glob("*.pdf")}
+    for path in stored_pdf_bytes:
+        path.write_bytes(b"%PDF-1.7\ncorrupted")
+    tampered = await client.post(preview_url, json=command(*args, **fields))
+    assert tampered.status_code == 409
+    assert (await client.get(summary_url)).status_code == 409
+    for path, original in stored_pdf_bytes.items():
+        path.write_bytes(original)
+    wage_source_command = {
+        "request_key": str(uuid4()), "kind": "payroll_organization_rule",
+        "employment_binding_id": None, "month": "2026-10",
+        "reference": "synthetic-september-wage-dossier", "filename": "wage.pdf",
+        "data_url": "data:application/pdf;base64," + base64.b64encode(
+            b"%PDF-1.7\nsynthetic reference wage, not official\n").decode(),
+        "evidence": "Synthetic reference wage for monthly cap arithmetic only",
+    }
+    wage_source = await client.post(url, json=wage_source_command)
+    assert wage_source.status_code == 200, wage_source.text
+    wage_review_command = {
+        "request_key": str(uuid4()), "source_file_id": wage_source.json()["file_id"],
+        "source_document": wage_source.json()["reference"],
+        "facts": [{"code": "period_fszn_rules_and_limits", "decision": "applicable",
+                   "finding": "Synthetic chief selected one monthly wage reference",
+                   "source_locator": "page 1, synthetic national wage",
+                   "reference_wage_month": "2026-09", "reference_wage_byn": "100.00",
+                   "reference_wage_published_on": "2026-10-24",
+                   "reference_wage_url": "https://www.belstat.gov.by/example/wage.pdf"}],
+        "evidence": "Synthetic chief checked one reference wage source file",
+        "supersedes_id": None,
+    }
+    wage_review_url = (f"/accounting/organizations/{book[0]}/periods/2026-10/"
+                       "payroll-organization-reviews")
+    wage_review = await client.post(wage_review_url, json=wage_review_command)
+    assert wage_review.status_code == 200, wage_review.text
+    assert (await client.post(wage_review_url, json=wage_review_command)).json() == wage_review.json()
+    capped_candidate = (await client.get(candidate_url)).json()
+    cap_preview = capped_candidate["fszn_monthly_cap_preview"]
+    assert cap_preview["ceiling_byn"] == "500.00"
+    assert cap_preview["employees"] == [{
+        "employee_id": binding["employee_id"], "review_ids": [attested["review_id"]],
+        "listed_eligible_base_byn": "700.00", "capped_listed_base_byn": "500.00",
+    }]
+    assert "fszn_components_need_monthly_recalculation" in capped_candidate["blockers"]
+    assert "fszn_minimum_wage_missing" in capped_candidate["blockers"]
+    assert capped_candidate["totals"]["listed_employer_contributions_byn"] == "140.00"
+    assert capped_candidate["posting_available"] is False
+    assert capped_candidate["statutory_payroll_certified"] is False
+    wage_path = root / str(book[0]) / (wage_source_command["request_key"].replace("-", "") + ".pdf")
+    wage_original = wage_path.read_bytes()
+    wage_path.write_bytes(b"%PDF-1.7\ntampered wage source\n")
+    assert (await client.get(candidate_url)).status_code == 409
+    wage_path.write_bytes(wage_original)
+    assert (await client.get(candidate_url)).status_code == 200
+
+    minimum_source_command = {
+        **wage_source_command, "request_key": str(uuid4()),
+        "reference": "synthetic-october-minimum-wage", "filename": "minimum.pdf",
+        "data_url": "data:application/pdf;base64," + base64.b64encode(
+            b"%PDF-1.7\nsynthetic minimum wage, not official\n").decode(),
+        "evidence": "Synthetic separate source for Article 9 comparison",
+    }
+    minimum_source = await client.post(url, json=minimum_source_command)
+    assert minimum_source.status_code == 200, minimum_source.text
+    minimum_fact = {**wage_review_command["facts"][0],
+                    "minimum_wage_month": "2026-10", "minimum_wage_byn": "2000.00",
+                    "minimum_wage_published_on": "2026-09-30",
+                    "minimum_wage_url": "https://nalog.gov.by/news/36005/",
+                    "minimum_wage_source_file_id": minimum_source.json()["file_id"],
+                    "minimum_wage_source_file_sha256": minimum_source.json()["sha256"],
+                    "minimum_wage_source_locator": "page 1, synthetic amount"}
+    minimum_review_command = {**wage_review_command, "request_key": str(uuid4()),
+                              "supersedes_id": wage_review.json()["review_id"],
+                              "facts": [minimum_fact]}
+    assert (await client.post(wage_review_url, json={
+        **minimum_review_command, "facts": [{**minimum_fact,
+            "minimum_wage_month": "2026-09"}],
+    })).status_code == 422
+    assert (await client.post(wage_review_url, json={
+        **minimum_review_command, "facts": [{**minimum_fact,
+            "minimum_wage_source_file_sha256": "0" * 64}],
+    })).status_code == 422
+    assert (await client.post(wage_review_url, json={
+        **minimum_review_command, "facts": [{**minimum_fact,
+            "minimum_wage_source_locator": "page 1\x00tampered"}],
+    })).status_code == 422
+    minimum_review = await client.post(wage_review_url, json=minimum_review_command)
+    assert minimum_review.status_code == 200, minimum_review.text
+    assert (await client.post(wage_review_url, json=minimum_review_command)).json() == minimum_review.json()
+    assert (await client.get(f"/accounting/organizations/{book[0]}/payroll-organization-reviews/"
+                             f"by-request/{wage_review_command['request_key']}")).json() == wage_review.json()
+    before_employee_review = (await client.get(candidate_url)).json()
+    assert before_employee_review["fszn_minimum_preview"]["employees"][0]["status"] == "unreviewed"
+    assert "fszn_minimum_condition_unreviewed" in before_employee_review["blockers"]
+
+    employee_source = await client.post(url, json={
+        "request_key": str(uuid4()), "kind": "payroll_applicability",
+        "employment_binding_id": binding["binding_id"], "month": "2026-10",
+        "reference": "synthetic-article-9-employee-fact", "filename": "employee.pdf",
+        "data_url": "data:application/pdf;base64," + base64.b64encode(
+            b"%PDF-1.7\nsynthetic employee category, not official\n").decode(),
+        "evidence": "Synthetic chief checked the employee exception category",
+    })
+    assert employee_source.status_code == 200, employee_source.text
+    employee_review_url = (f"/accounting/organizations/{book[0]}/periods/2026-10/"
+                           "payroll-applicability-reviews")
+    employee_review_command = {
+        "request_key": str(uuid4()), "employment_binding_id": binding["binding_id"],
+        "source_file_id": employee_source.json()["file_id"],
+        "source_document": employee_source.json()["reference"],
+        "facts": [{"code": "fszn_minimum_condition",
+                   "finding": "Synthetic chief identified ordinary employee treatment",
+                   "source_locator": "page 1, employee status",
+                   "fszn_minimum_condition": "applies",
+                   "fszn_minimum_full_month_norm_hours": "160.00",
+                   "fszn_minimum_full_norm_locator": "page 1, full month hours"}],
+        "evidence": "Synthetic chief identified Article 9 treatment for this employee",
+    }
+    assert (await client.post(employee_review_url, json={
+        **employee_review_command,
+        "facts": [{key: value for key, value in employee_review_command["facts"][0].items()
+                   if key != "fszn_minimum_condition"}],
+    })).status_code == 422
+    assert (await client.post(employee_review_url, json={
+        **employee_review_command,
+        "facts": [{key: value for key, value in employee_review_command["facts"][0].items()
+                   if key != "fszn_minimum_full_month_norm_hours"}],
+    })).status_code == 422
+    employee_review = await client.post(employee_review_url, json=employee_review_command)
+    assert employee_review.status_code == 200, employee_review.text
+    minimum_candidate = (await client.get(candidate_url)).json()
+    assert minimum_candidate["fszn_minimum_preview"]["employees"] == [{
+        "employee_id": binding["employee_id"], "review_ids": [attested["review_id"]],
+        "chief_condition": "applies", "status": "comparison",
+        "worked_hours": "80.00", "full_month_norm_hours": "160.00",
+        "time_adjusted_minimum_base_byn": "1000.00",
+        "listed_fszn_components_byn": "140.00",
+        "minimum_of_listed_components_byn": "200.00",
+        "indicative_shortfall_byn": "60.00",
+    }]
+    assert "fszn_minimum_recalculation_required" in minimum_candidate["blockers"]
+    assert minimum_candidate["totals"] == capped_candidate["totals"]
+    assert minimum_candidate["posting_available"] is False
+    minimum_path = root / str(book[0]) / (minimum_source_command["request_key"].replace("-", "") + ".pdf")
+    minimum_original = minimum_path.read_bytes()
+    minimum_path.write_bytes(b"%PDF-1.7\ntampered minimum source\n")
+    assert (await client.get(candidate_url)).status_code == 409
+    assert (await client.get(wage_review_url + "/current")).status_code == 409
+    minimum_path.write_bytes(minimum_original)
+    assert (await client.get(candidate_url)).status_code == 200
+    ended_after_review = await client.post(
+        f"/accounting/organizations/{book[0]}/payroll-employments", json={
+            "request_key": str(uuid4()),
+            "employee_id": binding["employee_id"],
+            "contract_ref": binding["contract_ref"],
+            "effective_from": "2026-10-15",
+            "state": "ended",
+            "source_document": "synthetic-retrospective-contract-end",
+            "evidence": "Synthetic later correction to employment period",
+        },
+    )
+    assert ended_after_review.status_code == 200, ended_after_review.text
+    stale_summary = (await client.get(summary_url)).json()
+    stale_coverage = stale_summary["known_binding_coverage"]
+    assert stale_coverage["known_binding_coverage_complete"] is False
+    assert stale_coverage["expected_intervals"][0]["work_to"] == "2026-10-14"
+    assert stale_coverage["issues"][0]["kind"] == "outside_current_binding"
+    assert stale_summary["selection_digest"] == attested_summary["selection_digest"]
+    assert stale_summary["coverage_digest"] != attested_summary["coverage_digest"]
+    assert stale_summary["summary_digest"] != attested_summary["summary_digest"]
+    stale_candidate = (await client.get(candidate_url)).json()
+    assert stale_candidate["fszn_monthly_cap_preview"] is None
+    assert stale_candidate["fszn_minimum_preview"] is None
+    period = await db.scalar(select(Period).where(
+        Period.organization_id == book[0], Period.month == "2026-10"))
+    period.closed = True
+    await db.commit()
+    assert (await client.post(wage_review_url, json={
+        **minimum_review_command, "request_key": str(uuid4()),
+        "supersedes_id": minimum_review.json()["review_id"],
+    })).status_code == 422
+    assert (await client.post(employee_review_url, json={
+        **employee_review_command, "request_key": str(uuid4()),
+        "supersedes_id": employee_review.json()["review_id"],
+    })).status_code == 422
+    assert (await client.post(review_url, json={
+        **review_command, "request_key": str(uuid4()),
+        "supersedes_review_id": corrected.json()["review_id"],
+    })).status_code == 422
+    assert (await client.post(review_url, json=review_command)).json() == receipt
+    grant = await db.scalar(select(AccessGrant).where(
+        AccessGrant.organization_id == book[0], AccessGrant.subject == "tester",
+    ))
+    grant.role = "accountant"
+    await db.commit()
+    accountant_access = (await client.get(
+        f"/accounting/organizations/{book[0]}/payroll-workpaper-access",
+    )).json()
+    assert accountant_access == {"organization_id": book[0], "can_preview": True,
+                                 "can_upload": True, "can_review": False}
+    assert (await client.post(review_url, json=review_command)).status_code == 403
+    assert (await client.get(
+        f"/accounting/organizations/{book[0]}/payroll-workpaper-reviews/{review_command['request_key']}"
+    )).status_code == 200
+    assert (await client.get(summary_url)).status_code == 200
+    immutable_receipt = await db.get(PayrollWorkpaperReview, receipt["review_id"])
+    immutable_receipt.reviewer_evidence = "Attempted edit of reviewed history"
+    with pytest.raises(ValueError, match="immutable"):
+        await db.flush()
+    await db.rollback()
+
+
+async def test_xlsx_preview_requires_personnel_number_in_employer_binding(
+        client, db, book, workpaper_sources, tmp_path, monkeypatch):
+    binding, deduction, contribution, ruleset = workpaper_sources
+    root = tmp_path / "payroll"
+    root.mkdir()
+    monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
+    employer = await client.post(f"/accounting/organizations/{book[0]}/payroll-employments", json={
+        "request_key": str(uuid4()), "employee_id": binding["employee_id"],
+        "contract_ref": "contract-without-number", "effective_from": "2026-01-01",
+        "state": "active", "source_document": "signed-contract-without-number",
+        "evidence": "Synthetic employer binding without a personnel number",
+    })
+    assert employer.status_code == 200, employer.text
+    assert employer.json()["personnel_identifier"] is None
+    source_url = f"/accounting/organizations/{book[0]}/payroll-evidence-files"
+    xlsx = tmp_path / "hours.xlsx"
+    make_timesheet(xlsx, month="2026-10", name_1="Synthetic Employee")
+
+    async def upload(kind, reference, filename, raw, content_type, month=None):
+        response = await client.post(source_url, json={
+            "request_key": str(uuid4()), "kind": kind,
+            "employment_binding_id": employer.json()["binding_id"], "month": month,
+            "reference": reference, "filename": filename,
+            "data_url": f"data:{content_type};base64," + base64.b64encode(raw).decode(),
+            "evidence": "Synthetic source for personnel-number guard",
+        })
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    contract = await upload("employment_contract", "signed-contract-without-number",
+                            "contract.pdf", b"%PDF-1.7\nsynthetic contract\n", "application/pdf")
+    timesheet = await upload(
+        "timesheet", "xlsx-without-personnel-binding", xlsx.name, xlsx.read_bytes(),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "2026-10")
+    args = (book[1], employer.json()["binding_id"], deduction["requirement_id"],
+            contribution["requirement_id"], ruleset["rule_set_id"])
+    payload = command(*args, work_to="2026-10-02", worked_hours="8.00",
+                      contract_document=contract["reference"],
+                      contract_digest=contract["sha256"], contract_file_id=contract["file_id"],
+                      timesheet_document=timesheet["reference"],
+                      timesheet_digest=timesheet["sha256"], timesheet_file_id=timesheet["file_id"],
+                      timesheet_row=11)
+    response = await client.post(
+        f"/accounting/organizations/{book[0]}/periods/2026-10/payroll-workpaper-preview",
+        json=payload)
+    assert response.status_code == 422
+    assert "personnel identifier" in response.text
+    assert "worker-a" not in response.text

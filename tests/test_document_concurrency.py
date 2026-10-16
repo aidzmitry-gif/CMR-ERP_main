@@ -9,9 +9,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from config.modules import ENABLED_MODULES
 from core.db.base import Base
-from core.domain.models import OutboxEvent, Sku
+from core.domain.models import Counterparty, OutboxEvent, Sku
 from core.runtime.app import create_app
 from core.runtime.deps import get_session
+from modules.integrations.models import StockItem
 from modules.sales.models import Deal, DealDocument, DealItem, PriceQuote
 
 
@@ -28,12 +29,16 @@ async def concurrent_app(tmp_path):
             yield session
     app.dependency_overrides[get_session] = own_session
     async with factory() as session:
-        deal = Deal(number='CONCURRENT', title='Original', counterparty='Buyer', amount=200)
+        buyer = Counterparty(name='Buyer', legal_name='Buyer Legal')
+        session.add(buyer)
+        await session.flush()
+        deal = Deal(number='CONCURRENT', title='Original', counterparty='Buyer', counterparty_id=buyer.id, amount=200)
         sku = Sku(code='CONCURRENT', title='Original SKU', unit='шт')
         session.add_all([deal, sku])
         await session.flush()
-        session.add_all([DealItem(deal_id=deal.id, sku_id=sku.id, qty=2),
-                         PriceQuote(sku_code=sku.code, counterparty='Buyer', price=100)])
+        session.add_all([DealItem(deal_id=deal.id, sku_id=sku.id, qty=2, unit_price=100),
+                         PriceQuote(sku_code=sku.code, counterparty='Buyer', price=100),
+                         StockItem(sku_code=sku.code, qty_available=100, qty_reserved=0)])
         await session.commit()
         deal_id, sku_id = deal.id, sku.id
     async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test',

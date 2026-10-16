@@ -50,11 +50,13 @@ class _PriorityFailingBus:
         self.order = order
         self.calls: list[tuple[_FakeSession, tuple[str, ...] | None]] = []
 
-    async def relay_once(self, session, ctx, *, event_types=None):
-        self.calls.append((session, event_types))
-        self.order.append("priority" if event_types is not None else "general")
-        if event_types is not None:
-            raise RuntimeError("priority poison")
+    async def relay_pending(self, factory, services, *, event_types=None):
+        async with factory() as session:
+            self.calls.append((session, event_types))
+            self.order.append("priority" if event_types is not None else "general")
+            if event_types is not None:
+                await session.rollback()
+                raise RuntimeError("priority poison")
         return 0
 
 
@@ -108,9 +110,10 @@ async def test_background_priority_cancellation_propagates(monkeypatch):
     factory = _FakeFactory(order)
 
     class _CancellingBus:
-        async def relay_once(self, session, ctx, *, event_types=None):
+        async def relay_pending(self, factory, services, *, event_types=None):
             assert event_types == ("intake.lead.received",)
-            raise asyncio.CancelledError
+            async with factory():
+                raise asyncio.CancelledError
 
     services = SimpleNamespace(
         db=SimpleNamespace(session_factory=factory),

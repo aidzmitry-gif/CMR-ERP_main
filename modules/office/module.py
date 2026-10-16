@@ -17,6 +17,9 @@ PERMISSIONS = [
     Permission("office.doc.write", "Создание и изменение документов"),
     Permission("office.stage.move", "Перевод документа по стадиям воронки"),
     Permission("office.carrier.request", "Создание заявки перевозчику на доставку по РБ"),
+    Permission("office.shipping.associate", "Подтверждение связи заявки со счётом"),
+    Permission("office.shipping.review.assign", "Назначение reviewer конкретного OfficeDoc"),
+    Permission("office.shipping.review.revoke", "Отзыв reviewer конкретного OfficeDoc"),
 ]
 
 
@@ -26,13 +29,20 @@ class OfficeModule(ModuleContract):
     api_prefix = "/office"
 
     def register(self, core: Core) -> None:
+        from modules.office.shipping_producer import OfficeShippingProducer
+
+        core.services.shipping_producer.register("office", OfficeShippingProducer(core))
         # API + виджет панели владельца
         core.include_router(routes.router, prefix=self.api_prefix)
         core.register_widget(Widget("office", "Офис-менеджер", source="office.docs"))
 
         # RBAC: права и роль офис-менеджера
         core.declare_permissions(PERMISSIONS)
-        core.declare_role(Role("Офис-менеджер", permissions=tuple(p.code for p in PERMISSIONS)))
+        core.declare_role(Role("Офис-менеджер", permissions=tuple(p.code for p in PERMISSIONS if not p.code.startswith("office.shipping."))))
+        # Canonical role slugs. Individual assignment, deal visibility and
+        # organization authority remain mandatory inside the source adapter.
+        core.declare_role(Role("assistant", ("office.doc.read", "office.carrier.request")))
+        core.declare_role(Role("finance", ("office.doc.read", "office.carrier.request", "office.shipping.associate")))
 
         # Входящие связи с отделами — подписки на события шины
         core.subscribe("sales.deal.won", events.on_deal_won)                    # ← CRM/Sales

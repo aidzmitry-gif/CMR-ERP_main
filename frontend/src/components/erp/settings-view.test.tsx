@@ -3,7 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "@/components/erp/settings-view";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe("SettingsView", () => {
   it("показывает реестр модулей, роуты, события и права", async () => {
@@ -32,5 +35,25 @@ describe("SettingsView", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
     render(<SettingsView />);
     expect(await screen.findByText("Загрузка…")).toBeInTheDocument();
+  });
+
+  it("links the registered accounting module to the accountant workspace", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        loaded_modules: ["sales", "accounting"],
+        routers: [],
+        events: [],
+        permissions: [],
+        widgets: [],
+      }),
+    }));
+
+    render(<SettingsView />);
+
+    const link = await screen.findByRole("link", { name: "Открыть Бухгалтерия" });
+    expect(link).toHaveAttribute("href", "/erp/accounting");
+    expect(link).toHaveTextContent("Бухгалтерия · accounting");
+    expect(screen.getByText("sales")).toBeInTheDocument();
   });
 });

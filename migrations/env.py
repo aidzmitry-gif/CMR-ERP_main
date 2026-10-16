@@ -15,6 +15,7 @@ from sqlalchemy import engine_from_config, pool
 
 # Регистрируем модели на Base.metadata: сначала shared kernel ядра,
 # затем модели каждого включённого модуля (если у модуля они есть).
+import core.domain.document_source  # noqa: F401,E402
 import core.domain.models  # noqa: F401,E402
 from config.modules import ENABLED_MODULES
 from config.settings import get_settings

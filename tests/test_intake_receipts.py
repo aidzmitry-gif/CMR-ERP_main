@@ -30,6 +30,7 @@ from core.domain.models import (
     AuditLog,
     Contact,
     Counterparty,
+    CounterpartyBranch,
     IntakeIdentity,
     IntakeReceipt,
     OutboxEvent,
@@ -48,7 +49,7 @@ from modules.leads.module import LeadsModule
 URL = "/integrations/intake/v1"
 HEADERS = {"X-Intake-Token": "test-intake-only", "X-User-Roles": "director"}
 TABLES = [model.__table__ for model in (
-    Counterparty, Contact, IntakeIdentity, IntakeReceipt, OutboxEvent, AuditLog, Lead, LeadAttachment,
+    Counterparty, CounterpartyBranch, Contact, IntakeIdentity, IntakeReceipt, OutboxEvent, AuditLog, Lead, LeadAttachment,
 )]
 
 

@@ -1,13 +1,20 @@
 import { AppShell } from "@/components/app-shell";
 import { FunnelBoard } from "@/components/funnel/funnel-board";
-import { FUNNEL_EXTRAS } from "@/lib/funnel-configs";
+import Link from "next/link";
 
 export default function ProductionPage() {
   return (
     <AppShell crumbs={["ERP", "Производство"]}>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <nav aria-label="Документы производства" className="flex flex-wrap gap-3 border-b border-line p-4 text-sm">
+          <Link href="/erp/production/bom" className="text-accent hover:underline">Спецификации сборок</Link>
+          <Link href="/erp/production/vyrabotka" className="text-accent hover:underline">Выработка сборщиков</Link>
+          <Link href="/erp/production/otk" className="text-accent hover:underline">Контроль качества</Link>
+        </nav>
+        <div className="flex min-h-0 flex-1">
       <FunnelBoard
         title="Производство"
-        subtitle="Канбан цеха: от очереди до готовности. «Готово → склад» создаёт приход на склад."
+        subtitle="Заказы из ERP: от очереди до готовности. Спецификации, выработка и контроль качества доступны в документах производства."
         boardPath="/production/board"
         createPath="/production/orders"
         patchPath="/production/orders"
@@ -16,31 +23,11 @@ export default function ProductionPage() {
           { key: "product", label: "Изделие" },
           { key: "qty", label: "Кол-во", type: "number", default: 1 },
         ]}
-        detailExtras={{
-          operations: [
-            { name: "Раскрой", plan: "04.06", fact: "04.06", status: "ok" },
-            { name: "Сварка шин", plan: "05.06", fact: "05.06", status: "ok" },
-            { name: "Монтаж BMS", plan: "06.06", fact: "—", status: "bad" },
-            { name: "Тест", plan: "06.06", fact: "—", status: "warn" },
-          ],
-          risk: {
-            percent: 64,
-            notes: ["Дефицит BMS 16S — 36 шт", "Поступление BMS — 04.06", "Перегрузка участка теста (118%)"],
-          },
-          bom: [
-            { name: "LiFePO4 3.2V 100Ah", need: 1920, stock: 1920 },
-            { name: "BMS 16S 48V", need: 120, stock: 84 },
-            { name: "Корпус АКБ", need: 120, stock: 120 },
-            { name: "Шины медные", need: 480, stock: 460 },
-          ],
-          equipment: [
-            { name: "Сборочный пост A", load: 88 },
-            { name: "Обжимной пресс", load: 72 },
-            { name: "Тест-стенд", load: 46 },
-          ],
-        }}
-        {...FUNNEL_EXTRAS.production}
+        createLabel="Создать наряд"
+        statusNote="Показаны заказы ERP. Обеспеченность и риск по заказу появятся после подключения его спецификации и фактических остатков."
       />
+        </div>
+      </div>
     </AppShell>
   );
 }

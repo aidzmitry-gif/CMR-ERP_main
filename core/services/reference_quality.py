@@ -63,7 +63,7 @@ _TITLES: dict[str, str] = {
     "core.currencies": "Валюты",
     "core.countries": "Страны",
     "core.banks": "Банки",
-    "core.accounts": "План счетов",
+    "core.accounts": "Старый технический список счетов",
     "core.regions": "Регионы и города",
 }
 

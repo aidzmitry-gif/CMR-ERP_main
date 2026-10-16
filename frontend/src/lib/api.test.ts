@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+const issuance = vi.hoisted(() => vi.fn());
+vi.mock("@/components/invoice-issuance-dialog", () => ({ openInvoiceIssuance: issuance }));
 
 import {
   addContact,
@@ -14,6 +16,7 @@ import {
   createDeal,
   createDealTask,
   createDocument,
+  createDocumentResult,
   createPriceQuote,
   createStage,
   decideApproval,
@@ -29,9 +32,11 @@ import {
   fetchBoardStages,
   fetchBranding,
   fetchCalls,
+  fetchCallsResult,
   fetchCrmStaff,
   fetchChats,
   fetchContacts,
+  fetchContactsResult,
   fetchDealDetail,
   fetchDealHandoff,
   fetchDealItems,
@@ -68,7 +73,6 @@ import {
   localToNaiveUtc,
   logActivity,
   logLeadAttempt,
-  loseDeal,
   lookupCounterparty,
   lookupCounterpartyResult,
   qualifyLead,
@@ -86,6 +90,7 @@ import {
   triggerIncomingCall,
   updateBranding,
   updateDeal,
+  updateDealFieldsIfCurrent,
   updateDealItem,
   updateDealStage,
   updateStage,
@@ -232,6 +237,15 @@ describe("api client — лиды", () => {
 });
 
 describe("api client — сделки/доска/KPI", () => {
+  it("forwards the explicit server-session identity for own SSR reads", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 403 });
+    vi.stubGlobal("fetch", fetchMock);
+    await fetchBoardResult("sales", "new_clients", undefined, "manager");
+    await fetchDealDetail("1", "sales", undefined, "manager");
+    for (const [, options] of fetchMock.mock.calls) {
+      expect(options.headers).toMatchObject({ "X-User": "manager", "X-User-Roles": "sales" });
+    }
+  });
   it("fetchBoardStages маппит стадии и сделки", async () => {
     stubFetch({ stages: [{ id: "new", title: "Новая", color: "#000", count: 1, sum: 500, deals: [apiDeal] }] });
     const stages = await fetchBoardStages();
@@ -272,9 +286,33 @@ describe("api client — сделки/доска/KPI", () => {
   });
 
   it("fetchDealDetail маппит карточку с позициями", async () => {
-    stubFetch({ ...apiDeal, items: [{ title: "Лист", last_price: 1500, min_price: 1450 }] });
+    stubFetch({ ...apiDeal, edit_token: "a".repeat(64), items: [{ title: "Лист", last_price: 1500, min_price: 1450 }] });
     const detail = await fetchDealDetail("9");
-    expect(detail).toMatchObject({ company: "ООО Доска", items: [{ title: "Лист", minPrice: 1450 }] });
+    expect(detail).toMatchObject({ company: "ООО Доска", editToken: "a".repeat(64), items: [{ title: "Лист", minPrice: 1450 }] });
+  });
+
+  it("пустая карточка не выдумывает шаг, ответственного, время и переписку", async () => {
+    stubFetch({ ...apiDeal, next_step: null, next_step_at: null, owner: "" });
+    expect(await fetchDealDetail("9")).toMatchObject({
+      nextStep: "", contact: "", datetime: "", messages: [],
+    });
+  });
+
+  it.each(["2026-09-12T07:25:00", "2026-09-12T07:25:00Z", "2026-09-12T10:25:00+03:00"])(
+    "время следующего шага %s берётся из срока, а не даты сделки",
+    async (next_step_at) => {
+      stubFetch({ ...apiDeal, next_step_at });
+      const detail = await fetchDealDetail("9");
+      expect(detail?.datetime).toContain("12.09.2026");
+      expect(detail?.datetime).toContain("10:25");
+      expect(detail?.datetime).toContain("(Минск)");
+      expect(detail).toMatchObject({ nextStep: "Звонок", contact: "Иванов" });
+    },
+  );
+
+  it("невалидный срок не становится выдуманным временем", async () => {
+    stubFetch({ ...apiDeal, next_step_at: "invalid" });
+    expect((await fetchDealDetail("9"))?.datetime).toBe("");
   });
 
   it("createDeal маппит ответ; null при !ok", async () => {
@@ -347,15 +385,43 @@ describe("api client — сделки/доска/KPI", () => {
 });
 
 describe("api client — документы/сообщения/согласования", () => {
+  it("обычный счёт использует диалог выпуска без обходного POST", async () => {
+    stubFetch({});
+    issuance.mockResolvedValueOnce(null);
+    expect((await issueDocument("1", "invoice")).ok).toBe(false);
+    expect(issuance).toHaveBeenLastCalledWith("1", undefined, undefined);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("явный режим передаётся в диалог, результат определяет оригинал", async () => {
+    stubFetch({});
+    issuance.mockResolvedValueOnce({ document: { id: 9, number: "СЧ-9", reserve_mode: "on_order", reserve_status: "unreserved" }, replayed: true });
+    const result = await issueDocument("1", "invoice", { reserve_mode: "on_order", request_key: "legacy-key" });
+    expect(issuance).toHaveBeenLastCalledWith("1", undefined, "on_order");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, renderUrl: "/api/sales/documents/9/render", replayed: true });
+  });
+
+  it.each(["contract", "order"])("под заказ недоступен для %s: нет запроса", async (kind) => {
+    stubFetch({});
+    expect(await createDocument("1", kind, { reserve_mode: "on_order" })).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each(["none", "unreserved"])("legacy %s не выдаётся за режим под заказ", async (reserve_status) => {
+    stubFetch({ id: 9, number: "СЧ-9", reserve_status });
+    expect((await issueDocument("1", "invoice", { reserve_mode: "on_order" })).message).not.toContain("Под заказ");
+  });
+
   it("fetchDocuments / createDocument", async () => {
     stubFetch([{ id: 1, kind: "invoice", number: "СЧ-1", status: "posted", onec_ref: "1С-СЧ-1", amount: 5000 }]);
     expect((await fetchDocuments("1"))[0].onec_ref).toBe("1С-СЧ-1");
-    stubFetch({ id: 2, kind: "invoice", number: "СЧ-2", status: "posted", onec_ref: null, amount: 5000, valid_until: null, reserve_status: "none" });
+    issuance.mockResolvedValueOnce({ document: { id: 2, number: "СЧ-2", status: "issued" }, replayed: false });
     expect((await createDocument("1", "invoice"))?.number).toBe("СЧ-2");
   });
 
   it("issueDocument: счёт даёт renderUrl, договор — только сообщение, null → ok=false", async () => {
-    stubFetch({ id: 7, kind: "invoice", number: "СЧ-7", status: "posted", onec_ref: null, amount: 100, valid_until: null, reserve_status: "none" });
+    issuance.mockResolvedValueOnce({ document: { id: 7, number: "СЧ-7", status: "issued" }, replayed: false });
     const inv = await issueDocument("1", "invoice");
     expect(inv.ok).toBe(true);
     expect(inv.renderUrl).toBe("/api/sales/documents/7/render");
@@ -367,7 +433,7 @@ describe("api client — документы/сообщения/согласов�
     expect(con.renderUrl).toBeUndefined(); // договор рендерится отдельно после согласования
     expect(con.message).toContain("согласование");
 
-    stubFetch(null, false);
+    issuance.mockResolvedValueOnce(null);
     const fail = await issueDocument("1", "invoice");
     expect(fail.ok).toBe(false);
     expect(fail.renderUrl).toBeUndefined();
@@ -384,6 +450,17 @@ describe("api client — документы/сообщения/согласов�
     expect(await aiAssist("1", "summary")).toBe("Резюме");
     stubFetch(null, false);
     expect(await aiDraftReply("1")).toBeNull();
+  });
+
+  it("rejects malformed history and sends the caller's replay key", async () => {
+    for (const invalid of [null, {}, [{id:1,text:"Incomplete"}]]) {
+      stubFetch(invalid);
+      await expect(fetchMessages("1")).rejects.toThrow("malformed_response");
+    }
+    stubFetch({},true);
+    expect(await sendMessage("1","phone","History","replay-123")).toBe(true);
+    const options = vi.mocked(fetch).mock.calls.at(-1)?.[1];
+    expect(JSON.parse(String(options?.body)).request_key).toBe("replay-123");
   });
 
   it("fetchApprovals / requestApproval / decideApproval", async () => {
@@ -416,6 +493,54 @@ describe("api client — документы/сообщения/согласов�
 });
 
 describe("api client — прочие операции и fallback'и", () => {
+  it("fetchContactsResult различает empty, HTTP, network и malformed", async () => {
+    const response = (body: unknown, status = 200) =>
+      vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status }));
+
+    let fetchMock = response([]);
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await fetchContactsResult("1")).toEqual({ status: "ok", data: [] });
+
+    fetchMock = response({ detail: "down" }, 503);
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await fetchContactsResult("1")).toEqual({ status: "http_error", httpStatus: 503 });
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
+    expect(await fetchContactsResult("1")).toEqual({ status: "network_error" });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not-json", { status: 200 })));
+    expect(await fetchContactsResult("1")).toEqual({ status: "malformed_response" });
+
+    fetchMock = response([{ id: "1", full_name: "Анна", phone: null, email: null, is_primary: true }]);
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await fetchContactsResult("1")).toEqual({ status: "malformed_response" });
+    expect(await fetchContacts("1")).toEqual([]);
+  });
+
+  it.each([undefined, 99])("rejects a CRM contact from an unknown or foreign client: %s", async (crm_client_id) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json([
+      { id: 1, crm_client_id, full_name: "Same numeric ID", phone: null, email: null, is_primary: false },
+    ])));
+    expect(await fetchContactsResult({ clientId: 12 })).toEqual({ status: "malformed_response" });
+  });
+
+  it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])("rejects malformed contact id %s", async (id) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([
+      { id, full_name: "Анна", phone: null, email: null, is_primary: true },
+    ]))));
+    expect(await fetchContactsResult("1")).toEqual({ status: "malformed_response" });
+  });
+
+  it.each([125.5, 0, null, undefined])("цена строки %s передаётся в add/patch без потери null или нуля", async (unitPrice) => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await addDealItem("1", 2, 3, unitPrice)).toBe(true);
+    expect(await updateDealItem(9, 4, unitPrice)).toBe(true);
+    const priceFields = unitPrice === undefined ? {} : { unit_price: unitPrice };
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ sku_id: 2, qty: 3, ...priceFields });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ qty: 4, ...priceFields });
+  });
+
   it("updateDealItem / deleteDealItem / setPrimaryContact / decideDocument", async () => {
     stubFetch({}, true);
     expect(await updateDealItem(1, 5)).toBe(true);
@@ -464,12 +589,22 @@ describe("api client — прочие операции и fallback'и", () => {
     expect(await fetchDealDetail("1", "sales", "synthetic-test-token")).toBeNull();
   });
 
+  it.each([403, 500])("strict documents exposes HTTP %i instead of empty data", async (status) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status }));
+    await expect(fetchDocuments("1", { throwOnError: true })).rejects.toThrow(String(status));
+  });
+
+  it("strict documents rejects malformed list", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
+    await expect(fetchDocuments("1", { throwOnError: true })).rejects.toThrow("Invalid documents response");
+  });
+
   it("fallback'и при сетевой ошибке (mock-данные/пустые)", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net")));
     expect(await fetchDealDetail("1")).toBeNull();
     expect((await fetchKpis()).length).toBeGreaterThan(0); // mock-KPI
     expect(await fetchDocuments("1")).toEqual([]);
-    expect(await fetchMessages("1")).toEqual([]);
+    await expect(fetchMessages("1")).rejects.toThrow();
     expect(await fetchApprovals()).toEqual([]);
     expect(await fetchContacts("1")).toEqual([]);
     expect(await fetchEvents()).toEqual([]);
@@ -481,6 +616,36 @@ describe("api client — прочие операции и fallback'и", () => {
     expect(await qualifyLead(1)).toBeNull();
     expect(await aiDraftReply("1")).toBeNull();
     expect(await aiAssist("1", "summary")).toBeNull();
+  });
+
+  it("сохранение полей сделки передаёт версию и отличает конфликт от успеха", async () => {
+    const token = "b".repeat(64);
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 409 })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({
+        id: 7, title: "Новая", edit_token: "c".repeat(64),
+      }) });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await updateDealFieldsIfCurrent("7", { title: "Новая" }, token)).toBe("conflict");
+    expect(await updateDealFieldsIfCurrent("7", { title: "Новая" }, token)).toBe("saved");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      title: "Новая", expected_edit_token: token,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("не закрывает редактор по 2xx без точной квитанции сохранённых полей", async () => {
+    const token = "b".repeat(64);
+    const responses = [
+      { id: 8, title: "Новая", amount: 100, edit_token: "c".repeat(64) },
+      { id: 7, title: "Чужое значение", amount: 100, edit_token: "c".repeat(64) },
+      { id: 7, title: "Новая", amount: 100, edit_token: "bad" },
+      { id: 7, title: "Новая", amount: 100, edit_token: "c".repeat(64) },
+    ];
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve({ ok: true, status: 200,
+      json: async () => responses.shift(),
+    })));
+    for (const result of ["unconfirmed", "unconfirmed", "unconfirmed", "saved"])
+      expect(await updateDealFieldsIfCurrent("7", { title: "Новая", amount: 100 }, token)).toBe(result);
   });
 
   it("все мутаторы возвращают fallback при сетевой ошибке", async () => {
@@ -667,20 +832,18 @@ describe("api client — склад/цена/позиции/задачи/при�
     }));
   });
 
-  it("fetchLossReasons/loseDeal", async () => {
+  it("fetchLossReasons", async () => {
     stubFetch([{ code: "price", title: "Дорого" }]);
     expect((await fetchLossReasons())[0].code).toBe("price");
     stubFetch({}, false);
     expect(await fetchLossReasons()).toEqual([]);
 
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
-    vi.stubGlobal("fetch", fetchMock);
-    expect(await loseDeal("1", "price", "слишком дорого")).toBe(true);
-    expect(fetchMock).toHaveBeenCalledWith("/api/sales/deals/1/lose", expect.objectContaining({
-      method: "POST",
-      body: JSON.stringify({ reason_code: "price", comment: "слишком дорого" }),
-    }));
   });
+
+  it("не экспортирует устаревший обход журнала отказа", async () => {
+    expect(await import("@/lib/api")).not.toHaveProperty("loseDeal");
+  });
+
 });
 
 describe("api client — телефония", () => {
@@ -702,6 +865,23 @@ describe("api client — телефония", () => {
   it("fetchCalls → [] при ошибке", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net")));
     expect(await fetchCalls()).toEqual([]);
+  });
+
+  it("fetchCallsResult фильтрует по контрагенту и сохраняет безопасную ссылку на CRM-клиента", async () => {
+    const row = { id: 8, call_id: "synthetic-8", direction: "in", phone_e164: null, owner: "Тест", status: "ended", deal_id: null, counterparty_id: 42, crm_client_id: 17, started_at: "2026-09-01T10:00:00" };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => [row] });
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await fetchCallsResult({ counterparty_id: 42, unlinked: true })).toEqual({ ok: true, rows: [row] });
+    expect(fetchMock).toHaveBeenCalledWith("/api/sales/calls?counterparty_id=42&unlinked=true", expect.objectContaining({ cache: "no-store" }));
+  });
+
+  it("fetchCallsResult fails closed if the server returns another counterparty's call", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => [
+      { id: 8, call_id: "synthetic-8", direction: "in", phone_e164: null, owner: "Тест", status: "ended", deal_id: null, counterparty_id: 43, started_at: "2026-09-01T10:00:00" },
+    ] }));
+
+    expect(await fetchCallsResult({ counterparty_id: 42 })).toEqual({ ok: false, error: "Сервер вернул звонки другого клиента." });
   });
 
   it("callComment/callResult/callLinkDeal/triggerIncomingCall шлют POST с телом на верный путь", async () => {
@@ -732,12 +912,12 @@ describe("api client — телефония", () => {
   });
 
   it("subscribeCalls — no-op без EventSource (jsdom не предоставляет), не бросает", () => {
-    const unsubscribe = subscribeCalls("Иванов", () => {});
+    const unsubscribe = subscribeCalls(() => {});
     expect(typeof unsubscribe).toBe("function");
     expect(() => unsubscribe()).not.toThrow();
   });
 
-  it("subscribeCalls строит URL с owner и без; onmessage парсит карточку", () => {
+  it("subscribeCalls использует URL потока без owner и разбирает карточки", () => {
     const instances: { url: string; onmessage: ((e: { data: string }) => void) | null; close: () => void }[] = [];
     class FakeEventSource {
       onmessage: ((e: { data: string }) => void) | null = null;
@@ -749,8 +929,8 @@ describe("api client — телефония", () => {
     vi.stubGlobal("EventSource", FakeEventSource as unknown as typeof EventSource);
 
     const cards: { id: number }[] = [];
-    const unsub = subscribeCalls("Иванов", (c) => cards.push(c as unknown as { id: number }));
-    expect(instances[0].url).toBe("/api/sales/calls/stream?owner=%D0%98%D0%B2%D0%B0%D0%BD%D0%BE%D0%B2");
+    const unsub = subscribeCalls((c) => cards.push(c as unknown as { id: number }));
+    expect(instances[0].url).toBe("/api/sales/calls/stream");
     instances[0].onmessage?.({ data: JSON.stringify({ id: 1 }) });
     expect(cards).toEqual([{ id: 1 }]);
     // «шум» потока (heartbeat/невалидный JSON) — не бросает и не добавляет карточку
@@ -759,7 +939,7 @@ describe("api client — телефония", () => {
     unsub();
     expect(instances[0].close).toHaveBeenCalled();
 
-    subscribeCalls(undefined, () => {});
+    subscribeCalls(() => {});
     expect(instances[1].url).toBe("/api/sales/calls/stream");
   });
 });
@@ -951,13 +1131,16 @@ describe("api client — корзина лида/вложения/бренд", (
   });
 
   it("commitLeadItemsToDeal переносит позиции в сделку и котирует цену; считает ok/total", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
     const items = [
       { skuId: 1, skuCode: "AKB-60", name: "АКБ", qty: 2, price: 100, discountPct: 0 },
-      { skuId: 2, skuCode: "AKB-70", name: "АКБ70", qty: 0, price: 0, discountPct: 0 }, // price=0 → без котировки
+      { skuId: 2, skuCode: "AKB-70", name: "АКБ70", qty: 1, price: 0, discountPct: 0 },
     ];
     const res = await commitLeadItemsToDeal("9", "ООО Ромашка", items);
     expect(res).toEqual({ ok: 2, total: 2 });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ sku_id: 1, qty: 2, unit_price: 100 });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ sku_id: 2, qty: 1, unit_price: 0 });
   });
 
   it("commitLeadItemsToDeal — ok меньше total, если часть addDealItem провалилась", async () => {
@@ -972,6 +1155,7 @@ describe("api client — корзина лида/вложения/бренд", (
     ];
     const res = await commitLeadItemsToDeal("9", "ООО", items);
     expect(res).toEqual({ ok: 1, total: 2 });
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/sales/prices")).toHaveLength(1);
   });
 
   it("fetchLeadAttachments маппит вложения", async () => {
@@ -1040,6 +1224,35 @@ describe("api client — корзина лида/вложения/бренд", (
 });
 
 describe("api client — convertLead поллит deal_id", () => {
+  it("сохраняет немедленный deal_id сервера без дополнительного поллинга", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ lead_id: 1, status: "converted", deal_id: 42 }) });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await convertLead(1)).toEqual({ lead_id: 1, status: "converted", deal_id: 42 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("409 после потерянного ответа восстанавливает существующую сделку чтением", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 409 })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 1, status: "converted", deal_id: 42 }) });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await convertLead(1)).toEqual({ lead_id: 1, status: "converted", deal_id: 42 });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/leads/1", { cache: "no-store" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("проверка ожидающей конвертации не отправляет POST", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 1, status: "converted", deal_id: 42 }) });
+    vi.stubGlobal("fetch", fetchMock);
+    expect((await convertLead(1, true))?.deal_id).toBe(42);
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith("/api/leads/1", { cache: "no-store" });
+  });
+
+  it("409 у неконвертированного лида не выдаёт готовую сделку", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 409 })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 1, status: "qualified", deal_id: null }) });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await convertLead(1)).toBeNull();
+  });
   it("возвращает deal_id, как только он появляется у лида", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn()
@@ -1069,4 +1282,15 @@ describe("api client — convertLead поллит deal_id", () => {
     expect(res?.deal_id).toBeUndefined();
     vi.useRealTimers();
   });
+});
+
+it("причина отказа договора видна менеджеру, технические ошибки не раскрываются", async () => {
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "Подтвердите цену каждой позиции" }), { status: 422 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ detail: { internal: "not for UI" } }), { status: 422 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "internal stack" }), { status: 500 }));
+  vi.stubGlobal("fetch", fetchMock);
+  expect(await createDocumentResult("1", "contract")).toEqual({ doc: null, error: "Подтвердите цену каждой позиции" });
+  expect((await createDocumentResult("1", "contract")).error).toBe("Не удалось создать документ. Проверьте данные и состояние версии.");
+  expect((await createDocumentResult("1", "contract")).error).not.toContain("internal");
 });

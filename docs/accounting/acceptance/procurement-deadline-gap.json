@@ -1,0 +1,19 @@
+{
+  "baseline": "62f4508",
+  "finding": "Legacy order plan routes return410; scoped owned_plan_out omits client deadline and at-risk fields present in legacy plan calculation. Need explicit organization-scoped source linking before restoring customer deadline projection.",
+  "evidence": [
+    "modules/procurement/routes.py:get_order_plan and plan_order",
+    "modules/procurement/routes.py:owned_plan_out",
+    "modules/procurement/order_edit_commands.py:EditorPlanInput and plan receipt verification"
+  ],
+  "probe": {
+    "file": "tests/test_procurement_ship_deadline.py",
+    "change": "temporary reuse of explicit ownership fixture only",
+    "passed": 7,
+    "failed": 7,
+    "duration": "35.41s",
+    "temporaryEditReverted": true
+  },
+  "nextAction": "Inspect ShipRequirement ownership and explicit deal-to-order links; implement scoped deadline review preserving durable command receipt identities. Do not re-enable unscoped route or guess organization from SKU.",
+  "status": "functional gap identified; not fixed"
+}

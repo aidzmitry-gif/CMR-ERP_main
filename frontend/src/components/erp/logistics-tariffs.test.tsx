@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Мокаем ТОЛЬКО сетевой слой логистики; чистую доменную логику (quoteTariff/tariffWeightPrice)
@@ -80,6 +80,36 @@ beforeEach(() => {
 });
 
 describe("LogisticsTariffs", () => {
+  it("drops an old zone draft and ignores a delayed old-zone response", async () => {
+    let old!: (value: CarrierTariff[]) => void;
+    (api.fetchTariffs as Mock).mockResolvedValueOnce(TARIFFS)
+      .mockReturnValueOnce(new Promise(resolve => { old = resolve; }))
+      .mockResolvedValueOnce([tariff({ carrier_code: "NEW" })]);
+    render(<LogisticsTariffs />);
+    await screen.findByText("CARGO");
+    const row = screen.getByText("CARGO").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "✏" }));
+    fireEvent.click(screen.getByText("Регионы РБ"));
+    expect(screen.queryByRole("button", { name: "✓" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Минск и область"));
+    await screen.findByText("NEW");
+    await act(async () => old([tariff({ carrier_code: "STALE" })]));
+    expect(screen.queryByText("STALE")).not.toBeInTheDocument();
+    expect(api.patchTariff).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Минск и область"));
+    expect(screen.getByText("NEW")).toBeInTheDocument();
+  });
+
+  it.each(["-2", ""])("does not silently skip invalid tariff value '%s'", async value => {
+    render(<LogisticsTariffs />);
+    await screen.findByText("CARGO");
+    const row = screen.getByText("CARGO").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "✏" }));
+    fireEvent.change(within(row).getAllByRole("spinbutton")[0], { target: { value } });
+    fireEvent.click(within(row).getByRole("button", { name: "✓" }));
+    expect(screen.getByText(/Заполните все ставки/)).toBeInTheDocument();
+    expect(api.patchTariff).not.toHaveBeenCalled();
+  });
   it("показывает индикатор загрузки, пока зоны не пришли", () => {
     (api.fetchZones as Mock).mockReturnValue(new Promise(() => {})); // навсегда pending
     render(<LogisticsTariffs />);

@@ -22,37 +22,39 @@ describe("CompanySwitcher", () => {
     currency.setCompany.mockReset();
   });
 
-  it("opens the available company list", () => {
+  it("opens the available display currencies", () => {
     render(<CompanySwitcher />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Belarus Office/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Валюта сумм: BYN" }));
 
-    expect(screen.getByRole("button", { name: /Russia Office/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Poland Office/ })).toBeInTheDocument();
+    for (const code of ["BYN", "RUB", "EUR"]) {
+      expect(screen.getByRole("button", { name: code })).toBeInTheDocument();
+    }
   });
 
-  it("selects a company and closes the list", () => {
+  it("selects a display currency and closes the list", () => {
     render(<CompanySwitcher />);
-    fireEvent.click(screen.getByRole("button", { name: /Belarus Office/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Russia Office/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Валюта сумм: BYN" }));
+    fireEvent.click(screen.getByRole("button", { name: "RUB" }));
 
     expect(currency.setCompany).toHaveBeenCalledWith("ru");
-    expect(screen.queryByRole("button", { name: /Poland Office/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "EUR" })).not.toBeInTheDocument();
   });
 
-  it("keeps the current company visible and prevents hiding it", () => {
+  it("does not present demo companies or promise separate accounting", () => {
     const { container } = render(<CompanySwitcher />);
-    fireEvent.click(screen.getByRole("button", { name: /Belarus Office/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Валюта сумм: BYN" }));
+    expect(container.textContent).not.toMatch(/Office|юр.?лиц|раздельный учёт|права|demo/i);
+    expect(screen.queryByTitle(/раздельного учёта/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /скрыть/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/Суммы пересчитаны из BYN по курсу НБ РБ/)).toBeInTheDocument();
+  });
 
-    const currentVisibilityButton = container.querySelector("button[disabled]");
-    expect(currentVisibilityButton).toBeDisabled();
-
-    const polandButton = screen.getByRole("button", { name: /Poland Office/ });
-    const polandVisibilityButton = polandButton.parentElement?.querySelector("button[aria-label]");
-    expect(polandVisibilityButton).not.toBeNull();
-    fireEvent.click(polandVisibilityButton!);
-
-    expect(screen.getAllByRole("button", { name: /Belarus Office/ })).toHaveLength(2);
-    expect(screen.queryByRole("button", { name: /Poland Office/ })).not.toBeInTheDocument();
+  it("closes without changing the selected currency", () => {
+    render(<CompanySwitcher />);
+    fireEvent.click(screen.getByRole("button", { name: "Валюта сумм: BYN" }));
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть" }));
+    expect(screen.queryByRole("button", { name: "EUR" })).not.toBeInTheDocument();
+    expect(currency.setCompany).not.toHaveBeenCalled();
   });
 });

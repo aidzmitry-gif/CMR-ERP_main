@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issuance xmlns="http://www.w3schools.com" sender="123456789">
+  <system><modelVersion>1.6.0</modelVersion></system>
+  <general>
+    <number>123456789-2026-0000000001</number>
+    <dateTransaction>2026-09-09</dateTransaction>
+    <documentType>ORIGINAL</documentType>
+  </general>
+  <provider>
+    <providerStatus>SELLER</providerStatus>
+    <dependentPerson>false</dependentPerson>
+    <residentsOfOffshore>false</residentsOfOffshore>
+    <specialDealGoods>false</specialDealGoods>
+    <bigCompany>false</bigCompany>
+    <countryCode>112</countryCode>
+    <unp>123456789</unp>
+    <name>Синтетический поставщик</name>
+    <address>Синтетический адрес поставщика</address>
+  </provider>
+  <recipient>
+    <recipientStatus>CUSTOMER</recipientStatus>
+    <dependentPerson>false</dependentPerson>
+    <residentsOfOffshore>false</residentsOfOffshore>
+    <specialDealGoods>false</specialDealGoods>
+    <bigCompany>false</bigCompany>
+    <countryCode>112</countryCode>
+    <unp>111111111</unp>
+    <name>Синтетический получатель</name>
+    <address>Синтетический адрес получателя</address>
+  </recipient>
+  <senderReceiver/>
+  <deliveryCondition/>
+  <roster totalCostVat="120" totalExcise="0" totalVat="20" totalCost="100">
+    <rosterItem>
+      <number>1</number>
+      <name>Синтетическая строка</name>
+      <count>1</count>
+      <price>100</price>
+      <cost>100</cost>
+      <summaExcise>0</summaExcise>
+      <vat><rate>20</rate><rateType>DECIMAL</rateType><summaVat>20</summaVat></vat>
+      <costVat>120</costVat>
+    </rosterItem>
+  </roster>
+</issuance>

@@ -155,7 +155,7 @@ async def _stored(factory, unp):
 async def test_same_unp_api_creates_overlap_and_only_winner_persists(pg_app):
     async with _synthetic(pg_app) as (factory, marker, unp, tasks):
         payloads = [{
-            "manual": {"name": f"{marker}-{suffix}", "unp": unp, "bank_name": f"Bank {suffix}"},
+            "manual": {"name": f"{marker}-{suffix}", "unp": unp, "bank_name": f"Bank {suffix}", "legal_address": "SYNTHETIC legal address for concurrency fixture"},
             "contacts": [{"full_name": f"{marker}-{suffix}", "phone": f"+37529000000{index}", "is_primary": True}],
         } for index, suffix in enumerate(("A", "B"))]
         responses, _ = await _queued_writes(factory, unp, tasks, *[
@@ -183,7 +183,7 @@ async def test_same_revision_updates_overlap_without_loser_contacts_or_audit(pg_
     async with _synthetic(pg_app) as (factory, marker, unp, tasks):
         async with asyncio.timeout(10):
             created = await pg_app.post("/system/mdm/counterparty", json={
-                "manual": {"name": f"{marker}-base", "unp": unp, "bank_name": "Base bank"},
+                "manual": {"name": f"{marker}-base", "unp": unp, "bank_name": "Base bank", "legal_address": "SYNTHETIC legal address for concurrency fixture"},
                 "contacts": [{"full_name": f"{marker}-base", "is_primary": True}],
             })
         assert created.status_code == 201, created.text
@@ -289,7 +289,7 @@ async def test_api_and_direct_orm_share_unp_lock_and_recheck(pg_app):
         responses, waiters = await _queued_writes(
             factory, unp, tasks,
             lambda: pg_app.post("/system/mdm/counterparty", json={
-                "manual": {"name": f"{marker}-A", "unp": unp, "bank_name": "API bank"},
+                "manual": {"name": f"{marker}-A", "unp": unp, "bank_name": "API bank", "legal_address": "SYNTHETIC legal address for concurrency fixture"},
                 "contacts": [{"full_name": f"{marker}-A", "is_primary": True}],
             }),
             orm_writer,

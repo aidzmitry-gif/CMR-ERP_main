@@ -1,23 +1,32 @@
 """Коннектор к 1С:КА (REST/OData).
 
-При пустом ``base_url`` — mock (dev/тесты). При заданном URL — OData GET (только чтение)
-для контрагентов и остатков/цен; финансовые фасады пока mock (контур DoD — товары/цены).
-``post_document`` не пишет в 1С (мастер-данные заморожены).
+При пустом ``base_url`` — mock только для справочников и витрины товаров в dev/тестах.
+При заданном URL — OData GET (только чтение) для контрагентов и остатков/цен.
+Финансовые read-фасады не используют демонстрационные суммы: пока для них нет
+проверенного OData-маппинга, они отдают честное пустое значение. Исходящая запись
+документов тоже закрыта до отдельного проверенного адаптера: ``post_document``
+не возвращает поддельную ссылку и не пишет в 1С.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 from datetime import date
+from uuid import UUID
 
 import httpx
+
+from core.services.mdm import CounterpartyWriteError
 
 log = logging.getLogger("integrations.onec")
 
 _MOCK_COUNTERPARTIES = [
-    {"name": "ООО Аккумулятор", "unp": "191234567", "id": "b7e3f1a0-1c00-4a01-9e10-000000000001"},
-    {"name": "ООО МеталлПром", "unp": "190000001", "id": "b7e3f1a0-1c00-4a01-9e10-000000000002"},
-    {"name": "АО СтройКомплект", "unp": "190000002", "id": "b7e3f1a0-1c00-4a01-9e10-000000000003"},
+    {"name": "ООО Аккумулятор", "unp": "191234567", "id": "b7e3f1a0-1c00-4a01-9e10-000000000001",
+     "legal_address": "Тестовый юридический адрес, 1 (демонстрационные данные)"},
+    {"name": "ООО МеталлПром", "unp": "190000001", "id": "b7e3f1a0-1c00-4a01-9e10-000000000002",
+     "legal_address": "Тестовый юридический адрес, 2 (демонстрационные данные)"},
+    {"name": "АО СтройКомплект", "unp": "190000002", "id": "b7e3f1a0-1c00-4a01-9e10-000000000003",
+     "legal_address": "Тестовый юридический адрес, 3 (демонстрационные данные)"},
 ]
 
 _MOCK_STOCK = [
@@ -30,28 +39,9 @@ _MOCK_STOCK = [
      "price": 1500.0, "cost": 1230.0},
 ]
 
-_MOCK_PAYMENTS = [
-    {"id": "c1f0-0001", "ref": "СЧ-1", "counterparty_ref": "ООО Аккумулятор",
-     "doc_number": "ПП-00123", "date": "2026-06-20", "amount": 12500.00, "currency": "BYN",
-     "direction": "in", "account_code": "51-1", "bank": "Беларусбанк",
-     "counterparty": "ООО Аккумулятор", "unp": "191234567", "purpose": "Оплата по счёту СЧ-1"},
-    {"id": "c1f0-0002", "ref": "СЧ-2", "counterparty_ref": "ООО МеталлПром",
-     "doc_number": "ПП-00124", "date": "2026-06-21", "amount": 8400.00, "currency": "BYN",
-     "direction": "out", "account_code": "51-1", "bank": "Беларусбанк",
-     "counterparty": "ООО МеталлПром", "unp": "190000001", "purpose": "Оплата поставщику"},
-    {"id": "c1f0-0003", "ref": "CN-7", "counterparty_ref": "Shenzhen Power Co",
-     "doc_number": "ПП-00125", "date": "2026-06-24", "amount": 21000.00, "currency": "USD",
-     "direction": "out", "account_code": "52-1", "bank": "Приорбанк",
-     "counterparty": "Shenzhen Power Co", "unp": None, "purpose": "Предоплата контракт CN-7"},
-]
 
-_MOCK_BALANCES = {
-    "51-1": {"account_code": "51-1", "name": "Расчётный счёт BYN", "bank": "Беларусбанк",
-             "balance": 154300.00, "currency": "BYN", "as_of": "2026-06-28"},
-    "52-1": {"account_code": "52-1", "name": "Валютный счёт USD", "bank": "Приорбанк",
-             "balance": 21000.00, "currency": "USD", "as_of": "2026-06-28"},
-}
-
+class OutboundDocumentUnavailable(RuntimeError):
+    """Исходящая запись не имеет проверенного адаптера и не может считаться успешной."""
 
 class OneCClient:
     def __init__(
@@ -74,6 +64,24 @@ class OneCClient:
 
     def _live(self) -> bool:
         return bool(self.base_url)
+
+    @property
+    def financial_source_available(self) -> bool:
+        """No finance OData mapping is verified for this 1C client yet."""
+        return False
+
+    @property
+    def financial_source_reason(self) -> str:
+        return "Для платежей, банковских остатков и баланса 1С не настроен проверенный read-only OData-адаптер"
+
+    @property
+    def outbound_document_source_available(self) -> bool:
+        """Default client never claims a document was written to 1C."""
+        return False
+
+    @property
+    def outbound_document_source_reason(self) -> str:
+        return "Для исходящих CRM-документов не настроен проверенный адаптер 1С"
 
     def _client(self) -> httpx.Client:
         # httpx (уже в requirements) вместо requests: тот НЕ в прод-зависимостях, а этот модуль
@@ -111,18 +119,41 @@ class OneCClient:
     def _fetch_counterparties_sync(self) -> list[dict]:
         rows = self._get_all(
             "Catalog_Контрагенты",
-            {"$select": "Ref_Key,Description,НаименованиеПолное,ИНН",
+            {"$select": "Ref_Key,Description,НаименованиеПолное,ИНН,ОбособленноеПодразделение,ГоловнойКонтрагент_Key,КодФилиала",
              "$orderby": "Ref_Key"},
             page_size=500,
         )
         out: list[dict] = []
         for row in rows:
-            name = (row.get("НаименованиеПолное") or row.get("Description") or "").strip()
+            if not row:
+                continue
+            is_branch = row.get("ОбособленноеПодразделение")
+            if type(is_branch) is not bool:
+                raise CounterpartyWriteError("invalid_onec_classification", "1С вернула неоднозначный тип контрагента", 502)
+            legal_name = (row.get("НаименованиеПолное") or "").strip() or None
+            name = (row.get("Description") or legal_name or "").strip()
             unp = (row.get("ИНН") or "").strip() or None
             ref = str(row.get("Ref_Key") or "")
             if not name or not ref:
+                if is_branch:
+                    raise CounterpartyWriteError("invalid_onec_identity", "У филиала 1С отсутствует наименование или ID", 502)
                 continue
-            out.append({"name": name[:256], "unp": unp, "id": ref})
+            # Confirmed against the live ka_copy metadata and one branch record.
+            # Missing/ambiguous classification must never flatten a branch into a legal entity.
+            try:
+                source_id = UUID(ref)
+                parent_id = UUID(row.get("ГоловнойКонтрагент_Key"))
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise CounterpartyWriteError("invalid_onec_identity", "1С вернула некорректную ссылку контрагента", 502) from exc
+            if not source_id.int or (not is_branch and parent_id.int):
+                raise CounterpartyWriteError("invalid_onec_classification", "1С вернула неоднозначный тип контрагента", 502)
+            if is_branch:
+                if not parent_id.int or parent_id == source_id:
+                    raise CounterpartyWriteError("branch_mapping_required", "У филиала 1С отсутствует корректная ссылка на головное предприятие", 422)
+                out.append({"id": str(source_id), "record_kind": "branch", "name": name,
+                            "parent_external_ref": str(parent_id), "raw_branch_code": row.get("КодФилиала")})
+            else:
+                out.append({"name": name[:255], "legal_name": legal_name, "unp": unp, "id": str(source_id)})
         return out
 
     def _fetch_stock_sync(self) -> list[dict]:
@@ -192,6 +223,8 @@ class OneCClient:
             return list(_MOCK_COUNTERPARTIES)
         try:
             return await asyncio.to_thread(self._fetch_counterparties_sync)
+        except CounterpartyWriteError:
+            raise
         except Exception as exc:  # noqa: BLE001
             log.warning("1C fetch_counterparties failed (%s) — empty", exc)
             return []
@@ -206,33 +239,17 @@ class OneCClient:
             return []
 
     async def fetch_payments(self) -> list[dict]:
-        """Платежи — mock до публикации платёжных документов в OData."""
-        return list(_MOCK_PAYMENTS)
+        """Never substitute a finance source with demonstration payment rows."""
+        return []
 
-    async def fetch_bank_balance(self, account_code: str) -> dict | None:
-        return _MOCK_BALANCES.get(account_code)
+    async def fetch_bank_balance(self, account_code: str | None = None) -> dict | None:
+        """Bank balance is unknown until an explicit source/account mapping is verified."""
+        return None
 
     async def fetch_balance_sheet(self, on_date: date) -> dict | None:
-        return {
-            "on_date": str(on_date),
-            "currency": "BYN",
-            "assets": [
-                {"code": "01", "name": "Основные средства", "amount": 320000.00},
-                {"code": "10", "name": "Материалы", "amount": 85000.00},
-                {"code": "41", "name": "Товары", "amount": 240000.00},
-                {"code": "51", "name": "Расчётные счета", "amount": 154300.00},
-                {"code": "62", "name": "Расчёты с покупателями", "amount": 98000.00},
-            ],
-            "liabilities": [
-                {"code": "60", "name": "Расчёты с поставщиками", "amount": 132000.00},
-                {"code": "66", "name": "Краткосрочные кредиты и займы", "amount": 90000.00},
-                {"code": "80", "name": "Уставный капитал", "amount": 50000.00},
-                {"code": "84", "name": "Нераспределённая прибыль", "amount": 625300.00},
-            ],
-            "total_assets": 897300.00,
-            "total_liabilities": 897300.00,
-        }
+        """Balance is unknown until a verified ledger extract mapping exists."""
+        return None
 
     async def post_document(self, doc_type: str, payload: dict) -> dict:
-        """Исходящая ERP→1С (часть 9). Не OData POST в живую 1С — mock-ссылка."""
-        return {"ref": f"1С-{payload.get('number', '')}", "posted": True}
+        """Fail closed until a verified outbound adapter is installed."""
+        raise OutboundDocumentUnavailable(self.outbound_document_source_reason)

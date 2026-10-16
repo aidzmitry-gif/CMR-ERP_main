@@ -1,23 +1,11 @@
 import { notFound } from "next/navigation";
-
 import { AppShell } from "@/components/app-shell";
 import { ProcurementMachineEditor } from "@/components/erp/procurement-machine-editor";
-import { fetchOrderServer } from "@/lib/procurement-machine";
-import { currentRole } from "@/lib/role-server";
 
-export default async function ProcurementOrderEditorPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
+export default async function ProcurementOrderEditorPage({ params, searchParams }: {
+  params: Promise<{ id: string }>; searchParams: Promise<{ org?: string }>;
 }) {
-  const { id } = await params;
-  const role = await currentRole();
-  const order = await fetchOrderServer(Number(id), role);
-  if (!order) notFound();
-
-  return (
-    <AppShell crumbs={["ERP", "Закупки", "Заказы в пути", order.number]}>
-      <ProcurementMachineEditor initial={order} />
-    </AppShell>
-  );
+  const { id } = await params; const { org } = await searchParams;
+  if (!/^[1-9]\d*$/.test(id) || Number(id) > 2147483647) notFound();
+  return <AppShell crumbs={["ERP", "Закупки", "Заказ"]}><ProcurementMachineEditor orderId={Number(id)} suggestedOrg={org} /></AppShell>;
 }

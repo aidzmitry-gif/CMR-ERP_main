@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.domain.models import Counterparty, Sku
+from core.domain.models import Counterparty, CounterpartyBranch, Sku
 from core.domain.reference import (
     Account,
     Bank,
@@ -190,13 +190,29 @@ async def _query_counterparties(
     if key:
         stmt = stmt.where(Counterparty.unp == key)
     elif name:
-        stmt = stmt.where(Counterparty.name.ilike(f"%{name}%"))
+        stmt = stmt.where(or_(Counterparty.name.ilike(f"%{name}%"),
+                              Counterparty.display_name.ilike(f"%{name}%"),
+                              Counterparty.legal_name.ilike(f"%{name}%"),
+                              select(CounterpartyBranch.id).where(
+                                  CounterpartyBranch.legal_entity_id == Counterparty.id,
+                                  CounterpartyBranch.is_active.is_(True),
+                                  CounterpartyBranch.name.ilike(f"%{name}%"),
+                              ).exists()))
     else:
         raise ReferenceQueryError("core.counterparties: нужен key (УНП) или name")
-    rows = (await session.execute(stmt.limit(limit))).scalars().all()
+    rows = (await session.execute(stmt.order_by(Counterparty.id).limit(limit))).scalars().all()
+    branches = (await session.scalars(select(CounterpartyBranch).where(
+        CounterpartyBranch.legal_entity_id.in_([r.id for r in rows]),
+        CounterpartyBranch.is_active.is_(True),
+    ).order_by(CounterpartyBranch.name, CounterpartyBranch.id))).all() if rows else []
+    by_parent: dict[int, list[dict]] = {}
+    for branch in branches:
+        by_parent.setdefault(branch.legal_entity_id, []).append({"id": branch.id, "name": branch.name})
     return {
         "ref": "core.counterparties",
-        "result": [{"id": r.id, "name": r.name, "unp": r.unp} for r in rows],
+        "result": [{"id": r.id, "name": r.display_name or r.name,
+                    "legal_name": r.legal_name, "unp": r.unp,
+                    "branches": by_parent.get(r.id, [])} for r in rows],
     }
 
 

@@ -34,6 +34,7 @@ export interface AnalyticsData {
   pass_rate_pct: number; // (accept+rework) ÷ всего × 100
   scrap_pct: number; // scrap ÷ всего × 100
   premium_fot_byn: number; // Σ (nh_output × PREMIUM_RATE)
+  financial_scope: "production_planning_estimate";
   plan_fact_by_month: MonthPlanFact[]; // 12 месяцев
   scrap_reasons: ScrapReason[]; // причины брака desc
   team_contribution: TeamMember[]; // вклад сборщиков

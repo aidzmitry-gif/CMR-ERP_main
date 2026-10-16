@@ -102,26 +102,32 @@ function roleHeaders(roles?: string): Record<string, string> | undefined {
 }
 
 /** Список спецификаций для SSR (server component); при недоступности бэка — пусто. */
-export async function fetchBomsServer(roles?: string): Promise<Bom[]> {
+export async function fetchBomsServer(roles?: string, strict = false): Promise<Bom[]> {
   try {
     const res = await fetch(`${BASE}/production/boms`, {
       cache: "no-store",
       headers: roleHeaders(roles),
     });
-    if (!res.ok) return [];
-    return (await res.json()) as Bom[];
-  } catch {
+    if (!res.ok) throw new Error("Список спецификаций недоступен.");
+    const rows: unknown = await res.json();
+    if (!Array.isArray(rows)) throw new Error("Некорректный список спецификаций.");
+    return rows as Bom[];
+  } catch (error) {
+    if (strict) throw error;
     return [];
   }
 }
 
 /** Список спецификаций (клиент, через прокси /api). */
-export async function fetchBoms(): Promise<Bom[]> {
+export async function fetchBoms(strict = false): Promise<Bom[]> {
   try {
     const res = await fetch("/api/production/boms", { cache: "no-store" });
-    if (!res.ok) return [];
-    return (await res.json()) as Bom[];
-  } catch {
+    if (!res.ok) throw new Error("Не удалось загрузить спецификации. Повторите загрузку.");
+    const rows: unknown = await res.json();
+    if (!Array.isArray(rows)) throw new Error("Некорректный список спецификаций.");
+    return rows as Bom[];
+  } catch (error) {
+    if (strict) throw error;
     return [];
   }
 }

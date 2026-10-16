@@ -14,7 +14,9 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     String,
+    Text,
     UniqueConstraint,
     event,
     func,
@@ -38,6 +40,9 @@ class Counterparty(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
+    # Kept for compatibility until sales records migrate to ID links.
+    display_name: Mapped[str | None] = mapped_column(String(255))
+    legal_name: Mapped[str | None] = mapped_column(String(255))
     unp: Mapped[str | None] = mapped_column(String(32))  # УНП (РБ) — natural key
     is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
     # ссылка дубля на эталон, в который он слит (NULL — самостоятельная запись)
@@ -52,6 +57,41 @@ class Counterparty(Base):
     __mapper_args__ = {"version_id_col": revision}
 
 
+class CounterpartyBranch(Base):
+    """A division of a legal entity, never another legal-UNP golden record."""
+
+    __tablename__ = "counterparty_branch"
+    __table_args__ = (
+        UniqueConstraint("id", "legal_entity_id", name="uq_branch_id_parent"),
+        CheckConstraint("tax_mode IN ('unknown', 'shared', 'independent')", name="ck_branch_tax_mode"),
+        CheckConstraint("portal_branch_code IS NULL OR length(portal_branch_code) = 4", name="ck_branch_code_length"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    legal_entity_id: Mapped[int] = mapped_column(ForeignKey("counterparty.id", ondelete="RESTRICT"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    address: Mapped[str | None] = mapped_column(String(1000))
+    tax_mode: Mapped[str] = mapped_column(String(16), default="unknown", server_default="unknown")
+    portal_branch_code: Mapped[str | None] = mapped_column(String(4))
+    is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+    revision: Mapped[int] = mapped_column(default=1, server_default="1", nullable=False)
+
+    __mapper_args__ = {"version_id_col": revision}
+
+
+class CounterpartyBranchAlias(Base):
+    """A source-specific branch identity; matching a legal UNP is insufficient."""
+
+    __tablename__ = "counterparty_branch_alias"
+    __table_args__ = (UniqueConstraint("source", "external_ref", name="uq_branch_alias_source_ref"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    branch_id: Mapped[int] = mapped_column(ForeignKey("counterparty_branch.id", ondelete="RESTRICT"), index=True)
+    source: Mapped[str] = mapped_column(String(64))
+    external_ref: Mapped[str] = mapped_column(String(255))
+
+
 class CounterpartyAlias(Base):
     """Алиас/источник эталонной записи контрагента (golden record).
 
@@ -60,6 +100,7 @@ class CounterpartyAlias(Base):
     """
 
     __tablename__ = "counterparty_alias"
+    __table_args__ = (UniqueConstraint("source", "external_ref", name="uq_counterparty_alias_source_ref"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     counterparty_id: Mapped[int] = mapped_column(ForeignKey("counterparty.id"))  # эталон
@@ -117,9 +158,16 @@ class Contact(Base):
     """Контактное лицо контрагента."""
 
     __tablename__ = "contact"
+    __table_args__ = (
+        ForeignKeyConstraint(["branch_id", "counterparty_id"],
+                             ["counterparty_branch.id", "counterparty_branch.legal_entity_id"],
+                             name="fk_contact_branch_parent", ondelete="RESTRICT"),
+        CheckConstraint("branch_id IS NULL OR counterparty_id IS NOT NULL", name="ck_contact_branch_parent"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     counterparty_id: Mapped[int | None] = mapped_column(ForeignKey("counterparty.id"), active_history=True)
+    branch_id: Mapped[int | None] = mapped_column(index=True)
     full_name: Mapped[str] = mapped_column(String(255))
     phone: Mapped[str | None] = mapped_column(String(64))
     email: Mapped[str | None] = mapped_column(String(255))
@@ -231,6 +279,59 @@ class Sku(Base):
     attributes: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
     # происхождение по полям (field-level provenance, M2) — единый слой с Counterparty.
     provenance: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+
+
+class CatalogSourceIdentity(Base):
+    """Scoped incoming identity; held rows deliberately have no native target."""
+
+    __tablename__ = "catalog_source_identity"
+    __table_args__ = (
+        UniqueConstraint("namespace", "entity", "source_guid", name="uq_catalog_source_identity"),
+        CheckConstraint("kind IN ('sku','group','counterparty')", name="ck_catalog_source_kind"),
+        CheckConstraint(
+            "(sku_id IS NULL AND group_id IS NULL AND counterparty_id IS NULL) OR "
+            "(kind='sku' AND sku_id IS NOT NULL AND group_id IS NULL AND counterparty_id IS NULL) OR "
+            "(kind='group' AND group_id IS NOT NULL AND sku_id IS NULL AND counterparty_id IS NULL) OR "
+            "(kind='counterparty' AND counterparty_id IS NOT NULL AND sku_id IS NULL AND group_id IS NULL)",
+            name="ck_catalog_source_target",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    namespace: Mapped[str] = mapped_column(String(64))
+    entity: Mapped[str] = mapped_column(String(128))
+    source_guid: Mapped[str] = mapped_column(String(36))
+    kind: Mapped[str] = mapped_column(String(16))
+    sku_id: Mapped[int | None] = mapped_column(ForeignKey("sku.id", ondelete="RESTRICT"))
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("ref_nomenclature_category.id", ondelete="RESTRICT"))
+    counterparty_id: Mapped[int | None] = mapped_column(ForeignKey("counterparty.id", ondelete="RESTRICT"))
+    source_sha: Mapped[str] = mapped_column(String(64))
+    revision_no: Mapped[int] = mapped_column()
+    target_sha: Mapped[str | None] = mapped_column(String(64))
+    holds: Mapped[list] = mapped_column(JSON)
+
+
+class CatalogSourceRevision(Base):
+    """Exact observed source text, never a reconstructed full source entity."""
+
+    __tablename__ = "catalog_source_revision"
+    __table_args__ = (
+        UniqueConstraint("identity_id", "revision_no", name="uq_catalog_source_revision"),
+        CheckConstraint("revision_no > 0", name="ck_catalog_source_revision_positive"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    identity_id: Mapped[int] = mapped_column(ForeignKey("catalog_source_identity.id", ondelete="RESTRICT"), index=True)
+    revision_no: Mapped[int] = mapped_column()
+    source_sha: Mapped[str] = mapped_column(String(64))
+    data_version: Mapped[str] = mapped_column(String(255))
+    previous_sha: Mapped[str | None] = mapped_column(String(64))
+    # Text preserves original decimal lexemes rather than JSON/float coercion.
+    source_text: Mapped[str] = mapped_column(Text)
+    target_sha: Mapped[str | None] = mapped_column(String(64))
+    holds: Mapped[list] = mapped_column(JSON)
+    actor: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class User(Base):
@@ -414,7 +515,7 @@ class AuditLog(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ts: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    actor: Mapped[str] = mapped_column(String(128), default="", server_default="")
+    actor: Mapped[str] = mapped_column(String(200), default="", server_default="")
     action: Mapped[str] = mapped_column(String(128))
     entity_ref: Mapped[str] = mapped_column(String(64), default="", server_default="")
     detail: Mapped[dict] = mapped_column(JSON)

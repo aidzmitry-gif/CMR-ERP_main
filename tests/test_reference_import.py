@@ -1,19 +1,86 @@
 """Идемпотентная загрузка контрагентов (входной адаптер 1С): upsert по УНП + alias."""
+from copy import deepcopy
+
 import pytest
 from sqlalchemy import func, select
 
-from core.domain.models import Counterparty
+from core.domain.models import Counterparty, CounterpartyAlias, CounterpartyBranch, SurvivorshipRule
 from core.services import reference_import
+from core.services.mdm import CounterpartyWriteError
+
+ADDRESS = "Тестовый юридический адрес, 1"
 
 
 async def _count(session, model) -> int:
     return (await session.execute(select(func.count()).select_from(model))).scalar() or 0
 
 
+async def test_alias_conflict_does_not_reassign_to_another_unp(session):
+    first = await reference_import.upsert_counterparty(session, unp="600187521", name="First", legal_address=ADDRESS, external_ref="same-ref")
+    await session.flush()
+    with pytest.raises(CounterpartyWriteError, match="Внешний ID"):
+        await reference_import.upsert_counterparty(session, unp="600187522", name="Other", external_ref="same-ref")
+    assert await _count(session, Counterparty) == 1
+    assert (await session.scalar(select(CounterpartyAlias))).counterparty_id == first.counterparty.id
+
+
+async def test_duplicate_unp_requires_resolution_before_import(session):
+    # Historical malformed UNPs can exist; never select the first candidate.
+    session.add_all([Counterparty(name="A", unp="111"), Counterparty(name="B", unp="111")])
+    await session.flush()
+    with pytest.raises(CounterpartyWriteError, match="Несколько активных"):
+        await reference_import.upsert_counterparty(session, unp="111", name="C", external_ref="new-ref")
+    assert await _count(session, CounterpartyAlias) == 0
+
+
+async def test_import_legal_name_does_not_replace_working_or_manual_names(session):
+    cp = Counterparty(name="Legacy", display_name="Рабочее", unp="600187521", requisites={"legal_address": ADDRESS})
+    session.add(cp)
+    await session.flush()
+    await reference_import.upsert_counterparty(session, unp=cp.unp, name="Описание1С", legal_name="Полное1С", external_ref="one")
+    assert (cp.name, cp.display_name, cp.legal_name) == ("Legacy", "Рабочее", "Полное1С")
+    cp.legal_name = "Подтверждено вручную"
+    cp.provenance = {**cp.provenance, "legal_name": {"source": "manual"}}
+    await session.flush()
+    await reference_import.upsert_counterparty(session, unp=cp.unp, name="Описание2", legal_name="Полное2", external_ref="one")
+    assert cp.legal_name == "Подтверждено вручную"
+
+
+async def test_unverified_branch_feed_is_rejected_without_creating_a_company(session):
+    with pytest.raises(CounterpartyWriteError, match="филиала"):
+        await reference_import.import_counterparties(session, [{"record_kind": "branch", "unp": "600187521", "name": "Branch", "id": "b"}])
+    assert await _count(session, Counterparty) == await _count(session, CounterpartyBranch) == 0
+
+
+async def test_empty_manual_only_legal_name_stays_empty(session):
+    session.add(SurvivorshipRule(entity_type="counterparty", field="legal_name", strategy="manual_only"))
+    cp = Counterparty(name="Legacy", unp="600187521", requisites={"legal_address": ADDRESS})
+    session.add(cp)
+    await session.flush()
+    await reference_import.upsert_counterparty(session, unp=cp.unp, name="Imported", legal_name="Must not fill")
+    assert cp.legal_name is None
+
+
+async def test_alias_of_direct_merged_duplicate_resolves_without_reassignment(session):
+    head = Counterparty(name="Head", unp="600187521", requisites={"legal_address": ADDRESS})
+    session.add(head)
+    await session.flush()
+    duplicate = Counterparty(name="Old", unp="600187521", is_active=False, merged_into_id=head.id)
+    session.add(duplicate)
+    await session.flush()
+    alias = CounterpartyAlias(counterparty_id=duplicate.id, source="1c", external_ref="old-ref")
+    session.add(alias)
+    await session.flush()
+    result = await reference_import.upsert_counterparty(session, unp=head.unp, name="Incoming", external_ref="old-ref")
+    assert result.counterparty.id == head.id
+    assert alias.counterparty_id == duplicate.id
+    assert not result.created and not result.alias_added
+
+
 async def test_upsert_creates_then_matches(session):
     # первый импорт — создаёт + alias
     r1 = await reference_import.upsert_counterparty(
-        session, unp="191234567", name="ООО Ромашка", source="1c", external_ref="0000-1"
+        session, unp="191234567", name="ООО Ромашка", legal_address=ADDRESS, source="1c", external_ref="0000-1"
     )
     assert r1.created is True
     assert r1.alias_added is True
@@ -31,7 +98,7 @@ async def test_upsert_creates_then_matches(session):
 
 
 async def test_upsert_fills_empty_name_and_adds_new_alias(session):
-    a = Counterparty(name="", unp="100045678")
+    a = Counterparty(name="", unp="100045678", requisites={"legal_address": ADDRESS})
     session.add(a)
     await session.flush()
 
@@ -45,7 +112,7 @@ async def test_upsert_fills_empty_name_and_adds_new_alias(session):
 
 
 async def test_existing_name_not_overwritten(session):
-    a = Counterparty(name="Точное имя", unp="222333444")
+    a = Counterparty(name="Точное имя", unp="222333444", requisites={"legal_address": ADDRESS})
     session.add(a)
     await session.flush()
 
@@ -57,9 +124,9 @@ async def test_existing_name_not_overwritten(session):
 
 async def test_batch_import_summary_idempotent(session):
     rows = [
-        {"unp": "111", "name": "A", "id": "a1"},
-        {"unp": "222", "name": "B", "id": "b1"},
-        {"unp": "111", "name": "A", "id": "a1"},  # дубль строки → матч, без новой записи
+        {"unp": "191000001", "name": "A", "legal_address": ADDRESS, "id": "a1"},
+        {"unp": "191000002", "name": "B", "legal_address": ADDRESS, "id": "b1"},
+        {"unp": "191000001", "name": "A", "legal_address": ADDRESS, "id": "a1"},  # дубль строки → матч, без новой записи
     ]
     summary = await reference_import.import_counterparties(session, rows)
     assert summary == {
@@ -81,7 +148,7 @@ async def test_batch_skips_rows_without_unp(session):
     rows = [
         {"unp": "", "name": "Группа без УНП", "id": "g1"},
         {"unp": None, "name": "Ещё без", "id": "g2"},
-        {"unp": "191000001", "name": "ООО С УНП", "id": "c1"},
+        {"unp": "191000001", "name": "ООО С УНП", "legal_address": ADDRESS, "id": "c1"},
     ]
     summary = await reference_import.import_counterparties(session, rows)
     assert summary["skipped_no_unp"] == 2
@@ -100,7 +167,7 @@ async def test_batch_import_skips_rows_without_unp(session):
         session,
         [
             {"unp": "", "name": "Группа 1С", "id": "group-1"},
-            {"unp": "191234567", "name": "ООО Ромашка", "id": "cp-1"},
+            {"unp": "191234567", "name": "ООО Ромашка", "legal_address": ADDRESS, "id": "cp-1"},
         ],
     )
     assert summary == {
@@ -111,3 +178,88 @@ async def test_batch_import_skips_rows_without_unp(session):
         "skipped_no_unp": 1,
     }
     assert await _count(session, Counterparty) == 1
+
+
+async def test_import_address_provenance_and_exact_replay(session):
+    row = {"unp": "191000003", "name": "Source", "legal_address": ADDRESS, "id": "source-address"}
+    assert (await reference_import.import_counterparties(session, [row]))["created"] == 1
+    cp = await session.scalar(select(Counterparty))
+    assert cp.requisites["legal_address"] == ADDRESS
+    assert cp.provenance["legal_address"] == {"source": "1c", "at": None}
+    revision = cp.revision
+    assert (await reference_import.import_counterparties(session, [row]))["created"] == 0
+    await session.flush()
+    assert cp.revision == revision
+    assert await _count(session, CounterpartyAlias) == 1
+
+
+@pytest.mark.parametrize("address", [None, "", " ", "x" * 1001, "bad\naddress", "bad\ud800address", True])
+async def test_incomplete_new_card_is_not_added_or_aliased(session, address):
+    with pytest.raises(CounterpartyWriteError) as caught:
+        await reference_import.upsert_counterparty(session, unp="191000003", name="Source",
+                                                  legal_address=address, external_ref="source-address")
+    assert caught.value.code in {"legal_address_required", "invalid_legal_address"}
+    assert not session.new
+    assert await _count(session, Counterparty) == await _count(session, CounterpartyAlias) == 0
+
+
+@pytest.mark.parametrize("unp", ["123", "12345678A", 191000003])
+async def test_invalid_unp_cannot_create_a_native_card(session, unp):
+    with pytest.raises(CounterpartyWriteError) as caught:
+        await reference_import.upsert_counterparty(session, unp=unp, name="Source", legal_address=ADDRESS)
+    assert caught.value.code == "unp_required"
+    assert not session.new
+
+
+async def test_invalid_address_encoding_does_not_dirty_existing_card(session):
+    cp = Counterparty(name="Existing", legal_name="Existing legal", unp="191000003",
+                      requisites={"legal_address": ADDRESS}, provenance={})
+    session.add(cp)
+    await session.flush()
+    with pytest.raises(CounterpartyWriteError) as caught:
+        await reference_import.upsert_counterparty(session, unp=cp.unp, name="Source",
+                                                  legal_name="New legal", legal_address="bad\ud800address",
+                                                  external_ref="source-address")
+    assert caught.value.code == "invalid_legal_address"
+    assert not session.dirty and not session.new
+    assert cp.legal_name == "Existing legal" and cp.requisites == {"legal_address": ADDRESS}
+    assert cp.provenance == {} and await _count(session, CounterpartyAlias) == 0
+
+
+@pytest.mark.parametrize("owner", [None, "manual", "mns_grp", "egr", "erp"])
+async def test_protected_or_unknown_address_remains_unchanged(session, owner):
+    provenance = {} if owner is None else {"legal_address": {"source": owner, "at": "2026-07-01"}}
+    cp = Counterparty(name="Existing", unp="191000003", requisites={"legal_address": ADDRESS,
+                                                                                "other": "preserve"},
+                      provenance=provenance)
+    session.add_all([cp, SurvivorshipRule(entity_type="counterparty", field="legal_address", strategy="most_recent")])
+    await session.flush()
+    before = deepcopy(cp.provenance)
+    result = await reference_import.upsert_counterparty(session, unp=cp.unp, name="Source",
+                                                       legal_address="Другой тестовый адрес",
+                                                       at="2026-09-01", external_ref="source-address")
+    assert cp.requisites == {"legal_address": ADDRESS, "other": "preserve"}
+    assert cp.provenance == before and "legal_address" not in result.updated_fields
+
+
+async def test_rejected_existing_card_has_no_dirty_values_or_new_alias(session):
+    cp = Counterparty(name="Existing", unp="191000003", legal_name="Existing legal", requisites={}, provenance={})
+    session.add(cp)
+    await session.commit()
+    revision = cp.revision
+    with pytest.raises(CounterpartyWriteError, match="юридический адрес"):
+        await reference_import.upsert_counterparty(session, unp=cp.unp, name="Source",
+                                                  legal_name="New legal", external_ref="source-address")
+    assert cp.legal_name == "Existing legal" and cp.provenance == {} and not session.is_modified(cp)
+    await session.flush()
+    assert cp.revision == revision and await _count(session, CounterpartyAlias) == 0
+
+
+async def test_batch_failure_rolls_back_cards_and_aliases_in_caller_transaction(session):
+    with pytest.raises(CounterpartyWriteError):
+        async with session.begin():
+            await reference_import.import_counterparties(session, [
+                {"unp": "191000003", "name": "Valid", "legal_address": ADDRESS, "id": "valid"},
+                {"unp": "191000004", "name": "Missing address", "id": "invalid"},
+            ])
+    assert await _count(session, Counterparty) == await _count(session, CounterpartyAlias) == 0

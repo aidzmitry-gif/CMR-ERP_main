@@ -1,15 +1,14 @@
 import { AppShell } from "@/components/app-shell";
 import { ProcurementRfqView } from "@/components/erp/procurement-rfq-view";
-import { fetchRfqsServer } from "@/lib/procurement-rfq";
-import { currentRole } from "@/lib/role-server";
+import { ProcurementNav } from "@/components/erp/procurement-nav";
 
-export default async function ProcurementRfqPage() {
-  const role = await currentRole();
-  const rfqs = await fetchRfqsServer(role);
-
+export default function ProcurementRfqPage() {
   return (
     <AppShell crumbs={["ERP", "Закупки", "Тендер / RFQ"]}>
-      <ProcurementRfqView initial={rfqs} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <ProcurementNav />
+        <ProcurementRfqView />
+      </div>
     </AppShell>
   );
 }

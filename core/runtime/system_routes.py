@@ -30,6 +30,7 @@ from core.domain.reference import NomenclatureCategory, SkuVersion, VatRate
 from core.runtime.access import roles_from_request
 from core.runtime.deps import get_session
 from core.services import (
+    counterparty_branches,
     mdm,
     reference_quality,
     reference_query,
@@ -402,8 +403,10 @@ async def mdm_merge(
         survivor = await mdm.merge(
             session, core.event_bus, int(payload["survivor_id"]), int(payload["duplicate_id"]),
             by=user.username,
+            reference_guard=getattr(core.services.touch_history, "has_deals", None),
         )
     except (KeyError, ValueError, TypeError) as exc:
+        await session.rollback()
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await session.commit()
     return {"id": survivor.id, "name": survivor.name, "unp": survivor.unp}
@@ -475,6 +478,55 @@ async def update_counterparty(
     user: CurrentUser = Depends(require_permission(SYSTEM_WRITE)),
 ) -> dict:
     return await _write_counterparty(counterparty_id, payload, request, session, user)
+
+
+@router.get("/system/mdm/counterparty/{counterparty_id}/branches")
+async def list_counterparty_branches(
+    counterparty_id: int,
+    session: AsyncSession = Depends(get_session),
+    _: CurrentUser = Depends(require_permission("sales.deal.read")),
+) -> dict:
+    try:
+        return await counterparty_branches.branches_for_parent(session, counterparty_id)
+    except mdm.CounterpartyWriteError as exc:
+        raise HTTPException(status_code=exc.status, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
+async def _write_counterparty_branch(
+    counterparty_id: int, branch_id: int | None, payload: counterparty_branches.BranchWrite,
+    session: AsyncSession, user: CurrentUser,
+) -> dict:
+    try:
+        branch = await counterparty_branches.save_branch(
+            session, counterparty_id, branch_id, payload, actor=user.username,
+        )
+        result = counterparty_branches.branch_dict(branch)
+        await session.commit()
+        return result
+    except mdm.CounterpartyWriteError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=exc.status, detail={"code": exc.code, "message": str(exc)}) from exc
+    except StaleDataError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail={"code": "stale_revision", "message": "Филиал изменён. Обновите карточку"}) from exc
+
+
+@router.post("/system/mdm/counterparty/{counterparty_id}/branches", status_code=201)
+async def create_counterparty_branch(
+    counterparty_id: int, payload: counterparty_branches.BranchWrite,
+    session: AsyncSession = Depends(get_session),
+    user: CurrentUser = Depends(require_permission(SYSTEM_WRITE)),
+) -> dict:
+    return await _write_counterparty_branch(counterparty_id, None, payload, session, user)
+
+
+@router.patch("/system/mdm/counterparty/{counterparty_id}/branches/{branch_id}")
+async def update_counterparty_branch(
+    counterparty_id: int, branch_id: int, payload: counterparty_branches.BranchWrite,
+    session: AsyncSession = Depends(get_session),
+    user: CurrentUser = Depends(require_permission(SYSTEM_WRITE)),
+) -> dict:
+    return await _write_counterparty_branch(counterparty_id, branch_id, payload, session, user)
 
 
 @router.get("/system/mdm/counterparty/{counterparty_id}")

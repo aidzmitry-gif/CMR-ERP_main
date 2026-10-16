@@ -1,6 +1,8 @@
 """Unit-тесты обработчиков событий: ранние выходы (guard) без БД."""
 from types import SimpleNamespace
 
+import pytest
+
 
 async def test_sales_handlers_ctx_none_are_noop():
     from modules.leads.events import on_campaign_launched
@@ -33,13 +35,16 @@ async def test_incoming_message_ai_disabled_is_noop():
     await on_incoming_message_ai({"direction": "in", "deal_id": 1}, ctx)
 
 
-async def test_cross_module_handlers_ctx_none_are_noop():
+async def test_cross_module_handlers_missing_context_contract():
     from modules.finance.events import on_document_posted as finance_on_doc
     from modules.logistics.events import on_document_posted as logistics_on_doc
-    from modules.wms.events import on_goods_received, on_stock_reserved
+    from modules.wms.events import on_goods_received, on_stock_released, on_stock_reserved
 
-    await on_stock_reserved({"items": [{"sku_code": "X", "qty": 1}]}, None)
-    await on_goods_received({"item": "Болт", "qty": 5}, None)
+    for handler in (on_stock_reserved, on_stock_released):
+        with pytest.raises(ValueError, match="EventContext is required"):
+            await handler({"items": [{"sku_code": "X", "qty": 1}]}, None)
+    with pytest.raises(ValueError, match="EventContext is required"):
+        await on_goods_received({"item": "Болт", "qty": 5}, None)
     await logistics_on_doc({"kind": "order", "deal_id": 1}, None)
     await finance_on_doc({"kind": "invoice", "number": "СЧ-1"}, None)
 

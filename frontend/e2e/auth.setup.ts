@@ -8,9 +8,16 @@ const authFile = "e2e/.auth/state.json";
 
 setup("dev-логин (Директор)", async ({ page }) => {
   await page.goto("/login");
+  await page.getByLabel("Сотрудник").selectOption("kharkovich_d");
   // Список сотрудников грузится с backend (/system/users); кнопка активна, когда
   // выбран сотрудник. По умолчанию выбран первый — Директор (полный доступ).
+  const responsePromise = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === "/api/auth/login" && response.request().method() === "POST",
+  );
   await page.getByRole("button", { name: "Войти" }).click();
+  const response = await responsePromise;
+  expect(response.ok(), `Dev login HTTP ${response.status()}`).toBeTruthy();
+  expect((await response.json()).user?.role).toBe("director");
   // Успешный вход уводит на доску сделок — дожидаемся, чтобы cookie точно проставился
   // и гейт AppShell пропустил.
   await page.waitForURL("**/crm/deals");

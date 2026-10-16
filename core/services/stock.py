@@ -15,6 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 class StockGateway(Protocol):
     """Складские операции над остатками; ``items`` — список ``{sku_code, qty}``."""
 
+    # Before replacement releases anything, lock the union of old and new items.
+    # No balance changes or commit; retain these locks through release + reserve.
+    async def lock_reservation_items(self, session: AsyncSession, items: list[dict]) -> None: ...
+
     async def reserve(self, session: AsyncSession, items: list[dict]) -> list[dict]: ...
     # SALES-51: снять резерв (``qty_reserved`` уменьшается); реализация — в integrations.
     async def release(self, session: AsyncSession, items: list[dict]) -> list[dict]: ...

@@ -23,6 +23,7 @@ async def test_empty_analytics_zero(api):
     assert a["pass_rate_pct"] == 0.0
     assert a["scrap_pct"] == 0.0
     assert a["premium_fot_byn"] == 0.0
+    assert a["financial_scope"] == "production_planning_estimate"
     assert len(a["plan_fact_by_month"]) == 12
 
 

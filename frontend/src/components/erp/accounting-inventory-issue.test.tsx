@@ -1,0 +1,246 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/accounting-buyers", () => ({
+  searchAccountingBuyers: vi.fn(async () => [{ id: 1, name: "Buyer from MDM", unp: "190000001", revision: 2 }]),
+}));
+vi.mock("@/lib/accounting-skus", () => ({
+  searchAccountingSkus: vi.fn(async () => [{ id: 8, code: "SKU", title: "Catalog item", unit: "шт" }]),
+}));
+vi.mock("@/lib/accounting-warehouses", () => ({
+  searchAccountingWarehouses: vi.fn(async () => [{ id: 4, name: "W", title: "Main warehouse" }]),
+}));
+import { AccountingInventoryIssue } from "./accounting-inventory-issue";
+
+afterEach(() => vi.unstubAllGlobals());
+const accounts = [{ code: "41", title: "Goods", category: "asset", cash: false, quantity_tracking: true, required_dimensions: [] }, { code: "43", title: "Finished goods", category: "asset", cash: false, quantity_tracking: true, required_dimensions: [] }, { code: "90.4", title: "Cost", category: "expense", cash: false, quantity_tracking: false, required_dimensions: [] }];
+const props = { org: "1", date: "2026-09-01", policyId: 1, accounts, onDate: vi.fn(), onBusyChange: vi.fn(), onPosted: vi.fn() };
+const calculation = { cost: { basis_digest: "basis", book_quantity: "3.000000", book_value_byn: "10.00", remaining_quantity: "1.500000", remaining_value_byn: "5.00", evidence: [{ entry_id: 2, line_id: 3, source: "receipt", source_version: 1, amount_byn: "10.00", quantity: "3.000000" }] }, digest: "posting", posting: { lines: [{ side: "debit", account: "90.4", amount: "5.00", quantity: null, dimensions: {} }, { side: "credit", account: "41", amount: "5.00", quantity: "1.500000", dimensions: { lot: "LOT" } }] } };
+function receipt(init: RequestInit, preview: { digest: string; cost: { basis_digest: string } } = calculation,
+                 options: { id?: number; sale?: boolean; zero?: boolean } = {}) {
+  const body = JSON.parse(String(init.body));
+  const facts = { organization_id: 1, source: body.source, source_version: body.source_version,
+    document_date: body.document_date, operation_date: body.operation_date, posting_date: body.posting_date,
+    policy_id: body.policy_id, operation: options.sale ? "inventory_sale" : "inventory_issue", digest: preview.digest };
+  return options.zero ? { ...facts, kind: "quantity_only_receipt", receipt_id: options.id ?? 9,
+    registration_token: 10, basis_digest: preview.cost.basis_digest, posted: true }
+    : { ...facts, id: options.id ?? 7 };
+}
+async function fill(sale = false) {
+  for (const [label, value] of [["Идентификатор основания", "ISSUE-1"], ["Партия", "LOT"], ["Количество списания", "1,5"], [sale ? "Содержание продажи" : "Содержание списания", "Test issue"], ["Счёт запасов", "41"], ["Счёт расходов", "90.4"]]) fireEvent.change(screen.getByLabelText(label === "Партия" ? /^Партия/ : label, { exact: true }), { target: { value } });
+  await selectWarehouse();
+  await selectSku();
+  fireEvent.change(screen.getByLabelText(/^Партия/, { exact: true }), { target: { value: "LOT" } });
+}
+
+async function selectBuyer() {
+  fireEvent.change(screen.getByLabelText("Поиск покупателя в справочнике"), { target: { value: "Buyer" } });
+  fireEvent.click(screen.getByRole("button", { name: "Найти покупателя" }));
+  await screen.findByRole("option", { name: "Buyer from MDM · 190000001 · ID 1" });
+  fireEvent.change(screen.getByLabelText("Покупатель из справочника"), { target: { value: "1" } });
+}
+
+async function selectSku() {
+  fireEvent.change(screen.getByLabelText("Поиск номенклатуры в справочнике"), { target: { value: "SKU" } });
+  fireEvent.click(screen.getByRole("button", { name: "Найти номенклатуру" }));
+  await screen.findByRole("option", { name: "SKU · Catalog item · шт · ID 8" });
+  fireEvent.change(screen.getByLabelText("Номенклатура из справочника"), { target: { value: "8" } });
+}
+
+async function selectWarehouse() {
+  fireEvent.change(screen.getByLabelText("Поиск склада в справочнике"), { target: { value: "W" } });
+  fireEvent.click(screen.getByRole("button", { name: "Найти склад" }));
+  await screen.findByRole("option", { name: "W · Main warehouse · ID 4" });
+  fireEvent.change(screen.getByLabelText("Склад из справочника"), { target: { value: "4" } });
+}
+
+it("shows the complete zero-cost receipt and confirms without client source IDs", async () => {
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => ({ ok: true, json: async () => url.endsWith("confirm")
+    ? receipt(init, { digest: "zero", cost: calculation.cost }, { id: 77, zero: true })
+    : { kind: "quantity_only_receipt", posting: null, digest: "zero", cost: { ...calculation.cost, issue_quantity: "1.500000", issue_cost_byn: "0.00" },
+      receipt: { zero_byn: true, source_layers: [{ entry_id: 11, line_id: 21, quantity: "1.000000" }, { entry_id: 12, line_id: 22, quantity: "0.500000" }] } } }));
+  vi.stubGlobal("fetch", fetcher);
+  render(<AccountingInventoryIssue {...props} inventoryMethod="fifo" />);
+  await fill();
+  fireEvent.click(screen.getByText("Рассчитать списание"));
+  expect(await screen.findByText(/Количество 1.500000 отражается квитанцией/)).toBeInTheDocument();
+  expect(screen.getByText(/операция № 11, строка № 21 · Количество 1.000000/)).toBeInTheDocument();
+  expect(screen.getByText(/операция № 12, строка № 22 · Количество 0.500000/)).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Подтвердить списание"));
+  expect(await screen.findByText("Запись списания № 77 зарегистрирована.")).toBeInTheDocument();
+  const request = fetcher.mock.calls[1] as unknown as [string, RequestInit];
+  expect(JSON.parse(String(request[1].body))).not.toHaveProperty("source_layers");
+});
+
+it.each([false, true])("offers finished-goods account 43 for %s", (sale) => {
+  render(<AccountingInventoryIssue {...props} sale={sale} />);
+  const codes = Array.from((screen.getByLabelText("Счёт запасов") as HTMLSelectElement).options).map((option) => option.value);
+  expect(codes).toEqual(expect.arrayContaining(["41", "43"]));
+});
+
+it("shows all allocated inventory layers separately from accounting postings", async () => {
+  const allocation = { ...calculation, cost: { ...calculation.cost, inventory_layers: [{ lot: "ZERO", quantity: "1.000000", amount_byn: "0.00", dimensions: { warehouse: "W", sku: "SKU" } }, { lot: "COST", quantity: "0.500000", amount_byn: "5.00", dimensions: { warehouse: "W", sku: "SKU" } }] } };
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => allocation })));
+  render(<AccountingInventoryIssue {...props} />);
+  await fill();
+  fireEvent.click(screen.getByText("Рассчитать списание"));
+  expect(await screen.findByText("Слои списания запасов")).toBeInTheDocument();
+  expect(screen.getByText(/Партия ZERO · Количество 1.000000 · Себестоимость 0.00 BYN/)).toBeInTheDocument();
+  expect(screen.getByText(/Партия COST · Количество 0.500000 · Себестоимость 5.00 BYN/)).toBeInTheDocument();
+  expect(screen.getByText(/Кт 41 · 5.00 BYN · Количество 1.500000/)).toBeInTheDocument();
+});
+
+it("requires preview and retries confirmation with the same prepared body", async () => {
+  let fail = true;
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith("confirm") && fail) throw new Error("Network failure");
+    return { ok: true, json: async () => url.endsWith("confirm") ? receipt(init) : calculation };
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const onPosted = vi.fn();
+  render(<AccountingInventoryIssue {...props} onPosted={onPosted} />);
+  await fill();
+  expect(screen.queryByText("Подтвердить списание")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Рассчитать списание"));
+  fireEvent.click(await screen.findByText("Подтвердить списание"));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Network failure");
+  expect(screen.getByLabelText("Количество списания")).toHaveValue("1,5");
+  fail = false;
+  fireEvent.click(screen.getByText("Подтвердить списание"));
+  expect(await screen.findByText("Бухгалтерское списание № 7 проведено.")).toBeInTheDocument();
+  expect(onPosted).toHaveBeenCalledTimes(1);
+  const first = fetcher.mock.calls[1] as unknown as [string, RequestInit];
+  const second = fetcher.mock.calls[2] as unknown as [string, RequestInit];
+  expect(first[1].body).toBe(second[1].body);
+  expect(JSON.parse(String(first[1].body))).toMatchObject({
+    quantity: "1.5", basis_digest: "basis", digest: "posting",
+    warehouse_identity: { id: 4, name: "W", title: "Main warehouse" },
+    sku_identity: { id: 8, code: "SKU", title: "Catalog item", unit: "шт" },
+  });
+});
+
+it("keeps a prepared issue when a successful response belongs to another book", async () => {
+  let wrong = true;
+  const onPosted = vi.fn();
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => ({ ok: true,
+    json: async () => url.endsWith("confirm")
+      ? { ...receipt(init), organization_id: wrong ? 2 : 1 } : calculation }));
+  vi.stubGlobal("fetch", fetcher);
+  render(<AccountingInventoryIssue {...props} onPosted={onPosted} />);
+  await fill();
+  fireEvent.click(screen.getByText("Рассчитать списание"));
+  fireEvent.click(await screen.findByText("Подтвердить списание"));
+  expect(await screen.findByRole("alert")).toHaveTextContent("не подтвердила именно эту операцию");
+  expect(onPosted).not.toHaveBeenCalled();
+  expect(screen.getByText("Подтвердить списание")).toBeInTheDocument();
+  wrong = false;
+  fireEvent.click(screen.getByText("Подтвердить списание"));
+  expect(await screen.findByText("Бухгалтерское списание № 7 проведено.")).toBeInTheDocument();
+  expect(onPosted).toHaveBeenCalledOnce();
+  expect(fetcher.mock.calls[1][1].body).toBe(fetcher.mock.calls[2][1].body);
+});
+
+it("invalidates a calculation when form or posting date changes", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => calculation })));
+  const view = render(<AccountingInventoryIssue {...props} />);
+  await fill();
+  fireEvent.click(screen.getByText("Рассчитать списание"));
+  await screen.findByText("Подтвердить списание");
+  fireEvent.change(screen.getByLabelText("Количество списания"), { target: { value: "2" } });
+  expect(screen.queryByText("Подтвердить списание")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Рассчитать списание"));
+  await screen.findByText("Подтвердить списание");
+  view.rerender(<AccountingInventoryIssue {...props} date="2026-09-02" />);
+  expect(screen.queryByText("Подтвердить списание")).not.toBeInTheDocument();
+});
+
+it("shows a zero-value receipt honestly without a phantom posting or entry link", async () => {
+  const zero = { kind: "quantity_only_receipt" as const, cost: { ...calculation.cost, issue_cost_byn: "0.00", evidence: [{ entry_id: null, line_id: null, receipt_id: 9, source: "zero", source_version: 1, amount_byn: "0.00", quantity: "0.500000", zero_value_disposal: true }] }, digest: "zero", posting: null, receipt: { source_layer: { entry_id: 2, line_id: 3, quantity: "0.500000" }, zero_byn: true } };
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => ({ ok: true, json: async () => url.endsWith("confirm") ? receipt(init, zero, { id: 9, zero: true }) : zero })));
+  const onEntry = vi.fn();
+  const onPosted = vi.fn();
+  render(<AccountingInventoryIssue {...props} onEntry={onEntry} onPosted={onPosted} />); await fill(); fireEvent.click(screen.getByText("Рассчитать списание"));
+  await screen.findByText(/Себестоимость 0.00 BYN/);
+  expect(screen.queryByText(/^Дт /)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Операция №/ })).not.toBeInTheDocument();
+  expect(screen.getByText(/Остаток после: 1.500000/)).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Подтвердить списание"));
+  expect(await screen.findByText("Запись списания № 9 зарегистрирована.")).toBeInTheDocument();
+  expect(onEntry).not.toHaveBeenCalled();
+  expect(onPosted).toHaveBeenCalledOnce();
+});
+
+it("allows FIFO to value a SKU across explicit lots", async () => {
+  const fetcher = vi.fn(async () => ({ ok: true, json: async () => ({ ...calculation, cost: { ...calculation.cost, method: "fifo" } }) }));
+  vi.stubGlobal("fetch", fetcher);
+  render(<AccountingInventoryIssue {...props} inventoryMethod="fifo" />);
+  for (const [label, value] of [["Идентификатор основания", "FIFO-1"], ["Количество списания", "1"], ["Содержание списания", "FIFO issue"], ["Счёт запасов", "41"], ["Счёт расходов", "90.4"]]) fireEvent.change(screen.getByLabelText(label, { exact: true }), { target: { value } });
+  await selectWarehouse();
+  await selectSku();
+  expect(screen.getByLabelText("Партия (необязательно)")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Рассчитать списание"));
+  await screen.findByText(/Метод: ФИФО/);
+  const call = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+  expect(JSON.parse(String(call[1].body)).lot).toBe("");
+});
+
+it("previews sale with exact VAT inputs, invalidates edits and confirms its frozen package", async () => {
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => ({ ok: true, json: async () => url.endsWith("confirm")
+    ? receipt(init, calculation, { sale: true })
+    : { ...calculation, net_amount_byn: "20.00", vat_amount_byn: "4.00", gross_amount_byn: "24.00" } }));
+  vi.stubGlobal("fetch", fetcher);
+  const saleAccounts = [...accounts, ...[["62", "asset"], ["90.1", "income"], ["90.2", "income"], ["68.2", "liability"]].map(([code, category]) => ({ code, category, title: code, cash: false, quantity_tracking: false, required_dimensions: [] }))];
+  render(<AccountingInventoryIssue {...props} sale accounts={saleAccounts} />);
+  await fill(true);
+  await selectBuyer();
+  for (const [label, value] of [["Стоимость продажи без НДС, BYN", "20,00"], ["Ставка НДС, %", "20"], ["Основание применения НДС", "Approved basis"], ["Счёт покупателя", "62"], ["Счёт выручки", "90.1"], ["Счёт НДС из выручки", "90.2"], ["Счёт расчётов по НДС", "68.2"], ["Покупатель: Договор", "contract"], ["Покупатель: Документ расчётов", "sale"]]) fireEvent.change(screen.getByLabelText(label === "Партия" ? /^Партия/ : label, { exact: true }), { target: { value } });
+  fireEvent.click(screen.getByText("Рассчитать продажу"));
+  await screen.findByText("Подтвердить продажу");
+  expect(screen.getByText(/К оплате: 24.00/)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Ставка НДС, %"), { target: { value: "10" } });
+  expect(screen.queryByText("Подтвердить продажу")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Рассчитать продажу"));
+  fireEvent.click(await screen.findByText("Подтвердить продажу"));
+  expect(await screen.findByText("Проводки по продаже вне CRM № 7 проведены.")).toBeInTheDocument();
+  const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
+  expect(calls[2][0]).toBe("/api/accounting/organizations/1/sales/confirm");
+  expect(JSON.parse(String(calls[2][1].body))).toMatchObject({ net_amount: "20.00", vat_rate: "10", sku: "SKU", sku_identity: { id: 8, code: "SKU", title: "Catalog item", unit: "шт" }, buyer_dimensions: { counterparty_id: "1", counterparty: "Buyer from MDM", counterparty_unp: "190000001", counterparty_revision: "2", contract: "contract", settlement_document: "sale" }, basis_digest: "basis", digest: "posting" });
+});
+
+it("shows V4 zero-cost sale sources with commercial revenue and VAT postings", async () => {
+  const zeroSale = { ...calculation, net_amount_byn: "20.00", vat_amount_byn: "4.00", gross_amount_byn: "24.00", cost: { ...calculation.cost, issue_quantity: "1.500000", issue_cost_byn: "0.00" }, posting: { lines: [{ side: "debit", account: "62", amount: "24.00", quantity: null, dimensions: {} }, { side: "credit", account: "90.1", amount: "24.00", quantity: null, dimensions: {} }, { side: "debit", account: "90.2", amount: "4.00", quantity: null, dimensions: {} }, { side: "credit", account: "68.2", amount: "4.00", quantity: null, dimensions: {} }] }, zero_value_command: { command_version: 4, inventory_layers: [{ source_entry_id: 11, source_line_id: 21, quantity: "1.000000" }, { source_entry_id: 12, source_line_id: 22, quantity: "0.500000" }] } };
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => ({ ok: true, json: async () => url.endsWith("confirm") ? receipt(init, zeroSale, { id: 17, sale: true }) : zeroSale })));
+  const saleAccounts = [...accounts, ...[["62", "asset"], ["90.1", "income"], ["90.2", "income"], ["68.2", "liability"]].map(([code, category]) => ({ code, category, title: code, cash: false, quantity_tracking: false, required_dimensions: [] }))];
+  render(<AccountingInventoryIssue {...props} sale accounts={saleAccounts} />);
+  await fill(true);
+  await selectBuyer();
+  for (const [label, value] of [["Стоимость продажи без НДС, BYN", "20,00"], ["Ставка НДС, %", "20"], ["Основание применения НДС", "Approved basis"], ["Счёт покупателя", "62"], ["Счёт выручки", "90.1"], ["Счёт НДС из выручки", "90.2"], ["Счёт расчётов по НДС", "68.2"], ["Покупатель: Договор", "contract"], ["Покупатель: Документ расчётов", "sale"]]) fireEvent.change(screen.getByLabelText(label, { exact: true }), { target: { value } });
+  fireEvent.click(screen.getByText("Рассчитать продажу"));
+  expect(await screen.findByText(/Себестоимость 0.00 BYN. Количество 1.500000/)).toBeInTheDocument();
+  expect(screen.getByText(/операция № 11, строка № 21 · Количество 1.000000/)).toBeInTheDocument();
+  expect(screen.getByText(/операция № 12, строка № 22 · Количество 0.500000/)).toBeInTheDocument();
+  expect(screen.getByText(/К оплате: 24.00/)).toBeInTheDocument();
+  expect(screen.getByText(/Дт 62 · 24.00 BYN/)).toBeInTheDocument();
+  expect(screen.getByText(/Кт 68.2 · 4.00 BYN/)).toBeInTheDocument();
+  expect(screen.queryByText(/проводка не создаётся/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Подтвердить продажу"));
+  expect(await screen.findByText("Проводки по продаже вне CRM № 17 проведены.")).toBeInTheDocument();
+});
+
+it.each(["account", "date"])("drops hidden revenue analytics when %s changes", async (mode) => {
+  const fetcher = vi.fn(async () => ({ ok: true, json: async () => calculation }));
+  vi.stubGlobal("fetch", fetcher);
+  const saleAccounts = [...accounts, ...["90.1.1", "90.1.2"].map((code) => ({ code, category: "income", title: code, cash: false, quantity_tracking: false, required_dimensions: code.endsWith("1") ? ["department"] : [] }))];
+  const view = render(<AccountingInventoryIssue {...props} sale accounts={saleAccounts} />);
+  await selectWarehouse();
+  await selectBuyer();
+  await selectSku();
+  fireEvent.change(screen.getByLabelText("Счёт выручки", { exact: true }), { target: { value: "90.1.1" } });
+  fireEvent.change(screen.getByLabelText("Выручка: Подразделение"), { target: { value: "OLD-DEPARTMENT" } });
+  if (mode === "account") fireEvent.change(screen.getByLabelText("Счёт выручки", { exact: true }), { target: { value: "90.1.2" } });
+  else view.rerender(<AccountingInventoryIssue {...props} date="2026-09-02" sale accounts={saleAccounts.map((a) => ({ ...a, required_dimensions: [] }))} />);
+  expect(screen.queryByLabelText("Выручка: Подразделение")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Рассчитать продажу"));
+  const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
+  expect(JSON.parse(String(calls[0][1].body)).revenue_dimensions).toEqual({});
+});

@@ -5,7 +5,7 @@ import { currentRole } from "@/lib/role-server";
 
 export default async function ProductionVyrabotkaPage() {
   const role = await currentRole();
-  const payroll = await fetchPayrollServer(role);
+  const payroll = await fetchPayrollServer(role, true).catch(() => null);
 
   return (
     <AppShell crumbs={["ERP", "Производство", "Выработка и оценка"]}>

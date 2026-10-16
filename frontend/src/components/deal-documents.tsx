@@ -1,10 +1,13 @@
 "use client";
 
 import { DocumentVersions } from "@/components/document-versions";
+import { DealDocumentCard } from "@/components/deal-document-card";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
 
 import { Check, FileText, Plus, X } from "lucide-react";
-import { useEffect, useState } from "react";
-import { createDocument, type DealDoc, decideDocument, fetchDocuments } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import { createDocumentResult, type DealDoc, decideDocument, fetchDocuments } from "@/lib/api";
+import { formatByn } from "@/lib/format";
 
 const KINDS = [
   { value: "invoice", label: "Счёт" },
@@ -19,9 +22,10 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 const STATUS: Record<string, { label: string; cls: string }> = {
+  issued: { label: "Выпущен", cls: "bg-emerald-50 text-emerald-600" },
   draft: { label: "Черновик", cls: "bg-sunken text-muted" },
   pending_approval: { label: "На согласовании", cls: "bg-amber-50 text-amber-600" },
-  posted: { label: "Записан в 1С", cls: "bg-emerald-50 text-emerald-600" },
+  posted: { label: "Выпущен в ERP", cls: "bg-emerald-50 text-emerald-600" },
   paid: { label: "Оплачен", cls: "bg-emerald-50 text-emerald-600" },
   rejected: { label: "Отклонён", cls: "bg-red-50 text-red-600" },
   cancelled: { label: "Аннулирован", cls: "bg-red-50 text-red-600" },
@@ -41,6 +45,8 @@ function daysUntil(iso: string): number {
 }
 
 function reserveBadge(d: DealDoc): { label: string; cls: string } | null {
+  if (d.kind === "invoice" && d.reserve_mode === "on_order" && d.reserve_status === "unreserved")
+    return { label: "Под заказ — товар не зарезервирован", cls: "bg-amber-50 text-amber-700" };
   if (d.reserve_status === "reserved" && d.valid_until) {
     const days = daysUntil(d.valid_until);
     const left =
@@ -49,30 +55,126 @@ function reserveBadge(d: DealDoc): { label: string; cls: string } | null {
     return { label: `В резерве · до ${fmtDate(d.valid_until)} · ${left}`, cls };
   }
   if (d.reserve_status === "consumed")
-    return { label: "Резерв → оплачен", cls: "bg-emerald-50 text-emerald-600" };
+    return { label: "Резерв использован при отгрузке", cls: "bg-emerald-50 text-emerald-600" };
   if (d.reserve_status === "released")
     return { label: "Резерв снят", cls: "bg-sunken text-muted" };
   return null;
 }
 
+function InvoiceMoney({ items }: { items: DealDoc[] }) {
+  const current = items.filter((doc) => doc.kind === "invoice"
+    && ["posted", "paid"].includes(doc.status) && !doc.superseded_by_id);
+  const candidate = current.length === 1 ? current[0] : null;
+  const invoice = candidate?.original_state === "issued"
+    && typeof candidate.amount === "number" && Number.isFinite(candidate.amount) && candidate.amount >= 0
+    ? candidate : null;
+
+  return (
+    <Card role="region" aria-label="Оплата и деньги">
+      <CardHeader><span aria-hidden>💵</span> Оплата и деньги</CardHeader>
+      <CardBody>
+        <dl className="grid grid-cols-2 gap-2.5">
+          <div className="col-span-2 rounded-[10px] bg-sunken px-3 py-2.5">
+            <dt className="text-[11px] text-muted">Сумма счёта (с НДС)</dt>
+            <dd className="mt-0.5 text-[16px] font-extrabold tabular-nums text-ink">
+              {invoice ? formatByn(invoice.amount) : "Нет данных"}
+            </dd>
+            {invoice && <a className="text-[11px] text-accent-ink underline"
+              href={`/api/sales/documents/${invoice.id}/render`} target="_blank" rel="noreferrer">
+              Счёт {invoice.number} · версия {invoice.version ?? 1}
+            </a>}
+            {!invoice && <p className="mt-1 text-[11px] text-muted">
+              {current.length > 1 ? "Несколько актуальных счетов — проверьте документы ниже." : "Сумма выпущенного счёта пока не подтверждена."}
+            </p>}
+          </div>
+          {["Оплачено", "Остаток к оплате"].map((label) => <div key={label} className="rounded-[10px] bg-sunken px-3 py-2.5">
+            <dt className="text-[11px] text-muted">{label}</dt>
+            <dd className="mt-0.5 text-sm font-semibold text-muted">Нет данных</dd>
+          </div>)}
+        </dl>
+      </CardBody>
+    </Card>
+  );
+}
+
 export function DealDocuments({ dealId }: { dealId: string }) {
-  const [items, setItems] = useState<DealDoc[]>([]);
+  return <DealDocumentsForDeal key={dealId} dealId={dealId} />;
+}
+
+function DealDocumentsForDeal({ dealId }: { dealId: string }) {
+  const [documents, setDocuments] = useState<{ dealId: string; items: DealDoc[] } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const activeDealId = useRef(dealId);
+  const loadRequest = useRef(0);
+  const items = documents?.dealId === dealId ? documents.items : [];
   const [kind, setKind] = useState(KINDS[0].value);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [onOrder, setOnOrder] = useState(false);
+  const invoiceRequestKey = useRef<string | null>(null);
 
+  const createButton = useRef<HTMLButtonElement>(null);
+  const restoreCreateFocus = useRef(false);
+  useEffect(() => {
+    if (busy || !restoreCreateFocus.current) return;
+    restoreCreateFocus.current = false;
+    if (document.activeElement === document.body) createButton.current?.focus();
+  }, [busy]);
   async function refresh() {
-    setItems(await fetchDocuments(dealId));
+    if (activeDealId.current !== dealId) return;
+    const request = ++loadRequest.current;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const items = await fetchDocuments(dealId, { throwOnError: true });
+      if (loadRequest.current === request) setDocuments({ dealId, items });
+    } catch {
+      if (loadRequest.current === request) {
+        setDocuments(null);
+        setLoadError(dealId);
+      }
+    } finally {
+      if (loadRequest.current === request) setLoading(false);
+    }
   }
 
   useEffect(() => {
-    void fetchDocuments(dealId).then(setItems);
+    activeDealId.current = dealId;
+    // Выбор относится только к открытой сделке.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOnOrder(false);
+    setLoading(true);
+    setLoadError(null);
+    invoiceRequestKey.current = null;
+    const request = ++loadRequest.current;
+    let ignore = false;
+    void fetchDocuments(dealId, { throwOnError: true })
+      .then((items) => { if (!ignore && loadRequest.current === request) setDocuments({ dealId, items }); })
+      .catch(() => { if (!ignore && loadRequest.current === request) { setDocuments(null); setLoadError(dealId); } })
+      .finally(() => { if (!ignore && loadRequest.current === request) setLoading(false); });
+    return () => {
+      ignore = true;
+      activeDealId.current = "";
+      // Invalidate the latest request, including refreshes started after this effect.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      ++loadRequest.current;
+    };
   }, [dealId]);
 
   async function onCreate() {
     setBusy(true);
     setError("");
-    if (!await createDocument(dealId, kind)) setError("Не удалось создать документ. Если он уже выпущен, используйте новую версию в истории.");
+    const requestKey = kind === "invoice" && onOrder
+      ? (invoiceRequestKey.current ??= crypto.randomUUID()) : null;
+    const result = requestKey
+      ? await createDocumentResult(dealId, kind, { reserve_mode: "on_order", request_key: requestKey })
+      : await createDocumentResult(dealId, kind);
+    if (activeDealId.current !== dealId) return;
+    // The opener becomes available after refresh; do not steal a new focus.
+    restoreCreateFocus.current = kind === "invoice" && document.activeElement === document.body;
+    if (!result.doc) setError(result.error ?? "Не удалось создать документ.");
+    else if (invoiceRequestKey.current === requestKey) invoiceRequestKey.current = null;
     await refresh();
     setBusy(false);
   }
@@ -86,6 +188,8 @@ export function DealDocuments({ dealId }: { dealId: string }) {
   }
 
   return (
+    <>
+    <InvoiceMoney items={items} />
     <div className="mt-4 rounded-xl border border-line p-4">
       <div className="flex items-center gap-2 font-semibold text-ink">
         <FileText size={18} className="text-accent-ink" /> Документы
@@ -94,7 +198,8 @@ export function DealDocuments({ dealId }: { dealId: string }) {
       <div className="mt-3 flex gap-2">
         <select
           value={kind}
-          onChange={(e) => setKind(e.target.value)}
+          disabled={busy}
+          onChange={(e) => { setKind(e.target.value); setOnOrder(false); invoiceRequestKey.current = null; }}
           className="flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
         >
           {KINDS.map((k) => (
@@ -104,6 +209,7 @@ export function DealDocuments({ dealId }: { dealId: string }) {
           ))}
         </select>
         <button
+          ref={createButton}
           onClick={onCreate}
           disabled={busy}
           className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
@@ -112,9 +218,19 @@ export function DealDocuments({ dealId }: { dealId: string }) {
         </button>
       </div>
 
+      {kind === "invoice" && <label className="mt-2 flex items-center gap-2 text-sm text-ink">
+        <input type="checkbox" checked={onOrder} disabled={busy}
+          onChange={(e) => { setOnOrder(e.target.checked); invoiceRequestKey.current = null; }} />
+        Под заказ — без резерва
+      </label>}
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+      {loadError === dealId && <div role="alert">
+        <p>Не удалось загрузить документы.</p>
+        <button type="button" onClick={refresh} disabled={loading}>Повторить загрузку документов</button>
+      </div>}
+      {loading && <p role="status">Загрузка документов…</p>}
       <ul className="mt-3 space-y-2">
-        {items.length === 0 && <li className="text-sm text-muted">Документов пока нет</li>}
+        {!loading && loadError !== dealId && documents?.dealId === dealId && items.length === 0 && <li className="text-sm text-muted">Документов пока нет</li>}
         {items.map((d) => {
           const s = STATUS[d.status] ?? STATUS.draft;
           const rb = reserveBadge(d);
@@ -123,15 +239,15 @@ export function DealDocuments({ dealId }: { dealId: string }) {
               key={d.id}
               className="flex items-center justify-between gap-2 rounded-lg bg-sunken px-3 py-2"
             >
-              <div className="min-w-0">
-                <div className="truncate text-sm text-ink">
-                  {KIND_LABEL[d.kind] ?? d.kind} · {d.number}
-                </div>
+              <div className="min-w-0 flex-1">
+                <DealDocumentCard doc={d} refresh={refresh} label={`${KIND_LABEL[d.kind] ?? d.kind} · ${d.number}`} />
                 <div className="mt-0.5 flex flex-wrap items-center gap-1">
                   <span className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${s.cls}`}>
                     {s.label}
-                    {d.onec_ref ? ` · ${d.onec_ref}` : ""}
                   </span>
+                  {d.status === "posted" && d.onec_ref && <span className="inline-block rounded-md bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700">
+                    Указана ссылка 1С: {d.onec_ref}
+                  </span>}
                   {rb && (
                     <span
                       className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${rb.cls}`}
@@ -146,7 +262,7 @@ export function DealDocuments({ dealId }: { dealId: string }) {
                   <button
                     onClick={() => onDecide(d.id, true)}
                     disabled={busy}
-                    title="Согласовать и провести в 1С"
+                    title="Согласовать и выпустить в ERP"
                     className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
                   >
                     <Check size={16} />
@@ -165,7 +281,8 @@ export function DealDocuments({ dealId }: { dealId: string }) {
           );
         })}
       </ul>
-      <DocumentVersions docs={items} refresh={refresh} />
+      <DocumentVersions dealId={dealId} docs={items} refresh={refresh} />
     </div>
+    </>
   );
 }

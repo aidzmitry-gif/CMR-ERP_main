@@ -87,3 +87,7 @@ async def test_account_region_in_catalog(api):
     # данные у владельца public, endpoint указывает на CRUD-роут
     assert by_key["core.accounts"]["owner_schema"] == "public"
     assert by_key["core.accounts"]["endpoint"] == "/system/refs/accounts"
+    assert by_key["core.accounts"]["title"] == "Старый технический список счетов"
+    assert "не становятся рабочими счетами автоматически" in by_key["core.accounts"]["description"]
+    assert by_key["accounting.chart"]["endpoint"] == "/accounting/catalog/accounts"
+    assert by_key["accounting.chart"]["title"] == "План счетов Беларуси"

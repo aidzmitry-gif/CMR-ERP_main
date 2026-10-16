@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: "standalone",
   // Прокси на backend — в route-handler'е `src/app/api/[...path]/route.ts`
   // (там же проброс dev-роли в заголовок X-User-Roles). Rewrite больше не нужен.
 };

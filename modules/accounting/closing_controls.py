@@ -1,0 +1,641 @@
+"""Read-only evidence summary for the month-closing workspace.
+
+The snapshot joins existing immutable registers and queues.  It is deliberately
+not a statutory approval and does not replace ``validate_close_period``: a
+missing register or provisional cost is reported for review instead of being
+silently treated as zero or as a blocker that the policy did not define.
+"""
+from __future__ import annotations
+
+from calendar import monthrange
+from datetime import date
+
+from fastapi import HTTPException
+from sqlalchemy import func, or_, select, text
+
+from modules.accounting.models import (
+    Entry,
+    FixedAssetDepreciationReceipt,
+    FixedAssetRegisterEntry,
+    ForeignTradeRegisterEntry,
+    Inbox,
+    InputVatRegisterEntry,
+    InventoryIssueReceipt,
+    LateCostReceipt,
+    Line,
+    ManualDocument,
+    ManualDocumentVoid,
+    OutputVatRegisterEntry,
+    PayrollAccrualReceipt,
+    PayrollEvidenceFile,
+    PayrollStatutoryReceipt,
+    PayrollWorkpaperReview,
+    Period,
+    Policy,
+    ProductionLaborReceipt,
+    ProductionOutputTransferReceipt,
+    ProductionOverheadReceipt,
+    RepairAccountingReceipt,
+    SourceControl,
+)
+from modules.accounting.service import AccountingError, lock_organization
+
+
+def _bounds(month: str) -> tuple[date, date]:
+    try:
+        first = date.fromisoformat(month + "-01")
+    except ValueError as exc:
+        raise AccountingError("Month must be YYYY-MM") from exc
+    if first.strftime("%Y-%m") != month:
+        raise AccountingError("Month must be YYYY-MM")
+    return first, first.replace(day=monthrange(first.year, first.month)[1])
+
+
+def _receipt_binding_ids(receipts) -> tuple[set[int], int]:
+    binding_ids: set[int] = set()
+    unmapped = 0
+    for receipt in receipts:
+        source_lines = receipt.source.get("lines") if isinstance(receipt.source, dict) else None
+        command_lines = receipt.command.get("lines") if isinstance(receipt.command, dict) else None
+        if not isinstance(source_lines, list) or not source_lines or source_lines != command_lines:
+            unmapped += max(len(source_lines), 1) if isinstance(source_lines, list) else 1
+            continue
+        for line in source_lines:
+            binding_id = line.get("employment_binding_id") if isinstance(line, dict) else None
+            if type(binding_id) is int and binding_id > 0:
+                binding_ids.add(binding_id)
+            else:
+                unmapped += 1
+    return binding_ids, unmapped
+
+
+async def _line_ids(session, org_id: int, first: date, last: date, prefix: str) -> list[int]:
+    rows = (await session.execute(select(Line.id).join(Entry, Entry.id == Line.entry_id).where(
+        Entry.organization_id == org_id,
+        Entry.posting_date >= first,
+        Entry.posting_date <= last,
+        or_(Line.account_code == prefix, Line.account_code.like(prefix + ".%")),
+    ).order_by(Line.id))).all()
+    return [row[0] for row in rows]
+
+
+async def snapshot(session, org_id: int, month: str, *, include_private_payroll: bool = False) -> dict:
+    first, last = _bounds(month)
+    await lock_organization(session, org_id)
+    period = await session.scalar(select(Period).where(
+        Period.organization_id == org_id, Period.month == month,
+    ))
+    policy = await session.scalar(select(Policy).where(
+        Policy.organization_id == org_id,
+        Policy.effective_from <= first,
+    ).order_by(Policy.effective_from.desc(), Policy.id.desc()))
+    pending_inbox = await session.scalar(select(func.count(Inbox.id)).where(
+        Inbox.organization_id == org_id, Inbox.month <= month, Inbox.entry_id.is_(None),
+    )) or 0
+    pending_sources = await session.scalar(select(func.count(SourceControl.id)).where(
+        SourceControl.organization_id == org_id, SourceControl.month <= month, SourceControl.entry_id.is_(None),
+    )) or 0
+    pending_manual = await session.scalar(select(func.count(ManualDocument.id)).where(
+        ManualDocument.organization_id == org_id,
+        ManualDocument.posting_date <= last,
+        ManualDocument.entry_id.is_(None),
+        ~select(ManualDocumentVoid.id).where(ManualDocumentVoid.document_id == ManualDocument.id).exists(),
+    )) or 0
+
+    from modules.accounting.bank_import import pending_count
+
+    pending_bank = await pending_count(session, org_id, last)
+
+    input_lines = await _line_ids(session, org_id, first, last, "18")
+    input_registered = set()
+    input_unresolved = 0
+    if input_lines:
+        input_registered = set((await session.scalars(select(InputVatRegisterEntry.line_id).where(
+            InputVatRegisterEntry.organization_id == org_id,
+            InputVatRegisterEntry.line_id.in_(input_lines),
+        ))).all())
+        input_statuses = (await session.execute(select(
+            InputVatRegisterEntry.deduction_status, InputVatRegisterEntry.eschf_status,
+        ).where(
+            InputVatRegisterEntry.organization_id == org_id,
+            InputVatRegisterEntry.line_id.in_(input_lines),
+        ))).all()
+        input_unresolved = sum(
+            deduction in {"not_assessed", "pending"} or eschf in {"not_provided", "pending"}
+            for deduction, eschf in input_statuses
+        )
+    output_lines = await _line_ids(session, org_id, first, last, "90.2")
+    output_registered = set()
+    output_unresolved = 0
+    if output_lines:
+        output_registered = set((await session.scalars(select(OutputVatRegisterEntry.line_id).where(
+            OutputVatRegisterEntry.organization_id == org_id,
+            OutputVatRegisterEntry.line_id.in_(output_lines),
+        ))).all())
+        output_statuses = (await session.execute(select(
+            OutputVatRegisterEntry.tax_treatment, OutputVatRegisterEntry.eschf_status,
+            OutputVatRegisterEntry.export_evidence,
+        ).where(
+            OutputVatRegisterEntry.organization_id == org_id,
+            OutputVatRegisterEntry.line_id.in_(output_lines),
+        ))).all()
+        output_unresolved = sum(
+            treatment in {"not_assessed", "pending"}
+            or eschf in {"not_provided", "pending"}
+            or (treatment == "zero_export" and not evidence)
+            for treatment, eschf, evidence in output_statuses
+        )
+
+    assets = (await session.scalars(select(FixedAssetRegisterEntry.id).where(
+        FixedAssetRegisterEntry.organization_id == org_id,
+        FixedAssetRegisterEntry.depreciation_start <= last,
+    ))).all()
+    depreciation_assets = set((await session.scalars(select(FixedAssetDepreciationReceipt.asset_id).where(
+        FixedAssetDepreciationReceipt.organization_id == org_id,
+        FixedAssetDepreciationReceipt.month == month,
+    ))).all())
+    asset_without_receipt = [asset_id for asset_id in assets if asset_id not in depreciation_assets]
+
+    repairs = await session.scalar(select(func.count(RepairAccountingReceipt.entry_id)).where(
+        RepairAccountingReceipt.organization_id == org_id,
+        RepairAccountingReceipt.month == month,
+    )) or 0
+    production_postings = await session.scalar(select(func.count(Entry.id)).where(
+        Entry.organization_id == org_id,
+        Entry.posting_date >= first,
+        Entry.posting_date <= last,
+        Entry.source.like("production:%"),
+    )) or 0
+    production_material_postings = await session.scalar(select(func.count(Entry.id)).where(
+        Entry.organization_id == org_id,
+        Entry.posting_date >= first,
+        Entry.posting_date <= last,
+        Entry.operation == "inventory_issue",
+        Entry.source.like("production:material:%"),
+    )) or 0
+    production_material_receipts = await session.scalar(select(func.count(InventoryIssueReceipt.entry_id)).join(
+        Entry, Entry.id == InventoryIssueReceipt.entry_id,
+    ).where(
+        InventoryIssueReceipt.organization_id == org_id,
+        Entry.organization_id == org_id,
+        Entry.posting_date >= first,
+        Entry.posting_date <= last,
+        Entry.operation == "inventory_issue",
+        Entry.source.like("production:material:%"),
+    )) or 0
+    production_labor_postings = await session.scalar(select(func.count(Entry.id)).where(
+        Entry.organization_id == org_id,
+        Entry.posting_date >= first,
+        Entry.posting_date <= last,
+        Entry.operation == "production_labor_import",
+        Entry.source.like("production:labor:%"),
+    )) or 0
+    production_labor_receipts = await session.scalar(select(func.count(ProductionLaborReceipt.entry_id)).where(
+        ProductionLaborReceipt.organization_id == org_id,
+        ProductionLaborReceipt.month == month,
+    )) or 0
+    production_overhead_postings = await session.scalar(select(func.count(Entry.id)).where(
+        Entry.organization_id == org_id,
+        Entry.posting_date >= first,
+        Entry.posting_date <= last,
+        Entry.operation == "production_overhead",
+        Entry.source.like("production:overhead:%"),
+    )) or 0
+    production_overhead_receipts = await session.scalar(select(func.count(ProductionOverheadReceipt.entry_id)).where(
+        ProductionOverheadReceipt.organization_id == org_id,
+        ProductionOverheadReceipt.month == month,
+    )) or 0
+    production_output_postings = await session.scalar(select(func.count(Entry.id)).where(
+        Entry.organization_id == org_id,
+        Entry.posting_date >= first,
+        Entry.posting_date <= last,
+        Entry.operation == "production_output_transfer",
+        Entry.source.like("production:output-transfer:%"),
+    )) or 0
+    production_output_receipts = await session.scalar(select(func.count(ProductionOutputTransferReceipt.entry_id)).where(
+        ProductionOutputTransferReceipt.organization_id == org_id,
+        ProductionOutputTransferReceipt.month == month,
+    )) or 0
+    from modules.accounting.production_output_transfer import output_transfer_source_state
+
+    output_transfer_rows = (await session.scalars(select(ProductionOutputTransferReceipt).where(
+        ProductionOutputTransferReceipt.organization_id == org_id,
+        ProductionOutputTransferReceipt.month <= month,
+    ).order_by(ProductionOutputTransferReceipt.month, ProductionOutputTransferReceipt.entry_id))).all()
+    stale_output_transfers = []
+    for row in output_transfer_rows:
+        state = await output_transfer_source_state(session, row, month)
+        if state != "unchanged":
+            stale_output_transfers.append({"entry_id": row.entry_id, "order_id": row.order_id, "state": state})
+    production_receipt_gap = sum((
+        max(0, int(production_material_postings) - int(production_material_receipts)),
+        max(0, int(production_labor_postings) - int(production_labor_receipts)),
+        max(0, int(production_overhead_postings) - int(production_overhead_receipts)),
+        max(0, int(production_output_postings) - int(production_output_receipts)),
+    ))
+    payroll_postings = await session.scalar(select(func.count(Entry.id)).where(
+        Entry.organization_id == org_id,
+        Entry.posting_date >= first,
+        Entry.posting_date <= last,
+        Entry.operation == "payroll_accrual_import",
+        Entry.source.like("payroll:accrual:%"),
+    )) or 0
+    payroll_receipts = await session.scalar(select(func.count(PayrollAccrualReceipt.entry_id)).join(
+        Entry, Entry.id == PayrollAccrualReceipt.entry_id,
+    ).where(
+        PayrollAccrualReceipt.organization_id == org_id,
+        PayrollAccrualReceipt.month == month,
+        Entry.organization_id == org_id,
+        Entry.posting_date >= first,
+        Entry.posting_date <= last,
+        Entry.operation == "payroll_accrual_import",
+        Entry.source.like("payroll:accrual:%"),
+    )) or 0
+    payroll_receipt_gap = max(0, int(payroll_postings) - int(payroll_receipts))
+    payroll_statutory_postings = await session.scalar(select(func.count(Entry.id)).where(
+        Entry.organization_id == org_id,
+        Entry.posting_date >= first,
+        Entry.posting_date <= last,
+        Entry.operation == "payroll_statutory_import",
+        Entry.source.like("payroll:statutory:%"),
+    )) or 0
+    payroll_statutory_receipts = await session.scalar(select(func.count(PayrollStatutoryReceipt.entry_id)).join(
+        Entry, Entry.id == PayrollStatutoryReceipt.entry_id,
+    ).where(
+        PayrollStatutoryReceipt.organization_id == org_id,
+        PayrollStatutoryReceipt.month == month,
+        Entry.organization_id == org_id,
+        Entry.posting_date >= first,
+        Entry.posting_date <= last,
+        Entry.operation == "payroll_statutory_import",
+        Entry.source.like("payroll:statutory:%"),
+    )) or 0
+    payroll_statutory_receipt_gap = max(0, int(payroll_statutory_postings) - int(payroll_statutory_receipts))
+    statutory_zero_files = (await session.scalars(select(PayrollEvidenceFile.id).where(
+        PayrollEvidenceFile.organization_id == org_id,
+        PayrollEvidenceFile.month == month,
+        PayrollEvidenceFile.kind == "payroll_statutory_zero",
+    ).order_by(PayrollEvidenceFile.id))).all()
+    payroll_statutory_source_missing = bool(
+        payroll_receipts and not payroll_statutory_receipts and not statutory_zero_files)
+    payroll_statutory_source_conflict = bool(statutory_zero_files and payroll_statutory_postings)
+    from modules.accounting.payroll_population import state as population_state
+
+    population = await population_state(session, org_id, month)
+    known_payroll_bindings = len(population["known_binding_ids"])
+    population_review_required = bool(known_payroll_bindings)
+    population_review_missing = population_review_required and not population["matches_current_bindings"]
+    zero_activity_files = (await session.scalars(select(PayrollEvidenceFile.id).where(
+        PayrollEvidenceFile.organization_id == org_id,
+        PayrollEvidenceFile.month == month,
+        PayrollEvidenceFile.kind == "payroll_zero_activity",
+    ).order_by(PayrollEvidenceFile.id))).all()
+    individual_zero_rows = (await session.scalars(select(PayrollEvidenceFile).where(
+        PayrollEvidenceFile.organization_id == org_id,
+        PayrollEvidenceFile.month == month,
+        PayrollEvidenceFile.kind == "payroll_zero_individual",
+    ).order_by(PayrollEvidenceFile.id))).all()
+    individual_zero_by_binding = {row.employment_binding_id: row.id for row in individual_zero_rows}
+    accrual_rows = (await session.scalars(select(PayrollAccrualReceipt).join(
+        Entry, Entry.id == PayrollAccrualReceipt.entry_id,
+    ).where(
+        PayrollAccrualReceipt.organization_id == org_id,
+        PayrollAccrualReceipt.month == month,
+        Entry.organization_id == org_id,
+        Entry.posting_date >= first,
+        Entry.posting_date <= last,
+        Entry.operation == "payroll_accrual_import",
+        Entry.source.like("payroll:accrual:%"),
+    ).order_by(PayrollAccrualReceipt.entry_id))).all()
+    accrual_binding_ids, unmapped_accrual_lines = _receipt_binding_ids(accrual_rows)
+    statutory_rows = (await session.scalars(select(PayrollStatutoryReceipt).join(
+        Entry, Entry.id == PayrollStatutoryReceipt.entry_id,
+    ).where(
+        PayrollStatutoryReceipt.organization_id == org_id,
+        PayrollStatutoryReceipt.month == month,
+        Entry.organization_id == org_id,
+        Entry.posting_date >= first,
+        Entry.posting_date <= last,
+        Entry.operation == "payroll_statutory_import",
+        Entry.source.like("payroll:statutory:%"),
+    ).order_by(PayrollStatutoryReceipt.entry_id))).all()
+    statutory_binding_ids, unmapped_statutory_lines = _receipt_binding_ids(statutory_rows)
+    statutory_person_zero_rows = (await session.scalars(select(PayrollEvidenceFile).where(
+        PayrollEvidenceFile.organization_id == org_id,
+        PayrollEvidenceFile.month == month,
+        PayrollEvidenceFile.kind == "payroll_stat_zero_person",
+    ).order_by(PayrollEvidenceFile.id))).all()
+    statutory_person_zero_by_binding = {
+        row.employment_binding_id: row.id for row in statutory_person_zero_rows
+    }
+    missing_statutory_binding_ids = sorted(
+        accrual_binding_ids - statutory_binding_ids - set(statutory_person_zero_by_binding))
+    statutory_person_zero_used = [
+        statutory_person_zero_by_binding[binding_id]
+        for binding_id in sorted(accrual_binding_ids - statutory_binding_ids)
+        if binding_id in statutory_person_zero_by_binding
+    ] if payroll_statutory_receipts else []
+    statutory_person_zero_conflict = bool(
+        statutory_binding_ids & set(statutory_person_zero_by_binding))
+    payroll_statutory_source_conflict = bool(
+        payroll_statutory_source_conflict or statutory_person_zero_conflict)
+    payroll_statutory_coverage_incomplete = bool(
+        payroll_receipts and payroll_statutory_receipts
+        and (missing_statutory_binding_ids or unmapped_statutory_lines or unmapped_accrual_lines))
+    missing_binding_ids = sorted(set(population["known_binding_ids"])
+                                 - accrual_binding_ids - set(individual_zero_by_binding))
+    individual_zero_used = ([individual_zero_by_binding[binding_id] for binding_id in
+                             sorted(set(population["known_binding_ids"]) - accrual_binding_ids)
+                             if binding_id in individual_zero_by_binding]
+                            if payroll_receipts else [])
+    payroll_source_missing = bool(
+        (known_payroll_bindings or payroll_statutory_postings)
+        and not payroll_receipts
+        and (not zero_activity_files or payroll_statutory_postings)
+    )
+    payroll_source_conflict = bool(zero_activity_files and (
+        payroll_postings or payroll_statutory_postings))
+    payroll_coverage_incomplete = bool(
+        known_payroll_bindings and payroll_receipts
+        and (missing_binding_ids or unmapped_accrual_lines))
+    payroll_reconciliation = None
+    payroll_reconciliation_error = None
+    if include_private_payroll and payroll_receipts and await session.scalar(select(func.count(
+        PayrollWorkpaperReview.id)).where(
+            PayrollWorkpaperReview.organization_id == org_id,
+            PayrollWorkpaperReview.month == month,
+        )):
+        from modules.accounting.payroll_workpaper_review import external_source_reconciliation
+
+        try:
+            payroll_reconciliation = await external_source_reconciliation(session, org_id, month)
+        except (HTTPException, AccountingError) as exc:
+            payroll_reconciliation_error = str(exc.detail if isinstance(exc, HTTPException) else exc)
+    late_cost_postings = await session.scalar(select(func.count(Entry.id)).where(
+        Entry.organization_id == org_id,
+        Entry.posting_date >= first,
+        Entry.posting_date <= last,
+        Entry.operation == "inventory_late_cost",
+    )) or 0
+    # Version-3 late-pool receipts are installed by PostgreSQL migrations.  The
+    # SQLite harness has neither pg_catalog/to_regclass nor physical accounting
+    # schemas, so it uses the mapped legacy receipt table instead.
+    if session.get_bind().dialect.name == "postgresql":
+        v3_late_pool_schema = (await session.scalar(text("""
+            SELECT to_regclass('accounting.late_pool_package') IS NOT NULL
+               AND to_regclass('accounting.late_pool_inventory_value_link') IS NOT NULL
+        """))) is True
+        late_cost_receipt_condition = """
+            EXISTS (SELECT 1 FROM accounting.late_cost_receipt receipt
+              WHERE receipt.entry_id=e.id AND receipt.organization_id=e.organization_id)
+        """
+        if v3_late_pool_schema:
+            late_cost_receipt_condition += """
+                OR (
+                  e.rule_version='late-cost-pool-v3'
+                  AND EXISTS (
+                    SELECT 1 FROM accounting.late_pool_package package
+                    WHERE package.late_entry_id=e.id AND package.organization_id=e.organization_id
+                      AND jsonb_typeof(package.calculation->'destinations')='array'
+                      AND (SELECT count(*) FROM accounting.late_pool_inventory_value_link link
+                        WHERE link.package_id=package.id) =
+                        (SELECT count(*) FROM jsonb_array_elements(package.calculation->'destinations') destination
+                         WHERE destination->>'kind'='inventory'
+                           AND CASE WHEN coalesce(destination->>'delta_byn','') ~ '^-?[0-9]{1,16}[.][0-9]{2}$'
+                                    THEN (destination->>'delta_byn')::numeric END <> 0)
+                  )
+                )
+            """
+        late_cost_receipts = await session.scalar(text("""
+            SELECT count(*)
+            FROM accounting.entry e
+            WHERE e.organization_id=:org AND e.posting_date >= :first AND e.posting_date <= :last
+              AND e.operation='inventory_late_cost'
+              AND (""" + late_cost_receipt_condition + """)
+        """), {"org": org_id, "first": first, "last": last}) or 0
+    else:
+        late_cost_receipts = await session.scalar(select(func.count(LateCostReceipt.entry_id)).join(
+            Entry, Entry.id == LateCostReceipt.entry_id,
+        ).where(
+            Entry.organization_id == org_id,
+            LateCostReceipt.organization_id == org_id,
+            Entry.posting_date >= first,
+            Entry.posting_date <= last,
+            Entry.operation == "inventory_late_cost",
+        )) or 0
+    trade_entries = (await session.scalars(select(ForeignTradeRegisterEntry).where(
+        ForeignTradeRegisterEntry.organization_id == org_id,
+        ForeignTradeRegisterEntry.posting_date >= first,
+        ForeignTradeRegisterEntry.posting_date <= last,
+    ).order_by(ForeignTradeRegisterEntry.id))).all()
+    trade_unresolved = sum(
+        (row.trade_mode in {"eaeu_import", "third_country_import"} and not row.incoterms)
+        or (row.trade_mode == "eaeu_import" and not row.eaeu_reference)
+        or (row.trade_mode in {"third_country_import", "export"} and not row.customs_reference)
+        or (row.trade_mode == "export" and not row.export_evidence)
+        or (row.currency == "BYN" and any(value is not None for value in (
+            row.original_amount, row.rate, row.rate_scale, row.rate_date, row.rate_source,
+        )))
+        or (row.currency != "BYN" and any(value is None for value in (
+            row.original_amount, row.rate, row.rate_scale, row.rate_date, row.rate_source,
+        )))
+        or (row.trade_mode == "export" and (row.customs_duty or row.import_vat))
+        for row in trade_entries
+    )
+
+    blockers = []
+    if pending_inbox:
+        blockers.append({"code": "unposted_inbox", "count": int(pending_inbox),
+                         "message": "Есть документы в очереди «Не проведено»."})
+    if pending_sources:
+        blockers.append({"code": "unposted_source_controls", "count": int(pending_sources),
+                         "message": "Есть первичные источники без бухгалтерской проводки."})
+    if pending_manual:
+        blockers.append({"code": "unposted_manual_documents", "count": int(pending_manual),
+                         "message": "Есть сохранённые бухгалтерские справки без проводки."})
+    if pending_bank:
+        blockers.append({"code": "unposted_bank_imports", "count": int(pending_bank),
+                         "message": "Есть закреплённые за юрлицом банковские строки без проводки (включая строки без даты)."})
+    if policy is None:
+        blockers.append({"code": "missing_policy", "count": 1,
+                         "message": "На дату месяца нет применимой версии учётной политики."})
+    if payroll_source_missing:
+        blockers.append({"code": "payroll_source_missing", "count": max(known_payroll_bindings, int(payroll_statutory_postings)),
+                         "message": "Для известной занятости или удержаний нет проверенного начисления либо непротиворечивого документа об отсутствии начислений."})
+    if population_review_missing:
+        blockers.append({"code": "payroll_population_review_missing", "count": known_payroll_bindings,
+                         "message": "Для известных трудовых договоров нет актуального подтверждения полного состава сотрудников из исходного реестра."})
+    if payroll_coverage_incomplete:
+        blockers.append({"code": "payroll_binding_coverage_incomplete",
+                         "count": len(missing_binding_ids) + unmapped_accrual_lines,
+                         "message": "Не все известные договоры покрыты начислением или индивидуальным документом об отсутствии начисления; строки без ID договора требуют сопоставления."})
+    if payroll_statutory_source_missing:
+        blockers.append({"code": "payroll_statutory_source_missing", "count": int(payroll_receipts),
+                         "message": "Для начисленной зарплаты нет проверенного источника удержаний и взносов либо подтверждения их отсутствия."})
+    if payroll_statutory_source_conflict:
+        blockers.append({"code": "payroll_statutory_source_conflict",
+                         "count": len(statutory_zero_files) + int(statutory_person_zero_conflict),
+                         "message": "Документ об отсутствии удержаний и взносов противоречит проведённому импорту."})
+    if payroll_statutory_coverage_incomplete:
+        blockers.append({"code": "payroll_statutory_coverage_incomplete",
+                         "count": len(missing_statutory_binding_ids)
+                         + unmapped_statutory_lines + unmapped_accrual_lines,
+                         "message": "Импорт удержаний и взносов не сопоставлен со всеми начислениями по договорам."})
+    review = []
+    if policy is not None and not policy.normative_verified:
+        review.append({"code": "policy_normative_basis", "count": 1,
+                       "message": "Нормативная редакция учётной политики ещё не подтверждена."})
+    if len(input_lines) - len(input_registered):
+        review.append({"code": "input_vat_register", "count": len(input_lines) - len(input_registered),
+                       "message": "Строки входного НДС требуют регистрации основания и ЭСЧФ."})
+    if len(output_lines) - len(output_registered):
+        review.append({"code": "output_vat_register", "count": len(output_lines) - len(output_registered),
+                       "message": "Строки исходящего НДС требуют регистрации ставки, основания и ЭСЧФ."})
+    if input_unresolved:
+        review.append({"code": "input_vat_evidence", "count": int(input_unresolved),
+                       "message": "Зарегистрированные строки входного НДС имеют незавершённый статус вычета или ЭСЧФ."})
+    if output_unresolved:
+        review.append({"code": "output_vat_evidence", "count": int(output_unresolved),
+                       "message": "Зарегистрированные строки исходящего НДС имеют незавершённый статус ставки или ЭСЧФ."})
+    if asset_without_receipt:
+        review.append({"code": "depreciation_register", "count": len(asset_without_receipt),
+                       "message": "У основных средств нет квитанции амортизации за выбранный месяц."})
+    if production_postings:
+        review.append({"code": "production_cost_provisional", "count": int(production_postings),
+                       "message": "Производственные проводки остаются предварительными до финальной себестоимости."})
+    if production_receipt_gap:
+        review.append({"code": "production_cost_receipt_gap", "count": int(production_receipt_gap),
+                       "message": "Для части производственных проводок нет соответствующей проверенной квитанции регистра."})
+    if stale_output_transfers:
+        review.append({"code": "production_output_source_stale", "count": len(stale_output_transfers),
+                       "message": "База себестоимости выпуска изменилась или недоступна; проверьте наряд перед закрытием.",
+                       "transfers": stale_output_transfers})
+    if payroll_postings:
+        review.append({"code": "payroll_accrual_provisional", "count": int(payroll_postings),
+                       "message": "Валовое начисление зарплаты импортировано из проверенного источника; нормативный расчёт ещё не сертифицирован."})
+    if payroll_receipt_gap:
+        review.append({"code": "payroll_accrual_receipt_gap", "count": int(payroll_receipt_gap),
+                       "message": "Для части импортированных начислений зарплаты нет связанной квитанции источника."})
+    if payroll_source_conflict:
+        review.append({"code": "payroll_zero_activity_superseded", "count": len(zero_activity_files),
+                       "message": "Документ об отсутствии начислений больше не используется: появились зарплатные проводки. Проверьте их квитанции."})
+    if payroll_statutory_postings:
+        review.append({"code": "payroll_statutory_provisional", "count": int(payroll_statutory_postings),
+                       "message": "Удержания и взносы импортированы из проверенного источника; нормативная сертификация ещё не выполнена."})
+    if payroll_statutory_receipt_gap:
+        review.append({"code": "payroll_statutory_receipt_gap", "count": int(payroll_statutory_receipt_gap),
+                       "message": "Для части импортированных удержаний и взносов нет связанной квитанции источника."})
+    if payroll_reconciliation_error:
+        review.append({"code": "payroll_arithmetic_reconciliation_unavailable", "count": 1,
+                       "message": "Сверка расчётной ведомости с зарплатными проводками недоступна: "
+                                  + payroll_reconciliation_error})
+    if payroll_reconciliation and payroll_reconciliation["differing_binding_count"]:
+        review.append({"code": "payroll_arithmetic_difference",
+                       "count": payroll_reconciliation["differing_binding_count"],
+                       "message": "Начисления, удержания или взносы в расчётной ведомости отличаются от проведённого внешнего источника; требуется объяснение бухгалтера."})
+    if payroll_reconciliation and payroll_reconciliation["status"] == "not_ready":
+        review.append({"code": "payroll_arithmetic_reconciliation_incomplete", "count": 1,
+                       "message": "Сверка расчётной ведомости с проведённым внешним источником ещё не завершена."})
+    if repairs:
+        review.append({"code": "repair_cost_provisional", "count": int(repairs),
+                       "message": "Ремонтные результаты не сертифицированы как финальная себестоимость."})
+    if late_cost_postings:
+        review.append({"code": "inventory_late_cost_provisional", "count": int(late_cost_postings),
+                       "message": "Дополнительные расходы по запасам требуют проверки финальной себестоимости."})
+    if int(late_cost_postings) > int(late_cost_receipts):
+        review.append({"code": "inventory_late_cost_receipt_gap",
+                       "count": int(late_cost_postings) - int(late_cost_receipts),
+                       "message": "Для части поздних расходов по запасам нет связанной квитанции расчёта."})
+    if trade_unresolved:
+        review.append({"code": "foreign_trade_evidence", "count": int(trade_unresolved),
+                       "message": "Документы ВЭД имеют незавершённые реквизиты или требуют проверки подтверждающих документов."})
+
+    return {
+        "organization_id": org_id,
+        "month": month,
+        "period": {"closed": bool(period.closed) if period else False,
+                   "generation": period.generation if period else 0},
+        "policy": {
+            "id": policy.id if policy else None,
+            "effective_from": policy.effective_from.isoformat() if policy else None,
+            "status": "verified" if policy and policy.normative_verified else ("unverified" if policy else "missing"),
+            "normative_verified": bool(policy.normative_verified) if policy else False,
+            "technical_preview_available": policy is not None,
+            "confirmation_available": bool(policy and policy.normative_verified),
+        },
+        "status": "review_only",
+        "close_blocked_by_queues": bool(blockers),
+        "close_blocked_by_policy": policy is None or not policy.normative_verified,
+        "blockers": blockers,
+        "review_items": review,
+        "documents": {"pending_inbox": int(pending_inbox), "pending_source_controls": int(pending_sources),
+                      "pending_manual_documents": int(pending_manual)},
+        "vat": {"input_lines": len(input_lines), "input_registered": len(input_registered),
+                "input_unregistered": len(input_lines) - len(input_registered),
+                "input_unresolved": int(input_unresolved),
+                "output_lines": len(output_lines), "output_registered": len(output_registered),
+                "output_unregistered": len(output_lines) - len(output_registered),
+                "output_unresolved": int(output_unresolved),
+                "statutory_certified": False},
+        "fixed_assets": {"assets_due_by_date": len(assets),
+                          "depreciation_receipts": len(depreciation_assets),
+                          "assets_without_month_receipt": len(asset_without_receipt),
+                          "statutory_certified": False},
+        "production": {
+            "postings": int(production_postings),
+            "material_issues": int(production_material_postings),
+            "material_issue_receipts": int(production_material_receipts),
+            "labor_imports": int(production_labor_postings),
+            "labor_receipts": int(production_labor_receipts),
+            "overhead_allocations": int(production_overhead_postings),
+            "overhead_receipts": int(production_overhead_receipts),
+            "output_transfers": int(production_output_postings),
+            "output_transfer_receipts": int(production_output_receipts),
+            "stale_output_transfers": stale_output_transfers,
+            "receipt_gap": int(production_receipt_gap),
+            "final_cost_certified": False,
+        },
+        "payroll": {
+            "known_active_bindings": known_payroll_bindings,
+            "population_review_required": population_review_required,
+            "population_review_id": population["review"]["review_id"] if population["review"] else None,
+            "population_matches_known_bindings": population["matches_current_bindings"],
+            "zero_activity_file_ids": list(zero_activity_files),
+            "individual_zero_file_ids": individual_zero_used,
+            "accrual_binding_ids": sorted(accrual_binding_ids),
+            "missing_binding_ids": missing_binding_ids if payroll_receipts else [],
+            "unmapped_accrual_lines": unmapped_accrual_lines,
+            "coverage_incomplete": payroll_coverage_incomplete,
+            "arithmetic_reconciliation_status": (
+                "unavailable" if payroll_reconciliation_error else
+                payroll_reconciliation["status"] if payroll_reconciliation else "not_requested"),
+            "source_missing": payroll_source_missing,
+            "source_conflict": payroll_source_conflict,
+            "gross_accruals": int(payroll_postings),
+            "receipts": int(payroll_receipts),
+            "receipt_gap": int(payroll_receipt_gap),
+            "statutory_imports": int(payroll_statutory_postings),
+            "statutory_receipts": int(payroll_statutory_receipts),
+            "statutory_receipt_gap": int(payroll_statutory_receipt_gap),
+            "statutory_zero_file_ids": list(statutory_zero_files),
+            "statutory_person_zero_file_ids": statutory_person_zero_used,
+            "statutory_binding_ids": sorted(statutory_binding_ids),
+            "missing_statutory_binding_ids": missing_statutory_binding_ids if payroll_statutory_receipts else [],
+            "unmapped_statutory_lines": unmapped_statutory_lines,
+            "statutory_coverage_incomplete": payroll_statutory_coverage_incomplete,
+            "statutory_source_missing": payroll_statutory_source_missing,
+            "statutory_source_conflict": payroll_statutory_source_conflict,
+            "statutory_payroll_certified": False,
+            "deductions_and_contributions_available": bool(
+                payroll_statutory_receipts or statutory_zero_files)
+            and not payroll_statutory_receipt_gap and not payroll_statutory_source_conflict
+            and not payroll_statutory_coverage_incomplete,
+        },
+        "repairs": {"posted": int(repairs), "final_cost_certified": False},
+        "inventory": {"late_cost_postings": int(late_cost_postings),
+                      "late_cost_receipts": int(late_cost_receipts),
+                      "final_cost_certified": False},
+        "foreign_trade": {"entries": len(trade_entries), "unresolved": int(trade_unresolved),
+                          "statutory_certified": False},
+        "statutory_certified": False,
+    }

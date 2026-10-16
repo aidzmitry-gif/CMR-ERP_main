@@ -1,15 +1,14 @@
 import { AppShell } from "@/components/app-shell";
-import { ClaimsPanel } from "@/components/erp/claims-panel";
-import { fetchClaimsServer } from "@/lib/procurement-claims";
-import { currentRole } from "@/lib/role-server";
+import { ProcurementScopedClaims } from "@/components/erp/procurement-scoped-claims";
+import { ProcurementNav } from "@/components/erp/procurement-nav";
 
-export default async function ProcurementClaimsPage() {
-  const role = await currentRole();
-  const claims = await fetchClaimsServer(role);
-
+export default function ProcurementClaimsPage() {
   return (
     <AppShell crumbs={["ERP", "Закупки", "Претензии поставщикам"]}>
-      <ClaimsPanel initial={claims} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <ProcurementNav />
+        <ProcurementScopedClaims />
+      </div>
     </AppShell>
   );
 }

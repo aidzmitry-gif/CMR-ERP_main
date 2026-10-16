@@ -1,26 +1,39 @@
 """Идемпотентная загрузка мастер-данных контрагентов (входной адаптер, напр. 1С/Bitrix).
 
 ERP — система-источник; внешняя система — **временный входной адаптер**. Сопоставление по
-natural key (УНП): есть активный эталон — дополняем его и фиксируем внешний id как alias;
-нет — создаём. **Идемпотентно:** повтор не плодит ни дублей контрагентов (матч по УНП), ни
+Сначала используется точный alias источника, затем единственный активный УНП;
+неоднозначность останавливает импорт. **Идемпотентно:** повтор не плодит ни дублей контрагентов, ни
 дублей алиасов. Отключение источника = перестать звать этот сервис, структура не меняется.
 
 Транзакцию коммитит вызывающий код (роут/sync-процесс модуля integrations).
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from hashlib import blake2b
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.domain.models import Counterparty, CounterpartyAlias
+from core.domain.models import (
+    Counterparty,
+    CounterpartyAlias,
+    CounterpartyBranchAlias,
+    lock_counterparty_unps,
+)
 from core.services import mdm, survivorship
 from core.services.survivorship import FieldValue, Rule, is_empty
 
-#: поля контрагента, к которым применяется survivorship при импорте (имя — единственное
-#: мастер-поле модели сейчас; расширяется вместе с моделью).
-_IMPORT_FIELDS = ("name",)
+#: Legacy name fills only an empty value; legal name uses explicit source rules.
+_IMPORT_FIELDS = ("name", "legal_name", "legal_address")
+
+
+async def _lock_alias_refs(session: AsyncSession, source: str, refs: set[str]) -> None:
+    if session.bind.dialect.name == "postgresql":
+        for ref in sorted(refs):
+            digest = blake2b(f"counterparty-alias:{source}:{ref}".encode(), digest_size=8).digest()
+            await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": int.from_bytes(digest, "big", signed=True)})
 
 
 @dataclass
@@ -50,14 +63,18 @@ def _apply_field(
     cp: Counterparty, field: str, incoming, source: str, at: str | None, rule: Rule
 ) -> bool:
     """Применить survivorship-правило к одному полю; обновить provenance. True — поле изменилось."""
+    current_value = (cp.requisites or {}).get(field) if field == "legal_address" else getattr(cp, field)
     current = None
-    if not is_empty(getattr(cp, field)):
+    if not is_empty(current_value):
         prov = (cp.provenance or {}).get(field, {})
-        current = FieldValue(getattr(cp, field), prov.get("source", "1c"), prov.get("at"))
+        current = FieldValue(current_value, prov.get("source", "1c"), prov.get("at"))
     winner = survivorship.decide(current, FieldValue(incoming, source, at), rule)
-    changed = winner.value != getattr(cp, field)
+    changed = winner.value != current_value
     if changed:
-        setattr(cp, field, winner.value)
+        if field == "legal_address":
+            cp.requisites = {**(cp.requisites or {}), field: winner.value}
+        else:
+            setattr(cp, field, winner.value)
     # provenance отражает источник победителя (фиксируем «кто владеет полем»)
     prov = dict(cp.provenance or {})
     prov[field] = {
@@ -73,6 +90,8 @@ async def upsert_counterparty(
     *,
     unp: str,
     name: str | None,
+    legal_name: str | None = None,
+    legal_address: str | None = None,
     source: str = "1c",
     external_ref: str | None = None,
     at: str | None = None,
@@ -88,48 +107,147 @@ async def upsert_counterparty(
     """
     if not unp:
         raise ValueError("нужен УНП (natural key)")
+    if not isinstance(unp, str):
+        raise mdm.CounterpartyWriteError("unp_required", "Укажите УНП из 9 цифр", 422)
+    if legal_name is not None and len(legal_name) > 255:
+        raise mdm.CounterpartyWriteError("invalid_legal_name", "Юридическое наименование превышает 255 символов; импорт остановлен без обрезки", 422)
+    if legal_address is not None and (
+        not isinstance(legal_address, str) or not legal_address.strip() or len(legal_address) > 1000
+        or any(ord(char) < 32 or ord(char) == 127 for char in legal_address)
+    ):
+        raise mdm.CounterpartyWriteError("invalid_legal_address", "Некорректный юридический адрес; импорт остановлен без обрезки", 422)
+    if legal_address is not None:
+        try:
+            legal_address.encode("utf-8")
+        except UnicodeEncodeError:
+            raise mdm.CounterpartyWriteError("invalid_legal_address", "Некорректная кодировка юридического адреса", 422) from None
     if rules is None:
         rules = await survivorship.load_rules(session, "counterparty")
-    candidates = await mdm.match_candidates(session, unp=unp)
+    await session.run_sync(lambda sync: lock_counterparty_unps(sync, {unp}))
+    alias = None
+    if external_ref:
+        await _lock_alias_refs(session, source, {external_ref})
+        if await session.scalar(select(CounterpartyBranchAlias.id).where(
+            CounterpartyBranchAlias.source == source, CounterpartyBranchAlias.external_ref == external_ref,
+        )) is not None:
+            raise mdm.CounterpartyWriteError("source_kind_conflict", "ID источника уже принадлежит филиалу")
+        alias = (await session.scalars(select(CounterpartyAlias).where(
+            CounterpartyAlias.source == source, CounterpartyAlias.external_ref == external_ref,
+        ))).one_or_none()
+    if alias:
+        linked = await session.get(Counterparty, alias.counterparty_id)
+        target_id = linked.merged_into_id or linked.id
+        locked = list(await session.scalars(select(Counterparty).where(
+            Counterparty.id.in_({linked.id, target_id}),
+        ).order_by(Counterparty.id).with_for_update().execution_options(populate_existing=True)))
+        by_id = {cp.id: cp for cp in locked}
+        linked = by_id[alias.counterparty_id]
+        counterparty = by_id.get(linked.merged_into_id or linked.id)
+        if counterparty is None:
+            raise mdm.CounterpartyWriteError("source_identity_changed", "Связь источника изменена параллельно; повторите импорт")
+        if not counterparty.is_active or counterparty.merged_into_id is not None or counterparty.unp != unp:
+            raise mdm.CounterpartyWriteError("source_identity_conflict", "Внешний ID связан с другим УНП или архивным контрагентом")
+        candidates = [counterparty]
+    else:
+        candidates = list(await session.scalars(select(Counterparty).where(
+            Counterparty.unp == unp, Counterparty.is_active.is_(True), Counterparty.merged_into_id.is_(None),
+        ).order_by(Counterparty.id).with_for_update().execution_options(populate_existing=True)))
+        if len(candidates) > 1:
+            raise mdm.CounterpartyWriteError("ambiguous_unp", "Несколько активных контрагентов с одним УНП; требуется явное сопоставление")
     created = False
     updated: list[str] = []
-    incoming = {"name": name}
+    incoming = {"name": name, "legal_name": legal_name, "legal_address": legal_address}
+    stored = None
     if candidates:
-        counterparty = candidates[0]
+        stored = candidates[0]
+        # Evaluate against a transient proposal; rejection must not dirty the locked card.
+        counterparty = Counterparty(name=stored.name, legal_name=stored.legal_name, unp=stored.unp,
+                                   requisites=dict(stored.requisites or {}),
+                                   provenance=dict(stored.provenance or {}))
         for field in _IMPORT_FIELDS:
             val = incoming.get(field)
             if val is None:
                 continue
+            # Existing working/legacy names and manually confirmed legal names are not import targets.
+            if field == "name" and not is_empty(counterparty.name):
+                continue
+            if field == "legal_name" and (counterparty.provenance or {}).get(field, {}).get("source") in {"manual", "mns_grp"}:
+                continue
+            if field == "legal_address" and source != "manual" and not is_empty(
+                (counterparty.requisites or {}).get(field)
+            ):
+                owner = (counterparty.provenance or {}).get(field, {}).get("source")
+                if owner is None or owner in {"manual", "mns_grp", "egr", "erp"}:
+                    continue
+            rule = survivorship.rule_for(rules, "name" if field == "legal_name" and field not in rules else field)
+            if rule.strategy == "manual_only" and source != "manual":
+                continue
             if _apply_field(
-                counterparty, field, val, source, at, survivorship.rule_for(rules, field)
+                counterparty, field, val, source, at,
+                rule,
             ):
                 updated.append(field)
     else:
-        counterparty = Counterparty(name=name or "", unp=unp)
+        rule = survivorship.rule_for(rules, "legal_name" if "legal_name" in rules else "name")
+        if rule.strategy == "manual_only" and source != "manual":
+            legal_name = None
+            incoming["legal_name"] = None
+        if survivorship.rule_for(rules, "legal_address").strategy == "manual_only" and source != "manual":
+            legal_address = None
+            incoming["legal_address"] = None
+        counterparty = Counterparty(name=name or legal_name or "", legal_name=legal_name, unp=unp,
+                                   requisites={"legal_address": legal_address} if legal_address is not None else {})
         counterparty.provenance = {
             f: {"source": source, "at": at}
             for f in _IMPORT_FIELDS
             if incoming.get(f) is not None
         }
-        session.add(counterparty)
-        await session.flush()  # получить id для alias
         created = True
 
+    if not re.fullmatch(r"[0-9]{9}", counterparty.unp):
+        raise mdm.CounterpartyWriteError("unp_required", "Укажите УНП из 9 цифр", 422)
+    if not isinstance(counterparty.name, str) or not counterparty.name.strip():
+        raise mdm.CounterpartyWriteError("name_required", "Нужно название компании", 422)
+    address = (counterparty.requisites or {}).get("legal_address")
+    if not isinstance(address, str) or not address.strip():
+        raise mdm.CounterpartyWriteError("legal_address_required", "Укажите юридический адрес", 422)
+    if stored is not None:
+        stored.name, stored.legal_name = counterparty.name, counterparty.legal_name
+        stored.requisites, stored.provenance = counterparty.requisites, counterparty.provenance
+        counterparty = stored
+    else:
+        session.add(counterparty)
+        await session.flush()  # получить id для alias после проверки реквизитов
+
     alias_added = False
-    if external_ref and not await _has_alias(session, counterparty.id, source, external_ref):
+    if external_ref and alias is None and not await _has_alias(session, counterparty.id, source, external_ref):
         await mdm.add_source_alias(session, counterparty.id, source, external_ref)
         alias_added = True
     return UpsertResult(counterparty, created, alias_added, tuple(updated))
 
 
 async def import_counterparties(session: AsyncSession, rows: list[dict], *, source: str = "1c") -> dict:
-    """Пакетный идемпотентный импорт. ``rows``: список ``{unp, name, external_ref|id}``.
+    """Пакетный идемпотентный импорт полных карточек с УНП и legal_address.
 
     Возвращает сводку для предпросмотра/лога адаптера.
     Строки без УНП пропускаются (в 1С бывают группы/элементы без ИНН) — иначе батч
     падает на ``upsert_counterparty`` и остатки/SKU не доезжают.
     """
+    for row in rows:
+        if row.get("record_kind") not in (None, "head", "branch"):
+            raise mdm.CounterpartyWriteError("invalid_record_kind", "Неизвестный тип записи источника", 422)
+        if row.get("record_kind") != "branch" and row.get("parent_external_ref") is not None:
+            raise mdm.CounterpartyWriteError("branch_mapping_required", "Связь с головным предприятием допустима только для филиала", 422)
+    if any(row.get("record_kind") == "branch" for row in rows):
+        from core.services.reference_branch_import import import_branch_batch
+
+        return await import_branch_batch(session, rows, source=source)
     created = matched = aliased = skipped = 0
+    # One transaction keeps locks until the whole batch commits: take the complete sets in order.
+    unps = {(row.get("unp") or "").strip() for row in rows} - {""}
+    refs = {row.get("external_ref") or row.get("id") for row in rows if (row.get("unp") or "").strip()}
+    await session.run_sync(lambda sync: lock_counterparty_unps(sync, unps))
+    await _lock_alias_refs(session, source, {ref for ref in refs if ref})
     rules = await survivorship.load_rules(session, "counterparty")  # один раз на батч
     for row in rows:
         unp = (row.get("unp") or "").strip()
@@ -140,6 +258,8 @@ async def import_counterparties(session: AsyncSession, rows: list[dict], *, sour
             session,
             unp=unp,
             name=row.get("name"),
+            legal_name=row.get("legal_name"),
+            legal_address=row.get("legal_address"),
             source=source,
             external_ref=row.get("external_ref") or row.get("id"),
             rules=rules,

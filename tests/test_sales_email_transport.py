@@ -1,3 +1,5 @@
+import os
+import tempfile
 from contextlib import contextmanager
 from email import policy
 from email.parser import BytesParser
@@ -7,7 +9,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from modules.sales.mail_transport import address, recipients, submit
+from modules.sales.mail_transport import (
+    address,
+    configured_sender,
+    recipients,
+    sales_smtp_config,
+    submit,
+)
 
 
 def settings(port=2525):
@@ -178,6 +186,41 @@ def test_unencrypted_remote_smtp_is_rejected_before_network():
         submit(config, config.smtp_from, ["a@example.test"], b"test").reason
         == "configuration_error"
     )
+
+
+def test_sales_dedicated_smtp_is_isolated_from_base_settings(monkeypatch):
+    fd, secret = tempfile.mkstemp(prefix="sales-smtp-")
+    try:
+        os.write(fd, b"sales-password\n")
+        os.close(fd)
+        values = {
+            "AIOS_SALES_SMTP_HOST": "sales.example.test",
+            "AIOS_SALES_SMTP_PORT": "587",
+            "AIOS_SALES_SMTP_USER": "sales-user",
+            "AIOS_SALES_SMTP_FROM": "sales@example.test",
+            "AIOS_SALES_SMTP_TLS": "true",
+            "AIOS_SALES_SMTP_PASSWORD_FILE": secret,
+        }
+        for key, value in values.items():
+            monkeypatch.setenv(key, value)
+        config = settings()
+        resolved = sales_smtp_config(config)
+        assert resolved.host == "sales.example.test"
+        assert resolved.password == "sales-password"
+        assert configured_sender(config) == "sales@example.test"
+        assert config.smtp_host == "127.0.0.1" and config.smtp_from == "crm@example.test"
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        os.unlink(secret)
+
+
+def test_sales_dedicated_smtp_partial_configuration_fails_closed(monkeypatch):
+    monkeypatch.setenv("AIOS_SALES_SMTP_HOST", "sales.example.test")
+    with pytest.raises(ValueError, match="не полностью"):
+        configured_sender(settings())
 
 
 @pytest.mark.parametrize("stage, expected", [("starttls", "failed"), ("data", "uncertain")])

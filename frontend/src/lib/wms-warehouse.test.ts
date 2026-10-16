@@ -92,6 +92,15 @@ describe("canEmitAlerts", () => {
 });
 
 describe("SSR fetch-обёртки (ssr helper)", () => {
+  it("dashboard forwards verified OIDC headers and preserves unknown on denial", async () => {
+    const headers = { Authorization: "Bearer synthetic-token" };
+    const fetchMock = stubFetch({}, false);
+    expect(await fetchDashboardServer("director", headers)).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/wms/dashboard",
+      expect.objectContaining({ cache: "no-store", headers }),
+    );
+  });
   it("fetchDashboardServer: URL/заголовки-роли, маппинг ответа", async () => {
     const data = {
       receipts_pending_qc: 3, tasks_putaway_open: 1, tasks_pick_open: 2, alerts_count: 4,
@@ -108,32 +117,26 @@ describe("SSR fetch-обёртки (ssr helper)", () => {
     expect(res).toEqual(data);
   });
 
-  it("fetchDashboardServer: без ролей — headers undefined; !ok — дефолт с нулями", async () => {
+  it("fetchDashboardServer: без ролей — headers undefined; !ok — данные неизвестны", async () => {
     const fn = stubFetch({}, false);
     const res = await fetchDashboardServer();
     expect(fn).toHaveBeenCalledWith(
       "http://127.0.0.1:8000/wms/dashboard",
       expect.objectContaining({ headers: undefined }),
     );
-    expect(res).toEqual({
-      receipts_pending_qc: 0, tasks_putaway_open: 0, tasks_pick_open: 0, alerts_count: 0,
-      alerts_deficit_value: 0, inventory_value: 0,
-      inventories_open: 0, recon_max_diff_value: 0, recon_total_diff_value: 0,
-      movements_today_in: 0, movements_today_out: 0, gateway: false,
-    });
+    expect(res).toBeNull();
   });
 
-  it("fetchDashboardServer: сетевая ошибка — дефолт с gateway:false", async () => {
+  it("fetchDashboardServer: сетевая ошибка не подменяет остатки нулями", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
     const res = await fetchDashboardServer();
-    expect(res.gateway).toBe(false);
-    expect(res.inventory_value).toBe(0);
+    expect(res).toBeNull();
   });
 
   it("fetchReceiptsServer / fetchTasksServer / fetchCyclePlansServer / fetchThresholdsServer — пустой fallback при ошибке", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
-    expect(await fetchReceiptsServer()).toEqual([]);
-    expect(await fetchTasksServer()).toEqual([]);
+    await expect(fetchReceiptsServer()).rejects.toThrow("down");
+    await expect(fetchTasksServer()).rejects.toThrow("down");
     expect(await fetchCyclePlansServer()).toEqual([]);
     expect(await fetchThresholdsServer()).toEqual([]);
   });
@@ -147,8 +150,10 @@ describe("SSR fetch-обёртки (ssr helper)", () => {
     );
     expect(res?.number).toBe("R-9");
 
-    stubFetch({}, false);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404 }));
     expect(await fetchReceiptServer("9")).toBeNull();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 403 }));
+    await expect(fetchReceiptServer("9")).rejects.toThrow("Receipt unavailable (403)");
   });
 
   it("fetchReconServer: маппит строки и total_abs_diff_value; дефолт при ошибке", async () => {
@@ -194,7 +199,7 @@ describe("Client fetch-обёртки (api/post helpers)", () => {
     stubFetch([{ id: 1, kind: "pick" }]);
     expect((await fetchTasks())[0].kind).toBe("pick");
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net")));
-    expect(await fetchTasks()).toEqual([]);
+    await expect(fetchTasks()).rejects.toThrow("net");
 
     stubFetch([{ id: 2, warehouse: "w1" }]);
     expect((await fetchCyclePlans())[0].warehouse).toBe("w1");

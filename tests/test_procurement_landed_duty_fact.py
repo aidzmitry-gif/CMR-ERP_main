@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 
@@ -27,6 +28,25 @@ from modules.procurement.landed_cost import LandedCostService
 pytestmark = pytest.mark.asyncio
 
 SVC = LandedCostService()
+
+
+async def _owned_order(api, payload):
+    api.headers["X-User"] = "procurement-owner-test"
+    created = await api.post("/procurement/orders", json=payload)
+    assert created.status_code == 201, created.text
+    books = (await api.get("/accounting/organizations")).json()
+    if not books:
+        company = await api.post("/accounting/organizations", json={"name": "Synthetic procurement company", "unp": "999999994"})
+        assert company.status_code == 201, company.text
+        books = [company.json()]
+    org = books[0]["id"]
+    assigned = await api.post(f"/procurement/organizations/{org}/purchase-ownership", json={
+        "kind": "order", "source_id": created.json()["id"], "evidence": "Explicit synthetic plan/fact fixture"
+    })
+    assert assigned.status_code == 201, assigned.text
+    api.headers["X-Expected-Organization"] = str(org)
+    api.headers["X-Expected-Principal"] = "procurement-owner-test"
+    return created.json()
 
 
 def _patch_duty(monkeypatch, pct):
@@ -50,17 +70,21 @@ async def test_landed_plan_fact_reconcile(api, session, monkeypatch):
         "supplier": "Поставщик",
         "lines": [{"sku_code": "RECON-1", "qty": 10, "goods_value_byn": 1000}],
     }
-    r = await api.post("/procurement/orders", json=payload)
-    assert r.status_code == 201, r.text
-    order = r.json()
+    order = await _owned_order(api, payload)
 
     # ПЛАН: предпросмотр landed cost ДО приёмки (то, что видит закупщик в редакторе машины)
-    preview = (await api.get(f"/procurement/orders/{order['id']}/landed-preview")).json()
+    org = api.headers["X-Expected-Organization"]
+    preview_response = await api.get(f"/procurement/organizations/{org}/orders/{order['id']}/landed-preview")
+    assert preview_response.status_code == 200, preview_response.text
+    preview = preview_response.json()
     plan_unit = Decimal(str(preview["lines"][0]["unit_landed_cost_byn"]))
 
     # ФАКТ: реальная приёмка заказа — фиксация actual landed cost
-    r = await api.patch(f"/procurement/orders/{order['id']}", json={"status": "received"})
-    assert r.status_code == 200, r.text
+    received = await api.post(f"/procurement/organizations/{org}/orders/{order['id']}/edit-commands", json={
+        "version": 1, "request_key": str(uuid4()), "order_id": order["id"],
+        "action": "status", "payload": {"status": "received"}
+    })
+    assert received.status_code == 200, received.text
 
     fact = await SVC.last_landed_cost(session, "RECON-1")
     assert fact is not None

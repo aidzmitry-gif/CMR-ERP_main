@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
@@ -16,6 +17,7 @@ from sqlalchemy import select
 from core.domain.models import OutboxEvent
 from modules.procurement.landed_cost import LandedCostService
 from modules.procurement.models import LandedCost
+from modules.procurement.order_edit_commands import PurchaseOrderEditCommand  # noqa: F401
 
 pytestmark = pytest.mark.asyncio
 
@@ -23,15 +25,32 @@ SVC = LandedCostService()
 
 
 async def _order(api, **fields):
+    api.headers["X-User"] = "procurement-owner-test"
     payload = {"supplier": "Поставщик", "lines": [{"sku_code": "A", "qty": 10, "goods_value_byn": 1500}]}
     payload.update(fields)
     r = await api.post("/procurement/orders", json=payload)
     assert r.status_code == 201, r.text
+    books = (await api.get("/accounting/organizations")).json()
+    if not books:
+        created = await api.post("/accounting/organizations", json={"name": "Synthetic procurement company", "unp": "999999994"})
+        assert created.status_code == 201, created.text
+        books = [created.json()]
+    org = books[0]["id"]
+    assigned = await api.post(f"/procurement/organizations/{org}/purchase-ownership", json={
+        "kind": "order", "source_id": r.json()["id"], "evidence": "Explicit synthetic landed-cost fixture"
+    })
+    assert assigned.status_code == 201, assigned.text
+    api.headers["X-Expected-Organization"] = str(org)
+    api.headers["X-Expected-Principal"] = "procurement-owner-test"
     return r.json()
 
 
 async def _receive(api, order_id):
-    r = await api.patch(f"/procurement/orders/{order_id}", json={"status": "received"})
+    org = api.headers["X-Expected-Organization"]
+    r = await api.post(f"/procurement/organizations/{org}/orders/{order_id}/edit-commands", json={
+        "version": 1, "request_key": str(uuid4()), "order_id": order_id,
+        "action": "status", "payload": {"status": "received"}
+    })
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -218,10 +237,13 @@ async def test_open_orders_lists_in_transit_with_eta(api):
                             lines=[{"sku_code": "SKU-QC", "qty": 5, "goods_value_byn": 500}])
     await _receive(api, received["id"])
 
-    rows = (await api.get("/procurement/open-orders")).json()
+    org = api.headers["X-Expected-Organization"]
+    response = await api.get(f"/procurement/organizations/{org}/open-orders")
+    assert response.status_code == 200, response.text
+    rows = response.json()["items"]
     numbers = {o["number"] for o in rows}
     assert numbers == {"PO-SHIP", "PO-CUST"}  # received — не открытый
-    # ближайший ETA первым (15 июля < 1 августа), позиции отданы
-    assert rows[0]["number"] == "PO-CUST"
-    assert rows[0]["eta_date"] == "2026-07-15"
-    assert rows[0]["lines"][0]["sku_code"] == "SKU-CU"
+    # Scoped reads use a stable ID keyset; ETA remains explicit data for the UI to sort/filter.
+    by_number = {row["number"]: row for row in rows}
+    assert by_number["PO-CUST"]["eta_date"] == "2026-07-15"
+    assert by_number["PO-SHIP"]["eta_date"] == "2026-08-01"

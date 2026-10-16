@@ -1,0 +1,8 @@
+# Runtime artifacts are approved by exact SHA-256; preserve LF on Windows checkout.
+.gitattributes text eol=lf
+native_adapter.bsl text eol=lf
+isolated/capture.bsl text eol=lf
+isolated/common-module.xml text eol=lf
+isolated/run-isolated.ps1 text eol=lf
+isolated/host/FixedComHost.cs text eol=lf
+isolated/host/build.ps1 text eol=lf

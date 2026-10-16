@@ -5,17 +5,25 @@ import type { NomenclatureGroup, SkuRow } from "@/lib/reference-data";
 
 /** Строки, у которых code/title содержат подстроку (регистронезависимо). Пусто — все строки. */
 export function filterSkusBySearch(rows: SkuRow[], query: string): SkuRow[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return rows;
+  const words = query.trim().toLocaleLowerCase("ru").split(/\s+/).filter(Boolean);
+  if (!words.length) return rows;
   return rows.filter(
-    (r) => r.title.toLowerCase().includes(q) || r.code.toLowerCase().includes(q),
+    (r) => words.every(word => `${r.code} ${r.title}`.toLocaleLowerCase("ru").includes(word)),
   );
 }
 
 /** Строки с заданным category_id. `null` — без фильтра (все строки, включая без категории). */
-export function filterSkusByCategory(rows: SkuRow[], categoryId: number | null): SkuRow[] {
+export function filterSkusByCategory(rows: SkuRow[], categoryId: number | null, groups: NomenclatureGroup[] = []): SkuRow[] {
   if (categoryId === null) return rows;
-  return rows.filter((r) => r.category_id === categoryId);
+  const ids = new Set([categoryId]);
+  const queue = [categoryId];
+  while (queue.length) {
+    const parent = queue.pop();
+    for (const group of groups) if (group.parent_id === parent && !ids.has(group.id)) {
+      ids.add(group.id); queue.push(group.id);
+    }
+  }
+  return rows.filter((r) => r.category_id !== null && ids.has(r.category_id));
 }
 
 /** Карта id → имя категории (для колонки «Категория» в таблице). */

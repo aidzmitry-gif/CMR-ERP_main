@@ -2,10 +2,21 @@
 from __future__ import annotations
 
 import pytest
+import pytest_asyncio
 
-SALES_HEADERS = {"X-User-Roles": "sales"}
+SALES_HEADERS = {"X-User": "l3-sales", "X-User-Roles": "sales"}
 GUEST_HEADERS = {"X-User-Roles": "guest"}
-SALES_HEAD_HEADERS = {"X-User-Roles": "sales_head"}
+SALES_HEAD_HEADERS = {"X-User": "l3-head", "X-User-Roles": "sales_head"}
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def registered_managers(session):
+    from core.domain.models import User
+    session.add_all([
+        User(username="l3-sales", full_name="L3 manager", role="sales", status="active", deal_visibility="all"),
+        User(username="l3-head", full_name="L3 head", role="sales_head", status="active", deal_visibility="all"),
+    ])
+    await session.commit()
 
 
 def test_sales_role_rbac_contract():

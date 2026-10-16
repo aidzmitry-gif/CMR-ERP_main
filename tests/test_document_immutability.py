@@ -1,16 +1,18 @@
-"""Audit-only reproduction; no changes to the application repository."""
+"""Regression for preserving an issued invoice after a new customer quote."""
 from decimal import Decimal
 
 from core.domain.models import Sku
+from modules.integrations.models import StockItem
 from modules.sales.models import PriceQuote
 
 
-async def test_issued_invoice_changes_after_new_customer_quote(api, session):
+async def test_issued_invoice_stays_unchanged_after_new_customer_quote(api, session):
     customer = "AUDIT synthetic customer"
     sku = Sku(code="AUDIT-SKU", title="AUDIT battery", unit="шт")
     session.add(sku)
     await session.flush()
     session.add(PriceQuote(sku_code=sku.code, counterparty=customer, price=Decimal("100")))
+    session.add(StockItem(sku_code=sku.code, qty_available=100, qty_reserved=0))
     await session.commit()
     deal_response = await api.post("/sales/deals", json={
         "number": "AUDIT-INV-1", "title": "Synthetic audit", "counterparty": customer,
@@ -18,7 +20,7 @@ async def test_issued_invoice_changes_after_new_customer_quote(api, session):
     })
     assert deal_response.status_code == 201, deal_response.text
     deal_id = deal_response.json()["id"]
-    item = await api.post(f"/sales/deals/{deal_id}/items", json={"sku_id": sku.id, "qty": 2})
+    item = await api.post(f"/sales/deals/{deal_id}/items", json={"sku_id": sku.id, "qty": 2, "unit_price": "100.00"})
     assert item.status_code == 201, item.text
     invoice = await api.post(f"/sales/deals/{deal_id}/documents", json={"kind": "invoice"})
     assert invoice.status_code == 201, invoice.text

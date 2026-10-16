@@ -5,6 +5,7 @@ import {
   emptySupplier,
   fetchSuppliers,
   fetchSuppliersServer,
+  fetchSupplierScorecard,
   filterSuppliers,
   statusLabel,
   updateSupplier,
@@ -115,6 +116,27 @@ describe("fetchSuppliers", () => {
   it("исключение сети — null", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("boom")));
     expect(await fetchSuppliers()).toBeNull();
+  });
+});
+
+describe("fetchSupplierScorecard", () => {
+  const card = { organization_id: 7, supplier_id: 3, supplier_name: "Поставщик",
+    orders_count: 2, on_time_observed_count: 1, on_time_count: 1, on_time_rate: 1,
+    won_rfq_count: 0, avg_won_price_byn: null, claims_total: null, claims_open: null,
+    claims_closed: null, score: null, status: "provisional_claims_unattributed",
+    reason: "Claims unattributed" };
+
+  it("читает только выбранное юрлицо и проверяет его в ответе", async () => {
+    const fn = stubFetch(card);
+    expect(await fetchSupplierScorecard(7, 3)).toEqual(card);
+    expect(fn).toHaveBeenCalledWith("/api/procurement/organizations/7/suppliers/3/scorecard", { cache: "no-store" });
+    stubFetch({ ...card, organization_id: 8 });
+    await expect(fetchSupplierScorecard(7, 3)).rejects.toThrow("Некорректные показатели");
+  });
+
+  it("отвергает сводный балл и фиктивный ноль претензий", async () => {
+    stubFetch({ ...card, claims_total: 0, score: 80 });
+    await expect(fetchSupplierScorecard(7, 3)).rejects.toThrow("Некорректные показатели");
   });
 });
 

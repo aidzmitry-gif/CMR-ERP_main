@@ -1,108 +1,64 @@
 "use client";
 
-import clsx from "clsx";
-import { ClipboardList, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { createInventory, fetchInventoryList, type InventoryCount, type InventoryOrganization, inventoryStatusLabel } from "@/lib/wms-inventory";
+import { emptySourceDraft, InventoryOrganizationSelect, InventorySourceFields, sourcePayload, sourceReady, useInventoryRequestScope } from "./wms-inventory-source";
 
-import {
-  createInventory,
-  type InventoryCount,
-  type InventoryStatus,
-  inventoryStatusLabel,
-} from "@/lib/wms-inventory";
+interface Props { initial: InventoryCount[]; organizations: InventoryOrganization[]; initialOrganizationId: number | null }
+export function WmsInventoryList(props: Props) {
+  return <InventoryListBody key={JSON.stringify([props.initialOrganizationId, props.initial])} {...props} />;
+}
 
-const STATUS_STYLES: Record<InventoryStatus, string> = {
-  open: "bg-amber-50 text-amber-600",
-  done: "bg-green-50 text-green-600",
-  canceled: "bg-sunken text-muted",
-};
-
-export function WmsInventoryList({ initial }: { initial: InventoryCount[] }) {
+function InventoryListBody({ initial, organizations, initialOrganizationId }: Props) {
   const router = useRouter();
+  const request = useInventoryRequestScope();
+  const [organizationId, setOrganizationId] = useState(initialOrganizationId);
+  const [docs, setDocs] = useState<InventoryCount[] | null>(initialOrganizationId === null ? null : initial);
   const [warehouse, setWarehouse] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(false);
+  const [source, setSource] = useState(emptySourceDraft);
 
-  async function onCreate() {
-    if (!warehouse.trim()) {
-      setError(true);
-      setTimeout(() => setError(false), 900);
-      return;
-    }
-    setBusy(true);
-    const doc = await createInventory(warehouse.trim());
-    setBusy(false);
-    if (doc) router.push(`/erp/wms/inventory/${doc.id}`);
+  async function changeOrganization(id: number | null) {
+    const ticket = request.begin();
+    setOrganizationId(id); setDocs(null); setSource(emptySourceDraft());
+    try {
+      if (id !== null) { const rows = await fetchInventoryList(id); if (request.current(ticket)) setDocs(rows); }
+    } catch (error) { request.fail(ticket, error); }
+    finally { request.finish(ticket); }
   }
-
-  return (
-    <div className="flex-1 overflow-auto p-6">
-      <p className="text-sm text-muted">
-        Пересчёт склада со сверкой против 1С. Ожидаемое подтягивается из 1С (зеркало), факт
-        вносит кладовщик — система считает недостачи/излишки. Остатки в 1С не меняются.
-      </p>
-
-      <div className="mt-4 flex items-center gap-2">
-        <input
-          value={warehouse}
-          onChange={(e) => setWarehouse(e.target.value)}
-          placeholder="Склад для инвентаризации (напр. Минск (центр.))"
-          className={clsx(
-            "min-w-0 flex-1 rounded-lg border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent",
-            error ? "border-amber-500" : "border-line",
-          )}
-        />
-        <button
-          onClick={onCreate}
-          disabled={busy}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-ink disabled:opacity-60"
-        >
-          <Plus size={16} /> Новая инвентаризация
-        </button>
-      </div>
-
-      <div className="mt-4 overflow-hidden rounded-xl border border-line bg-surface">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
-              <th className="px-4 py-2 font-medium">Документ</th>
-              <th className="px-4 py-2 font-medium">Склад</th>
-              <th className="px-4 py-2 font-medium">Статус</th>
-              <th className="px-4 py-2 font-medium">Создан</th>
-            </tr>
-          </thead>
-          <tbody>
-            {initial.length === 0 && (
-              <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-muted">
-                  <ClipboardList size={20} className="mx-auto mb-1 text-faint" />
-                  Инвентаризаций пока нет
-                </td>
-              </tr>
-            )}
-            {initial.map((d) => (
-              <tr key={d.id} className="border-b border-line transition-colors last:border-0 hover:bg-sunken">
-                <td className="px-4 py-2.5">
-                  <Link href={`/erp/wms/inventory/${d.id}`} className="font-medium text-accent-ink hover:underline">
-                    {d.number || `ИНВ-${d.id}`}
-                  </Link>
-                </td>
-                <td className="px-4 py-2.5 text-muted">{d.warehouse}</td>
-                <td className="px-4 py-2.5">
-                  <span className={clsx("inline-flex rounded-md px-2 py-0.5 text-xs font-medium", STATUS_STYLES[d.status])}>
-                    {inventoryStatusLabel(d.status)}
-                  </span>
-                </td>
-                <td className="px-4 py-2.5 text-faint">
-                  {d.created_at ? new Date(d.created_at).toLocaleDateString("ru-RU") : "—"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+  async function onCreate() {
+    if (request.busy || organizationId === null || !warehouse.trim() || !sourceReady(source)) return;
+    const ticket = request.begin();
+    try {
+      const doc = await createInventory({ organization_id: organizationId, warehouse: warehouse.trim(), ...sourcePayload(source) });
+      if (request.current(ticket)) router.push(`/erp/wms/inventory/${doc.id}`);
+    } catch (error) { request.fail(ticket, error); }
+    finally { request.finish(ticket); }
+  }
+  return <div className="min-w-0 flex-1 overflow-auto p-6">
+    <p className="mb-4 text-sm text-muted">Пересчёт физического журнала склада выбранного юрлица. Неизвестный остаток не считается нулём.</p>
+    <InventoryOrganizationSelect organizations={organizations} value={organizationId} onChange={changeOrganization} />
+    <label className="mt-4 block text-sm">Склад
+      <input aria-label="Склад" value={warehouse} onChange={(e) => { setWarehouse(e.target.value); setSource({ ...source, confirmed: false }); }}
+        className="ml-2 rounded-lg border border-line bg-surface px-3 py-2" />
+    </label>
+    <InventorySourceFields draft={source} onChange={setSource} disabled={request.busy || organizationId === null} />
+    <button onClick={onCreate} disabled={request.busy || organizationId === null || !warehouse.trim() || !sourceReady(source)}
+      className="mt-3 rounded-lg bg-accent px-3 py-2 text-sm text-white disabled:opacity-60">Новая инвентаризация</button>
+    {request.error && <div role="alert" className="mt-3 text-sm text-red-600">{request.error}
+      {organizationId !== null && <button className="ml-2 underline" onClick={() => changeOrganization(organizationId)}>Повторить загрузку списка</button>}
+    </div>}
+    {request.busy && <p role="status" className="mt-3 text-sm">Выполняется запрос…</p>}
+    {organizationId === null ? <p className="mt-4 text-sm text-muted">Выберите юрлицо для просмотра документов.</p> : docs !== null &&
+      <div className="mt-4 overflow-auto rounded-xl border border-line bg-surface"><table className="w-full text-sm">
+        <thead><tr><th className="p-3 text-left">Документ</th><th className="p-3 text-left">Склад</th><th className="p-3 text-left">Статус</th><th className="p-3 text-left">Источник</th></tr></thead>
+        <tbody>{docs.length === 0 && !request.error && <tr><td colSpan={4} className="p-4 text-muted">Инвентаризаций пока нет</td></tr>}
+          {docs.filter((doc) => doc.organization_id === organizationId).map((doc) => <tr key={doc.id} className="border-t border-line">
+            <td className="p-3"><Link className="text-accent-ink underline" href={`/erp/wms/inventory/${doc.id}`}>{doc.number || `ИНВ-${doc.id}`}</Link></td>
+            <td className="p-3">{doc.warehouse}</td><td className="p-3">{inventoryStatusLabel(doc.status)}</td>
+            <td className="p-3">{doc.expected_source === "wms_physical" ? "Физический журнал WMS" : "Не подтверждён"}</td>
+          </tr>)}
+        </tbody></table></div>}
+  </div>;
 }

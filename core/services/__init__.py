@@ -6,26 +6,33 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import ModuleType
 
 from core.services import sku_master
+from core.services.accounting import AccountingGateway
 from core.services.approvals import ApprovalService
 from core.services.auth import AuthService
 from core.services.bank import BankGateway
 from core.services.config import Settings, get_settings
+from core.services.crm_clients import CrmClientLookupGateway
 from core.services.db import Database
 from core.services.eventbus import OutboxEventBus
 from core.services.gsheets import GSheetsClient, GSheetsGateway
 from core.services.landed_cost import LandedCostGateway
 from core.services.litellm import LLMGateway
+from core.services.logistics import LogisticsGateway, ShippingProducerDispatcher
 from core.services.onec import OneCGateway
 from core.services.price_cost import PriceCostGateway
+from core.services.procurement import ProcurementSourceGateway
+from core.services.production import ProductionOutputGateway
 from core.services.registry import RegistryGateway
+from core.services.sales import SalesSourceGateway
 from core.services.stock import StockGateway
 from core.services.telephony import TelephonyGateway
 from core.services.temporal import TemporalService
 from core.services.touch_history import TouchHistoryGateway
+from core.services.wms import WmsReservationGateway
 
 __all__ = ["Services", "build_services"]
 
@@ -43,6 +50,7 @@ class Services:
     llm: LLMGateway
     # шлюзы 1С / складских остатков / реестра ЕГР наполняет модуль integrations
     # при register (часть 6/9/10); None — модуль не подключён
+    crm_clients: CrmClientLookupGateway | None = None
     onec: OneCGateway | None = None
     stock: StockGateway | None = None
     registry: RegistryGateway | None = None
@@ -66,6 +74,14 @@ class Services:
     # Несёт PII/коммерческую переписку → роут-потребитель защищён правом, реализация в sales
     # тоже проводит свою проверку прав (защита на обоих уровнях).
     touch_history: TouchHistoryGateway | None = None
+    # Populated by the owning modules during registration; absent means unavailable.
+    accounting: AccountingGateway | None = None
+    procurement_source: ProcurementSourceGateway | None = None
+    wms_reservations: WmsReservationGateway | None = None
+    production_output: ProductionOutputGateway | None = None
+    sales_source: SalesSourceGateway | None = None
+    logistics: LogisticsGateway | None = None
+    shipping_producer: ShippingProducerDispatcher = field(default_factory=ShippingProducerDispatcher)
 
 
 def build_services() -> Services:

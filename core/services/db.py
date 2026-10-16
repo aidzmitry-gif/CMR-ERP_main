@@ -64,11 +64,11 @@ class Database:
 
             async with self.engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
-            logger.info("DB (sqlite dev): таблицы готовы (%s)", self.url)
+            logger.info("DB (sqlite dev): таблицы готовы")
         else:
             async with self.engine.connect() as conn:
                 await conn.execute(text("SELECT 1"))
-            logger.info("DB: подключение успешно (%s)", self.url)
+            logger.info("DB: подключение успешно")
 
     async def disconnect(self) -> None:
         """Закрыть пул соединений (вызывается при остановке)."""

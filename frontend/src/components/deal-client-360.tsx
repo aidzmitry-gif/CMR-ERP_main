@@ -1,44 +1,26 @@
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { fetchCounterpartyCard, type CounterpartyCard } from "@/lib/reference-data";
+import { fetchCounterpartyCardResult, type CounterpartyCard } from "@/lib/reference-data";
+import { backendAuthHeaders } from "@/lib/auth-headers-server";
 
-const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 const SOURCE_LABEL: Record<string, string> = { "1c": "1С", bitrix: "Bitrix", erp: "ERP", egr: "ЕГР" };
 
-/** Резолв контрагента сделки (free-text имя) в MDM по имени → id эталона (или null). */
-async function resolveId(company: string, roles?: string): Promise<number | null> {
-  try {
-    const res = await fetch(`${BASE}/system/references/query`, {
-      method: "POST",
-      cache: "no-store",
-      headers: { "Content-Type": "application/json", ...(roles ? { "X-User-Roles": roles } : {}) },
-      body: JSON.stringify({ ref: "core.counterparties", name: company, limit: 1 }),
-    });
-    if (!res.ok) return null;
-    const rows = ((await res.json())?.result ?? []) as { id: number }[];
-    return rows[0]?.id ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Мини-досье 360° по контрагенту сделки (SSR). Резолвит компанию в MDM по имени и
- * показывает golden record: УНП, источники (1С/Bitrix/ЕГР — единая личность клиента из
- * синхронизированных систем), первичный контакт и сводку касаний. Honest-empty, если в MDM
- * нет совпадения — контрагентов 1С грузит сессия Справочников, досье «оживёт» по мере загрузки.
- * Читает только core-эндпоинты (`/system/references/query`, `/system/mdm/counterparty/{id}`).
- */
-export async function DealClient360({ company, roles }: { company: string; roles?: string }) {
-  const id = company?.trim() ? await resolveId(company, roles) : null;
-  const card = id == null ? null : await fetchCounterpartyCard(id, roles);
-
+/** Досье однозначного контрагента, уже разрешённого сервером в карточке сделки. */
+export async function DealClient360({ counterpartyId, roles }: { counterpartyId?: number; roles?: string }) {
+  const result = counterpartyId == null ? null
+    : await fetchCounterpartyCardResult(counterpartyId, roles, await backendAuthHeaders(roles));
+  const card = result?.status === "success" ? result.card : null;
+  const error = result?.status === "unauthorized"
+    ? "Для просмотра досье клиента войдите снова."
+    : result?.status === "forbidden" ? "Нет доступа к досье клиента."
+    : result?.status === "service-error" || result?.status === "invalid-id"
+      ? "Не удалось загрузить досье клиента. Обновите страницу." : null;
   return (
     <Card className="px-[18px] py-[14px]">
       <CardHeader>
         <span aria-hidden>🪪</span>
         <span>Клиент · 360°</span>
       </CardHeader>
-      <CardBody className="space-y-2.5">{card ? <Body card={card} /> : <Empty />}</CardBody>
+      <CardBody className="space-y-2.5">{card ? <Body card={card} /> : error ? <p role="alert" className="text-sm text-muted">{error}</p> : <Empty />}</CardBody>
     </Card>
   );
 }
@@ -46,9 +28,7 @@ export async function DealClient360({ company, roles }: { company: string; roles
 function Empty() {
   return (
     <div className="rounded-lg bg-sunken px-3 py-2 text-[12px] text-muted">
-      <span className="font-semibold text-faint">нет в MDM · </span>
-      контрагент не найден в справочнике (контрагентов 1С загружает отдельная сессия) — досье
-      появится после загрузки.
+      Досье клиента пока недоступно.
     </div>
   );
 }

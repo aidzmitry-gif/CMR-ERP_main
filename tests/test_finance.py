@@ -64,6 +64,23 @@ async def test_invoice_without_due_date_is_honest_empty(session):
     assert p.deal_id is None and p.counterparty_ref is None
 
 
+@pytest.mark.parametrize("raw", [None, "", "invalid", "NaN", "Infinity", True])
+async def test_issued_invoice_does_not_create_a_zero_receivable_from_bad_amount(session, raw):
+    from modules.finance.events import on_document_posted
+
+    with pytest.raises(ValueError, match="amount|positive"):
+        await on_document_posted({"kind": "invoice", "number": "СЧ-BAD", "amount": raw}, _ctx(session))
+    assert (await session.execute(select(Payment))).scalars().all() == []
+
+
+async def test_malformed_landed_amount_does_not_fall_back_to_another_field(session):
+    from modules.finance.events import on_landed_cost
+
+    with pytest.raises(ValueError, match="amount"):
+        await on_landed_cost({"amount": "invalid", "total_landed_byn": "100.00"}, _ctx(session))
+    assert (await session.execute(select(Payment))).scalars().all() == []
+
+
 async def test_payment_paid_sets_paid_at_and_emits(session, api):
     from core.domain.models import OutboxEvent
 
@@ -434,6 +451,48 @@ async def test_reconcile_1c_with_mock_gateway(session):
     assert refs_matched == {"СЧ-1"}
     assert refs_only_erp == {"СЧ-ONLY-ERP"}
     assert refs_only_1c == {"СЧ-ONLY-1C"}
+
+
+async def test_reconcile_1c_requires_equal_amounts_and_preserves_duplicate_rows(session):
+    from modules.finance.reconcile import reconcile_with_onec
+
+    session.add_all([
+        Payment(ref="СЧ-DUP", amount=Decimal("100.00"), kind="receivable", status="pending"),
+        Payment(ref="СЧ-DUP", amount=Decimal("200.00"), kind="receivable", status="pending"),
+        Payment(ref="СЧ-DIFF", amount=Decimal("300.00"), kind="receivable", status="pending"),
+    ])
+    await session.commit()
+
+    class _Mock1C:
+        async def fetch_payments(self):
+            return [{"ref": "СЧ-DUP", "amount": "200,00"},
+                    {"ref": "СЧ-DUP", "amount": "100.00"},
+                    {"ref": "СЧ-DIFF", "amount": "301.00"}]
+
+    result = await reconcile_with_onec(session, _Mock1C())
+    assert [row["amount"] for row in result["matched"]] == ["100.00", "200.00"]
+    assert result["amount_mismatch"] == [{"ref": "СЧ-DIFF", "counterparty_ref": None,
+                                           "erp_amount": "300.00", "one_c_amount": "301.00"}]
+    assert result["only_in_erp"] == result["only_in_1c"] == result["invalid_source_rows"] == []
+
+
+async def test_reconcile_1c_keeps_malformed_source_amount_out_of_matches(session):
+    from modules.finance.reconcile import reconcile_with_onec
+
+    session.add(Payment(ref="СЧ-BAD", amount=Decimal("10.00"), kind="receivable", status="pending"))
+    await session.commit()
+
+    class _Mock1C:
+        async def fetch_payments(self):
+            return [{"ref": "СЧ-BAD", "amount": "not money"},
+                    {"ref": "СЧ-BAD", "amount": "NaN"},
+                    {"ref": "СЧ-BAD", "amount": "10.001"}]
+
+    result = await reconcile_with_onec(session, _Mock1C())
+    assert result["matched"] == result["amount_mismatch"] == result["only_in_1c"] == []
+    assert result["only_in_erp"][0]["amount"] == "10.00"
+    assert len(result["invalid_source_rows"]) == 3
+    assert {row["reason"] for row in result["invalid_source_rows"]} == {"invalid_amount"}
 
 
 async def test_reconcile_1c_failsoft_on_exception(session):

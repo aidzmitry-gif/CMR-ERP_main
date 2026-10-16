@@ -1,0 +1,21 @@
+{
+  "database": "acc_install_40629d40d51b48aa95a7b20d09a4a3ff",
+  "baseline": "pass",
+  "proposal": "pass",
+  "cleanup": true,
+  "registered_revision": "0132",
+  "registered_accounting_upgrade": "pass",
+  "legacy_import_preserved": true,
+  "accounting_tables": 51,
+  "restore": {
+    "status": "pass",
+    "tables": 236,
+    "triggers": 373,
+    "sequences": 174,
+    "ledger_rows": 2,
+    "immutable_entry_guard": true,
+    "dump_sha256": "8dc39668db32552d5d066e5d86cf1562d4d6a3a0a49ed502c51dc77186ad0419"
+  },
+  "scope": "Synthetic registered0121-to-0132 upgrade and full database dump/restore; no real-book acceptance or H04 merge acceptance.",
+  "sourceCommit": "aedc552"
+}

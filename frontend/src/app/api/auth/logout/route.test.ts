@@ -22,7 +22,7 @@ describe("POST /api/auth/logout", () => {
     expect(response.status).toBe(303);
     expect(response.headers.get("Location")).toBe("https://auth.example.test/realms/erp/protocol/openid-connect/logout");
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    for (const cookie of ["aios_role", "aios_user", "aios_access_token", "aios_refresh_token", "aios_oidc_state", "aios_oidc_verifier"]) {
+    for (const cookie of ["aios_role", "aios_user", "aios_username", "aios_access_token", "aios_refresh_token", "aios_oidc_state", "aios_oidc_verifier"]) {
       expect(removeCookie).toHaveBeenCalledWith(cookie);
     }
   });

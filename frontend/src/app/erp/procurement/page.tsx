@@ -1,25 +1,9 @@
 import { AppShell } from "@/components/app-shell";
-import { FunnelBoard } from "@/components/funnel/funnel-board";
-import { FUNNEL_EXTRAS } from "@/lib/funnel-configs";
+import { ProcurementKanban } from "@/components/erp/procurement-kanban";
+import { ProcurementNav } from "@/components/erp/procurement-nav";
 
-export default function ProcurementPage() {
-  return (
-    <AppShell crumbs={["ERP", "Закупки"]}>
-      <FunnelBoard
-        title="Закупки"
-        subtitle="Воронка закупок: от потребности до завершения. «Приёмка / QC» создаёт приход на склад."
-        boardPath="/procurement/board"
-        createPath="/procurement/requests"
-        patchPath="/procurement/requests"
-        fields={[
-          { key: "supplier", label: "Поставщик" },
-          { key: "item", label: "Позиция" },
-          { key: "qty", label: "Кол-во", type: "number", default: 1 },
-          { key: "amount", label: "Сумма, ₽", type: "number", default: 0 },
-        ]}
-        showChannels
-        {...FUNNEL_EXTRAS.procurement}
-      />
-    </AppShell>
-  );
+export default async function ProcurementPage({ searchParams }: { searchParams?: Promise<{ org?: string | string[] }> }) {
+  const params = searchParams ? await searchParams : {};
+  const suggestedOrg = typeof params.org === "string" ? params.org : undefined;
+  return <AppShell crumbs={["ERP", "Закупки"]}><div className="flex min-w-0 flex-1 flex-col"><ProcurementNav /><ProcurementKanban suggestedOrg={suggestedOrg} /></div></AppShell>;
 }

@@ -53,6 +53,25 @@ def test_helpers_map_slug_to_package():
     assert "marketing" in allowed_slugs(["sales", "sales_head"])
 
 
+def test_accountant_has_exact_finance_and_accounting_scope():
+    response = client.get("/system/access", headers={"X-User-Roles": "accountant"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["matrix"]["accountant"] == ["home", "finance", "accounting"]
+    assert data["current_roles"] == ["accountant"]
+    assert {role["slug"]: role["title"] for role in data["roles"]}["accountant"] == "Бухгалтер"
+
+    for package in ("finance", "accounting"):
+        assert is_package_allowed(package, ["accountant"]), package
+    for package in ("sales", "procurement", "wms"):
+        assert not is_package_allowed(package, ["accountant"]), package
+
+    for path in ("/finance/rbac-probe", "/accounting/rbac-probe"):
+        assert client.get(path, headers={"X-User-Roles": "accountant"}).status_code != 403, path
+    for path in ("/sales/rbac-probe", "/procurement/rbac-probe", "/wms/rbac-probe"):
+        assert client.get(path, headers={"X-User-Roles": "accountant"}).status_code == 403, path
+
+
 # --- backend-ограничение ---
 def test_default_role_is_guest_denied():
     # fail-closed (P0-1): без заголовка роли — бесправный «Гость», 403 на защищённый модуль

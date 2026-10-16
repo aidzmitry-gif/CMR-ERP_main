@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FunnelStage } from "@/lib/types";
 
@@ -7,6 +7,7 @@ vi.mock("@/lib/funnel-api", () => ({
   createFunnelCard: vi.fn().mockResolvedValue(true),
   moveFunnelCard: vi.fn().mockResolvedValue(true),
 }));
+vi.mock("./gate1-picker-modal", () => ({ default: () => <div>Gate 1 — подбор позиций</div> }));
 // @dnd-kit не работает в jsdom — мокаем DndContext, чтобы вызвать обработчики drag.
 vi.mock("@dnd-kit/core", () => ({
   DndContext: ({
@@ -78,9 +79,88 @@ const props = {
 beforeEach(() => {
   vi.clearAllMocks();
   mock(funnelApi.fetchFunnelBoard).mockResolvedValue(stages);
+  mock(funnelApi.createFunnelCard).mockResolvedValue(true);
+  mock(funnelApi.moveFunnelCard).mockResolvedValue(true);
 });
 
 describe("FunnelBoard", () => {
+  it.each([false, true])("Gate 1 открывается только после успешного ACK (%s)", async (accepted) => {
+    let resolve!: (value: boolean) => void;
+    mock(funnelApi.moveFunnelCard).mockReturnValueOnce(new Promise<boolean>((r) => { resolve = r; }));
+    mock(funnelApi.fetchFunnelBoard).mockResolvedValue([stages[0], { ...stages[1], title: "Gate 1" }]);
+    render(<FunnelBoard {...props} />);
+    await screen.findByText("AGM аккумулятор");
+    fireEvent.click(screen.getByTestId("dnd-end"));
+    expect(screen.queryByText("Gate 1 — подбор позиций")).not.toBeInTheDocument();
+    await act(async () => resolve(accepted));
+    if (accepted) expect(screen.getByText("Gate 1 — подбор позиций")).toBeInTheDocument();
+    else expect(screen.queryByText("Gate 1 — подбор позиций")).not.toBeInTheDocument();
+  });
+
+  it("после потери ACK повторное чтение уточняет реально сохранённую сервером стадию", async () => {
+    mock(funnelApi.moveFunnelCard).mockResolvedValueOnce(false);
+    mock(funnelApi.fetchFunnelBoard).mockResolvedValueOnce(stages).mockResolvedValueOnce([
+      { ...stages[0], cards: [], count: 0, sum: 0 },
+      { ...stages[1], cards: stages[0].cards, count: 1, sum: 1000 },
+    ]);
+    render(<FunnelBoard {...props} />);
+    await screen.findByText("AGM аккумулятор");
+    fireEvent.click(screen.getByTestId("dnd-end"));
+    await screen.findByRole("alert");
+    fireEvent.click(screen.getByRole("button", { name: "Обновить доску" }));
+    await screen.findByText("AGM аккумулятор");
+    expect(within(screen.getByText("Приёмка / QC").parentElement!.parentElement!.parentElement!).getByText("AGM аккумулятор")).toBeInTheDocument();
+  });
+  it("различает отказ чтения и подтверждённую пустую доску, позволяет повторить чтение", async () => {
+    mock(funnelApi.fetchFunnelBoard).mockRejectedValueOnce(new Error("500")).mockResolvedValueOnce([]);
+    render(<FunnelBoard {...props} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить доску");
+    expect(screen.queryByText("Доска пуста")).not.toBeInTheDocument();
+    expect(screen.queryByText("Итоги по воронке")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить загрузку" }));
+    expect(await screen.findByText("Доска пуста")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("не подставляет запоздалый ответ прежнего раздела", async () => {
+    let resolve!: (value: FunnelStage[]) => void;
+    mock(funnelApi.fetchFunnelBoard).mockReturnValueOnce(new Promise<FunnelStage[]>((r) => { resolve = r; })).mockResolvedValueOnce([]);
+    const view = render(<FunnelBoard {...props} />);
+    view.rerender(<FunnelBoard {...props} boardPath="/new/board" />);
+    await screen.findByText("Доска пуста");
+    await act(async () => resolve(stages));
+    expect(screen.queryByText("AGM аккумулятор")).not.toBeInTheDocument();
+  });
+
+  it("при отказе создания сохраняет форму и не отправляет два запроса одновременно", async () => {
+    let resolve!: (value: boolean) => void;
+    mock(funnelApi.createFunnelCard).mockReturnValueOnce(new Promise<boolean>((r) => { resolve = r; }));
+    render(<FunnelBoard {...props} />);
+    await screen.findByText("AGM аккумулятор");
+    fireEvent.click(screen.getByRole("button", { name: /Добавить/ }));
+    fireEvent.change(screen.getByLabelText("Поставщик"), { target: { value: "Новый поставщик" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранение…" }));
+    expect(funnelApi.createFunnelCard).toHaveBeenCalledTimes(1);
+    await act(async () => resolve(false));
+    expect(screen.getByRole("alert")).toHaveTextContent("не подтверждено");
+    expect(screen.getByLabelText("Поставщик")).toHaveValue("Новый поставщик");
+    expect(screen.getByRole("button", { name: "Сохранить" })).toBeEnabled();
+  });
+
+  it("не меняет стадию до подтверждения, при отказе оставляет карточку на месте", async () => {
+    let resolve!: (value: boolean) => void;
+    mock(funnelApi.moveFunnelCard).mockReturnValueOnce(new Promise<boolean>((r) => { resolve = r; }));
+    render(<FunnelBoard {...props} />);
+    await screen.findByText("AGM аккумулятор");
+    fireEvent.click(screen.getByTestId("dnd-end"));
+    fireEvent.click(screen.getByTestId("dnd-end"));
+    expect(funnelApi.moveFunnelCard).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("status")).toHaveTextContent("Сохраняем смену стадии");
+    await act(async () => resolve(false));
+    expect(screen.getByRole("alert")).toHaveTextContent("Смена стадии не подтверждена");
+    expect(within(screen.getByText("Потребность").parentElement!.parentElement!.parentElement!).getByText("AGM аккумулятор")).toBeInTheDocument();
+  });
   it("загружает и рендерит стадии и карточку", async () => {
     render(<FunnelBoard {...props} />);
     expect(await screen.findByText("AGM аккумулятор")).toBeInTheDocument();

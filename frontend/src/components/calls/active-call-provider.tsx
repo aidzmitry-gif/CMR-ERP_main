@@ -12,6 +12,7 @@ import {
   subscribeCalls,
   type CallCard,
 } from "@/lib/api";
+import { confirmProgrammaticDocumentNavigation } from "@/lib/use-unsaved-document-guard";
 
 /** Контекст кокпита разговора из карточки входящего: есть сделка → deal, иначе новый клиент. */
 function contextFromCard(card: CallCard): CallContext {
@@ -35,13 +36,8 @@ function contextFromCard(card: CallCard): CallContext {
 /**
  * Глобальная подписка продавца на поток входящих звонков (SSE) + всплывающее окно.
  * Монтируется в оболочке (AppShell) — окно доступно на любом экране CRM/ERP.
- * ``owner`` — ФИО продавца (= Deal.owner), по которому backend пушит карточки.
  */
-export function ActiveCallProvider({
-  owner,
-  children,
-}: {
-  owner?: string;
+export function ActiveCallProvider({ children }: {
   children: React.ReactNode;
 }) {
   const [card, setCard] = useState<CallCard | null>(null);
@@ -50,7 +46,7 @@ export function ActiveCallProvider({
   const router = useRouter();
 
   // subscribeCalls возвращает функцию отписки → она же cleanup эффекта.
-  useEffect(() => subscribeCalls(owner, setCard), [owner]);
+  useEffect(() => subscribeCalls(setCard), []);
 
   return (
     <>
@@ -70,6 +66,7 @@ export function ActiveCallProvider({
             setCard(null);
           }}
           onLinkDeal={() => {
+            if (card.deal_id && !confirmProgrammaticDocumentNavigation()) return;
             if (card.deal_id) router.push(`/crm/deals/${card.deal_id}`);
             setCard(null);
           }}
@@ -79,6 +76,7 @@ export function ActiveCallProvider({
             router.refresh();
           }}
           onCreateLead={async () => {
+            if (!confirmProgrammaticDocumentNavigation()) return;
             await createLead({
               source: "phone",
               phone: card.phone ?? "",

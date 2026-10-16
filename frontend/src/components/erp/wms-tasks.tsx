@@ -29,15 +29,27 @@ export function WmsTasks({ initial }: { initial: WmsTask[] }) {
   const [kind, setKind] = useState("");
   const [toLoc, setToLoc] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   async function refresh() {
     setTasks(await fetchTasks());
   }
+  async function reload() {
+    if (busy) return;
+    setBusy(true); setError("");
+    try { await refresh(); }
+    catch (e) { setError(e instanceof Error ? e.message : "Не удалось обновить задания."); }
+    finally { setBusy(false); }
+  }
   async function act(t: WmsTask, patch: Record<string, unknown>) {
+    if (busy) return;
     setBusy(true);
-    await patchTask(t.id, patch);
-    await refresh();
-    setBusy(false);
+    setError("");
+    try {
+      if (!await patchTask(t.id, patch)) throw new Error("Не удалось изменить задание. Проверьте доступ и состояние документа.");
+      await refresh();
+    } catch (e) { setError(e instanceof Error ? e.message : "Не удалось обновить складские задания."); }
+    finally { setBusy(false); }
   }
 
   const rows = useMemo(
@@ -46,7 +58,9 @@ export function WmsTasks({ initial }: { initial: WmsTask[] }) {
   );
 
   return (
-    <div className="flex-1 overflow-auto p-6">
+    <div className="min-w-0 w-0 flex-1 overflow-auto p-6 lg:pr-24">
+      {error && <p role="alert" className="mb-4 text-sm text-red-700">{error}</p>}
+      <button onClick={() => void reload()} disabled={busy} className="mb-3 rounded-lg border border-line px-3 py-2 text-sm">Обновить задания</button>
       <p className="text-sm text-muted">
         Задачи кладовщику. Завершение размещения перемещает товар в постоянную ячейку,
         завершение подбора списывает со склада (движение расхода).
@@ -66,6 +80,8 @@ export function WmsTasks({ initial }: { initial: WmsTask[] }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
+              <th className="px-4 py-2 font-medium">Юрлицо</th>
+              <th className="px-4 py-2 font-medium">Склад</th>
               <th className="px-4 py-2 font-medium">Тип</th>
               <th className="px-4 py-2 font-medium">Код</th>
               <th className="px-4 py-2 text-right font-medium">Кол-во</th>
@@ -76,12 +92,14 @@ export function WmsTasks({ initial }: { initial: WmsTask[] }) {
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-muted">Задач нет</td></tr>
+              <tr><td colSpan={8} className="px-4 py-6 text-center text-muted">Задач нет</td></tr>
             )}
             {rows.map((t) => {
               const openish = t.status === "open" || t.status === "in_progress";
               return (
                 <tr key={t.id} className="border-b border-line last:border-0">
+                  <td className="px-4 py-2.5 text-muted">{t.organization_id ? `Юрлицо №${t.organization_id}` : "Не определено"}</td>
+                  <td className="px-4 py-2.5 text-muted">{t.warehouse}</td>
                   <td className="px-4 py-2.5 text-ink">{taskKindLabel(t.kind)}</td>
                   <td className="px-4 py-2.5 font-mono text-xs text-muted">{t.sku_code}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums text-ink">{formatNumber(t.qty)}</td>

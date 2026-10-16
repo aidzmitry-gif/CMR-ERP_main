@@ -22,6 +22,7 @@ function makeData(overrides: Partial<AnalyticsData> = {}): AnalyticsData {
     pass_rate_pct: 70, // "high" 60..80 → amber
     scrap_pct: 3, // "low" ≤5 → green
     premium_fot_byn: 12345.67,
+    financial_scope: "production_planning_estimate",
     plan_fact_by_month: [
       { month: 1, plan_nh: 100, fact_nh: 80 },
       { month: 2, plan_nh: 120, fact_nh: 130 },
@@ -66,6 +67,8 @@ describe("ProductionAnalyticsView", () => {
     // Проценты и деньги — по реальным форматтерам
     expect(screen.getByText("85,0%")).toBeInTheDocument();
     expect(screen.getByText("12 345,67 р.")).toBeInTheDocument();
+    expect(screen.getByText("Плановая премия")).toBeInTheDocument();
+    expect(screen.getByRole("note")).toHaveTextContent("не бухгалтерское начисление зарплаты");
   });
 
   it("цвет KPI зависит от значения: эффективность 85 — зелёная, пропускаемость 70 — янтарная", () => {

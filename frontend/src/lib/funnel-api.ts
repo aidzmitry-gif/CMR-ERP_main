@@ -2,16 +2,13 @@ import type { FunnelStage } from "@/lib/types";
 
 /** Универсальный клиент воронки ERP-модулей: ходит на бэкенд через прокси `/api`. */
 
-/** Доска воронки из API (`GET /api{boardPath}`); при ошибке — пустой список стадий. */
+/** Ошибка чтения не является подтверждённой пустой доской. */
 export async function fetchFunnelBoard(boardPath: string): Promise<FunnelStage[]> {
-  try {
-    const res = await fetch(`/api${boardPath}`, { cache: "no-store" });
-    if (!res.ok) return [];
-    const data = (await res.json()) as { stages?: FunnelStage[] };
-    return data.stages ?? [];
-  } catch {
-    return [];
-  }
+  const res = await fetch(`/api${boardPath}`, { cache: "no-store" });
+  if (!res.ok) throw new Error("Не удалось загрузить доску");
+  const data = (await res.json()) as { stages?: FunnelStage[] } | null;
+  if (!Array.isArray(data?.stages)) throw new Error("Некорректный ответ доски");
+  return data.stages;
 }
 
 /** Создать карточку (`POST /api{createPath}`). Возвращает true при успехе. */

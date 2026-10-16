@@ -20,6 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 class TouchHistoryGateway(Protocol):
     """Чтение истории касаний (звонки/письма/сделки) контрагента по его id."""
 
+    async def has_deals(self, session: AsyncSession, counterparty_ids: tuple[int, ...]) -> bool:
+        """Called with locked parent records before merging identities."""
+        ...
+
     async def touches(
         self, session: AsyncSession, counterparty_id: int, *, limit: int = 50
     ) -> list[dict]: ...

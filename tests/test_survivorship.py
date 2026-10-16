@@ -45,7 +45,8 @@ def test_most_recent_wins_by_date():
 
 async def test_import_writes_provenance(session):
     r = await reference_import.upsert_counterparty(
-        session, unp="191000001", name="ООО Новый", source="1c", external_ref="x1"
+        session, unp="191000001", name="ООО Новый", source="1c", external_ref="x1",
+        legal_address="Тестовый юридический адрес, 1",
     )
     assert r.created is True
     assert r.counterparty.provenance["name"]["source"] == "1c"
@@ -55,6 +56,7 @@ async def test_manual_only_rule_protects_field_from_sync(session):
     # правило: имя меняется только вручную
     session.add(SurvivorshipRule(entity_type="counterparty", field="name", strategy="manual_only"))
     cp = Counterparty(name="Имя вручную", unp="191000002",
+                      requisites={"legal_address": "Тестовый юридический адрес, 2"},
                       provenance={"name": {"source": "manual", "at": "2026-06-18"}})
     session.add(cp)
     await session.flush()
@@ -71,13 +73,16 @@ async def test_source_priority_rule_lets_egr_win_over_existing_1c(session):
         entity_type="counterparty", field="name", strategy="source_priority",
         source_priority=["egr", "erp", "manual", "1c", "bitrix"],
     ))
-    cp = Counterparty(name="Имя из 1С", unp="191000003",
-                      provenance={"name": {"source": "1c", "at": "2026-06-02"}})
+    cp = Counterparty(name="Имя из 1С", legal_name="Юридическое1С", unp="191000003",
+                      requisites={"legal_address": "Тестовый юридический адрес, 3"},
+                      provenance={"name": {"source": "1c", "at": "2026-06-02"},
+                                  "legal_name": {"source": "1c", "at": "2026-06-02"}})
     session.add(cp)
     await session.flush()
 
     await reference_import.upsert_counterparty(
-        session, unp="191000003", name="ОАО из ЕГР", source="egr", external_ref="z1"
+        session, unp="191000003", name="ОАО из ЕГР", legal_name="ОАО из ЕГР", source="egr", external_ref="z1"
     )
-    assert cp.name == "ОАО из ЕГР"  # ЕГР приоритетнее 1С → перезаписал
-    assert cp.provenance["name"]["source"] == "egr"
+    assert cp.name == "Имя из 1С"  # Старое имя остаётся совместимым с историческими ссылками.
+    assert cp.legal_name == "ОАО из ЕГР"
+    assert cp.provenance["legal_name"]["source"] == "egr"

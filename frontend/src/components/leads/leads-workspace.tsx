@@ -2,20 +2,20 @@
 "use client";
 
 import clsx from "clsx";
+import Link from "next/link";
 import { Globe, Mail, Phone, Plus, User, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { CallWindow } from "@/components/calls/call-window";
+import { OwnLeadsWorkspace } from "@/components/leads/own-leads-workspace";
 import { LeadDrawerPreview } from "@/components/leads/lead-drawer-preview";
 import { loadLeadsClient, type LeadsLoadState } from "@/components/leads/leads-load";
 import {
-  commitLeadItemsToDeal,
   convertLead,
   createLead,
   expressBulkLeads,
   expressLead,
   fetchLeadHandoffStats,
-  fetchLeadItems,
   fetchLeadManagers,
   fetchLeadPlan,
   fetchLeadSourceStats,
@@ -1152,7 +1152,17 @@ function IntakeModal({
   );
 }
 
-export function LeadsWorkspace({
+export function LeadsWorkspace(props: { initialLeads: Lead[]; initialLoadState?: LeadsLoadState; ownOnly?: boolean }) {
+  const router = useRouter();
+  if (props.initialLoadState && props.initialLoadState !== "ok") return <main className="min-w-0 flex-1 space-y-3 overflow-auto p-3 [overflow-wrap:anywhere] sm:p-6">
+    <p role="alert">{props.initialLoadState === "auth" ? "Нет доступа к лидам" : "Не удалось загрузить лиды — проверьте связь с сервером"}</p>
+    {props.initialLoadState === "auth" && <Link href="/login">Войти через Keycloak</Link>}
+    <button onClick={() => router.refresh()}>Повторить загрузку лидов</button>
+  </main>;
+  return props.ownOnly ? <OwnLeadsWorkspace initialLeads={props.initialLeads} initialLoadState={props.initialLoadState} /> : <LegacyLeadsWorkspace {...props} />;
+}
+
+function LegacyLeadsWorkspace({
   initialLeads,
   initialLoadState = "ok",
 }: {
@@ -1405,35 +1415,15 @@ export function LeadsWorkspace({
 
   async function onConvert(id: number) {
     setBusyId(id);
-    const res = await convertLead(id);
+    const current = leads.find((lead) => lead.id === id);
+    const res = current?.status === "converted" ? await convertLead(id, true) : await convertLead(id);
     if (res) {
       // convertedAt локально (фикс ревью Ц13): сторож «⚠ сделка не создана» должен
       // сработать и в живой сессии без перезагрузки, если deal_id так и не пришёл.
-      patch(id, { status: "converted", dealId: res.deal_id, convertedAt: new Date().toISOString() });
-      // Цикл 14: подобранное на лиде КП доезжает до сделки при ЛЮБОЙ конвертации.
-      // Раньше позиции переносила только цепочка «В сделку + счёт», а обычная «В сделку»
-      // (карточка и drawer) создавала ПУСТУЮ сделку (amount=0) — продавец начинал с нуля,
-      // хотя скорборд уже засчитал Σ КП как переданные деньги.
-      const cur = leads.find((l) => l.id === id);
-      if (res.deal_id && (cur?.itemsCount ?? 0) > 0) {
-        const items = await fetchLeadItems(id);
-        if (items.length > 0) {
-          const { ok, total } = await commitLeadItemsToDeal(
-            String(res.deal_id),
-            cur?.company || cur?.name || "Новый лид",
-            items,
-          );
-          if (ok < total) {
-            flash(`Сделка создана, но перенесено ${ok}/${total} позиций КП — проверьте сделку`, 4000);
-          }
-        }
-      } else if (!res.deal_id && (cur?.itemsCount ?? 0) > 0) {
-        // Фикс ревью Ц14: поллинг deal_id истёк (событие в пути дольше 12с) — не молчим:
-        // повторная конвертация вернёт 409, а КП само не переедет. Честно говорим, что делать.
-        flash(
-          "Сделка создаётся дольше обычного — позиции КП не перенесены. Обновите страницу и перенесите КП из карточки лида",
-          6000,
-        );
+      patch(id, { status: "converted", dealId: res.deal_id, convertedAt: current?.convertedAt ?? new Date().toISOString() });
+      // Сервер создаёт сделку вместе с позициями КП; клиент не повторяет их POST.
+      if (!res.deal_id) {
+        flash("Создание сделки ещё выполняется. Проверьте результат в карточке лида; повторно переносить товары не нужно.", 6000);
       }
       refreshPlan();
     } else {
@@ -1578,8 +1568,8 @@ export function LeadsWorkspace({
 
   return (
     <>
-      <main className="flex-1 overflow-auto p-6">
-        <div className="mb-5 flex items-start justify-between gap-4">
+      <main className="min-w-0 flex-1 overflow-auto p-3 [overflow-wrap:anywhere] sm:p-6">
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-lg font-semibold text-ink">Приём лидов</h1>
             <p className="mt-0.5 text-sm text-muted">
@@ -1817,6 +1807,11 @@ export function LeadsWorkspace({
             <Metric label="Конверсия" value={`${conversion}%`} />
           </div>
         )}
+        {leads.length === 0 && (
+          <p className="mt-4 text-sm text-muted">
+            Выберите лид, чтобы квалифицировать и распределить.
+          </p>
+        )}
       </main>
 
       {/* Drawer-preview вместо постоянной правой колонки: 1 клик по лиду открывает,
@@ -1833,7 +1828,7 @@ export function LeadsWorkspace({
         onCall={(l) => setCallPopupLead(l)}
         onItemsSaved={(id, count, total) => patch(id, { itemsCount: count, itemsTotal: total })}
         onConverted={(id, dealId) =>
-          patch(id, { status: "converted", dealId, convertedAt: new Date().toISOString() })
+          patch(id, { status: "converted", dealId, convertedAt: leads.find((lead) => lead.id === id)?.convertedAt ?? new Date().toISOString() })
         }
       />
 
@@ -1854,15 +1849,6 @@ export function LeadsWorkspace({
         }
         onClose={() => setCallPopupLead(null)}
       />
-
-      {/* Подсказка «Выберите лид» когда нет лидов вовсе — для пустого инбокса. */}
-      {leads.length === 0 && (
-        <aside className="w-[280px] shrink-0 overflow-auto border-l border-line bg-surface">
-          <div className="p-6 text-sm text-muted">
-            Выберите лид, чтобы квалифицировать и распределить.
-          </div>
-        </aside>
-      )}
 
       {modalOpen && <IntakeModal onClose={() => setModalOpen(false)} onCreate={onCreate} />}
     </>
