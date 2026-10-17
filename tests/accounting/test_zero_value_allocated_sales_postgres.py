@@ -115,11 +115,11 @@ async def test_allocated_zero_sale_has_one_quantity_and_real_revenue(pg_factory,
             # fail an existing V4 retry through its historical loader.
             original_loader = zero_value_disposals.load_authenticated_zero_value_disposals
 
-            async def rejected_loader(current_session, current_org, *, before_registration_token=None):
+            async def rejected_loader(current_session, current_org, *, before_registration_token=None, procurement=None):
                 assert current_session is session and current_org == pg_book[0]
                 if before_registration_token == entry.id:
                     return await original_loader(current_session, current_org,
-                                                 before_registration_token=before_registration_token)
+                                                 before_registration_token=before_registration_token, procurement=procurement)
                 assert before_registration_token == entry.id + 1
                 raise service.AccountingError("historical policy-selected quantities differ")
 
