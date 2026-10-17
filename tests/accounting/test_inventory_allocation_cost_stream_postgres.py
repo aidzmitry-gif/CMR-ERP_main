@@ -59,6 +59,10 @@ async def inventory_identities(factory, book):
         warehouse = await session.scalar(select(WarehouseDirectory).where(
             WarehouseDirectory.organization_id == book[0], WarehouseDirectory.name == "Main"))
         if warehouse is None:
+            await session.execute(text(
+                "SELECT setval(pg_get_serial_sequence('wms.warehouse_directory','id'), "
+                "(SELECT max(id) FROM wms.warehouse_directory))"
+            ))
             warehouse = WarehouseDirectory(
                 organization_id=book[0], name="Main", title="Main warehouse", created_by="tester")
             session.add(warehouse)
