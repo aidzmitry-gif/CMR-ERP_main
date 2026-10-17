@@ -45,8 +45,8 @@ async def test_v4_issue_replays_complete_sources_and_late_cost(pg_factory, pg_bo
         for output_id in outputs:
             await confirm_output_cost_correction(session, pg_book[0], "2026-10",
                 await _output_cost_command(session, pg_book[0], output_id), "tester")
-        await run_migration(session, "0146_zero_value_allocation_basis.py", "upgrade")
-        await run_migration(session, "0147_zero_value_allocation_runtime.py", "upgrade")
+        assert await session.scalar(text("SELECT to_regprocedure('accounting.zero_value_allocation_basis(integer,jsonb,integer)')")) is not None
+        assert await session.scalar(text("SELECT accounting.zero_value_allocation_runtime_version()")) == 4
         await run_migration(session, "0147_zero_value_allocation_runtime.py", "downgrade")
         assert await session.scalar(text("SELECT to_regprocedure('accounting.zero_value_allocation_runtime_version()')")) is None
         await run_migration(session, "0147_zero_value_allocation_runtime.py", "upgrade")

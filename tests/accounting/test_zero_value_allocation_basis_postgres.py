@@ -42,7 +42,8 @@ async def test_v4_basis_binds_multiple_origins_cutoff_and_preserves_disabled_wri
         for output_id in outputs:
             await confirm_output_cost_correction(session, pg_book[0], "2026-10",
                 await _output_cost_command(session, pg_book[0], output_id), "tester")
-        await run_migration(session, "0146_zero_value_allocation_basis.py", "upgrade")
+        assert await session.scalar(text("SELECT to_regprocedure('accounting.zero_value_allocation_basis(integer,jsonb,integer)')")) is not None
+        assert await session.scalar(text("SELECT accounting.zero_value_allocation_runtime_version()")) == 4
         source_rows = (await session.execute(text("SELECT entry_id,id,dimensions FROM accounting.line WHERE entry_id IN (:a,:b) AND side='debit' ORDER BY entry_id,id"),
             {"a": outputs[0], "b": outputs[1]})).all()
         document = {"source": "zero-v4-basis", "source_version": 1, "document_date": "2026-10-29",
@@ -84,13 +85,21 @@ async def test_v4_basis_binds_multiple_origins_cutoff_and_preserves_disabled_wri
                 async with session.begin_nested():
                     await basis(session, pg_book[0], changed)
         verified = command.model_copy(update={"basis_digest": original})
-        with pytest.raises(DBAPIError, match="Zero-value|Zero sale"):
-            async with session.begin_nested():
-                session.add(ZeroValueInventoryDisposalReceipt(organization_id=pg_book[0], source=verified.source,
-                    source_version=1, operation="inventory_issue", entry_id=None, posting_date=verified.posting_date,
-                    policy_id=policy_id, command=verified.model_dump(mode="json"), basis_digest=original,
-                    digest=receipt_digest(pg_book[0], "tester", verified), actor="tester"))
-                await session.flush()
+        # Restore current DDL after checking the historical write-disabled stage.
+        legacy_stage = await session.begin_nested()
+        try:
+            await run_migration(session, "0147_zero_value_allocation_runtime.py", "downgrade")
+            assert await session.scalar(text("SELECT to_regprocedure('accounting.zero_value_allocation_runtime_version()')")) is None
+            with pytest.raises(DBAPIError, match="Zero-value|Zero sale"):
+                async with session.begin_nested():
+                    session.add(ZeroValueInventoryDisposalReceipt(organization_id=pg_book[0], source=verified.source,
+                        source_version=1, operation="inventory_issue", entry_id=None, posting_date=verified.posting_date,
+                        policy_id=policy_id, command=verified.model_dump(mode="json"), basis_digest=original,
+                        digest=receipt_digest(pg_book[0], "tester", verified), actor="tester"))
+                    await session.flush()
+        finally:
+            await legacy_stage.rollback()
+        assert await session.scalar(text("SELECT accounting.zero_value_allocation_runtime_version()")) == 4
         # A later value registration invalidates current approval, not its original cutoff.
         await service.post(session, pg_book[0], PostingInput(source="zero-v4-later-wip", source_version=1,
             operation="manual", document_date="2026-10-31", operation_date="2026-10-31", posting_date="2026-10-31",

@@ -11,7 +11,11 @@ from tests.accounting.test_finished_goods_inventory_postgres import (
     _output_cost_command,
     sale_document,
 )
-from tests.accounting.test_inventory_allocation_api_postgres import application, output_sources
+from tests.accounting.test_inventory_allocation_api_postgres import (
+    application,
+    inventory_identities,
+    output_sources,
+)
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_zero_value_output_cost_postgres import run_migration
 from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
@@ -51,6 +55,7 @@ async def test_allocated_sale_migration_empty_roundtrip(pg_factory):
 @pytest.mark.parametrize("vat_rate", ["0", "20"])
 async def test_allocated_zero_sale_has_one_quantity_and_real_revenue(pg_factory, pg_book, issuance_pg, method, vat_rate, monkeypatch):
     policy_id, outputs = await output_sources(pg_factory, pg_book, method, issuance=issuance_pg)
+    identities = await inventory_identities(pg_factory, pg_book)
     async with pg_factory() as session:
         await service.post(session, pg_book[0], PostingInput(source="zero-sale-reverse-wip", source_version=1,
             operation="manual", document_date="2026-10-31", operation_date="2026-10-31", posting_date="2026-10-31",
@@ -61,10 +66,8 @@ async def test_allocated_zero_sale_has_one_quantity_and_real_revenue(pg_factory,
         for output_id in outputs:
             await confirm_output_cost_correction(session, pg_book[0], "2026-10",
                 await _output_cost_command(session, pg_book[0], output_id), "tester")
-        for revision in ("0146_zero_value_allocation_basis.py", "0147_zero_value_allocation_runtime.py",
-                         "0148_zero_value_allocated_sales.py", "0149_production_material_allocations.py",
-                         "0150_zero_material_allocations.py"):
-            await run_migration(session, revision, "upgrade")
+        assert await session.scalar(text("SELECT accounting.zero_value_allocated_sale_version()")) == 4
+        assert await session.scalar(text("SELECT accounting.production_material_allocation_version()")) == 1
         if vat_rate == "20":
             for code, category in (("90.2", "income"), ("68.2", "liability")):
                 if not await session.scalar(select(Account.id).where(Account.organization_id == pg_book[0], Account.code == code)):
@@ -73,6 +76,10 @@ async def test_allocated_zero_sale_has_one_quantity_and_real_revenue(pg_factory,
                         quantity_tracking=False, cash=False, normative_ref="Synthetic"))
             await session.flush()
         document = sale_document(policy_id).model_copy(update={"lot": "", "quantity": Decimal("3.1"), "vat_rate": Decimal(vat_rate)})
+        document = sales.SaleDocument.model_validate({
+            **document.model_dump(mode="json"), **identities, "buyer_dimensions": {
+                **document.buyer_dimensions, "counterparty_id": "1", "counterparty": "supplier1",
+                "counterparty_unp": "190000001", "counterparty_revision": "1"}})
         await session.commit()
         base = f"/accounting/organizations/{pg_book[0]}/sales"
         async with AsyncClient(transport=ASGITransport(app=application(pg_factory)), base_url="http://test") as client:
