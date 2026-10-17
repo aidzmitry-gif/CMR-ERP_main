@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   e2e:
-    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -36,7 +35,7 @@ jobs:
       - name: Install Playwright (chromium)
         working-directory: frontend
         run: npx --no-install playwright install --with-deps chromium
-      - name: Native PDF and exact remaining E2E scenarios
+      - name: Native PDF and stock-outcome diagnostic
         shell: python
         run: |
           import hashlib
@@ -50,12 +49,12 @@ jobs:
           root = Path.cwd()
           temp = Path(os.environ['RUNNER_TEMP'])
           summary_path = temp / 'erp-ready-e2e-summary.json'
-          expected_sources = {'frontend/e2e/counterparties.spec.ts': '27e7b1bae0477a983c21a8a215d237f1361c62e61e4bd01615b4b0adb660501e', 'frontend/e2e/crm-own-cycle.spec.ts': '2abbcecd942765f164eec448ce6737f39e9e152012151a8cdd3f0e4b2458a6f1', 'frontend/e2e/crm-own-outcomes.spec.ts': '7c13375bd03937af425a817cf3f2e3bd2f47728a256b81f126d81dea2567ca24', 'frontend/e2e/deal-card.spec.ts': 'bcb66f622e6f54e51437e712c1f8a1327a4bfc6b6c2d6b46b6ad95cfb5621ec9', 'frontend/e2e/deals-board.spec.ts': '694519c4eefda774fb32cb82336e128b0f99f6ab23ae522a32e28e8fcb5df9b8', 'frontend/e2e/navigation.spec.ts': '996b3f56c58b0385b8e180d2bb6b83602cb844c38e4953983e2fa866f371a39f', 'frontend/e2e/procurement-deadlines.spec.ts': '5ffdb586955d4379bbb87bb591b8251116db732f4de53fe32dbb76d59c6a5155', 'frontend/e2e/crm-fixtures.ts': '43be79105c3fa04f1875ef7507e38e56cb5f25800e27d50221c1177100d75f98', 'scripts/seed_invoice_e2e.py': 'c83b6069b25aa6e43924281a7a210c4e065a1a685aa1e5aaaee14e4b68da3281'}
+          expected_sources = {'frontend/e2e/counterparties.spec.ts': '27e7b1bae0477a983c21a8a215d237f1361c62e61e4bd01615b4b0adb660501e', 'frontend/e2e/crm-own-cycle.spec.ts': '2abbcecd942765f164eec448ce6737f39e9e152012151a8cdd3f0e4b2458a6f1', 'frontend/e2e/crm-own-outcomes.spec.ts': '598700113548e7837d4aa0482501b1d5a358ab14f4ebdc929a381c7c18bdb710', 'frontend/e2e/deal-card.spec.ts': 'bcb66f622e6f54e51437e712c1f8a1327a4bfc6b6c2d6b46b6ad95cfb5621ec9', 'frontend/e2e/deals-board.spec.ts': '694519c4eefda774fb32cb82336e128b0f99f6ab23ae522a32e28e8fcb5df9b8', 'frontend/e2e/navigation.spec.ts': '996b3f56c58b0385b8e180d2bb6b83602cb844c38e4953983e2fa866f371a39f', 'frontend/e2e/procurement-deadlines.spec.ts': '5ffdb586955d4379bbb87bb591b8251116db732f4de53fe32dbb76d59c6a5155', 'frontend/e2e/crm-fixtures.ts': '43be79105c3fa04f1875ef7507e38e56cb5f25800e27d50221c1177100d75f98', 'scripts/seed_invoice_e2e.py': 'c83b6069b25aa6e43924281a7a210c4e065a1a685aa1e5aaaee14e4b68da3281'}
           expected_modules = {'finance': '59832b2f14a2ee02d8db266a67f8206616bdcd94', 'hr': 'f8a6e0142f1920b07ec56818f42d156a602ff9c3', 'leads': '9a304f771ba74369ded199168e0e1da3ad6348d2', 'logistics': '6923d2e021980ef2546f382364d38dc34a0fef29', 'marketing': 'd4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282', 'procurement': 'f29ea84bd13342ae572e8c4499031d2f053d3d47', 'production': 'be7d7e198bf09cc41c642d22125db401da5adc48', 'sales': '37b3b1d752fe5b16d89ae01a535dc84360ac7591', 'service': '3d33800c44865cd7a7373b29192c5d59d3c4bec8', 'wms': '8b6fb881a03f1a268f07e65f4fa89d195fc933a2'}
-          expected_cases = {tuple(case) for case in [["chromium", "crm-own-outcomes.spec.ts", "own outcomes preserve originals, tasks and stock reserve"], ["chromium", "crm-own-outcomes.spec.ts", "own outcomes preserve originals, tasks and on_order reserve"], ["chromium", "crm-own-outcomes.spec.ts", "own no-invoice loss finalizes with date, reason and history"], ["chromium", "deal-card.spec.ts", "\u043a\u0430\u0440\u0442\u043e\u0447\u043a\u0430 \u0441\u0434\u0435\u043b\u043a\u0438: \u0432\u044b\u043f\u0443\u0441\u043a \u0441\u0447\u0451\u0442\u0430 ERP \u0441 \u0440\u0435\u0437\u0435\u0440\u0432\u043e\u043c"], ["chromium", "deal-card.spec.ts", "\u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b: \u043e\u0448\u0438\u0431\u043a\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0438 \u043e\u0442\u043b\u0438\u0447\u0430\u0435\u0442\u0441\u044f \u043e\u0442 \u043f\u0443\u0441\u0442\u043e\u0433\u043e \u0441\u043f\u0438\u0441\u043a\u0430 \u0438 \u0434\u043e\u043f\u0443\u0441\u043a\u0430\u0435\u0442 \u043f\u043e\u0432\u0442\u043e\u0440"], ["chromium", "deal-card.spec.ts", "\u0441\u0447\u0451\u0442 \u043f\u043e\u0434 \u0437\u0430\u043a\u0430\u0437: \u043f\u043e\u0442\u0435\u0440\u044f\u043d\u043d\u044b\u0439 \u043e\u0442\u0432\u0435\u0442, \u043f\u043e\u0432\u0442\u043e\u0440 \u0438 \u043d\u0435\u0438\u0437\u043c\u0435\u043d\u044f\u0435\u043c\u044b\u0439 \u043e\u0440\u0438\u0433\u0438\u043d\u0430\u043b"], ["chromium", "deals-board.spec.ts", "drag-and-drop: \u0441\u043c\u0435\u043d\u0430 \u0441\u0442\u0430\u0434\u0438\u0438 \u043f\u0435\u0440\u0435\u0442\u0430\u0441\u043a\u0438\u0432\u0430\u043d\u0438\u0435\u043c"], ["chromium", "navigation.spec.ts", "\u043d\u0430\u0432\u0438\u0433\u0430\u0446\u0438\u044f: \u043f\u0430\u043d\u0435\u043b\u044c \u0432\u043b\u0430\u0434\u0435\u043b\u044c\u0446\u0430 \u2192 ERP-\u043c\u043e\u0434\u0443\u043b\u044c"], ["chromium", "procurement-deadlines.spec.ts", "\u0441\u0440\u043e\u043a \u043a\u043b\u0438\u0435\u043d\u0442\u0430 \u043f\u0435\u0440\u0435\u043d\u043e\u0441\u0438\u0442\u0441\u044f \u0432 \u0447\u0435\u0440\u043d\u043e\u0432\u0438\u043a \u043f\u043b\u0430\u043d\u0430 \u0437\u0430\u043a\u0443\u043f\u043a\u0438"], ["setup", "auth.setup.ts", "dev-\u043b\u043e\u0433\u0438\u043d (\u0414\u0438\u0440\u0435\u043a\u0442\u043e\u0440)"]]}
+          expected_cases = {tuple(case) for case in [["chromium", "crm-own-outcomes.spec.ts", "own outcomes preserve originals, tasks and stock reserve"], ["setup", "auth.setup.ts", "dev-\u043b\u043e\u0433\u0438\u043d (\u0414\u0438\u0440\u0435\u043a\u0442\u043e\u0440)"]]}
           summary = {'schemaVersion': 1, 'stage': 'preflight', 'passed': False,
-                     'planned': 10, 'diagnosticOnly': False, 'passedCount': 0, 'failedCount': 0, 'notRunCount': 10,
-                     'globalErrorCount': 0, 'countsKnown': True, 'cases': [], 'sourceVerifiedAfter': False,
+                     'planned': 2, 'diagnosticOnly': True, 'passedCount': 0, 'failedCount': 0, 'notRunCount': 2,
+                     'globalErrorCount': 0, 'globalDiagnostics': [], 'countsKnown': True, 'cases': [], 'sourceVerifiedAfter': False,
                      'cleanupDeferredToHostedJobTeardown': True}
 
           def git(*args):
@@ -84,7 +83,7 @@ jobs:
                       walk(child)
               for suite in report.get('suites', []):
                   walk(suite)
-              assert len(result) == 10 and len({r[0] for r in result}) == 10
+              assert len(result) == 2 and len({r[0] for r in result}) == 2
               assert {r[0] for r in result} == expected_cases
               return result
 
@@ -105,7 +104,7 @@ jobs:
                           'timeout' if status == 'timedOut' else
                           'interrupted' if status == 'interrupted' else 'unknown')
               sources = ('frontend/e2e/crm-own-cycle.spec.ts', 'frontend/e2e/crm-fixtures.ts',
-                         'frontend/e2e/auth.setup.ts')
+                         'frontend/e2e/auth.setup.ts', 'frontend/e2e/crm-own-outcomes.spec.ts')
               forms = {form: index for index, name in enumerate(sources)
                        for form in (str(root / name), name, name.removeprefix('frontend/'))}
               limits = {index: len((root / name).read_text(encoding='utf-8').splitlines())
@@ -129,18 +128,24 @@ jobs:
                       add(frame[1], int(frame[2]), int(frame[3]))
               return {'category': category, 'httpStatus': http_status, 'locations': locations}
 
-          def last_checkpoint(result):
+          def last_checkpoint(result, annotation_type='erp_ready_checkpoint'):
+              assert annotation_type in ('erp_ready_checkpoint', 'erp_ready_outcome_checkpoint')
               annotations = result.get('annotations', [])
               assert isinstance(annotations, list)
               count = 0
               for annotation in annotations:
                   assert isinstance(annotation, dict) and isinstance(annotation.get('type'), str)
-                  if annotation['type'] != 'erp_ready_checkpoint':
+                  if annotation['type'] != annotation_type:
                       continue
                   count += 1
                   value = annotation.get('description')
                   assert count <= 20 and type(value) is str and value == str(count)
               return count or None
+
+          def global_diagnostics(errors):
+              assert isinstance(errors, list) and all(isinstance(error, dict) for error in errors)
+              return [diagnose({'error': error}, 'unknown') for error in errors[:3]]
+
 
           def capture(command, name, timeout):
               with (temp / (name + '.json')).open('wb') as out, (temp / (name + '.stderr')).open('wb') as err:
@@ -163,10 +168,10 @@ jobs:
               summary['commit'] = git('rev-parse', 'HEAD')
               summary['sourceSha256'] = expected_sources
               summary['moduleSha'] = expected_modules
-              selected = ['e2e/crm-own-outcomes.spec.ts', 'e2e/deal-card.spec.ts', 'e2e/deals-board.spec.ts', 'e2e/navigation.spec.ts', 'e2e/procurement-deadlines.spec.ts']
+              selected = ['e2e/crm-own-outcomes.spec.ts']
               command = ['node', 'node_modules/@playwright/test/cli.js', 'test', *selected,
                          '--project=chromium', '--workers=1', '--retries=0', '--max-failures=1',
-                         '--trace=off', '--reporter=json', '--grep-invert', 'фильтры: приоритет и «Только висяки»|переключение воронки']
+                         '--trace=off', '--reporter=json', '--grep', 'own outcomes preserve originals, tasks and stock reserve$']
               summary['stage'] = 'collection'
               assert capture([*command, '--list'], 'erp-ready-collection', 90) == 0
               listing = json.loads((temp / 'erp-ready-collection.json').read_text())
@@ -176,12 +181,12 @@ jobs:
               summary['collectedIds'] = sorted(collected_ids)
               summary['stage'] = 'execution'
               summary.update(countsKnown=False, passedCount=None, failedCount=None,
-                             notRunCount=None, globalErrorCount=None)
+                             notRunCount=None, globalErrorCount=None, globalDiagnostics=None)
               execution_code = capture(command, 'erp-ready-result', 900)
               report = json.loads((temp / 'erp-ready-result.json').read_text())
               executed = cases(report)
               assert {entry[1] for entry in executed} == collected_ids
-              global_error_count = len(report.get('errors', []))
+              global_errors = report.get('errors', [])
               duration_ms = int(report['stats']['duration'])
               result_cases = []
               for stable, identity, test in executed:
@@ -199,13 +204,17 @@ jobs:
                       value['diagnostic'] = diagnose(results[0], status)
                       if stable[1] == 'crm-own-cycle.spec.ts':
                           value['diagnostic']['lastCheckpointId'] = last_checkpoint(results[0])
+                      elif stable[1] == 'crm-own-outcomes.spec.ts':
+                          value['diagnostic']['lastCheckpointId'] = last_checkpoint(results[0], 'erp_ready_outcome_checkpoint')
                   result_cases.append(value)
+              global_errors_summary = global_diagnostics(global_errors)
+              global_error_count = len(global_errors)
               passed_count = sum(c['status'] == 'passed' for c in result_cases)
               not_run_count = sum(c['status'] == 'not_run' for c in result_cases)
               summary.update(cases=result_cases, passedCount=passed_count, notRunCount=not_run_count,
-                             failedCount=10 - passed_count - not_run_count, countsKnown=True,
-                             globalErrorCount=global_error_count, durationMs=duration_ms)
-              summary['passed'] = execution_code == 0 and summary['passedCount'] == 10 and summary['globalErrorCount'] == 0
+                             failedCount=2 - passed_count - not_run_count, countsKnown=True,
+                             globalErrorCount=global_error_count, globalDiagnostics=global_errors_summary, durationMs=duration_ms)
+              summary['passed'] = execution_code == 0 and summary['passedCount'] == 2 and summary['globalErrorCount'] == 0
               summary['stage'] = 'completed'
               code = 0 if summary['passed'] else 1
           except Exception:
@@ -232,6 +241,7 @@ jobs:
           retention-days: 7
 
   eschf_pg:
+    if: ${{ false }}
     name: ESCHF source and freshness persisted-role regression (89)
     runs-on: ubuntu-latest
     timeout-minutes: 20

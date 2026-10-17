@@ -7,13 +7,16 @@ for (const mode of ['stock', 'on_order'] as const) {
   test(`own outcomes preserve originals, tasks and ${mode} reserve`, async ({ page, context, browser, baseURL }) => {
     test.setTimeout(180_000);
     const nonce = `${mode}-${Date.now()}`;
+    test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '1' });
     const counterparty = await createSyntheticCounterparty(browser, `Outcome ${nonce}`, baseURL, 2901);
+    test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '2' });
     await context.clearCookies();
     await page.goto('/login');
     await page.getByLabel('Сотрудник').selectOption('e2e_owner');
     await page.getByRole('button', { name: 'Войти', exact: true }).click();
     await expect(page).not.toHaveURL(/\/login/);
     // Synthetic prerequisites use the real own API; outcome and loss retry use the UI.
+    test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '3' });
     const { client, deal } = await createSyntheticCrmDeal(page.request, counterparty, {
       ownerId: 2901, number: `E2E-OUTCOME-${nonce}`, title: 'Synthetic outcome',
       nextStep: 'Согласовать доставку', nextStepAt: '2026-09-20T07:00:00',
@@ -22,20 +25,26 @@ for (const mode of ['stock', 'on_order'] as const) {
     expect(client.counterparty_id).toBe(counterparty.id);
     expect(deal.crm_client_id).toBe(client.id);
     const path = `/api/sales/deals/${deal.id}`;
+    test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '4' });
     await page.goto(`/crm/deals/${deal.id}`);
     await page.getByPlaceholder('Что сделать…').fill(`Проверить ${nonce}`);
     await page.getByTitle('Срок (необязательно)').fill('2026-09-21T10:00');
     await page.getByRole('button', { name: 'Задача', exact: true }).click();
     await expect(page.getByText(`Проверить ${nonce}`, { exact: true })).toBeVisible();
+    test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '5' });
     const message = await page.request.post(path + '/messages', { data: {
       text: `History ${nonce}`, channel: 'internal', request_key: `history-${nonce}`,
     } });
     expect(message.status()).toBe(201);
+    test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '6' });
     const item = await addSyntheticDealItem(page, deal.id, mode === 'stock' ? 'QA-STOCK' : 'QA-ORDER');
     expect(item.qty).toBe(2);
     expect(item.unit_price).toBe(125.5);
+    test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '7' });
     const fixture = await seedInvoiceE2E(page, deal.id, item.id, mode, { foreignBookReader: mode === 'stock' });
+    test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '8' });
     await prepareInvoiceWizard(page, fixture, mode);
+    test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '9' });
     const issueReply = page.waitForResponse(response => response.url().endsWith(`/api/sales/deals/${deal.id}/documents`)
       && response.request().method() === 'POST');
     await page.getByRole('button', { name: mode === 'stock' ? 'Выпустить счёт и зарезервировать' : 'Выпустить счёт под заказ', exact: true }).click();
@@ -70,6 +79,7 @@ for (const mode of ['stock', 'on_order'] as const) {
       return (await response.json()).filter((row: { source: string }) => row.source.startsWith(`invoice:${invoice.id}:`));
     };
     try {
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '10' });
       const before = {
         tasks: await read(path + '/tasks'), messages: await read(path + '/messages'),
         items: await read(path + '/items'), documents: await read(path + '/documents'),
@@ -101,6 +111,7 @@ for (const mode of ['stock', 'on_order'] as const) {
         await page.getByPlaceholder('Поиск сделок...').fill(deal.number);
         await page.getByTestId(`deal-card-${deal.id}`).click();
       };
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '11' });
       await openDrawer();
       const won = page.waitForResponse(r => r.url().endsWith(`/deals/${deal.id}/win`) && r.request().method() === 'POST');
       await page.getByRole('button', { name: 'Выиграна', exact: true }).click();
@@ -112,6 +123,7 @@ for (const mode of ['stock', 'on_order'] as const) {
       expect((await page.request.post(path + '/win')).status()).toBe(409);
       expect((await page.request.patch(path, { data: { stage: 'qual' } })).status()).toBe(200);
       expect((await preserved()).closed_date).toBeNull();
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '12' });
       const lossPreviewResponse = await page.request.get(`/api/sales/organizations/${fixture.organization}/deals/${deal.id}/loss-preview`);
       expect(lossPreviewResponse.status()).toBe(200);
       const lossPreview = await lossPreviewResponse.json();
@@ -155,15 +167,18 @@ for (const mode of ['stock', 'on_order'] as const) {
         }
         return route.continue();
       });
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '13' });
       await requestLoss.click();
       await expect(page.getByText(/Результат исходной команды не установлен/)).toBeVisible();
       const retryLoss = page.getByRole('button', { name: 'Повторить исходную команду', exact: true });
       await expect(retryLoss).toBeEnabled();
       await preserved();
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '14' });
       await retryLoss.click();
       await expect(page.getByText(/ожидает завершения/)).toBeVisible();
       await expect(page.getByRole('button', { name: 'Завершить отказ', exact: true })).toBeDisabled();
       expect(attempts).toBe(2);
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '15' });
       const submissionKey = submission?.request_key;
       if (typeof submissionKey !== 'string') throw new Error('Loss request key was not retained');
       const lossRecord = await read(`/api/sales/organizations/${fixture.organization}/deals/${deal.id}/loss-requests/${submissionKey}`);
@@ -187,6 +202,7 @@ for (const mode of ['stock', 'on_order'] as const) {
       const money = page.getByRole('region', { name: 'Оплата и деньги', exact: true });
       await expect(money.getByText('Нет данных', { exact: true })).toHaveCount(2);
       await page.screenshot({ path: test.info().outputPath(`outcome-${mode}.png`), fullPage: true });
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '16' });
       const foreign = await browser.newContext({ baseURL });
       try {
         const other = await foreign.newPage();
@@ -207,6 +223,7 @@ for (const mode of ['stock', 'on_order'] as const) {
         expect((await other.request.patch(path, { data: { stage: 'qual' } })).status()).toBe(404);
         expect((await other.request.get(`/api/sales/documents/${invoice.id}/render`)).status()).toBe(404);
       } finally { await foreign.close(); }
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '17' });
       expect(await preserved()).toEqual(afterPending);
       await writeFile(test.info().outputPath('preservation.json'), JSON.stringify({ mode, deal_id: deal.id, before, afterPending }, null, 2));
     } finally { await control.close(); }
