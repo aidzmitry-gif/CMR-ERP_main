@@ -1,5 +1,6 @@
 """A chief's fact review is sourced, scoped and revisable without posting."""
 import base64
+import os
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -36,7 +37,7 @@ async def binding(client, db, org_id: int, name: str) -> int:
 async def test_fact_review_is_append_only_and_candidate_checks_current_source(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     org_id = book[0]
     binding_id = await binding(client, db, org_id, "Synthetic Employee")
@@ -111,7 +112,7 @@ async def test_fact_review_is_append_only_and_candidate_checks_current_source(
 async def test_fact_review_rejects_other_book_closed_period_and_non_chief(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     org_id = book[0]
     binding_id = await binding(client, db, org_id, "First Employee")

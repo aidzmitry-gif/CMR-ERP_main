@@ -1,5 +1,6 @@
 """A monthly gross receipt must account for each known employer binding."""
 import base64
+import os
 from datetime import date
 from uuid import uuid4
 
@@ -62,7 +63,7 @@ def _file(kind, *, binding_id=None, reference="source"):
 async def test_mixed_accrual_and_individual_zero_cover_all_known_bindings(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     prefix = f"/accounting/organizations/{book[0]}"
     first_employee, first_id = await _binding(client, db, prefix, "First employee")

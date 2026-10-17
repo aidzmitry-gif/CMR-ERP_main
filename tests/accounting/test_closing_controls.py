@@ -1,4 +1,5 @@
 import base64
+import os
 from datetime import date
 from decimal import Decimal
 from uuid import uuid4
@@ -238,7 +239,7 @@ async def test_known_employment_needs_month_payroll_source_before_close(
         await service.validate_close_period(db, book[0], "2026-10", close)
 
     root = tmp_path / "payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     raw = b"%PDF-1.7\nsynthetic chief zero-accrual statement\n"
     command = {
@@ -373,7 +374,7 @@ async def test_gross_payroll_close_requires_statutory_source_or_reviewed_zero(
         await service.validate_close_period(db, book[0], "2026-10", close)
 
     root = tmp_path / "payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     raw = b"%PDF-1.7\nsynthetic reviewed statement: no deductions or contributions\n"
     request_key = str(uuid4())
@@ -464,7 +465,7 @@ async def test_statutory_import_covers_each_gross_binding_or_individual_zero(
         await service.validate_close_period(db, book[0], "2026-10", close)
 
     root = tmp_path / "payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     saved = await client.post(prefix + "/payroll-evidence-files", json={
         "request_key": str(uuid4()), "kind": "payroll_stat_zero_person",

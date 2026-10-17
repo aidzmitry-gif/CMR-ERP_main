@@ -1,5 +1,6 @@
 """Monthly source roster must stay aligned with the book before close."""
 import base64
+import os
 from uuid import uuid4
 
 import pytest
@@ -38,7 +39,7 @@ async def bind_employee(client, db, prefix, name):
 async def test_population_review_rejects_partial_roster_and_requires_new_revision(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     prefix = f"/accounting/organizations/{book[0]}"
     first_employee, first_binding = await bind_employee(client, db, prefix, "First worker")
@@ -98,7 +99,7 @@ async def test_population_review_rejects_partial_roster_and_requires_new_revisio
 async def test_population_review_requires_chief_and_scoped_source(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     prefix = f"/accounting/organizations/{book[0]}"
     source = await client.post(prefix + "/payroll-evidence-files", json=roster_file())

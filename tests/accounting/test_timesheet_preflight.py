@@ -3,6 +3,7 @@
 import base64
 import calendar
 import json
+import os
 from datetime import date
 from uuid import uuid4
 from zipfile import ZipFile
@@ -134,7 +135,7 @@ def test_employee_after_blank_row_is_not_silently_ignored(tmp_path):
 async def test_stored_timesheet_preflight_keeps_scope_and_source_bytes(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     employee = Employee(full_name="Synthetic Workbook Employee", department="repair")
     db.add(employee)
