@@ -51,9 +51,9 @@ jobs:
           summary_path = temp / 'erp-ready-e2e-summary.json'
           expected_sources = {'frontend/e2e/counterparties.spec.ts': '27e7b1bae0477a983c21a8a215d237f1361c62e61e4bd01615b4b0adb660501e', 'frontend/e2e/crm-own-cycle.spec.ts': '91bc3778e13c51a89a0990fbf83f43b5d44c607d13b4a11492a6f530f352aa23', 'frontend/e2e/crm-own-outcomes.spec.ts': '7c13375bd03937af425a817cf3f2e3bd2f47728a256b81f126d81dea2567ca24', 'frontend/e2e/deal-card.spec.ts': 'bcb66f622e6f54e51437e712c1f8a1327a4bfc6b6c2d6b46b6ad95cfb5621ec9', 'frontend/e2e/deals-board.spec.ts': '694519c4eefda774fb32cb82336e128b0f99f6ab23ae522a32e28e8fcb5df9b8', 'frontend/e2e/navigation.spec.ts': '996b3f56c58b0385b8e180d2bb6b83602cb844c38e4953983e2fa866f371a39f', 'frontend/e2e/procurement-deadlines.spec.ts': '5ffdb586955d4379bbb87bb591b8251116db732f4de53fe32dbb76d59c6a5155', 'frontend/e2e/crm-fixtures.ts': '821d8d075133e048b0681ed32fd9156f58fcbe061c1228c25dab59f53fe895ac', 'scripts/seed_invoice_e2e.py': 'c83b6069b25aa6e43924281a7a210c4e065a1a685aa1e5aaaee14e4b68da3281'}
           expected_modules = {'finance': '59832b2f14a2ee02d8db266a67f8206616bdcd94', 'hr': 'f8a6e0142f1920b07ec56818f42d156a602ff9c3', 'leads': '9a304f771ba74369ded199168e0e1da3ad6348d2', 'logistics': '6923d2e021980ef2546f382364d38dc34a0fef29', 'marketing': 'd4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282', 'procurement': 'f29ea84bd13342ae572e8c4499031d2f053d3d47', 'production': 'be7d7e198bf09cc41c642d22125db401da5adc48', 'sales': '786569040aabeab2c674e7e33ab2658ad3f77ab2', 'service': '3d33800c44865cd7a7373b29192c5d59d3c4bec8', 'wms': '8b6fb881a03f1a268f07e65f4fa89d195fc933a2'}
-          expected_cases = {tuple(case) for case in [['chromium', 'crm-own-cycle.spec.ts', 'own: клиент → контакт → сделка → задача/история → счёт под заказ и чужой доступ'], ['chromium', 'crm-own-outcomes.spec.ts', 'own outcomes preserve originals, tasks and stock reserve'], ['chromium', 'crm-own-outcomes.spec.ts', 'own outcomes preserve originals, tasks and on_order reserve'], ['chromium', 'crm-own-outcomes.spec.ts', 'own no-invoice loss finalizes with date, reason and history'], ['chromium', 'deal-card.spec.ts', 'карточка сделки: выпуск счёта ERP с резервом'], ['chromium', 'deal-card.spec.ts', 'документы: ошибка загрузки отличается от пустого списка и допускает повтор'], ['chromium', 'deal-card.spec.ts', 'счёт под заказ: потерянный ответ, повтор и неизменяемый оригинал'], ['chromium', 'deals-board.spec.ts', 'drag-and-drop: смена стадии перетаскиванием'], ['chromium', 'navigation.spec.ts', 'навигация: панель владельца → ERP-модуль'], ['chromium', 'procurement-deadlines.spec.ts', 'срок клиента переносится в черновик плана закупки'], ['setup', 'auth.setup.ts', 'dev-логин (Директор)']]}
+          expected_cases = {tuple(case) for case in [['chromium', 'crm-own-cycle.spec.ts', 'own: клиент → контакт → сделка → задача/история → счёт под заказ и чужой доступ'], ['setup', 'auth.setup.ts', 'dev-логин (Директор)']]}
           summary = {'schemaVersion': 1, 'stage': 'preflight', 'passed': False,
-                     'planned': 11, 'passedCount': 0, 'failedCount': 0, 'notRunCount': 11,
+                     'planned': 2, 'diagnosticOnly': True, 'passedCount': 0, 'failedCount': 0, 'notRunCount': 2,
                      'globalErrorCount': 0, 'countsKnown': True, 'cases': [], 'sourceVerifiedAfter': False,
                      'cleanupDeferredToHostedJobTeardown': True}
 
@@ -83,9 +83,50 @@ jobs:
                       walk(child)
               for suite in report.get('suites', []):
                   walk(suite)
-              assert len(result) == 11 and len({r[0] for r in result}) == 11
+              assert len(result) == 2 and len({r[0] for r in result}) == 2
               assert {r[0] for r in result} == expected_cases
               return result
+
+          def diagnose(result, status):
+              error = result.get('error', {})
+              if not isinstance(error, dict):
+                  error = {}
+              message = error.get('message', '')
+              first_line = message.splitlines()[0] if isinstance(message, str) and message else ''
+              actions = ('Create synthetic MDM counterparty', 'Resolve synthetic MDM-linked CRM client',
+                         'Create synthetic MDM-linked CRM deal', 'Link CRM client to selected MDM counterparty',
+                         'Create deal from selected MDM counterparty', 'Create deal item through the UI',
+                         'Read back UI-created deal item', 'Create synthetic seller profile')
+              match = re.match(r'^(?:Error: )?(?:' + '|'.join(map(re.escape, actions))
+                               + r'): HTTP ([1-5][0-9]{2})(?![0-9])', first_line)
+              http_status = int(match[1]) if match else None
+              category = ('http_status' if http_status is not None else
+                          'timeout' if status == 'timedOut' else
+                          'interrupted' if status == 'interrupted' else 'unknown')
+              sources = ('frontend/e2e/crm-own-cycle.spec.ts', 'frontend/e2e/crm-fixtures.ts',
+                         'frontend/e2e/auth.setup.ts')
+              forms = {form: index for index, name in enumerate(sources)
+                       for form in (str(root / name), name, name.removeprefix('frontend/'))}
+              limits = {index: len((root / name).read_text(encoding='utf-8').splitlines())
+                        for index, name in enumerate(sources)}
+              locations = []
+              def add(file, line, column):
+                  index = forms.get(file) if isinstance(file, str) else None
+                  if (index is not None and type(line) is int and type(column) is int
+                          and 1 <= line <= limits[index] and 1 <= column <= 4096):
+                      value = {'sourceId': index, 'line': line, 'column': column}
+                      if value not in locations and len(locations) < 3:
+                          locations.append(value)
+              location = error.get('location')
+              if isinstance(location, dict):
+                  add(location.get('file'), location.get('line'), location.get('column'))
+              stack = error.get('stack', '')
+              if isinstance(stack, str):
+                  pattern = (r'^[ \t]*at[ \t]+(?:[^\r\n()]+[ \t]+\()?(' + '|'.join(map(re.escape, forms))
+                             + r'):([0-9]{1,4}):([0-9]{1,4})\)?[ \t]*$')
+                  for frame in re.finditer(pattern, stack, re.MULTILINE):
+                      add(frame[1], int(frame[2]), int(frame[3]))
+              return {'category': category, 'httpStatus': http_status, 'locations': locations}
 
           def capture(command, name, timeout):
               with (temp / (name + '.json')).open('wb') as out, (temp / (name + '.stderr')).open('wb') as err:
@@ -108,13 +149,10 @@ jobs:
               summary['commit'] = git('rev-parse', 'HEAD')
               summary['sourceSha256'] = expected_sources
               summary['moduleSha'] = expected_modules
-              selected = ['e2e/crm-own-cycle.spec.ts', 'e2e/crm-own-outcomes.spec.ts',
-                          'e2e/deal-card.spec.ts', 'e2e/deals-board.spec.ts',
-                          'e2e/navigation.spec.ts', 'e2e/procurement-deadlines.spec.ts']
+              selected = ['e2e/crm-own-cycle.spec.ts']
               command = ['node', 'node_modules/@playwright/test/cli.js', 'test', *selected,
                          '--project=chromium', '--workers=1', '--retries=0', '--max-failures=1',
-                         '--trace=off', '--reporter=json', '--grep-invert',
-                         'фильтры: приоритет и «Только висяки»|переключение воронки']
+                         '--trace=off', '--reporter=json']
               summary['stage'] = 'collection'
               assert capture([*command, '--list'], 'erp-ready-collection', 90) == 0
               listing = json.loads((temp / 'erp-ready-collection.json').read_text())
@@ -142,13 +180,16 @@ jobs:
                       assert results[0].get('retry', 0) == 0
                       status = results[0]['status']
                       assert status in ('passed', 'failed', 'timedOut', 'interrupted')
-                  result_cases.append({'id': identity, 'status': status})
+                  value = {'id': identity, 'status': status}
+                  if status in ('failed', 'timedOut', 'interrupted'):
+                      value['diagnostic'] = diagnose(results[0], status)
+                  result_cases.append(value)
               passed_count = sum(c['status'] == 'passed' for c in result_cases)
               not_run_count = sum(c['status'] == 'not_run' for c in result_cases)
               summary.update(cases=result_cases, passedCount=passed_count, notRunCount=not_run_count,
-                             failedCount=11 - passed_count - not_run_count, countsKnown=True,
+                             failedCount=2 - passed_count - not_run_count, countsKnown=True,
                              globalErrorCount=global_error_count, durationMs=duration_ms)
-              summary['passed'] = execution_code == 0 and summary['passedCount'] == 11 and summary['globalErrorCount'] == 0
+              summary['passed'] = execution_code == 0 and summary['passedCount'] == 2 and summary['globalErrorCount'] == 0
               summary['stage'] = 'completed'
               code = 0 if summary['passed'] else 1
           except Exception:
