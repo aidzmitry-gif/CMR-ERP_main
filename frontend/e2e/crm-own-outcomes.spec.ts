@@ -164,13 +164,20 @@ for (const mode of ['stock', 'on_order'] as const) {
       const lossPreviewResponse = await page.request.get(`/api/sales/organizations/${fixture.organization}/deals/${deal.id}/loss-preview`);
       expect(lossPreviewResponse.status()).toBe(200);
       const lossPreview = await lossPreviewResponse.json();
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '22' });
       await openDrawer();
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '23' });
       await page.getByRole('button', { name: 'Отказ', exact: true }).click();
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '24' });
       const requestLoss = page.getByRole('button', { name: 'Запросить отказ', exact: true });
       await expect(requestLoss).toBeDisabled();
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '25' });
       await page.getByLabel('Причина отказа').selectOption(fixture.loss_reason);
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '26' });
       await expect(requestLoss).toBeEnabled();
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '27' });
       await page.getByPlaceholder('Комментарий (необязательно)').fill('Synthetic loss');
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '28' });
       let submission: Record<string, unknown> | null = null;
       let committedLoss: Record<string, unknown> | null = null;
       let attempts = 0;
@@ -205,18 +212,18 @@ for (const mode of ['stock', 'on_order'] as const) {
         }
         return route.continue();
       });
-      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '22' });
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '29' });
       await requestLoss.click();
       await expect(page.getByText(/Результат исходной команды не установлен/)).toBeVisible();
       const retryLoss = page.getByRole('button', { name: 'Повторить исходную команду', exact: true });
       await expect(retryLoss).toBeEnabled();
       await preserved();
-      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '23' });
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '30' });
       await retryLoss.click();
       await expect(page.getByText(/ожидает завершения/)).toBeVisible();
       await expect(page.getByRole('button', { name: 'Завершить отказ', exact: true })).toBeDisabled();
       expect(attempts).toBe(2);
-      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '24' });
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '31' });
       const submissionKey = submission?.request_key;
       if (typeof submissionKey !== 'string') throw new Error('Loss request key was not retained');
       const lossRecord = await read(`/api/sales/organizations/${fixture.organization}/deals/${deal.id}/loss-requests/${submissionKey}`);
@@ -240,7 +247,7 @@ for (const mode of ['stock', 'on_order'] as const) {
       const money = page.getByRole('region', { name: 'Оплата и деньги', exact: true });
       await expect(money.getByText('Нет данных', { exact: true })).toHaveCount(2);
       await page.screenshot({ path: test.info().outputPath(`outcome-${mode}.png`), fullPage: true });
-      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '25' });
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '32' });
       const foreign = await browser.newContext({ baseURL });
       try {
         const other = await foreign.newPage();
@@ -261,7 +268,7 @@ for (const mode of ['stock', 'on_order'] as const) {
         expect((await other.request.patch(path, { data: { stage: 'qual' } })).status()).toBe(404);
         expect((await other.request.get(`/api/sales/documents/${invoice.id}/render`)).status()).toBe(404);
       } finally { await foreign.close(); }
-      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '26' });
+      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '33' });
       expect(await preserved()).toEqual(afterPending);
       await writeFile(test.info().outputPath('preservation.json'), JSON.stringify({ mode, deal_id: deal.id, before, afterPending }, null, 2));
     } finally { await control.close(); }

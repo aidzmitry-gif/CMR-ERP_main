@@ -31,7 +31,8 @@ async function server(invoices = false) {
     if (url.endsWith("loss-context")) return ok({ deal_id: 1, principal: s.principal, organization_id: s.unowned ? null : 7,
       organization: s.unowned ? null : { id: 7, name: "Подтверждённая компания", unp: "123" }, mapping_required: s.unowned,
       funnel: snapshot.funnel, stage: s.record?.state === "finalized" ? snapshot.lost_stage : snapshot.stage,
-      lost_stage: snapshot.lost_stage, pending_request_id: s.record?.state === "pending" ? s.record.request_id : null,
+      lost_stage: snapshot.lost_stage, lost_stages: snapshot.lost_stage ? [snapshot.lost_stage] : [],
+      pending_request_id: s.record?.state === "pending" ? s.record.request_id : null,
       latest_request_id: s.record?.request_id ?? null, latest_request_state: s.record?.state ?? null });
     if (url.endsWith("loss-preview")) return ok({ organization_id: 7, deal_id: 1, snapshot, composition_digest: await hash(snapshot),
       pending_request_id: s.record?.state === "pending" ? s.record.request_id : null, invoices: rows() });
@@ -58,6 +59,35 @@ async function submit() {
   fireEvent.click(screen.getByRole("button", { name: "Запросить отказ" }));
   await screen.findByLabelText("Основание завершения или отзыва");
 }
+it("uses a late supplied reason list on the same deal without choosing or sending automatically", async () => {
+  const { s } = await server();
+  const onCancel = vi.fn();
+  const view = render(<LoseDealModal dealId="1" dealLabel="Сделка 1" reasons={reasons} onCancel={onCancel} />);
+  await screen.findByRole("option", { name: "Цена" });
+  view.rerender(<LoseDealModal dealId="1" dealLabel="Сделка 1"
+    reasons={[{ code: "new_reason", title: "Новая причина" }]} onCancel={onCancel} />);
+  expect(await screen.findByRole("option", { name: "Новая причина" })).toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: "Цена" })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Причина отказа")).toHaveValue("");
+  expect(screen.getByRole("button", { name: "Запросить отказ" })).toBeDisabled();
+  expect(s.posts).toHaveLength(0);
+  fireEvent.change(screen.getByLabelText("Причина отказа"), { target: { value: "new_reason" } });
+  fireEvent.click(screen.getByRole("button", { name: "Запросить отказ" }));
+  await screen.findByLabelText("Основание завершения или отзыва");
+  expect(s.posts).toHaveLength(1);
+  expect(JSON.parse(s.posts[0].body).reason_code).toBe("new_reason");
+});
+it("loads standalone reasons and sends only the explicitly selected reason", async () => {
+  const { s } = await server();
+  render(<LoseDealModal dealId="1" dealLabel="Сделка 1" onCancel={vi.fn()} />);
+  await screen.findByRole("option", { name: "Цена" });
+  expect(screen.getByLabelText("Причина отказа")).toHaveValue("");
+  expect(screen.getByRole("button", { name: "Запросить отказ" })).toBeDisabled();
+  expect(s.posts).toHaveLength(0);
+  await submit();
+  expect(s.posts).toHaveLength(1);
+  expect(JSON.parse(s.posts[0].body).reason_code).toBe("price");
+});
 it("keeps pending on its stage; only exact finalized receipt invokes completion", async () => {
   const { s } = await server(); const done = vi.fn();
   render(<LoseDealModal dealId="1" dealLabel="Сделка 1" reasons={reasons} onCancel={vi.fn()} onFinalized={done} />);

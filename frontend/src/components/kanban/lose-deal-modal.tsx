@@ -41,7 +41,8 @@ export function LoseDealModal({ dealId, dealLabel, reasons: suppliedReasons, onC
   const [preview, setPreview] = useState<LossPreview | null>(null);
   const [record, setRecord] = useState<LossRecord | null>(null);
   const [journal, setJournal] = useState<Journal>({ raw: null, attempt: null });
-  const [reasons, setReasons] = useState<LossReason[]>(suppliedReasons ?? []);
+  const [fetchedReasons, setFetchedReasons] = useState<LossReason[]>([]);
+  const reasons = suppliedReasons ?? fetchedReasons;
   const [reason, setReason] = useState("");
   const [comment, setComment] = useState("");
   const [empty, setEmpty] = useState(false);
@@ -88,7 +89,7 @@ export function LoseDealModal({ dealId, dealLabel, reasons: suppliedReasons, onC
     void load(token).catch(e => { if (alive) setError(message(e)); }).finally(() => {
       if (alive) { locked.current = false; setBusy(false); }
     });
-    if (!suppliedReasons) void fetchLossReasons().then(rows => { if (alive) setReasons(rows); });
+    if (!suppliedReasons) void fetchLossReasons().then(rows => { if (alive) setFetchedReasons(rows); });
     return () => { alive = false; epoch.current = token + 1; };
     // A new deal gets an entirely new operation epoch, including A -> B -> A.
     // eslint-disable-next-line react-hooks/exhaustive-deps
