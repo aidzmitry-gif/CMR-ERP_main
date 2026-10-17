@@ -5,12 +5,15 @@ import { addSyntheticDealItem, createSyntheticCounterparty, createSyntheticCrmCl
 test("own: клиент → контакт → сделка → задача/история → счёт под заказ и чужой доступ", async ({ page, context, browser, baseURL }) => {
   test.setTimeout(180_000);
   const name = `OWN E2E ${Date.now()}`;
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "1" });
   const counterparty = await createSyntheticCounterparty(browser, name, baseURL, 2901);
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "2" });
   await context.clearCookies();
   await page.goto("/login");
   await page.getByLabel("Сотрудник").selectOption("e2e_owner");
   await page.getByRole("button", { name: "Войти", exact: true }).click();
   await expect(page).not.toHaveURL(/\/login/);
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "3" });
   const client = await createSyntheticCrmClient(page.request, counterparty, 2901);
   expect(client.counterparty_id).toBe(counterparty.id);
   expect(client.owner_id).toBe(2901);
@@ -38,6 +41,7 @@ test("own: клиент → контакт → сделка → задача/и�
   expect(contactKeys[0]).toBe(contactKeys[1]);
   await page.reload();
   await expect(page.getByRole("listitem").filter({ hasText: "Анна Контрольная" })).toBeVisible();
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "4" });
   await page.getByRole("button", { name: "Новая сделка клиента", exact: true }).click();
   const dealForm = page.locator('form.shadow-pop');
   await dealForm.getByPlaceholder("CRM-2024-0200").fill(`E2E-OWN-${Date.now()}`);
@@ -55,6 +59,7 @@ test("own: клиент → контакт → сделка → задача/и�
   await page.getByRole("link", { name: new RegExp(deal.number) }).click();
   await expect(page).toHaveURL(new RegExp(`/crm/deals/${deal.id}$`));
   await expect(page.getByRole("listitem").filter({ hasText: "Анна Контрольная" })).toBeVisible();
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "5" });
   await page.getByPlaceholder("Что сделать…").fill("Согласовать доставку");
   await page.getByTitle("Срок (необязательно)").fill("2026-09-15T10:00");
   await page.getByRole("button", { name: "Задача", exact: true }).click();
@@ -79,16 +84,21 @@ test("own: клиент → контакт → сделка → задача/и�
   expect(historyKeys).toHaveLength(2);
   expect(historyKeys[0]).toBe(historyKeys[1]);
   expect(await (await page.request.get(`/api/sales/deals/${deal.id}/messages`)).json()).toHaveLength(1);
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "6" });
   const item = await addSyntheticDealItem(page, deal.id, "QA-ORDER");
   expect(item.qty).toBe(2);
   expect(item.unit_price).toBe(125.5);
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "7" });
   const fixture = await seedInvoiceE2E(page, deal.id, item.id, "on_order");
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "8" });
   await prepareInvoiceWizard(page, fixture, "on_order");
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "13" });
   const issueReply = page.waitForResponse(response => response.url().endsWith(`/api/sales/deals/${deal.id}/documents`)
     && response.request().method() === "POST");
   await page.getByRole("button", { name: "Выпустить счёт под заказ", exact: true }).click();
   expect((await issueReply).status()).toBe(201);
   await expect(page.getByRole("link", { name: "Открыть оригинал", exact: true })).toBeVisible();
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "14" });
   const documents = await (await page.request.get(`/api/sales/deals/${deal.id}/documents`)).json();
   expect(documents).toHaveLength(1);
   expect(Number(documents[0].amount)).toBe(301.2);
@@ -99,6 +109,7 @@ test("own: клиент → контакт → сделка → задача/и�
   await expect(page.getByText("Согласовать доставку", { exact: true })).toBeVisible();
   await expect(page.getByRole("listitem").filter({ hasText: "Анна Контрольная" })).toBeVisible();
   expect(await (await page.request.get(`/api/sales/documents/${documentId}/render`)).text()).toBe(original);
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "15" });
   await page.screenshot({ path: test.info().outputPath('own-manager-cycle.png'), fullPage: true });
   await page.getByRole("button", { name: "Сформировать", exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: test.info().outputPath('own-manager-documents.png') });
@@ -106,6 +117,7 @@ test("own: клиент → контакт → сделка → задача/и�
   await originalPage.goto(`/api/sales/documents/${documentId}/render`);
   await originalPage.screenshot({ path: test.info().outputPath('own-invoice-original.png'), fullPage: true });
   await originalPage.close();
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "16" });
   const contractReply = await page.request.post(`/api/sales/deals/${deal.id}/documents`, {
     data: {kind:'contract',request_key:`contract-${Date.now()}`},
   });
@@ -117,6 +129,7 @@ test("own: клиент → контакт → сделка → задача/и�
   try {
     expect((await approver.request.post(`/api/sales/documents/${contract.id}/decide`,{data:{approved:true}})).status()).toBe(200);
   } finally { await approver.close(); }
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "17" });
   await page.reload();
   await page.getByRole('button',{name:'Email документов',exact:true}).click();
   const emailPanel = page.getByRole('region',{name:'Отправка документов по email',exact:true});
@@ -134,6 +147,7 @@ test("own: клиент → контакт → сделка → задача/и�
   expect(email.accepted_at).toBeNull();
   expect(email.attachments).toHaveLength(2);
   await expect(emailPanel.getByRole('button',{name:'Подтвердить отправку',exact:true})).toBeDisabled();
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "18" });
   const pdf = await page.request.get(`/api/sales/deals/${deal.id}/emails/${email.id}/attachments/0`);
   expect(pdf.status()).toBe(200);
   const bytes = await pdf.body();
@@ -141,6 +155,7 @@ test("own: клиент → контакт → сделка → задача/и�
   await writeFile(test.info().outputPath('own-prepared-invoice.pdf'),bytes);
   await emailPanel.scrollIntoViewIfNeeded();
   await page.screenshot({path:test.info().outputPath('own-prepared-email.png')});
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "19" });
   await page.reload();
   const history = await (await page.request.get(`/api/sales/deals/${deal.id}/emails`)).json();
   expect(history).toHaveLength(1);
@@ -176,4 +191,5 @@ test("own: клиент → контакт → сделка → задача/и�
     const hidden = await (await other.request.get(`/api/sales/clients?q=${encodeURIComponent(name)}`)).json();
     expect(hidden).toEqual({ rows:[], total:0 });
   } finally { await foreign.close(); }
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "20" });
 });

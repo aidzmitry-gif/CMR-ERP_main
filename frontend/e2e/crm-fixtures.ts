@@ -1,4 +1,4 @@
-import { expect, type APIRequestContext, type Browser, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Browser, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
@@ -239,11 +239,15 @@ export async function prepareInvoiceWizard(
   ]) {
     await page.getByLabel(label, { exact: true }).fill(value);
   }
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "9" });
   await page.getByText("Получить предпросмотр", { exact: true }).click();
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "10" });
   await expect(page.getByRole("heading", { name: "Проверьте реквизиты и суммы", exact: true })).toBeVisible();
+  test.info().annotations.push({ type: "erp_ready_checkpoint", description: "11" });
   await expect(page.getByRole("heading", { name: "Проверьте реквизиты и суммы", exact: true }).locator("..").getByText(`Покупатель: ${fixture.buyer_name} · УНП ${fixture.buyer_unp} · #${fixture.buyer}`)).toBeVisible();
   await expect(page.getByText("Всего: 301.20 BYN", { exact: true })).toBeVisible();
   if (mode === "on_order") {
+    test.info().annotations.push({ type: "erp_ready_checkpoint", description: "12" });
     await page.getByRole("checkbox", { name: "Подтверждаю выпуск без резерва и проверенные данные счёта", exact: true }).check();
     return;
   }
