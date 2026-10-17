@@ -167,8 +167,9 @@ for (const mode of ['stock', 'on_order'] as const) {
       await openDrawer();
       await page.getByRole('button', { name: 'Отказ', exact: true }).click();
       const requestLoss = page.getByRole('button', { name: 'Запросить отказ', exact: true });
-      await expect(requestLoss).toBeEnabled();
+      await expect(requestLoss).toBeDisabled();
       await page.getByLabel('Причина отказа').selectOption(fixture.loss_reason);
+      await expect(requestLoss).toBeEnabled();
       await page.getByPlaceholder('Комментарий (необязательно)').fill('Synthetic loss');
       let submission: Record<string, unknown> | null = null;
       let committedLoss: Record<string, unknown> | null = null;
