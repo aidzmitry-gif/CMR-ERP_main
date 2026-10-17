@@ -271,7 +271,7 @@ async def organization_role(session, org_id, actor):
     return role
 
 
-async def current_member(session, org_id, user):
+async def current_member(session, org_id, user, *, package: Literal["accounting", "finance"] = "accounting"):
     """Book membership and effective identity, both checked after the book lock."""
     actor = subject(user)
     role = await organization_role(session, org_id, actor)
@@ -287,10 +287,10 @@ async def current_member(session, org_id, user):
         else:
             fresh = user
     except EffectiveIdentityLookupError as exc:
-        raise HTTPException(403, "Current accounting access could not be verified") from exc
+        raise HTTPException(403, f"Current {package} access could not be verified") from exc
     if (subject(fresh) != actor or fresh.local_status not in {None, "active"}
-            or fresh.crm_restricted or not is_package_allowed("accounting", fresh.roles)):
-        raise HTTPException(403, "Accounting access denied")
+            or fresh.crm_restricted or not is_package_allowed(package, fresh.roles)):
+        raise HTTPException(403, f"{package.capitalize()} access denied")
     return actor, role
 
 

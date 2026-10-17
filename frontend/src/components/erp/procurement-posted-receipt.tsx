@@ -115,7 +115,8 @@ export function ProcurementPostedReceipt({ org, entry }: { org: string; entry: s
   const current = result?.key === key ? result : null;
   const source = current?.source, error = current?.error;
   const sourceReceiptId = source?.receipt_id;
-  const correctionView = correction.context === key ? correction : { context: key, busy: false, uncertain: false, blocked: false };
+  const correctionReady = correction.context === key;
+  const correctionView = correctionReady ? correction : { context: key, busy: false, uncertain: false, blocked: false };
 
   useEffect(() => {
     let active = true;
@@ -183,7 +184,7 @@ export function ProcurementPostedReceipt({ org, entry }: { org: string; entry: s
   }
 
   function createCorrection() {
-    if (!source || correctionView.busy || correctionView.uncertain || correctionView.blocked || correctionView.created || pendingCorrection.current) return;
+    if (!correctionReady || !source || correctionView.busy || correctionView.uncertain || correctionView.blocked || correctionView.created || pendingCorrection.current) return;
     const correctionKey = crypto.randomUUID();
     const expectedVersion = source.version, expectedEntryId = source.entry_id;
     const command: CorrectionCommand = { org, originalReceiptId: source.receipt_id, expectedVersion,
@@ -201,7 +202,7 @@ export function ProcurementPostedReceipt({ org, entry }: { org: string; entry: s
 
   function retryCorrection() {
     const command = pendingCorrection.current;
-    if (!command || correctionView.busy || correctionView.blocked) return;
+    if (!correctionReady || !command || correctionView.busy || correctionView.blocked) return;
     void submitCorrection(command, correctionView.uncertain);
   }
 
@@ -212,11 +213,12 @@ export function ProcurementPostedReceipt({ org, entry }: { org: string; entry: s
       <h2 className="font-semibold">Исправление первичной накладной</h2>
       <p>Будет создан отдельный связанный черновик. Исходная накладная и проводка № {source.entry_id} останутся без изменений.</p>
       <p>Этот черновик пока нельзя провести или передать в WMS. Для него нужен отдельный workflow исправлений.</p>
+      {!correctionReady && <p role="status">Проверяем журнал ранее отправленного запроса…</p>}
       {correctionView.error && <p role="alert">{correctionView.error}</p>}
       {correctionView.busy && <p role="status">Создаём черновик исправления…</p>}
-      {correctionView.uncertain && !correctionView.blocked && correctionView.command && <button type="button" disabled={correctionView.busy} onClick={retryCorrection} className="rounded border border-line px-3 py-2">Повторить тот же запрос</button>}
+      {correctionReady && correctionView.uncertain && !correctionView.blocked && correctionView.command && <button type="button" disabled={correctionView.busy} onClick={retryCorrection} className="rounded border border-line px-3 py-2">Повторить тот же запрос</button>}
       {correctionView.created && <p role="status">Черновик исправления № {correctionView.created.id}, версия {correctionView.created.version}, создан.</p>}
-      {!correctionView.created && !correctionView.command && !correctionView.blocked && <button type="button" disabled={correctionView.busy} onClick={createCorrection} className="rounded border border-line px-3 py-2">Создать черновик исправления</button>}
+      {correctionReady && !correctionView.created && !correctionView.command && !correctionView.blocked && <button type="button" disabled={correctionView.busy} onClick={createCorrection} className="rounded border border-line px-3 py-2">Создать черновик исправления</button>}
       {correctionView.created && <Link className="block text-accent underline" href={`/erp/procurement/receipts?org=${encodeURIComponent(org)}&receipt=${correctionView.created.id}`}>Открыть черновик исправления в реестре накладных</Link>}
     </section>}
     {source && <Link className="block text-accent underline" href={`/erp/wms/receipts/from-primary?org=${source.organization_id}&receipt=${source.receipt_id}&version=${source.version}`}>Подготовить складскую приёмку по исходной накладной</Link>}

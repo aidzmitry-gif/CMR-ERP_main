@@ -68,6 +68,44 @@ def test_source_fields_preserved_and_no_false_legal_confirmation():
     assert ADDRESS not in repr(plan) and row["Description"] not in repr(plan)
 
 
+def test_tab_separators_normalized_only_in_target_legal_name():
+    row = _row(НаименованиеПолное="  Source\t\tlegal\tname  ")
+    original = deepcopy(row)
+    raw = json.dumps(row, ensure_ascii=True)
+    plan = _plan([row])
+    assert row == original and not plan.held
+    draft = plan.ready[0]
+    assert draft.legal_name == "  Source  legal name  "
+    assert draft.name == row["Description"] and draft.legal_address == ADDRESS
+    assert draft.source_guid == REF and draft.data_version == row["DataVersion"]
+    assert draft.source_sha == digest(raw)
+    assert plan.candidate_digest == _candidate_digest([original])
+
+
+@pytest.mark.parametrize("legal_name", ["", "\t \t", "Source\tname\n", "Source\tname\x7f", 123,
+                                        "x" * 255 + "\t"])
+def test_tab_normalization_preserves_other_legal_name_holds(legal_name):
+    row = _row(НаименованиеПолное=legal_name)
+    plan = _plan([row])
+    assert not plan.ready and plan.source_complete_count == 1
+    assert plan.held[0].reason == "native_legal_name_invalid"
+    assert plan.held[0].source_sha == digest(json.dumps(row, ensure_ascii=True))
+
+
+@pytest.mark.parametrize("field", ["name", "address"])
+def test_tab_in_other_fields_is_still_held(field):
+    changes = ({"Description": "Source\tname"} if field == "name" else
+               {"КонтактнаяИнформация": [{"Вид_Key": LEGAL, "Тип": "Адрес", "Представление": "Source\taddress"}]})
+    plan = _plan([_row(**changes)])
+    assert not plan.ready
+    assert plan.held[0].reason == ("native_name_invalid" if field == "name" else "native_legal_address_invalid")
+
+
+def test_optional_legal_name_none_remains_none():
+    plan = _plan([_row(НаименованиеПолное=None)])
+    assert not plan.held and plan.ready[0].legal_name is None
+
+
 @pytest.mark.parametrize(("changes", "reason"), [
     ({"DeletionMark": True}, "deleted"),
     ({"ОбособленноеПодразделение": True}, "branch_needs_separate_policy"),
@@ -153,6 +191,37 @@ async def test_native_ready_subset_replays_with_private_exact_bindings(session):
     assert first["bindings"] == [{"source_guid": REF, "data_version": "version-1",
                                   "source_sha": plan.ready[0].source_sha, "counterparty_id": cp.id}]
     assert cp.requisites["legal_address"] == ADDRESS
+    assert await session.scalar(select(func.count()).select_from(CounterpartyAlias)) == 1
+
+
+async def test_normalized_legal_name_replays_without_duplicate_card_or_alias(session):
+    row = _row(НаименованиеПолное="Source\tlegal name")
+    plan = _plan([row])
+    first = await apply_counterparty_plan(session, plan)
+    second = await apply_counterparty_plan(session, plan)
+    cp = await session.scalar(select(Counterparty))
+    assert cp.legal_name == "Source legal name"
+    assert cp.provenance["legal_name"]["source"] == "1c"
+    assert first["summary"]["created"] == 1 and second["summary"]["created"] == 0
+    assert first["bindings"] == second["bindings"]
+    assert first["bindings"][0]["source_sha"] == digest(json.dumps(row, ensure_ascii=True))
+    assert await session.scalar(select(func.count()).select_from(Counterparty)) == 1
+    assert await session.scalar(select(func.count()).select_from(CounterpartyAlias)) == 1
+
+
+@pytest.mark.parametrize("owner", ["manual", "mns_grp"])
+async def test_normalized_import_preserves_protected_legal_name_and_provenance(session, owner):
+    provenance = {"legal_name": {"source": owner, "at": "2026-07-01"}}
+    cp = Counterparty(name="Working name", legal_name="Protected legal name", unp="191000001",
+                      requisites={"legal_address": ADDRESS}, provenance=deepcopy(provenance))
+    session.add(cp)
+    await session.flush()
+    plan = _plan([_row(НаименованиеПолное="Source\tlegal name")])
+    result = await apply_counterparty_plan(session, plan)
+    assert cp.legal_name == "Protected legal name"
+    assert cp.provenance["legal_name"] == provenance["legal_name"]
+    assert result["summary"]["created"] == 0
+    assert result["bindings"][0]["counterparty_id"] == cp.id
     assert await session.scalar(select(func.count()).select_from(CounterpartyAlias)) == 1
 
 

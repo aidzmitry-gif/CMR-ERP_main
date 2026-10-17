@@ -142,6 +142,10 @@ def build_counterparty_plan(rows: list[SourceRow], catalogs: dict, *, expected_c
     ready, held, complete = [], [], []
     for observation, key, row, reason in parsed:
         address = None
+        legal_name = row.get("НаименованиеПолное")
+        if isinstance(legal_name, str):
+            # Normalize a source separator in the target; keep the sealed source unchanged.
+            legal_name = legal_name.replace("\t", " ")
         if reason is None:
             contacts = row.get("КонтактнаяИнформация")
             if base_unps[row["ИНН"]] > 1:
@@ -165,14 +169,14 @@ def build_counterparty_plan(rows: list[SourceRow], catalogs: dict, *, expected_c
         if reason is None:
             if not _text_valid(row["Description"], 255):
                 reason = "native_name_invalid"
-            elif row.get("НаименованиеПолное") is not None and not _text_valid(row["НаименованиеПолное"], 255):
+            elif legal_name is not None and not _text_valid(legal_name, 255):
                 reason = "native_legal_name_invalid"
             elif not _text_valid(address, 1000):
                 reason = "native_legal_address_invalid"
         source_sha = digest(observation.source_text)
         if reason is None:
             ready.append(CounterpartyDraft(key, row["DataVersion"], source_sha, row["ИНН"], row["Description"],
-                                           row.get("НаименованиеПолное"), address))
+                                           legal_name, address))
         else:
             held.append(CounterpartyHold(key, row["DataVersion"], source_sha, reason))
     candidate_digest = sha256(json.dumps(sorted(complete), ensure_ascii=True, separators=(",", ":")).encode()).hexdigest()

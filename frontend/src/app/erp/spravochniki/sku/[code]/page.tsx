@@ -1,5 +1,6 @@
 import { AppShell } from "@/components/app-shell";
 import { SpravSkuCard } from "@/components/erp/spravochniki/sprav-sku-card";
+import { backendAuthHeaders } from "@/lib/auth-headers-server";
 import { fetchSkuCard } from "@/lib/reference-data";
 import { currentRole } from "@/lib/role-server";
 
@@ -10,7 +11,8 @@ export default async function SkuCardPage({
 }) {
   const { code } = await params;
   const role = await currentRole();
-  const card = await fetchSkuCard(decodeURIComponent(code), role);
+  const authHeaders = await backendAuthHeaders(role);
+  const card = await fetchSkuCard(decodeURIComponent(code), role, authHeaders);
 
   return (
     <AppShell crumbs={["ERP", "Справочники", "Номенклатура"]}>

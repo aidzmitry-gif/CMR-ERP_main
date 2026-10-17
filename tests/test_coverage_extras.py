@@ -137,10 +137,37 @@ async def test_egr_503_without_registry(api_no_gateways):
     assert (await api_no_gateways.get("/integrations/egr/191234567")).status_code == 503
 
 
-async def test_create_activity_with_explicit_date(api):
-    # дата передана явно → ветка без запроса max(Activity.date)
+async def test_create_activity_with_explicit_date(api, session):
+    from core.domain.models import User
+    from core.services.auth import CurrentUser, get_current_user
+    from modules.hr.models import Employee
+
+    session.add(
+        Employee(id=920, full_name="Сотрудник с явной датой", department="Продажи", status="active")
+    )
+    session.add(
+        User(
+            username="coverage-activity-owner",
+            full_name="Coverage Activity Owner",
+            keycloak_user_id="coverage-activity-subject",
+            employee_id=920,
+            department="Продажи",
+            role="director",
+            status="active",
+        )
+    )
+    await session.commit()
+    app = api._transport.app
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        username="coverage-activity-owner",
+        roles=["director"],
+        keycloak_user_id="coverage-activity-subject",
+    )
+
+    # Явная дата остаётся частью исходного запроса и ответа.
     r = await api.post("/sales/activities", json={"kpi_key": "calls_all", "date": "2026-06-01"})
-    assert r.status_code == 201 and r.json()["date"] == "2026-06-01"
+    assert r.status_code == 201
+    assert r.json() == {"ok": True, "date": "2026-06-01"}
 
 
 async def test_lead_requalify_keeps_routed_status(api, session):

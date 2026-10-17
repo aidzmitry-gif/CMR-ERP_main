@@ -2,8 +2,8 @@
 from datetime import date
 from decimal import Decimal
 
-from core.domain.models import Counterparty, CounterpartyBranch
-from core.domain.reference import CurrencyRate, Unit, VatRate
+from core.domain.models import Counterparty, CounterpartyBranch, Sku
+from core.domain.reference import CurrencyRate, NomenclatureCategory, Unit, VatRate
 
 
 async def test_query_versioned_as_of(api, session):
@@ -132,3 +132,112 @@ async def test_ai_catalog_advertises_query_tool(api):
     assert cat["tool"]["name"] == "reference.query"
     assert cat["tool"]["endpoint"] == "/system/references/query"
     assert any(r["key"] == "core.counterparties" for r in cat["references"])
+
+
+async def test_sku_catalog_pages_cover_all_active_rows_stably(api, session):
+    session.add_all([
+        Sku(code=f"PAGE-{index:04d}", title=f"Позиция {index}")
+        for index in range(505)
+    ] + [
+        Sku(code="PAGE-ARCHIVED-1", title="Архив 1", is_active=False),
+        Sku(code="PAGE-ARCHIVED-2", title="Архив 2", is_active=False),
+    ])
+    await session.commit()
+
+    pages = []
+    for offset in (0, 250, 500):
+        response = await api.post("/system/references/query", json={
+            "ref": "core.skus", "limit": 250, "offset": offset, "search": "",
+        })
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["total"] == 505
+        assert body["offset"] == offset
+        assert body["limit"] == 250
+        pages.extend(row["code"] for row in body["result"])
+
+    assert pages == [f"PAGE-{index:04d}" for index in range(505)]
+    assert len(pages) == len(set(pages))
+
+
+async def test_sku_catalog_search_counts_literal_and_terms(api, session):
+    session.add_all([
+        Sku(code="A%_100", title="Relay Protection"),
+        Sku(code="Axx100", title="Relay Protection"),
+        Sku(code="B%_100", title="Relay"),
+    ])
+    await session.commit()
+
+    response = await api.post("/system/references/query", json={
+        "ref": "core.skus", "search": "a%_ relay", "offset": 0,
+    })
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total"] == 1
+    assert [row["code"] for row in body["result"]] == ["A%_100"]
+
+
+async def test_sku_catalog_category_subtree_uses_active_api_tree(api, session):
+    root = NomenclatureCategory(code="TREE-ROOT", name="Корень")
+    child = NomenclatureCategory(code="TREE-CHILD", name="Потомок", parent_id=None)
+    inactive = NomenclatureCategory(code="TREE-INACTIVE", name="Архив", parent_id=None, is_active=False)
+    cycle_a = NomenclatureCategory(code="TREE-CYCLE-A", name="Цикл A")
+    cycle_b = NomenclatureCategory(code="TREE-CYCLE-B", name="Цикл B")
+    session.add_all([root, child, inactive, cycle_a, cycle_b])
+    await session.flush()
+    child.parent_id = root.id
+    inactive.parent_id = root.id
+    root.parent_id = cycle_a.id
+    cycle_a.parent_id = cycle_b.id
+    cycle_b.parent_id = root.id
+    active_below_inactive = NomenclatureCategory(
+        code="TREE-BELOW-INACTIVE", name="Активный потомок архива", parent_id=inactive.id,
+    )
+    grandchild = NomenclatureCategory(code="TREE-GRANDCHILD", name="Внук", parent_id=child.id)
+    session.add_all([active_below_inactive, grandchild])
+    await session.flush()
+    session.add_all([
+        Sku(code="TREE-SKU-ROOT", title="Корневая", category_id=root.id),
+        Sku(code="TREE-SKU-CYCLE", title="Цикл", category_id=cycle_a.id),
+        Sku(code="TREE-SKU-CHILD", title="Дочерняя", category_id=child.id),
+        Sku(code="TREE-SKU-GRANDCHILD", title="Внук", category_id=grandchild.id),
+        Sku(code="TREE-SKU-INACTIVE", title="Архив", category_id=inactive.id),
+        Sku(code="TREE-SKU-BRIDGE", title="За архивным мостом", category_id=active_below_inactive.id),
+    ])
+    await session.commit()
+
+    response = await api.post("/system/references/query", json={
+        "ref": "core.skus", "category_subtree_id": root.id, "offset": 0,
+    })
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total"] == 4
+    assert [row["code"] for row in body["result"]] == [
+        "TREE-SKU-CHILD", "TREE-SKU-CYCLE", "TREE-SKU-GRANDCHILD", "TREE-SKU-ROOT",
+    ]
+
+    exact = await api.post("/system/references/query", json={
+        "ref": "core.skus", "category_id": root.id,
+    })
+    assert exact.status_code == 200
+    assert [row["code"] for row in exact.json()["result"]] == ["TREE-SKU-ROOT"]
+
+
+async def test_sku_catalog_rejects_invalid_new_filters(api):
+    invalid = [
+        {"offset": -1},
+        {"offset": 1.5},
+        {"offset": True},
+        {"offset": 2_147_483_648},
+        {"search": ["not", "a string"]},
+        {"search": "x" * 513},
+        {"category_subtree_id": 0},
+        {"category_subtree_id": True},
+        {"category_subtree_id": 9_007_199_254_740_992},
+        {"category_id": 1, "category_subtree_id": 2},
+    ]
+    for filters in invalid:
+        response = await api.post(
+            "/system/references/query", json={"ref": "core.skus", **filters},
+        )
+        assert response.status_code == 422, (filters, response.text)

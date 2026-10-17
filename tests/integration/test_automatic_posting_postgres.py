@@ -1,7 +1,7 @@
 """Synthetic automatic-account owners on migrated, test-owned PostgreSQL.
 
-The existing frozen proposal fixture remains unchanged. This wrapper applies
-the registered bank mapping and G26 policy migrations before seeding; it does not prove full CRM head,
+The existing frozen proposal remains unchanged; the shared fixture applies the
+G26 policy migration. This wrapper adds bank mapping before seeding; it does not prove full CRM head,
 real document admission, statutory approval, month closing or OIDC.
 """
 
@@ -65,7 +65,7 @@ async def automatic_pg(pg_factory, db, book):  # noqa: F811
         connection.execute(text("ALTER TABLE finance.bank_transaction DROP COLUMN direction, DROP COLUMN source_provider, "
                                 "DROP COLUMN source_external_id, DROP COLUMN source_kind, DROP COLUMN source_reference"))
         with Operations.context(MigrationContext.configure(connection)):
-            for name in ("0135_full_bank_statement_sources", "0137_bank_account_mapping", "crm_rel_001_auto_posting_01"):
+            for name in ("0135_full_bank_statement_sources", "0137_bank_account_mapping"):
                 path = Path(__file__).resolve().parents[2] / f"migrations/versions/{name}.py"
                 spec = spec_from_file_location(name, path)
                 migration = module_from_spec(spec)
@@ -81,7 +81,7 @@ async def automatic_pg(pg_factory, db, book):  # noqa: F811
                 session.add(model(**{c.key: getattr(row, c.key) for c in model.__table__.columns}))
             await session.flush()
         # Explicit copied fixture IDs do not advance PostgreSQL sequences.
-        for table in ("accounting.account", "accounting.policy"):
+        for table in ("accounting.account", "accounting.policy", "wms.warehouse_directory"):
             await session.execute(text(
                 f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), (SELECT max(id) FROM {table}))"
             ))
@@ -202,6 +202,9 @@ async def test_pg_automatic_shipment_concurrent_exact_cost_and_authorized_saved_
         fake_receipt, _, options, _ = await shipment_setup(api, session, selected_book, posting)
         services.wms_reservations, services.sales_source = gateway, sales_source
         org = selected_book[0]
+        session.add(WarehouseDirectory(organization_id=org, name="W", title="Synthetic WMS warehouse",
+                                       is_active=True, created_by="tester", wms_enabled=True,
+                                       prohibit_negative_stock=True))
         await invoice(session, 27, [{"sku_code": "SKU", "qty": "1"}, {"sku_code": "SKU", "qty": "2"}], org)
         session.add(StockMovement(organization_id=org, sku_code="SKU", warehouse="W", kind="in", qty="3", reason="receipt"))
         await session.commit()

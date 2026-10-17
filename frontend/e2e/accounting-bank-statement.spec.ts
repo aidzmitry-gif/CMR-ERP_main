@@ -17,6 +17,7 @@ test("строка списания проходит из формы выпис�
   expect(account.ok(), await account.text()).toBeTruthy();
   await page.goto("/erp/accounting");
   await page.getByLabel("Организация", { exact: true }).selectOption(String(org.id));
+  await page.getByRole("button", { name: "Банк и платежи", exact: true }).click();
   await page.getByRole("button", { name: "Импорт выписки", exact: true }).click();
   await page.getByText("Добавить строку из выписки", { exact: true }).click();
   const reference = `BANK-PAYMENT-${stamp}`;
@@ -41,7 +42,35 @@ test("строка списания проходит из формы выпис�
   await page.getByRole("button", { name: "Сохранить строку выписки", exact: true }).click();
   await expect(page.getByRole("button", { name: "Сохранить строку выписки", exact: true })).toBeEnabled();
   await expect(row).toHaveCount(1);
+  const candidatesResponse = await page.request.get(`/api/accounting/organizations/${org.id}/bank-import/candidates`);
+  expect(candidatesResponse.ok(), await candidatesResponse.text()).toBeTruthy();
+  const candidates = (await candidatesResponse.json()).filter(
+    (candidate: { source_snapshot: { source_external_id: string } }) => candidate.source_snapshot.source_external_id === reference,
+  );
+  expect(candidates).toHaveLength(1);
+  expect(candidates[0].binding_status).toBe("own");
+  const source = candidates[0].source_snapshot;
+  expect(source).toMatchObject({ source_provider: "Synthetic bank", account_code: "SYNTHETIC-ACCOUNT", direction: "payment", amount: "125.50", currency: "BYN" });
+  const accountsResponse = await page.request.get(`/api/accounting/organizations/${org.id}/accounts?on=2026-09-03`);
+  expect(accountsResponse.ok(), await accountsResponse.text()).toBeTruthy();
+  const bankAccounts = (await accountsResponse.json()).filter((account: { code: string }) => account.code === "51");
+  expect(bankAccounts).toHaveLength(1);
+  const mappingResponse = await page.request.post(`/api/accounting/organizations/${org.id}/bank-account-mappings`, {
+    data: { provider: source.source_provider, external_account: source.account_code, currency: "BYN",
+      valid_from: "2026-09-01", ledger_account_id: bankAccounts[0].id,
+      dimensions: { bank_statement: source.ext_id }, evidence: "Synthetic E2E bank mapping evidence" },
+  });
+  expect(mappingResponse.status(), await mappingResponse.text()).toBe(201);
+  const mappingQuery = new URLSearchParams({ provider: source.source_provider, external_account: source.account_code, currency: "BYN", at: "2026-09-03" });
+  const mappingsResponse = await page.request.get(`/api/accounting/organizations/${org.id}/bank-account-mappings?${mappingQuery}`);
+  expect(mappingsResponse.ok(), await mappingsResponse.text()).toBeTruthy();
+  const mappings = await mappingsResponse.json();
+  expect(mappings).toHaveLength(1);
+  expect(mappings[0]).toMatchObject({ organization_id: org.id, ledger_account_id: bankAccounts[0].id });
   await row.getByRole("button", { name: "Выбрать", exact: true }).click();
+  await expect(page.getByLabel("Счёт банка импорта")).toHaveValue("51");
+  await expect(page.getByLabel("Счёт банка импорта")).toBeDisabled();
+  await page.getByLabel("Выбрать счета вручную").check();
   await page.getByLabel("Счёт расчётов импорта").selectOption("60");
   await page.getByRole("button", { name: "Рассчитать проводки", exact: true }).click();
   await expect(page.getByText(/Кт 51.*125.50 BYN/)).toBeVisible();

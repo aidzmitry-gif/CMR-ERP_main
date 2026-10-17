@@ -168,12 +168,12 @@ describe("страницы (src/app)", () => {
 
   it("OwnerPage показывает метрики при наличии данных", async () => {
     mock(api.fetchOwnerDashboard).mockResolvedValue({
-      metrics: { approvals_pending: 1, approvals_total: 1, audit_count: 0, events_count: 2, counterparties: 3, skus: 0, modules: ["sales", "wms"], widgets: [{ key: "w", title: "Воронка продаж" }] },
-      stages: [
+      metrics: { status: "ok", data: { approvals_pending: 1, approvals_total: 1, audit_count: 0, events_count: 2, counterparties: 3, skus: 0, modules: ["sales", "wms"], widgets: [{ key: "w", title: "Воронка продаж" }] } },
+      stages: { status: "ok", data: [
         { id: "new", title: "Новая", color: "#000", count: 1, sum: 100, deals: [] },
         { id: "won", title: "Закрыто", color: "#000", count: 2, sum: 200, deals: [] },
-      ],
-      kpis: [{ id: "k", label: "K", value: 1, target: 2, percent: 50, icon: "phone", tone: "blue" }],
+      ] },
+      kpis: { status: "ok", data: [{ id: "k", label: "K", value: 1, target: 2, percent: 50, icon: "phone", tone: "blue" }] },
     });
     render(await OwnerPage());
     expect(screen.getByText("Панель владельца")).toBeInTheDocument();
@@ -183,16 +183,31 @@ describe("страницы (src/app)", () => {
   });
 
   it("OwnerPage показывает заглушку без данных", async () => {
-    mock(api.fetchOwnerDashboard).mockResolvedValue(null);
+    mock(api.fetchOwnerDashboard).mockResolvedValue({
+      metrics: { status: "unavailable" },
+      stages: { status: "unavailable" },
+      kpis: { status: "unavailable" },
+    });
     render(await OwnerPage());
-    expect(screen.getByText(/Нет данных/)).toBeInTheDocument();
+    const dealsMetric = screen.getByText("Сделок в работе").parentElement!.parentElement!;
+    const amountMetric = screen.getByText("Сумма в работе").parentElement!.parentElement!;
+    const kpiMetric = screen.getByText("Среднее выполнение KPI с планом").parentElement!.parentElement!;
+    expect(dealsMetric).toHaveTextContent("Нет данных");
+    expect(dealsMetric).not.toHaveTextContent(/\b0\b/);
+    expect(amountMetric).toHaveTextContent("Нет данных");
+    expect(amountMetric).not.toHaveTextContent(/\b0\b|₽|BYN/);
+    expect(kpiMetric).toHaveTextContent("Нет данных");
+    expect(kpiMetric).not.toHaveTextContent(/%/);
+    expect(screen.queryByText("Новая заявка")).not.toBeInTheDocument();
+    expect(screen.getByText("Метрики владельца временно недоступны.")).toBeInTheDocument();
+    expect(screen.getByText("Воронка продаж временно недоступна.")).toBeInTheDocument();
   });
 
   it("OwnerPage с пустыми KPI показывает отсутствие данных о плане", async () => {
     mock(api.fetchOwnerDashboard).mockResolvedValue({
-      metrics: { approvals_pending: 0, approvals_total: 0, audit_count: 0, events_count: 0, counterparties: 0, skus: 0, modules: [], widgets: [] },
-      stages: [],
-      kpis: [],
+      metrics: { status: "ok", data: { approvals_pending: 0, approvals_total: 0, audit_count: 0, events_count: 0, counterparties: 0, skus: 0, modules: [], widgets: [] } },
+      stages: { status: "ok", data: [] },
+      kpis: { status: "ok", data: [] },
     });
     render(await OwnerPage());
     expect(screen.getByText("Нет данных")).toBeInTheDocument();

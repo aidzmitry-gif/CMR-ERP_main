@@ -1,8 +1,8 @@
 """Безопасный load-only путь для локального кэша импорта Bitrix24/1С."""
 from __future__ import annotations
 
-import importlib
 import hashlib
+import importlib
 import json
 import os
 import subprocess
@@ -544,7 +544,7 @@ async def _seed_existing_deal_directory(
     """Add synthetic, already trusted CRM directory rows to a loaded pilot deal."""
     from decimal import Decimal
 
-    from sqlalchemy import func, select
+    from sqlalchemy import select
 
     from core.domain.models import CounterpartyAlias
     from modules.sales.models import CrmClient, CrmClientContact, Deal
@@ -4651,6 +4651,7 @@ async def test_direct_deal_call_uses_proven_company_and_employee_for_client_card
     capsys.readouterr()
 
     from sqlalchemy import select
+
     from modules.sales.models import CallLog, CrmClient, Deal
 
     db = module._isolated_database()
@@ -4697,6 +4698,7 @@ async def test_call_owner_uses_its_portal_user_and_reconcile_detects_owner_drift
     capsys.readouterr()
 
     from sqlalchemy import select
+
     from modules.sales.models import CallLog, Deal
 
     db = module._isolated_database()
@@ -4745,6 +4747,7 @@ async def test_call_owner_zero_sentinel_remains_unassigned_in_load_and_reconcile
     capsys.readouterr()
 
     from sqlalchemy import select
+
     from modules.sales.models import CallLog
 
     db = module._isolated_database()
@@ -5450,7 +5453,6 @@ async def test_distinct_1c_refs_with_duplicate_unp_keep_stable_masters(
     assert len(set(first_refs.values())) == 2
     assert first_names[first_refs["cp-a"]] == ("Canonical Alpha", "111111111")
     assert first_names[first_refs["cp-z"]] == ("Canonical Zeta", None)
-
     # Simulate an earlier importer collapsing both refs into one master; the next
     # pass must split the second alias back to its own 1C identity.
     db = module._isolated_database()
@@ -5458,6 +5460,7 @@ async def test_distinct_1c_refs_with_duplicate_unp_keep_stable_masters(
     async with db.session_factory() as session:
         aliases = (await session.execute(select(CounterpartyAlias))).scalars().all()
         masters = (await session.execute(select(Counterparty))).scalars().all()
+        assert {row.id: (row.name, row.unp) for row in masters} == first_names
         ref_to_master = {
             row.external_ref: row.counterparty_id for row in aliases if row.source == "1c"
         }

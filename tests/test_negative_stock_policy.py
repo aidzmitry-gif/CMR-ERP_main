@@ -1,12 +1,14 @@
 from decimal import Decimal
-from uuid import uuid4
+
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select,func
+from sqlalchemy import func, select
+
+from modules.wms.invoice_shipments import create, preview
 from modules.wms.models import StockMovement
-from modules.wms.invoice_shipments import create,preview
-from modules.wms.stock_policy import check,shortage
+from modules.wms.stock_policy import check, shortage
 from tests.test_warehouse_execution_mode import prepared
+
 
 @pytest.mark.parametrize("wms", [False, True])
 @pytest.mark.parametrize("prohibit", [True, False])
@@ -42,7 +44,9 @@ def test_shortage_reason_and_unknown_are_explicit(physical,other,expected):
     assert detail["reason"]==expected
     if physical is None:
         assert detail["available"] is None and detail["shortage"] is None
-        with pytest.raises(HTTPException):check("SKU","Warehouse",1,None,0,False)
+        with pytest.raises(HTTPException):
+            check("SKU", "Warehouse", 1, None, 0, False)
+
 
 async def test_policy_toggle_is_scoped_audited_and_stale_rejected(api,session):
     org,_,_,warehouse,_,_=await prepared(api,session,False)
@@ -76,28 +80,32 @@ async def test_reservation_from_known_zero_respects_policy(api,session,prohibit)
     session.add(StockMovement(organization_id=org,sku_code="A",warehouse="W",kind="out",qty="10",reason="shipment"))
     await session.flush()
     if prohibit:
-        with pytest.raises(HTTPException) as caught:await reserve(session,org,facts,data,actor)
+        with pytest.raises(HTTPException) as caught:
+            await reserve(session, org, facts, data, actor)
         assert caught.value.detail["physical"]=="0.00" and caught.value.detail["requested"]=="5.00"
     else:
         result=await reserve(session,org,facts,data,actor)
         assert result["snapshot"]["physical_basis"]["W"]["cutoff"]>0
 
 async def test_empty_journal_is_structured_unknown_not_zero(api,session):
-    from modules.wms.invoice_reservations import reserve
     from sqlalchemy import delete
+
+    from modules.wms.invoice_reservations import reserve
     from tests.test_invoice_stock_allocation import setup
     org,facts,data,actor=await setup(api,session)
     from modules.wms.models import WarehouseDirectory
     session.add(WarehouseDirectory(organization_id=org,name="W",title="Warehouse",created_by=actor))
     await session.flush()
     await session.execute(delete(StockMovement).where(StockMovement.organization_id==org))
-    with pytest.raises(HTTPException) as caught:await reserve(session,org,facts,data,actor)
+    with pytest.raises(HTTPException) as caught:
+        await reserve(session, org, facts, data, actor)
     assert caught.value.detail["reason"]=="unknown_stock"
     assert caught.value.detail["sku_code"]=="A" and caught.value.detail["warehouse"]=="W"
     assert caught.value.detail["physical"] is None
 
 def test_negative_exception_does_not_spend_other_document_reserve():
-    with pytest.raises(HTTPException) as caught:check("SKU","Warehouse",1,10,10,False)
+    with pytest.raises(HTTPException) as caught:
+        check("SKU", "Warehouse", 1, 10, 10, False)
     assert caught.value.detail["reason"]=="reserved_by_other_documents"
 
 async def test_preview_aggregates_same_sku_lines(api,session):
@@ -127,15 +135,16 @@ async def test_negative_ledger_can_be_reconciled_by_inventory(api,session):
     assert completed.status_code==200,completed.text
 
 async def test_negative_exception_is_limited_to_selected_warehouse(api,session):
-    from modules.wms.models import WarehouseDirectory
     from modules.wms.invoice_shipments import guard_free
+    from modules.wms.models import WarehouseDirectory
     from tests.test_invoice_stock_allocation import setup
     org,_,_,actor=await setup(api,session)
     session.add_all([WarehouseDirectory(organization_id=org,name="W",title="W",created_by=actor,prohibit_negative_stock=False),WarehouseDirectory(organization_id=org,name="Other",title="Other",created_by=actor)])
     session.add_all([StockMovement(organization_id=org,sku_code="A",warehouse="Other",kind="in",qty=1,reason="receipt"),StockMovement(organization_id=org,sku_code="A",warehouse="Other",kind="out",qty=1,reason="shipment")])
     await session.flush()
     await guard_free(session,org,{("A","W"):Decimal("11")})
-    with pytest.raises(HTTPException) as caught:await guard_free(session,org,{("A","Other"):Decimal("1")})
+    with pytest.raises(HTTPException) as caught:
+        await guard_free(session, org, {("A", "Other"): Decimal("1")})
     assert caught.value.detail["warehouse"]=="Other" and caught.value.detail["physical"]=="0.00"
 
 async def test_completed_line_does_not_carry_other_line_shortage(api,session):

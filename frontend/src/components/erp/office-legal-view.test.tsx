@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { OfficeLegalView } from "@/components/erp/office-legal-view";
@@ -23,6 +23,17 @@ let postHandler: () => { ok: boolean; status: number };
 // URL-и всех GET-ов на список — чтобы проверять, что фильтры уходят в query.
 let getUrls: string[] = [];
 let postBodies: string[] = [];
+let getHandler: ((url: string, init?: RequestInit) => Promise<Response>) | null = null;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 function jsonResponse(body: unknown, ok = true, status = 200) {
   return Promise.resolve({
@@ -50,6 +61,7 @@ beforeEach(() => {
   postHandler = () => ({ ok: true, status: 200 });
   getUrls = [];
   postBodies = [];
+  getHandler = null;
 
   vi.stubGlobal(
     "fetch",
@@ -60,7 +72,7 @@ beforeEach(() => {
         return jsonResponse({ id: 999 }, r.ok, r.status);
       }
       getUrls.push(String(url));
-      return jsonResponse(listData);
+      return getHandler ? getHandler(String(url), init) : jsonResponse(listData);
     }),
   );
 });
@@ -167,5 +179,138 @@ describe("OfficeLegalView", () => {
     expect(await screen.findByText("Ошибка 422")).toBeInTheDocument();
     // форма не закрылась — ошибку видно на месте
     expect(screen.getByText("Новый договор")).toBeInTheDocument();
+  });
+
+  it("GET 503 показывает отдельную ошибку списка, а не успешное пустое состояние", async () => {
+    getHandler = async () => ({ ok: false, status: 503 } as Response);
+    render(<OfficeLegalView />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ошибка 503");
+    expect(screen.getByText("Не удалось загрузить договоры")).toBeInTheDocument();
+    expect(screen.queryByText("Договоров нет")).not.toBeInTheDocument();
+    expect(screen.getByText("Ошибка 503").closest("form")).toBeNull();
+  });
+
+  it("сетевая ошибка списка повторяется с текущими фильтрами и может завершиться успехом", async () => {
+    let calls = 0;
+    getHandler = async () => {
+      calls += 1;
+      if (calls === 2) throw new TypeError("Failed to fetch");
+      return jsonResponse(calls === 1 ? [] : [contract({ number: "ДОГ-RETRY" })]);
+    };
+    render(<OfficeLegalView />);
+
+    await screen.findByText("Договоров нет");
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "expired" } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ошибка сети");
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    await screen.findByText("ДОГ-RETRY");
+    expect(getUrls).toHaveLength(3);
+    expect(getUrls[2]).toContain("status=expired");
+  });
+
+  it("сбой обновления оставляет договоры тех же фильтров и явно помечает данные устаревшими", async () => {
+    let calls = 0;
+    getHandler = async () => {
+      calls += 1;
+      return calls === 1
+        ? jsonResponse([contract()])
+        : ({ ok: false, status: 503 } as Response);
+    };
+    render(<OfficeLegalView />);
+    expect(await screen.findByText("ДОГ-001")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Договор" }));
+    fireEvent.change(screen.getByPlaceholderText("ООО Поставщик"), { target: { value: "ООО Обновление" } });
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Показаны ранее загруженные данные");
+    expect(screen.getByText("ДОГ-001")).toBeInTheDocument();
+    expect(screen.queryByText("Договоров нет")).not.toBeInTheDocument();
+  });
+
+  it("при смене фильтра очищает предыдущие договоры, пока загружается новый список", async () => {
+    const pending = deferred<Response>();
+    let calls = 0;
+    getHandler = () => (++calls === 1 ? jsonResponse([contract()]) : pending.promise);
+    render(<OfficeLegalView />);
+    expect(await screen.findByText("ДОГ-001")).toBeInTheDocument();
+
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "terminated" } });
+    expect(screen.queryByText("ДОГ-001")).not.toBeInTheDocument();
+    expect(screen.getByText("Загрузка списка…")).toBeInTheDocument();
+    expect(screen.queryByText("Договоров нет")).not.toBeInTheDocument();
+  });
+
+  it("поздний ответ предыдущего фильтра не перезаписывает текущий, даже если mock игнорирует abort", async () => {
+    const first = deferred<Response>();
+    const second = deferred<Response>();
+    let calls = 0;
+    getHandler = () => (++calls === 1 ? first.promise : second.promise);
+    render(<OfficeLegalView />);
+    await waitFor(() => expect(getUrls).toHaveLength(1));
+    const firstSignal = (vi.mocked(fetch).mock.calls[0][1] as RequestInit).signal;
+
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "terminated" } });
+    await waitFor(() => expect(getUrls).toHaveLength(2));
+    expect(firstSignal?.aborted).toBe(true);
+    second.resolve(jsonResponse([contract({ number: "ДОГ-CURRENT" })]));
+    expect(await screen.findByText("ДОГ-CURRENT")).toBeInTheDocument();
+
+    await act(async () => {
+      first.resolve(jsonResponse([contract({ number: "ДОГ-OLD" })]));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.getByText("ДОГ-CURRENT")).toBeInTheDocument();
+    expect(screen.queryByText("ДОГ-OLD")).not.toBeInTheDocument();
+  });
+
+  it("размонтирование отменяет GET и поздний ответ не создаёт ошибку или новый запрос", async () => {
+    const pending = deferred<Response>();
+    getHandler = () => pending.promise;
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => undefined);
+    const view = render(<OfficeLegalView />);
+    await waitFor(() => expect(getUrls).toHaveLength(1));
+    const signal = (vi.mocked(fetch).mock.calls[0][1] as RequestInit).signal;
+
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      pending.resolve({ ok: false, status: 503 } as Response);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(view.container.querySelector('[role="alert"]')).toBeNull();
+    expect(alertSpy).not.toHaveBeenCalled();
+    expect(getUrls).toHaveLength(1);
+  });
+
+  it("успех POST после смены фильтра перезагружает текущий фильтр, а не захваченный", async () => {
+    const pendingPost = deferred<Response>();
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        postBodies.push(String(init.body));
+        return pendingPost.promise;
+      }
+      requests.push(String(url));
+      getUrls.push(String(url));
+      return jsonResponse([]);
+    }));
+    render(<OfficeLegalView />);
+    await screen.findByText("Договоров нет");
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "active" } });
+    await waitFor(() => expect(requests).toHaveLength(2));
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Договор" }));
+    fireEvent.change(screen.getByPlaceholderText("ООО Поставщик"), { target: { value: "ООО Тест" } });
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    await waitFor(() => expect(postBodies).toHaveLength(1));
+
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "terminated" } });
+    await waitFor(() => expect(requests).toHaveLength(3));
+    pendingPost.resolve({ ok: true, status: 201 } as Response);
+    await waitFor(() => expect(requests).toHaveLength(4));
+    expect(requests[2]).toContain("status=terminated");
+    expect(requests[3]).toContain("status=terminated");
+    expect(requests[3]).not.toContain("status=active");
   });
 });

@@ -559,9 +559,60 @@ describe("api client — прочие операции и fallback'и", () => {
   });
 
   it("fetchOwnerDashboard собирает метрики/воронку/KPI", async () => {
-    stubFetch({ approvals_pending: 1, approvals_total: 2, modules: ["sales"], widgets: [] });
+    const ownerMetrics = {
+      approvals_pending: 1, approvals_total: 2, audit_count: 3, events_count: 4,
+      counterparties: 5, skus: 6, modules: ["sales"], widgets: [],
+    };
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => url.includes("/sales/board") ? { stages: [] } : url.includes("/sales/kpis") ? [] : ownerMetrics,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
     const dash = await fetchOwnerDashboard();
-    expect(dash?.metrics.approvals_pending).toBe(1);
+    expect(dash.metrics).toEqual({ status: "ok", data: ownerMetrics });
+    expect(dash.stages.status).toBe("ok");
+    expect(dash.kpis).toEqual({ status: "ok", data: [] });
+  });
+
+  it("fetchOwnerDashboard считает пустой объект метрик недоступными данными", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => url.includes("/sales/board") ? { stages: [] } : url.includes("/sales/kpis") ? [] : {},
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const dash = await fetchOwnerDashboard();
+
+    expect(dash.metrics).toEqual({ status: "unavailable" });
+    expect(dash.stages).toEqual({
+      status: "ok",
+      data: [{ id: "lost", title: "Отказ", count: 0, sum: 0, color: "#EF4444", deals: [] }],
+    });
+    expect(dash.kpis).toEqual({ status: "ok", data: [] });
+  });
+
+  it("fetchOwnerDashboard rejects a string counter in otherwise complete metrics", async () => {
+    const ownerMetrics = {
+      approvals_pending: "2", approvals_total: 3, audit_count: 4, events_count: 5,
+      counterparties: 6, skus: 7, modules: ["sales"], widgets: [{ key: "sales", title: "Sales" }],
+    };
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => url.includes("/sales/board") ? { stages: [] } : url.includes("/sales/kpis") ? [] : ownerMetrics,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const dash = await fetchOwnerDashboard();
+
+    expect(dash.metrics).toEqual({ status: "unavailable" });
+    expect(dash.stages).toEqual({
+      status: "ok",
+      data: [{ id: "lost", title: "Отказ", count: 0, sum: 0, color: "#EF4444", deals: [] }],
+    });
+    expect(dash.kpis).toEqual({ status: "ok", data: [] });
   });
 
   it("fetchOwnerDashboard keeps its access token out of board URLs", async () => {
@@ -570,7 +621,9 @@ describe("api client — прочие операции и fallback'и", () => {
       json: async () => url.includes("/sales/board") ? { stages: [] } : url.includes("/sales/kpis") ? [] : {},
     }));
     vi.stubGlobal("fetch", fetchMock);
-    await fetchOwnerDashboard("director", "synthetic-owner-token");
+    const dash = await fetchOwnerDashboard("director", "synthetic-owner-token");
+    expect(dash.stages.status).toBe("ok");
+    expect(dash.kpis.status).toBe("ok");
     const boardCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/sales/board"));
     expect(boardCall?.[0]).toMatch(/\/sales\/board$/);
     expect(boardCall?.[1]).toEqual(expect.objectContaining({
@@ -579,9 +632,64 @@ describe("api client — прочие операции и fallback'и", () => {
     expect(fetchMock.mock.calls.every(([url]) => !String(url).includes("synthetic-owner-token"))).toBe(true);
   });
 
-  it("fetchOwnerDashboard → null при ошибке", async () => {
+  it("fetchOwnerDashboard сохраняет успешные источники при независимой ошибке доски", async () => {
+    const ownerMetrics = {
+      approvals_pending: 1, approvals_total: 1, audit_count: 0, events_count: 2,
+      counterparties: 3, skus: 0, modules: [], widgets: [],
+    };
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/sales/board")) return { ok: false, status: 403, json: async () => ({}) };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => url.includes("/sales/kpis") ? [{ key: "calls", title: "Звонки", target: 2, actual: 1, percent: 50, unit: "count", icon: "phone", tone: "blue" }] : ownerMetrics,
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const dash = await fetchOwnerDashboard();
+    expect(dash.metrics.status).toBe("ok");
+    expect(dash.stages).toEqual({ status: "auth" });
+    expect(dash.kpis.status).toBe("ok");
+  });
+
+  it("fetchOwnerDashboard различает запрет доступа и недоступный источник", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/system/owner")) return { ok: false, status: 401, json: async () => ({}) };
+      if (url.includes("/sales/board")) return { ok: false, status: 500, json: async () => ({}) };
+      return { ok: false, status: 403, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const dash = await fetchOwnerDashboard();
+    expect(dash.metrics).toEqual({ status: "auth" });
+    expect(dash.stages).toEqual({ status: "unavailable" });
+    expect(dash.kpis).toEqual({ status: "auth" });
+  });
+
+  it("fetchOwnerDashboard не отдаёт демо-доску и мок-KPI при сетевом сбое", async () => {
+    const ownerMetrics = {
+      approvals_pending: 0, approvals_total: 0, audit_count: 0, events_count: 0,
+      counterparties: 0, skus: 0, modules: [], widgets: [],
+    };
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/sales/board") || url.includes("/sales/kpis")) throw new Error("network down");
+      return { ok: true, status: 200, json: async () => ownerMetrics };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const dash = await fetchOwnerDashboard();
+    expect(dash.metrics.status).toBe("ok");
+    expect(dash.stages).toEqual({ status: "unavailable" });
+    expect(dash.kpis).toEqual({ status: "unavailable" });
+    expect("data" in dash.stages).toBe(false);
+    expect("data" in dash.kpis).toBe(false);
+  });
+
+  it("fetchOwnerDashboard отмечает все источники недоступными при общей сетевой ошибке", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
-    expect(await fetchOwnerDashboard()).toBeNull();
+    expect(await fetchOwnerDashboard()).toEqual({
+      metrics: { status: "unavailable" },
+      stages: { status: "unavailable" },
+      kpis: { status: "unavailable" },
+    });
   });
 
   it.each([401, 403, 404, 500])("does not invent a deal after HTTP %i", async (status) => {
@@ -978,9 +1086,9 @@ describe("api client — лиды: расширенный контракт", () 
     expect(fetchMock).toHaveBeenCalledWith("/api/integrations/web/lead", expect.objectContaining({
       body: JSON.stringify({ name: "Иван" }),
     }));
-    expect(await submitEmailLead({ from: "a@b.by" })).toBe(true);
+    expect(await submitEmailLead({ from: "fixture@example.invalid" })).toBe(true);
     expect(fetchMock).toHaveBeenLastCalledWith("/api/integrations/email/inbound", expect.objectContaining({
-      body: JSON.stringify({ from: "a@b.by" }),
+      body: JSON.stringify({ from: "fixture@example.invalid" }),
     }));
   });
 

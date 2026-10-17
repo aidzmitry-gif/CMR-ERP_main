@@ -68,6 +68,11 @@ class AccountingGateway(Protocol):
         """
         ...
 
+    async def finance_member(self, session: Any, organization_id: int, user: Any,
+                             *, write: bool) -> str:
+        """Authorize an internal finance consumer in this book without committing."""
+        ...
+
     async def source_organizations(self, session: Any, user: Any) -> list[dict]: ...
 
     async def source_owner_authority(self, session: Any, organization_id: int, user: Any) -> str:

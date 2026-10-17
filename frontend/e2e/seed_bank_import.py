@@ -33,6 +33,7 @@ with engine.begin() as connection:
     result = connection.execute(BankTransaction.__table__.insert().values(
         ext_id=f"E2E-BANK-{org_id}", occurred_on=date(2026, 9, 3), amount="120.00", currency="BYN",
         payer_name="Synthetic buyer", purpose="Synthetic advance",
+        source_provider="synthetic-bank", account_code=f"E2E-ACCOUNT-{org_id}", direction="receipt",
     ))
     connection.execute(SourceBinding.__table__.insert().values(
         organization_id=org_id, source_type="finance_bank_transaction", source_id=result.inserted_primary_key[0],

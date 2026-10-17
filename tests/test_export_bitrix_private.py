@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 import requests
 
-
 SPEC = importlib.util.spec_from_file_location(
     "export_bitrix_private", Path(__file__).parents[1] / "scripts" / "export_bitrix_private.py")
 assert SPEC and SPEC.loader

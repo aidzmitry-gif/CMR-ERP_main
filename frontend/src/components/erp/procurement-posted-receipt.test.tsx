@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { ProcurementPostedReceipt } from "./procurement-posted-receipt";
@@ -41,7 +41,7 @@ it("creates a separate linked correction draft and returns to it through the reg
   expect(await screen.findByText("SUP-81 · версия 3")).toBeInTheDocument();
   expect(screen.getByText(/Будет создан отдельный связанный черновик/)).toBeInTheDocument();
   expect(screen.getByText(/пока нельзя провести или передать в WMS/)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Создать черновик исправления" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Создать черновик исправления" }));
 
   await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Черновик исправления № 92, версия 1, создан."));
   expect(command).toMatchObject({ expected_version: 3, expected_entry_id: 42 });
@@ -129,4 +129,53 @@ it("fails closed before rendering malformed receipt lines", async () => {
   render(<ProcurementPostedReceipt org="7" entry="42" />);
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("неполные исходные данные"));
   expect(screen.queryByRole("button", { name: "Создать черновик исправления" })).not.toBeInTheDocument();
+});
+
+it("waits for journal recovery before enabling actions and keeps creation singleflight", async () => {
+  const recoveryCallbacks: VoidFunction[] = [];
+  const nativeQueueMicrotask = globalThis.queueMicrotask.bind(globalThis);
+  vi.stubGlobal("queueMicrotask", (callback: VoidFunction) => {
+    if (new Error().stack?.includes("procurement-posted-receipt.tsx")) recoveryCallbacks.push(callback);
+    else nativeQueueMicrotask(callback);
+  });
+
+  const bodies: string[] = [];
+  let resolvePost: ((value: ReturnType<typeof response>) => void) | undefined;
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === postedPath) return response(source);
+    if (url === correctionPath && init?.method === "POST") {
+      bodies.push(String(init.body));
+      return await new Promise<ReturnType<typeof response>>((resolve) => { resolvePost = resolve; });
+    }
+    throw new Error(`Unexpected request ${url}`);
+  });
+  vi.stubGlobal("fetch", fetcher);
+
+  render(<ProcurementPostedReceipt org="7" entry="42" />);
+  expect(await screen.findByText("SUP-81 · версия 3")).toBeInTheDocument();
+  await waitFor(() => expect(recoveryCallbacks).toHaveLength(1));
+  expect(screen.getByText("Проверяем журнал ранее отправленного запроса…")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Создать черновик исправления" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Повторить тот же запрос" })).not.toBeInTheDocument();
+  expect(fetcher.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+
+  await act(async () => { recoveryCallbacks.shift()!(); });
+  const createButton = await screen.findByRole("button", { name: "Создать черновик исправления" });
+  act(() => {
+    fireEvent.click(createButton);
+    fireEvent.click(createButton);
+  });
+  await waitFor(() => expect(resolvePost).toBeDefined());
+  expect(bodies).toHaveLength(1);
+  const savedBody = JSON.parse(bodies[0]);
+  expect(savedBody).toEqual({ key: expect.any(String), expected_version: 3, expected_entry_id: 42 });
+  expect(sessionStorage.getItem("procurement-receipt-correction:v1:7:81")).toBe(JSON.stringify({
+    org: "7", originalReceiptId: 81, expectedVersion: 3, expectedEntryId: 42,
+    key: savedBody.key, body: bodies[0],
+  }));
+
+  await act(async () => { resolvePost!(response(correction(96, savedBody.key))); });
+  expect(await screen.findByText("Черновик исправления № 96, версия 1, создан.")).toBeInTheDocument();
+  expect(sessionStorage.getItem("procurement-receipt-correction:v1:7:81")).toBeNull();
+  expect(fetcher.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
 });

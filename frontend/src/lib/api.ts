@@ -2285,10 +2285,38 @@ export interface OwnerMetrics {
   widgets: { key: string; title: string }[];
 }
 
+function isOwnerMetrics(value: unknown): value is OwnerMetrics {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const metrics = value as Record<string, unknown>;
+  const counts = [
+    metrics.approvals_pending,
+    metrics.approvals_total,
+    metrics.audit_count,
+    metrics.events_count,
+    metrics.counterparties,
+    metrics.skus,
+  ];
+
+  return (
+    counts.every((count) => typeof count === "number" && Number.isFinite(count) && Number.isInteger(count) && count >= 0) &&
+    Array.isArray(metrics.modules) && metrics.modules.every((module) => typeof module === "string") &&
+    Array.isArray(metrics.widgets) && metrics.widgets.every((widget) =>
+      typeof widget === "object" && widget !== null && !Array.isArray(widget) &&
+      typeof (widget as Record<string, unknown>).key === "string" &&
+      typeof (widget as Record<string, unknown>).title === "string"
+    )
+  );
+}
+
+export type OwnerSource<T> =
+  | { status: "ok"; data: T }
+  | { status: "auth" }
+  | { status: "unavailable" };
+
 export interface OwnerDashboard {
-  metrics: OwnerMetrics;
-  stages: Stage[];
-  kpis: Kpi[];
+  metrics: OwnerSource<OwnerMetrics>;
+  stages: OwnerSource<Stage[]>;
+  kpis: OwnerSource<Kpi[]>;
 }
 
 /** AI-инсайт по здоровью бизнеса (AI Control Tower). null — AI выключен / ошибка. */
@@ -2302,26 +2330,45 @@ export async function fetchOwnerInsight(): Promise<string | null> {
   }
 }
 
-/** Панель владельца (Control Tower): кросс-модульные метрики + воронка + KPI (SSR). */
+/** Панель владельца (Control Tower): независимый статус для каждого SSR-источника. */
 export async function fetchOwnerDashboard(
   roles?: string,
   accessToken?: string,
-): Promise<OwnerDashboard | null> {
-  try {
-    const [metricsRes, stages, kpis] = await Promise.all([
-      fetch(`${BASE}/system/owner`, {
+): Promise<OwnerDashboard> {
+  const metrics = (async (): Promise<OwnerSource<OwnerMetrics>> => {
+    try {
+      const response = await fetch(`${BASE}/system/owner`, {
         cache: "no-store",
         headers: roleHeaders(roles, accessToken),
-      }),
-      fetchBoardStages(roles, undefined, accessToken),
-      fetchKpis(roles, accessToken),
-    ]);
-    if (!metricsRes.ok) throw new Error(String(metricsRes.status));
-    const metrics = (await metricsRes.json()) as OwnerMetrics;
-    return { metrics, stages, kpis };
-  } catch {
-    return null;
-  }
+      });
+      if (response.status === 401 || response.status === 403) return { status: "auth" };
+      if (!response.ok) return { status: "unavailable" };
+      const payload: unknown = await response.json();
+      return isOwnerMetrics(payload) ? { status: "ok", data: payload } : { status: "unavailable" };
+    } catch {
+      return { status: "unavailable" };
+    }
+  })();
+
+  const [metricsResult, boardResult, kpiResult] = await Promise.all([
+    metrics,
+    fetchBoardResult(roles, undefined, accessToken),
+    fetchKpisResult(roles, accessToken),
+  ]);
+
+  return {
+    metrics: metricsResult,
+    stages: boardResult.authError
+      ? { status: "auth" }
+      : boardResult.demo
+        ? { status: "unavailable" }
+        : { status: "ok", data: boardResult.stages },
+    kpis: kpiResult.authError
+      ? { status: "auth" }
+      : kpiResult.demo
+        ? { status: "unavailable" }
+        : { status: "ok", data: kpiResult.kpis },
+  };
 }
 
 /** Лого продавца для печатных форм (счёт/договор) — honest null, если не загружено. */

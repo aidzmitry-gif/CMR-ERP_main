@@ -33,24 +33,39 @@ function contextFromCard(card: CallCard): CallContext {
   };
 }
 
-/**
- * Глобальная подписка продавца на поток входящих звонков (SSE) + всплывающее окно.
- * Монтируется в оболочке (AppShell) — окно доступно на любом экране CRM/ERP.
- */
-export function ActiveCallProvider({ children }: {
+/** Keeps the shell stable while mounting call UI only for an eligible CRM matrix role. */
+export function ActiveCallProvider({ children, enabled = false }: {
   children: React.ReactNode;
+  enabled?: boolean;
 }) {
+  return (
+    <>
+      {children}
+      {enabled ? <ActiveCallSubscriptionOverlay /> : null}
+    </>
+  );
+}
+
+function ActiveCallSubscriptionOverlay() {
   const [card, setCard] = useState<CallCard | null>(null);
   // cockpit = открыт рабочий кокпит разговора (после «Принять»), отдельно от screen-pop.
   const [cockpit, setCockpit] = useState<CallContext | null>(null);
   const router = useRouter();
 
-  // subscribeCalls возвращает функцию отписки → она же cleanup эффекта.
-  useEffect(() => subscribeCalls(setCard), []);
+  // Cleanup + флаг подавляют события, уже попавшие в очередь при отписке.
+  useEffect(() => {
+    let subscribed = true;
+    const unsubscribe = subscribeCalls((nextCard) => {
+      if (subscribed) setCard(nextCard);
+    });
+    return () => {
+      subscribed = false;
+      unsubscribe();
+    };
+  }, []);
 
   return (
     <>
-      {children}
       {card && (
         <IncomingCallCard
           card={card}

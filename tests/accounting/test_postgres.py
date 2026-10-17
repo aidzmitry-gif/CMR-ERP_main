@@ -73,6 +73,9 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0188_manual_document_void.py",
     "0189_inventory_issue_directory_identity.py",
     "0190_procurement_receipt_correction_drafts.py",
+    "crm_rel_001_auto_posting_01.py",
+    "crm_rel_001_wms_mode_01.py",
+    "0194_warehouse_negative_stock_policy.py",
 )
 
 
