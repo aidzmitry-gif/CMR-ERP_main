@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Request, type Response } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { addSyntheticDealItem, createSyntheticCounterparty, createSyntheticCrmDeal, prepareInvoiceWizard, seedInvoiceE2E } from './crm-fixtures';
@@ -116,11 +116,39 @@ for (const mode of ['stock', 'on_order'] as const) {
       };
       test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '11' });
       await openDrawer(true);
-      const won = page.waitForResponse(r => r.url().endsWith(`/deals/${deal.id}/win`) && r.request().method() === 'POST');
-      await page.getByRole('button', { name: 'Выиграна', exact: true }).click();
-      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '15' });
-      expect((await won).status()).toBe(200);
-      test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '16' });
+      const winRequests = [
+        { url: new URL(path + '/loss-context', page.url()).href, method: 'GET' },
+        { url: new URL('/api/sales/stages', page.url()).href, method: 'GET' },
+        { url: new URL(path + '/win', page.url()).href, method: 'POST' },
+      ].map((endpoint, index) => ({ ...endpoint, request: null as Request | null, attempts: 0,
+        annotation: { type: 'erp_ready_win_request', description: `${index + 1}:null` } }));
+      test.info().annotations.push(...winRequests.map(row => row.annotation));
+      const observeWinRequest = (request: Request) => {
+        const index = winRequests.findIndex(row => row.url === request.url() && row.method === request.method());
+        if (index < 0) return;
+        const row = winRequests[index];
+        row.attempts = Math.min(2, row.attempts + 1);
+        row.request = row.attempts === 1 ? request : null;
+        row.annotation.description = `${index + 1}:null`;
+      };
+      const observeWinResponse = (response: Response) => {
+        const index = winRequests.findIndex(row => row.attempts === 1 && row.request === response.request());
+        const status = response.status();
+        if (index >= 0 && Number.isInteger(status) && status >= 100 && status <= 599)
+          winRequests[index].annotation.description = `${index + 1}:${status}`;
+      };
+      page.on('request', observeWinRequest);
+      page.on('response', observeWinResponse);
+      try {
+        const won = page.waitForResponse(r => r.url().endsWith(`/deals/${deal.id}/win`) && r.request().method() === 'POST');
+        await page.getByRole('button', { name: 'Выиграна', exact: true }).click();
+        test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '15' });
+        expect((await won).status()).toBe(200);
+        test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '16' });
+      } finally {
+        page.off('request', observeWinRequest);
+        page.off('response', observeWinResponse);
+      }
       await page.reload();
       test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '17' });
       expect((await preserved()).stage).toBe('won');
