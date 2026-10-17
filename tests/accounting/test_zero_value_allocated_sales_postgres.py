@@ -7,12 +7,6 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
-
-from modules.accounting import sales, service, zero_value_disposals
-from modules.accounting.models import Account, Entry
-from modules.accounting.production_output_cost_workflow import confirm_output_cost_correction
-from modules.accounting.schemas import LineInput, PostingInput
-from modules.accounting.zero_value_disposals import load_authenticated_zero_value_disposals
 from tests.accounting.test_finished_goods_inventory_postgres import (
     _output_cost_command,
     sale_document,
@@ -20,6 +14,13 @@ from tests.accounting.test_finished_goods_inventory_postgres import (
 from tests.accounting.test_inventory_allocation_api_postgres import application, output_sources
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_zero_value_output_cost_postgres import run_migration
+from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
+
+from modules.accounting import sales, service, zero_value_disposals
+from modules.accounting.models import Account, Entry
+from modules.accounting.production_output_cost_workflow import confirm_output_cost_correction
+from modules.accounting.schemas import LineInput, PostingInput
+from modules.accounting.zero_value_disposals import load_authenticated_zero_value_disposals
 
 pytestmark = pytest.mark.integration
 
@@ -48,8 +49,8 @@ async def test_allocated_sale_migration_empty_roundtrip(pg_factory):
 
 @pytest.mark.parametrize("method", ["fifo", "weighted_average"])
 @pytest.mark.parametrize("vat_rate", ["0", "20"])
-async def test_allocated_zero_sale_has_one_quantity_and_real_revenue(pg_factory, pg_book, method, vat_rate, monkeypatch):
-    policy_id, outputs = await output_sources(pg_factory, pg_book, method)
+async def test_allocated_zero_sale_has_one_quantity_and_real_revenue(pg_factory, pg_book, issuance_pg, method, vat_rate, monkeypatch):
+    policy_id, outputs = await output_sources(pg_factory, pg_book, method, issuance=issuance_pg)
     async with pg_factory() as session:
         await service.post(session, pg_book[0], PostingInput(source="zero-sale-reverse-wip", source_version=1,
             operation="manual", document_date="2026-10-31", operation_date="2026-10-31", posting_date="2026-10-31",
