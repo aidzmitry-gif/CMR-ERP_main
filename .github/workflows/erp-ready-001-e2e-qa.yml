@@ -1,0 +1,175 @@
+name: ERP-READY selective E2E QA
+
+on:
+  push:
+    branches:
+      - "agent/erp-ready-001-e2e-20261017"
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install backend deps
+        run: pip install -r requirements-dev.txt
+      - name: Native dependencies for immutable document PDFs
+        run: sudo apt-get update && sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 fonts-dejavu-core
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+      - name: Install Playwright (chromium)
+        working-directory: frontend
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Native PDF and exact remaining E2E scenarios
+        shell: python
+        run: |
+          import hashlib
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          root = Path.cwd()
+          temp = Path(os.environ['RUNNER_TEMP'])
+          summary_path = temp / 'erp-ready-e2e-summary.json'
+          expected_sources = {'frontend/e2e/counterparties.spec.ts': '27e7b1bae0477a983c21a8a215d237f1361c62e61e4bd01615b4b0adb660501e', 'frontend/e2e/crm-own-cycle.spec.ts': '91bc3778e13c51a89a0990fbf83f43b5d44c607d13b4a11492a6f530f352aa23', 'frontend/e2e/crm-own-outcomes.spec.ts': '7c13375bd03937af425a817cf3f2e3bd2f47728a256b81f126d81dea2567ca24', 'frontend/e2e/deal-card.spec.ts': 'bcb66f622e6f54e51437e712c1f8a1327a4bfc6b6c2d6b46b6ad95cfb5621ec9', 'frontend/e2e/deals-board.spec.ts': '694519c4eefda774fb32cb82336e128b0f99f6ab23ae522a32e28e8fcb5df9b8', 'frontend/e2e/navigation.spec.ts': '996b3f56c58b0385b8e180d2bb6b83602cb844c38e4953983e2fa866f371a39f', 'frontend/e2e/procurement-deadlines.spec.ts': '5ffdb586955d4379bbb87bb591b8251116db732f4de53fe32dbb76d59c6a5155', 'frontend/e2e/crm-fixtures.ts': '821d8d075133e048b0681ed32fd9156f58fcbe061c1228c25dab59f53fe895ac', 'scripts/seed_invoice_e2e.py': 'c83b6069b25aa6e43924281a7a210c4e065a1a685aa1e5aaaee14e4b68da3281'}
+          expected_modules = {'finance': '59832b2f14a2ee02d8db266a67f8206616bdcd94', 'hr': 'f8a6e0142f1920b07ec56818f42d156a602ff9c3', 'leads': '9a304f771ba74369ded199168e0e1da3ad6348d2', 'logistics': '6923d2e021980ef2546f382364d38dc34a0fef29', 'marketing': 'd4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282', 'procurement': 'f29ea84bd13342ae572e8c4499031d2f053d3d47', 'production': 'be7d7e198bf09cc41c642d22125db401da5adc48', 'sales': '786569040aabeab2c674e7e33ab2658ad3f77ab2', 'service': '3d33800c44865cd7a7373b29192c5d59d3c4bec8', 'wms': '8b6fb881a03f1a268f07e65f4fa89d195fc933a2'}
+          expected_cases = {tuple(case) for case in [['chromium', 'crm-own-cycle.spec.ts', 'own: клиент → контакт → сделка → задача/история → счёт под заказ и чужой доступ'], ['chromium', 'crm-own-outcomes.spec.ts', 'own outcomes preserve originals, tasks and stock reserve'], ['chromium', 'crm-own-outcomes.spec.ts', 'own outcomes preserve originals, tasks and on_order reserve'], ['chromium', 'crm-own-outcomes.spec.ts', 'own no-invoice loss finalizes with date, reason and history'], ['chromium', 'deal-card.spec.ts', 'карточка сделки: выпуск счёта ERP с резервом'], ['chromium', 'deal-card.spec.ts', 'документы: ошибка загрузки отличается от пустого списка и допускает повтор'], ['chromium', 'deal-card.spec.ts', 'счёт под заказ: потерянный ответ, повтор и неизменяемый оригинал'], ['chromium', 'deals-board.spec.ts', 'drag-and-drop: смена стадии перетаскиванием'], ['chromium', 'navigation.spec.ts', 'навигация: панель владельца → ERP-модуль'], ['chromium', 'procurement-deadlines.spec.ts', 'срок клиента переносится в черновик плана закупки'], ['setup', 'auth.setup.ts', 'dev-логин (Директор)']]}
+          summary = {'schemaVersion': 1, 'stage': 'preflight', 'passed': False,
+                     'planned': 11, 'passedCount': 0, 'failedCount': 0, 'notRunCount': 11,
+                     'globalErrorCount': 0, 'countsKnown': True, 'cases': [], 'sourceVerifiedAfter': False,
+                     'cleanupDeferredToHostedJobTeardown': True}
+
+          def git(*args):
+              return subprocess.check_output(['git', *args], cwd=root, text=True).strip()
+
+          def verify_sources():
+              assert git('rev-parse', 'HEAD') == os.environ['GITHUB_SHA']
+              subprocess.run(['git', 'diff', '--quiet', 'HEAD', '--ignore-submodules=untracked'],
+                             cwd=root, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+              for name, expected in expected_sources.items():
+                  assert hashlib.sha256((root / name).read_bytes()).hexdigest() == expected
+              for name, expected in expected_modules.items():
+                  assert git('-C', f'modules/{name}', 'rev-parse', 'HEAD') == expected
+
+          def cases(report):
+              result = []
+              def walk(suite):
+                  for spec in suite.get('specs', []):
+                      for test in spec.get('tests', []):
+                          stable = (test['projectId'], Path(spec['file']).name, spec['title'])
+                          assert stable in expected_cases
+                          identity = test['projectId'] + ':' + spec['id']
+                          assert re.fullmatch(r'(setup|chromium):[a-f0-9]{20}-[a-f0-9]{20}', identity)
+                          result.append((stable, identity, test))
+                  for child in suite.get('suites', []):
+                      walk(child)
+              for suite in report.get('suites', []):
+                  walk(suite)
+              assert len(result) == 11 and len({r[0] for r in result}) == 11
+              assert {r[0] for r in result} == expected_cases
+              return result
+
+          def capture(command, name, timeout):
+              with (temp / (name + '.json')).open('wb') as out, (temp / (name + '.stderr')).open('wb') as err:
+                  # This one attempt has a disposable hosted VM; accept only a terminal job.
+                  return subprocess.run(command, cwd=root / 'frontend', stdout=out, stderr=err,
+                                        timeout=timeout, check=False).returncode
+
+          code = 1
+          try:
+              verify_sources()
+              assert not (root / 'e2e.db').exists()
+              for directory in (root, root / 'frontend'):
+                  assert not any((directory / name).exists() for name in
+                                 ('.env', '.env.local', '.env.development', '.env.development.local',
+                                  '.env.production', '.env.production.local', '.env.test', '.env.test.local'))
+              import weasyprint
+              assert weasyprint.__version__ == '70.0'
+              assert weasyprint.HTML(string='<p>QA</p>').write_pdf().startswith(b'%PDF-')
+              summary['weasyprintVersion'] = '70.0'
+              summary['commit'] = git('rev-parse', 'HEAD')
+              summary['sourceSha256'] = expected_sources
+              summary['moduleSha'] = expected_modules
+              selected = ['e2e/crm-own-cycle.spec.ts', 'e2e/crm-own-outcomes.spec.ts',
+                          'e2e/deal-card.spec.ts', 'e2e/deals-board.spec.ts',
+                          'e2e/navigation.spec.ts', 'e2e/procurement-deadlines.spec.ts']
+              command = ['node', 'node_modules/@playwright/test/cli.js', 'test', *selected,
+                         '--project=chromium', '--workers=1', '--retries=0', '--max-failures=1',
+                         '--trace=off', '--reporter=json', '--grep-invert',
+                         'фильтры: приоритет и «Только висяки»|переключение воронки']
+              summary['stage'] = 'collection'
+              assert capture([*command, '--list'], 'erp-ready-collection', 90) == 0
+              listing = json.loads((temp / 'erp-ready-collection.json').read_text())
+              assert not listing.get('errors')
+              collected = cases(listing)
+              collected_ids = {entry[1] for entry in collected}
+              summary['collectedIds'] = sorted(collected_ids)
+              summary['stage'] = 'execution'
+              summary.update(countsKnown=False, passedCount=None, failedCount=None,
+                             notRunCount=None, globalErrorCount=None)
+              execution_code = capture(command, 'erp-ready-result', 900)
+              report = json.loads((temp / 'erp-ready-result.json').read_text())
+              executed = cases(report)
+              assert {entry[1] for entry in executed} == collected_ids
+              global_error_count = len(report.get('errors', []))
+              duration_ms = int(report['stats']['duration'])
+              result_cases = []
+              for stable, identity, test in executed:
+                  results = test.get('results', [])
+                  assert test.get('expectedStatus') == 'passed'
+                  assert len(results) <= 1
+                  if not results or results[0]['status'] == 'skipped':
+                      status = 'not_run'
+                  else:
+                      assert results[0].get('retry', 0) == 0
+                      status = results[0]['status']
+                      assert status in ('passed', 'failed', 'timedOut', 'interrupted')
+                  result_cases.append({'id': identity, 'status': status})
+              passed_count = sum(c['status'] == 'passed' for c in result_cases)
+              not_run_count = sum(c['status'] == 'not_run' for c in result_cases)
+              summary.update(cases=result_cases, passedCount=passed_count, notRunCount=not_run_count,
+                             failedCount=11 - passed_count - not_run_count, countsKnown=True,
+                             globalErrorCount=global_error_count, durationMs=duration_ms)
+              summary['passed'] = execution_code == 0 and summary['passedCount'] == 11 and summary['globalErrorCount'] == 0
+              summary['stage'] = 'completed'
+              code = 0 if summary['passed'] else 1
+          except Exception:
+              # Exception bodies can contain data or cookies. Only fixed stage/status is exported.
+              summary['passed'] = False
+          finally:
+              try:
+                  verify_sources()
+                  summary['sourceVerifiedAfter'] = True
+              except Exception:
+                  summary['passed'] = False
+                  code = 1
+              summary_path.write_text(json.dumps(summary, sort_keys=True) + '\n', encoding='utf-8')
+              print('Selective E2E stage:', summary['stage'], 'passed:', summary['passedCount'],
+                    'failed:', summary['failedCount'], 'not run:', summary['notRunCount'])
+          sys.exit(code)
+      - name: Upload allowlisted numerical E2E summary only
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: erp-ready-selective-e2e-summary
+          path: ${{ runner.temp }}/erp-ready-e2e-summary.json
+          if-no-files-found: error
+          retention-days: 7

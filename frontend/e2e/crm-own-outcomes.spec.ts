@@ -1,29 +1,26 @@
 import { expect, test } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
+import { addSyntheticDealItem, createSyntheticCounterparty, createSyntheticCrmDeal, prepareInvoiceWizard, seedInvoiceE2E } from './crm-fixtures';
 
 for (const mode of ['stock', 'on_order'] as const) {
   test(`own outcomes preserve originals, tasks and ${mode} reserve`, async ({ page, context, browser, baseURL }) => {
     test.setTimeout(180_000);
+    const nonce = `${mode}-${Date.now()}`;
+    const counterparty = await createSyntheticCounterparty(browser, `Outcome ${nonce}`, baseURL, 2901);
     await context.clearCookies();
     await page.goto('/login');
     await page.getByLabel('Сотрудник').selectOption('e2e_owner');
     await page.getByRole('button', { name: 'Войти', exact: true }).click();
     await expect(page).not.toHaveURL(/\/login/);
     // Synthetic prerequisites use the real own API; outcome and loss retry use the UI.
-    const nonce = `${mode}-${Date.now()}`;
-    const clientReply = await page.request.post('/api/sales/clients', { data: {
-      name: `Outcome ${nonce}`, request_key: `client-${nonce}`,
-    } });
-    expect(clientReply.status()).toBe(201);
-    const client = await clientReply.json();
-    const dealReply = await page.request.post('/api/sales/deals', { data: {
-      number: `OUTCOME-${nonce}`, title: 'Synthetic outcome', counterparty: client.name,
-      crm_client_id: client.id, next_step: 'Согласовать доставку',
-      next_step_at: '2026-09-20T07:00:00', ship_deadline: '2026-09-25', expected_close_date: '2026-09-23',
-    } });
-    expect(dealReply.status()).toBe(201);
-    const deal = await dealReply.json();
+    const { client, deal } = await createSyntheticCrmDeal(page.request, counterparty, {
+      ownerId: 2901, number: `E2E-OUTCOME-${nonce}`, title: 'Synthetic outcome',
+      nextStep: 'Согласовать доставку', nextStepAt: '2026-09-20T07:00:00',
+      shipDeadline: '2026-09-25', expectedCloseDate: '2026-09-23',
+    });
+    expect(client.counterparty_id).toBe(counterparty.id);
+    expect(deal.crm_client_id).toBe(client.id);
     const path = `/api/sales/deals/${deal.id}`;
     await page.goto(`/crm/deals/${deal.id}`);
     await page.getByPlaceholder('Что сделать…').fill(`Проверить ${nonce}`);
@@ -34,20 +31,23 @@ for (const mode of ['stock', 'on_order'] as const) {
       text: `History ${nonce}`, channel: 'internal', request_key: `history-${nonce}`,
     } });
     expect(message.status()).toBe(201);
-    const selector = page.getByRole('combobox', { name: 'Номенклатура (справочник из 1С через MDM)' });
-    const sku = selector.locator('option').filter({ hasText: mode === 'stock' ? 'QA-STOCK' : 'QA-ORDER' });
-    await expect(sku).toHaveCount(1);
-    await selector.selectOption((await sku.getAttribute('value'))!);
-    await page.getByRole('spinbutton', { name: 'Количество новой позиции', exact: true }).fill('2');
-    await page.getByLabel('Цена за единицу новой позиции', { exact: true }).fill('125.50');
-    const added = page.waitForResponse(r => r.url().endsWith(`/deals/${deal.id}/items`) && r.request().method() === 'POST');
-    await page.getByRole('button', { name: 'Добавить', exact: true }).first().click();
-    expect((await added).status()).toBe(201);
-    const invoiceReply = await page.request.post(path + '/documents', { data: {
-      kind: 'invoice', reserve_mode: mode, request_key: `invoice-${nonce}`,
-    } });
-    expect(invoiceReply.status()).toBe(201);
-    const invoice = await invoiceReply.json();
+    const item = await addSyntheticDealItem(page, deal.id, mode === 'stock' ? 'QA-STOCK' : 'QA-ORDER');
+    expect(item.qty).toBe(2);
+    expect(item.unit_price).toBe(125.5);
+    const fixture = await seedInvoiceE2E(page, deal.id, item.id, mode, { foreignBookReader: mode === 'stock' });
+    await prepareInvoiceWizard(page, fixture, mode);
+    const issueReply = page.waitForResponse(response => response.url().endsWith(`/api/sales/deals/${deal.id}/documents`)
+      && response.request().method() === 'POST');
+    await page.getByRole('button', { name: mode === 'stock' ? 'Выпустить счёт и зарезервировать' : 'Выпустить счёт под заказ', exact: true }).click();
+    expect((await issueReply).status()).toBe(201);
+    await expect(page.getByRole('link', { name: 'Открыть оригинал', exact: true })).toBeVisible();
+    const issuedList = await page.request.get(`/api/sales/deals/${deal.id}/documents`);
+    expect(issuedList.status()).toBe(200);
+    const issuedDocuments = await issuedList.json();
+    expect(issuedDocuments).toHaveLength(1);
+    const invoice = issuedDocuments[0] as { id: number; amount: number; reserve_status: string };
+    expect(invoice.reserve_status).toBe(mode === 'stock' ? 'reserved' : 'unreserved');
+    expect(invoice.amount).toBe(301.2);
     const read = async (url: string) => {
       const response = await page.request.get(url);
       expect(response.status()).toBe(200);
@@ -64,14 +64,25 @@ for (const mode of ['stock', 'on_order'] as const) {
       expect(response.status()).toBe(200);
       return response.json();
     };
+    const reservations = async () => {
+      const response = await control.request.get(`/api/wms/reservations?organization_id=${fixture.organization}`);
+      expect(response.status()).toBe(200);
+      return (await response.json()).filter((row: { source: string }) => row.source.startsWith(`invoice:${invoice.id}:`));
+    };
     try {
       const before = {
         tasks: await read(path + '/tasks'), messages: await read(path + '/messages'),
         items: await read(path + '/items'), documents: await read(path + '/documents'),
-        original_sha256: await originalHash(), stock: await stock(),
+        original_sha256: await originalHash(), stock: await stock(), reservations: await reservations(),
       };
       expect(before.documents[0].reserve_status).toBe(mode === 'stock' ? 'reserved' : 'unreserved');
       expect(Number(before.documents[0].amount)).toBe(301.2);
+      if (mode === 'stock') {
+        expect(before.reservations).toHaveLength(1);
+        expect(before.reservations[0]).toMatchObject({ organization_id: fixture.organization,
+          sku_code: fixture.sku, warehouse: 'E2E-W', version: 1, qty: '2.00', actor: 'e2e_owner' });
+        expect(before.reservations[0].id).toBeGreaterThan(0);
+      } else expect(before.reservations).toEqual([]);
       const preserved = async () => {
         expect(await read(path + '/tasks')).toEqual(before.tasks);
         expect(await read(path + '/messages')).toEqual(before.messages);
@@ -79,10 +90,10 @@ for (const mode of ['stock', 'on_order'] as const) {
         expect(await read(path + '/documents')).toEqual(before.documents);
         expect(await originalHash()).toBe(before.original_sha256);
         expect(await stock()).toEqual(before.stock);
+        expect(await reservations()).toEqual(before.reservations);
         const current = await read(path);
-        for (const field of ['next_step', 'next_step_at', 'ship_deadline', 'expected_close_date', 'amount']) {
-          expect(current[field]).toEqual(deal[field]);
-        }
+        expect(current).toMatchObject({ next_step: deal.next_step, next_step_at: deal.next_step_at,
+          ship_deadline: deal.ship_deadline, expected_close_date: deal.expected_close_date, amount: deal.amount });
         return current;
       };
       const openDrawer = async () => {
@@ -101,47 +112,76 @@ for (const mode of ['stock', 'on_order'] as const) {
       expect((await page.request.post(path + '/win')).status()).toBe(409);
       expect((await page.request.patch(path, { data: { stage: 'qual' } })).status()).toBe(200);
       expect((await preserved()).closed_date).toBeNull();
+      const lossPreviewResponse = await page.request.get(`/api/sales/organizations/${fixture.organization}/deals/${deal.id}/loss-preview`);
+      expect(lossPreviewResponse.status()).toBe(200);
+      const lossPreview = await lossPreviewResponse.json();
       await openDrawer();
       await page.getByRole('button', { name: 'Отказ', exact: true }).click();
-      const close = page.getByRole('button', { name: 'Закрыть в отказ', exact: true });
-      await expect(close).toBeDisabled();
-      await page.getByLabel('Причина отказа').selectOption('price');
+      const requestLoss = page.getByRole('button', { name: 'Запросить отказ', exact: true });
+      await expect(requestLoss).toBeEnabled();
+      await page.getByLabel('Причина отказа').selectOption(fixture.loss_reason);
       await page.getByPlaceholder('Комментарий (необязательно)').fill('Synthetic loss');
-      let failOnce = true;
-      let loseReply = mode === 'on_order';
+      let submission: Record<string, unknown> | null = null;
+      let committedLoss: Record<string, unknown> | null = null;
+      let attempts = 0;
       await page.route(`**/api/sales/deals/${deal.id}/lose`, async route => {
-        if (!failOnce) {
-          if (!loseReply) return route.continue();
-          loseReply = false;
-          expect((await route.fetch()).status()).toBe(200);
-          return route.abort('failed');
+        if (route.request().method() !== 'POST') return route.continue();
+        attempts += 1;
+        const body = route.request().postDataJSON() as Record<string, unknown>;
+        if (attempts === 1) {
+          submission = body;
+          expect(body).toMatchObject({ organization_id: fixture.organization, reason_code: fixture.loss_reason,
+            comment: 'Synthetic loss', finalize_if_empty: false });
+          expect(body.request_key).toEqual(expect.stringMatching(/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/));
+          expect(body.expected_composition_digest).toBe(lossPreview.composition_digest);
+          if (mode === 'on_order') {
+            const response = await route.fetch();
+            expect(response.status()).toBe(200);
+            committedLoss = await response.json() as Record<string, unknown>;
+            expect(committedLoss).toMatchObject({ replayed: false, state: 'pending', command: body,
+              request_id: body.request_key });
+            await route.abort('failed');
+            return;
+          }
+          return route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"synthetic retry"}' });
         }
-        failOnce = false;
-        return route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"synthetic retry"}' });
+        expect(body).toEqual(submission);
+        if (mode === 'on_order') {
+          if (!committedLoss) throw new Error('No committed loss receipt before retry');
+          const response = await route.fetch();
+          expect(response.status()).toBe(200);
+          expect(await response.json()).toEqual({ ...committedLoss, replayed: true });
+          return route.fulfill({ response });
+        }
+        return route.continue();
       });
-      await close.click();
-      await expect(page.getByRole('alert').filter({ hasText: 'Не удалось закрыть сделку в отказ' })).toBeVisible();
-      await expect(page.getByLabel('Причина отказа')).toHaveValue('price');
-      expect((await preserved()).stage).toBe('qual');
+      await requestLoss.click();
+      await expect(page.getByText(/Результат исходной команды не установлен/)).toBeVisible();
+      const retryLoss = page.getByRole('button', { name: 'Повторить исходную команду', exact: true });
+      await expect(retryLoss).toBeEnabled();
+      await preserved();
+      await retryLoss.click();
+      await expect(page.getByText(/ожидает завершения/)).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Завершить отказ', exact: true })).toBeDisabled();
+      expect(attempts).toBe(2);
+      const submissionKey = submission?.request_key;
+      if (typeof submissionKey !== 'string') throw new Error('Loss request key was not retained');
+      const lossRecord = await read(`/api/sales/organizations/${fixture.organization}/deals/${deal.id}/loss-requests/${submissionKey}`);
+      expect(lossRecord.state).toBe('pending');
+      expect(lossRecord.command).toEqual(submission);
+      expect(lossRecord.ready_to_finalize).toBe(false);
       if (mode === 'on_order') {
-        await close.click();
-        await expect(close).toBeEnabled();
-        await expect(page.getByRole('alert').filter({ hasText: 'Не удалось закрыть сделку в отказ' })).toBeVisible();
-        expect((await preserved()).stage).toBe('lost');
+        expect(lossRecord.request_id).toBe(committedLoss?.request_id);
+        expect(lossRecord.request_digest).toBe(committedLoss?.request_digest);
       }
-      const lost = page.waitForResponse(r => r.url().endsWith(`/deals/${deal.id}/lose`)
-        && r.status() === (mode === 'on_order' ? 409 : 200));
-      await close.click();
-      await lost;
-      await expect(page.getByText('Закрыть сделку в отказ', { exact: true })).not.toBeVisible();
+      expect((await preserved()).stage).toBe('qual');
       await page.reload();
-      const final = await preserved();
-      expect(final.stage).toBe('lost');
-      expect(final.closed_date).toBeTruthy();
-      expect(final.lost_reason_code).toBe('price');
-      expect(final.lost_comment).toBe('Synthetic loss');
-      await expect(page.getByTestId('stage-column-lost').getByTestId(`deal-card-${deal.id}`)).toBeVisible();
-      expect((await read(path + '/history')).slice(-3).map((row: { to_stage: string }) => row.to_stage)).toEqual(['won', 'qual', 'lost']);
+      const afterPending = await preserved();
+      expect(afterPending.stage).toBe('qual');
+      expect(afterPending.closed_date).toBeNull();
+      expect(afterPending.lost_reason_code).toBeNull();
+      expect(afterPending.lost_comment).toBeNull();
+      expect((await read(path + '/history')).slice(-2).map((row: { to_stage: string }) => row.to_stage)).toEqual(['won', 'qual']);
       await page.goto(`/crm/deals/${deal.id}`);
       await expect(page.getByText(`Проверить ${nonce}`, { exact: true })).toBeVisible();
       const money = page.getByRole('region', { name: 'Оплата и деньги', exact: true });
@@ -154,14 +194,83 @@ for (const mode of ['stock', 'on_order'] as const) {
         await other.getByLabel('Сотрудник').selectOption('e2e_foreign');
         await other.getByRole('button', { name: 'Войти', exact: true }).click();
         await expect(other).not.toHaveURL(/\/login/);
-        for (const outcome of ['win', 'lose']) {
-          expect((await other.request.post(path + '/' + outcome, { data: { reason_code: 'price' } })).status()).toBe(404);
-        }
+        expect((await other.request.post(path + '/win')).status()).toBe(404);
+        const foreignLoss = await other.request.post(path + '/lose', {
+          headers: { 'X-Expected-Principal': 'e2e_foreign' },
+          data: {
+            organization_id: fixture.organization, request_key: crypto.randomUUID(),
+            expected_composition_digest: lossPreview.composition_digest,
+            reason_code: fixture.loss_reason, comment: 'Synthetic foreign scope check', finalize_if_empty: false,
+          },
+        });
+        expect(foreignLoss.status()).toBe(mode === 'stock' ? 404 : 403);
         expect((await other.request.patch(path, { data: { stage: 'qual' } })).status()).toBe(404);
         expect((await other.request.get(`/api/sales/documents/${invoice.id}/render`)).status()).toBe(404);
       } finally { await foreign.close(); }
-      expect(await preserved()).toEqual(final);
-      await writeFile(test.info().outputPath('preservation.json'), JSON.stringify({ mode, deal_id: deal.id, before, final }, null, 2));
+      expect(await preserved()).toEqual(afterPending);
+      await writeFile(test.info().outputPath('preservation.json'), JSON.stringify({ mode, deal_id: deal.id, before, afterPending }, null, 2));
     } finally { await control.close(); }
   });
 }
+
+test('own no-invoice loss finalizes with date, reason and history', async ({ page, context, browser, baseURL }) => {
+  const stamp = Date.now();
+  const counterparty = await createSyntheticCounterparty(browser, `E2E empty loss ${stamp}`, baseURL, 2901);
+  await context.clearCookies();
+  await page.goto('/login');
+  await page.getByLabel('Сотрудник').selectOption('e2e_owner');
+  await page.getByRole('button', { name: 'Войти', exact: true }).click();
+  await expect(page).not.toHaveURL(/\/login/);
+  const { deal, client } = await createSyntheticCrmDeal(page.request, counterparty, {
+    ownerId: 2901, number: `E2E-EMPTY-LOSS-${stamp}`, title: 'Synthetic no-invoice outcome',
+  });
+  expect(client.counterparty_id).toBe(counterparty.id);
+  expect(deal.crm_client_id).toBe(client.id);
+  const fixture = await seedInvoiceE2E(page, deal.id, null, null);
+  const path = `/api/sales/deals/${deal.id}`;
+  await page.goto(`/crm/deals/${deal.id}`);
+  await page.getByRole('button', { name: 'Отказ / состояние запроса', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText(/Счетов: 0\./)).toBeVisible();
+  const noInvoice = dialog.getByRole('checkbox', { name: 'Закрыть сейчас, если счетов нет', exact: true });
+  await noInvoice.check();
+  await dialog.getByLabel('Причина отказа', { exact: true }).selectOption(fixture.loss_reason);
+  const comment = 'Synthetic no-invoice terminal loss';
+  await dialog.getByPlaceholder('Комментарий (необязательно)').fill(comment);
+
+  const requestPromise = page.waitForRequest(request => request.url().endsWith(`/api/sales/deals/${deal.id}/lose`)
+    && request.method() === 'POST');
+  const responsePromise = page.waitForResponse(response => response.url().endsWith(`/api/sales/deals/${deal.id}/lose`)
+    && response.request().method() === 'POST');
+  await dialog.getByRole('button', { name: 'Запросить отказ', exact: true }).click();
+  const request = await requestPromise;
+  const body = request.postDataJSON() as Record<string, unknown>;
+  expect(body).toMatchObject({ organization_id: fixture.organization, reason_code: fixture.loss_reason,
+    comment, finalize_if_empty: true });
+  expect(body.request_key).toEqual(expect.stringMatching(/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/));
+  expect(body.expected_composition_digest).toEqual(expect.stringMatching(/^[a-f0-9]{64}$/));
+  const requestKey = body.request_key;
+  if (typeof requestKey !== 'string') throw new Error('No durable no-invoice loss request key');
+  const response = await responsePromise;
+  expect(response.status()).toBe(200);
+  const receipt = await response.json();
+  expect(receipt).toMatchObject({ state: 'finalized', command: body,
+    resolution: { action: 'finalized', request_id: body.request_key } });
+  await expect(dialog.getByText(new RegExp(`Запрос ${requestKey}: отказ завершён`))).toBeVisible();
+
+  const recordResponse = await page.request.get(`/api/sales/organizations/${fixture.organization}/deals/${deal.id}/loss-requests/${requestKey}`);
+  expect(recordResponse.status()).toBe(200);
+  expect(await recordResponse.json()).toMatchObject({ state: 'finalized', command: body,
+    resolution: { action: 'finalized', snapshot: { to_stage: 'lost' } } });
+  const dealResponse = await page.request.get(path);
+  expect(dealResponse.status()).toBe(200);
+  const finalized = await dealResponse.json();
+  expect(finalized).toMatchObject({ stage: 'lost', lost_reason_code: fixture.loss_reason, lost_comment: comment });
+  expect(finalized.closed_date).toMatch(/^\d{2}\.\d{2}\.\d{4}$/);
+  const documents = await page.request.get(path + '/documents');
+  expect(documents.status()).toBe(200);
+  expect(await documents.json()).toEqual([]);
+  const history = await page.request.get(path + '/history');
+  expect(history.status()).toBe(200);
+  expect((await history.json()).at(-1)).toMatchObject({ to_stage: 'lost' });
+});

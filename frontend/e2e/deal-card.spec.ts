@@ -1,66 +1,38 @@
-import { execFileSync } from "node:child_process";
-import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import {
+  addSyntheticDealItem, createDealFromMdmDirectory, createSyntheticCounterparty,
+  prepareInvoiceWizard, seedInvoiceE2E,
+} from "./crm-fixtures";
 
 // Критический путь карточки: создать сделку → проверить реквизиты → выпустить счёт ERP с резервом.
 // Самодостаточно (на пустой доске CI карточек нет — создаём свою).
-test("карточка сделки: выпуск счёта ERP с резервом", async ({ page }, testInfo) => {
-  const clientName = `ООО E2E-Документ ${Date.now()}`;
-  await page.goto("/crm/deals");
-  // Кнопка SSR-видима до подключения React onClick; ждём завершения гидрации.
-  await expect(page.getByTestId("deals-client-ready")).toBeVisible();
-
-  await page.getByRole("button", { name: /Создать сделку/ }).click();
-  const form = page.locator("form.shadow-pop");
-  await expect(form).toBeVisible();
-  await form.getByPlaceholder("CRM-2024-0200").fill(`E2E-DOC-${Date.now()}`);
-  await form.getByPlaceholder("ООО ...").fill(clientName);
-  await form.getByPlaceholder("Поставка ...").fill("Поставка для E2E");
-  await form.getByRole("button", { name: "Создать" }).click();
-
-  // открыть карточку созданной сделки (double-click: single-click открывает drawer-preview,
-  // double-click — router.push на полную карточку /crm/deals/[id] с вкладкой Документы)
-  await page.getByText(clientName).first().dblclick();
+test("карточка сделки: выпуск счёта ERP с резервом", async ({ page, browser, baseURL }, testInfo) => {
+  const stamp = Date.now();
+  const counterparty = await createSyntheticCounterparty(browser, `E2E invoice buyer ${stamp}`, baseURL);
+  const { deal } = await createDealFromMdmDirectory(page, counterparty, {
+    ownerId: 2901, number: `E2E-DOC-${stamp}`, title: "Поставка для E2E",
+  });
+  await page.goto(`/crm/deals/${deal.id}`);
   await expect(page.getByText("Документы")).toBeVisible();
-
-  const dealId = Number(new URL(page.url()).pathname.split("/").pop());
-  const actor = (await page.context().cookies()).find(cookie => cookie.name === "aios_actor")?.value;
-  expect(actor).toBeTruthy();
-  const fixture = JSON.parse(execFileSync(process.env.E2E_PYTHON ?? "python", ["-m", "scripts.seed_invoice_e2e"], {
-    cwd: resolve(process.cwd(), ".."),
-    input: JSON.stringify({ deal_id: dealId, actor }),
-    env: { ...process.env, AIOS_E2E_SEED: "1" }, encoding: "utf8",
-  })) as { organization: number; item: number; sku: string; buyer: number; loss_reason: string };
-  const profile = await page.request.post(`/api/accounting/organizations/${fixture.organization}/seller-profiles`, { data: {
-    source_key: `e2e-seller-${dealId}`, expected_revision: 0, effective_from: "2026-01-01",
-    currency: "BYN", address: "Synthetic seller address", account: "TEST ACCOUNT", bank: "TEST BANK",
-    bik: "TEST BIK", director: "Synthetic director", evidence: "Synthetic E2E approved seller profile", confirmed: true,
-  } });
-  expect(profile.status(), await profile.text()).toBe(201);
-  await page.getByRole("button", { name: /Сформировать/ }).click();
-  await page.getByLabel("Юрлицо", { exact: true }).selectOption(String(fixture.organization));
-  await page.getByText("Проверить принадлежность", { exact: true }).click();
-  await page.getByText("Продолжить к счёту", { exact: true }).click();
-  for (const [label, value] of [["Валюта", "BYN"], ["Дата счёта", "2026-09-10"], ["Действителен до", "2026-09-15"],
-    [`Цена строки ${fixture.item}`, "100.00"], [`Ставка строки ${fixture.item}`, "20.00"], ["Основание цен и ставок", "Synthetic negotiated price and VAT for E2E"]]) {
-    await page.getByLabel(label, { exact: true }).fill(value);
-  }
-  await page.getByText("Получить предпросмотр", { exact: true }).click();
-  await expect(page.getByText("Всего: 240.00 BYN", { exact: true })).toBeVisible();
-  await page.getByLabel("Склад распределения 1", { exact: true }).selectOption("E2E-W");
-  await page.getByLabel("Количество распределения 1", { exact: true }).fill("2.00");
-  await page.getByLabel("Основание полноты физического журнала", { exact: true }).fill("Synthetic opening physical stock: 10 units, no earlier reservations");
-  await page.getByRole("checkbox", { name: /Подтверждаю полноту физического журнала/ }).check();
+  const dealId = deal.id;
+  const item = await addSyntheticDealItem(page, dealId, "QA-STOCK");
+  expect(item.qty).toBe(2);
+  expect(item.unit_price).toBe(125.5);
+  const fixture = await seedInvoiceE2E(page, dealId, item.id, "stock", { physicalShipment: true });
+  await prepareInvoiceWizard(page, fixture, "stock");
+  const issuedReply = page.waitForResponse(response => response.url().endsWith(`/api/sales/deals/${dealId}/documents`)
+    && response.request().method() === "POST");
   await page.getByRole("button", { name: "Выпустить счёт и зарезервировать", exact: true }).click();
+  expect((await issuedReply).status()).toBe(201);
   await expect(page.getByRole("link", { name: "Открыть оригинал", exact: true })).toBeVisible();
   const documents = await page.request.get(`/api/sales/deals/${dealId}/documents`);
   expect(documents.ok()).toBeTruthy();
   const invoices = (await documents.json()).filter((doc: { kind: string }) => doc.kind === "invoice");
   expect(invoices).toHaveLength(1);
-  expect(invoices[0]).toMatchObject({ status: "issued", reserve_status: "reserved", onec_ref: null, amount: 240 });
+  expect(invoices[0]).toMatchObject({ status: "issued", reserve_status: "reserved", onec_ref: null, amount: 301.2 });
   const original = await page.request.get(`/api/sales/documents/${invoices[0].id}/render`);
   expect(original.ok()).toBeTruthy();
-  expect(await original.text()).toContain("E2E invoice buyer");
+  expect(await original.text()).toContain(counterparty.name);
   await page.goto(`/crm/deals/${dealId}?org=${fixture.organization}&invoice=${invoices[0].id}#document-register`);
   const dealRegister = page.getByRole("region", { name: "Реестр документов сделки", exact: true });
   await expect(dealRegister.getByRole("button", { name: "Аннулирование счёта", exact: true })).toBeVisible();
@@ -115,17 +87,18 @@ test("карточка сделки: выпуск счёта ERP с резерв
   await loss.screenshot({ path: testInfo.outputPath("pending-deal-loss.png") });
 });
 
-test("документы: ошибка загрузки отличается от пустого списка и допускает повтор", async ({ page }) => {
-  const created = await page.request.post("/api/sales/deals", { data: {
-    number: `E2E-DOC-LOAD-${Date.now()}`, title: "Синтетическая проверка загрузки", counterparty: "E2E document load",
-  } });
-  expect(created.status()).toBe(201);
-  const deal = await created.json();
+test("документы: ошибка загрузки отличается от пустого списка и допускает повтор", async ({ page, browser, baseURL }) => {
+  const stamp = Date.now();
+  const counterparty = await createSyntheticCounterparty(browser, `E2E empty documents ${stamp}`, baseURL);
+  const { deal } = await createDealFromMdmDirectory(page, counterparty, {
+    ownerId: 2901, number: `E2E-DOC-LOAD-${stamp}`, title: "Синтетическая проверка загрузки",
+  });
+  const fixture = await seedInvoiceE2E(page, deal.id, null, null);
   let fail = true;
   await page.route(`**/api/sales/deals/${deal.id}/documents`, (route) => fail && route.request().method() === "GET"
     ? route.fulfill({ status: 500, contentType: "application/json", body: '{"detail":"synthetic failure"}' })
     : route.continue());
-  await page.goto(`/crm/deals/${deal.id}`);
+  await page.goto(`/crm/deals/${deal.id}?org=${fixture.organization}`);
   await expect(page.getByText("Не удалось загрузить документы.", { exact: true })).toBeVisible();
   await expect(page.getByText("Документов пока нет", { exact: true })).toHaveCount(0);
   fail = false;
@@ -133,51 +106,19 @@ test("документы: ошибка загрузки отличается о�
   await expect(page.getByText("Документов пока нет", { exact: true })).toBeVisible();
 });
 
-test("счёт под заказ: потерянный ответ, повтор и неизменяемый оригинал", async ({ page }) => {
+test("счёт под заказ: потерянный ответ, повтор и неизменяемый оригинал", async ({ page, browser, baseURL }) => {
   test.setTimeout(120_000);
-  const clientName = `ООО E2E-Документ ${Date.now()}`;
-  await page.goto("/crm/deals");
-  // Кнопка SSR-видима до подключения React onClick; ждём завершения гидрации.
-  await expect(page.getByTestId("deals-client-ready")).toBeVisible();
-
-  await page.getByRole("button", { name: /Создать сделку/ }).click();
-  const form = page.locator("form.shadow-pop");
-  await expect(form).toBeVisible();
-  await form.getByPlaceholder("CRM-2024-0200").fill(`E2E-DOC-${Date.now()}`);
-  await form.getByPlaceholder("ООО ...").fill(clientName);
-  await form.getByPlaceholder("Поставка ...").fill("Поставка для E2E");
-  await form.getByRole("button", { name: "Создать" }).click();
-
-  // открыть карточку созданной сделки (double-click: single-click открывает drawer-preview,
-  // double-click — router.push на полную карточку /crm/deals/[id] с вкладкой Документы)
-  await page.getByText(clientName).first().dblclick();
-  await expect(page.getByText("Документы")).toBeVisible();
-
-  const dealId = Number(new URL(page.url()).pathname.split("/").pop());
-  const actor = (await page.context().cookies()).find(cookie => cookie.name === "aios_actor")?.value;
-  expect(actor).toBeTruthy();
-  const fixture = JSON.parse(execFileSync(process.env.E2E_PYTHON ?? "python", ["-m", "scripts.seed_invoice_e2e"], {
-    cwd: resolve(process.cwd(), ".."),
-    input: JSON.stringify({ deal_id: dealId, actor }),
-    env: { ...process.env, AIOS_E2E_SEED: "1" }, encoding: "utf8",
-  })) as { organization: number; item: number; sku: string; buyer: number; loss_reason: string };
-  const profile = await page.request.post(`/api/accounting/organizations/${fixture.organization}/seller-profiles`, { data: {
-    source_key: `e2e-seller-${dealId}`, expected_revision: 0, effective_from: "2026-01-01",
-    currency: "BYN", address: "Synthetic seller address", account: "TEST ACCOUNT", bank: "TEST BANK",
-    bik: "TEST BIK", director: "Synthetic director", evidence: "Synthetic E2E approved seller profile", confirmed: true,
-  } });
-  expect(profile.status(), await profile.text()).toBe(201);
-  await page.getByRole("checkbox", { name: "Под заказ — без резерва", exact: true }).check();
-  await page.getByRole("button", { name: /Сформировать/ }).click();
-  await page.getByLabel("Юрлицо", { exact: true }).selectOption(String(fixture.organization));
-  await page.getByText("Проверить принадлежность", { exact: true }).click();
-  await page.getByText("Продолжить к счёту", { exact: true }).click();
-  for (const [label, value] of [["Валюта", "BYN"], ["Дата счёта", "2026-09-10"], ["Действителен до", "2026-09-15"],
-    [`Цена строки ${fixture.item}`, "100.00"], [`Ставка строки ${fixture.item}`, "20.00"], ["Основание цен и ставок", "Synthetic negotiated price and VAT for E2E"]]) {
-    await page.getByLabel(label, { exact: true }).fill(value);
-  }
-  await page.getByText("Получить предпросмотр", { exact: true }).click();
-  await expect(page.getByText("Всего: 240.00 BYN", { exact: true })).toBeVisible();
+  const stamp = Date.now();
+  const counterparty = await createSyntheticCounterparty(browser, `E2E on-order ${stamp}`, baseURL);
+  const { deal } = await createDealFromMdmDirectory(page, counterparty, {
+    ownerId: 2901, number: `E2E-DOC-ORDER-${stamp}`, title: "Синтетический счёт под заказ",
+  });
+  const dealId = deal.id;
+  const item = await addSyntheticDealItem(page, dealId, "QA-ORDER");
+  expect(item.qty).toBe(2);
+  expect(item.unit_price).toBe(125.5);
+  const fixture = await seedInvoiceE2E(page, dealId, item.id, "on_order");
+  await prepareInvoiceWizard(page, fixture, "on_order");
   const endpoint = `/api/sales/deals/${dealId}/documents`;
   let originalCommand: unknown;
   let originalHtml = "";
@@ -200,7 +141,6 @@ test("счёт под заказ: потерянный ответ, повтор 
       await route.continue();
     }
   });
-  await page.getByRole("checkbox", { name: "Подтверждаю выпуск без резерва и проверенные данные счёта" }).check();
   await page.getByRole("button", { name: "Выпустить счёт под заказ", exact: true }).click();
   await expect(page.getByRole("button", { name: "Повторить исходный запрос", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Повторить исходный запрос", exact: true }).click();
@@ -210,7 +150,7 @@ test("счёт под заказ: потерянный ответ, повтор 
   expect(response.ok()).toBeTruthy();
   const invoices = (await response.json()).filter((doc: { kind: string }) => doc.kind === "invoice");
   expect(invoices).toHaveLength(1);
-  expect(invoices[0]).toMatchObject({ id: originalId, status: "issued", reserve_mode: "on_order", reserve_status: "unreserved", amount: 240 });
+  expect(invoices[0]).toMatchObject({ id: originalId, status: "issued", reserve_mode: "on_order", reserve_status: "unreserved", amount: 301.2 });
   expect(await (await page.request.get(`/api/sales/documents/${originalId}/render`)).text()).toBe(originalHtml);
   await page.reload();
   expect(await (await page.request.get(`/api/sales/documents/${originalId}/render`)).text()).toBe(originalHtml);

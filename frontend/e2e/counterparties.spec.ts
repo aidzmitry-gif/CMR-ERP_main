@@ -135,7 +135,13 @@ test("контрагенты: создание, preview, повторное об
       const duplicateName = `${runName} duplicate`;
       await duplicateEditor.getByLabel("Наименование компании").fill(duplicateName);
       await duplicateEditor.getByLabel("УНП (карточка)").fill(demoUnp);
+      await duplicateEditor.getByLabel("Юридический адрес").fill(`Synthetic legal address for ${duplicateName}`);
+      const duplicateSave = page.waitForResponse((response) => response.url().endsWith("/api/system/mdm/counterparty")
+        && response.request().method() === "POST");
       await duplicateEditor.getByRole("button", { name: "Сохранить" }).click();
+      const duplicateResponse = await duplicateSave;
+      expect(duplicateResponse.status()).toBe(409);
+      expect((await duplicateResponse.json()).detail.code).toBe("duplicate_unp");
       await expect(duplicateEditor.getByRole("alert")).toContainText("Найдите карточку по УНП");
       await expect(duplicateEditor.getByLabel("Наименование компании")).toHaveValue(duplicateName);
       await expect(page).toHaveURL(/\/erp\/spravochniki\/counterparty\?name=/);

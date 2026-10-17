@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
+import { createSyntheticCounterparty, createSyntheticCrmDeal } from "./crm-fixtures";
 
-test("срок клиента переносится в черновик плана закупки", async ({ page }, testInfo) => {
+test("срок клиента переносится в черновик плана закупки", async ({ page, browser, baseURL }, testInfo) => {
   const stamp = Date.now();
   const post = async (url: string, data: unknown) => {
     const r = await page.request.post(`/api${url}`, { data });
@@ -11,7 +12,10 @@ test("срок клиента переносится в черновик пла�
     expect(r.ok(), await r.text()).toBeTruthy(); return r.json();
   };
   const org = await post("/accounting/organizations", { name: `E2E deadlines ${stamp}`, unp: String(stamp).slice(-9) });
-  const deal = await post("/sales/deals", { number: `DL-${stamp}`, title: "Deadline review", counterparty: "Synthetic buyer", amount: 0, ship_deadline: "2026-12-31" });
+  const counterparty = await createSyntheticCounterparty(browser, `Synthetic deadline buyer ${stamp}`, baseURL);
+  const { deal } = await createSyntheticCrmDeal(page.request, counterparty, {
+    ownerId: 2901, number: `E2E-DL-${stamp}`, title: "Deadline review", shipDeadline: "2026-12-31",
+  });
   const ownership = `/sales/organizations/${org.id}/deals/${deal.id}`;
   const preview = await get(`${ownership}/ownership-preview`);
   await post(`${ownership}/ownership`, { expected_snapshot: preview.snapshot, evidence: "Synthetic browser fixture" });

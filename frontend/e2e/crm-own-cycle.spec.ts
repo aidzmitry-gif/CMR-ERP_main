@@ -1,26 +1,20 @@
 import { expect, test } from "@playwright/test";
 import { writeFile } from "node:fs/promises";
+import { addSyntheticDealItem, createSyntheticCounterparty, createSyntheticCrmClient, prepareInvoiceWizard, seedInvoiceE2E } from "./crm-fixtures";
 
 test("own: клиент → контакт → сделка → задача/история → счёт под заказ и чужой доступ", async ({ page, context, browser, baseURL }) => {
   test.setTimeout(180_000);
+  const name = `OWN E2E ${Date.now()}`;
+  const counterparty = await createSyntheticCounterparty(browser, name, baseURL, 2901);
   await context.clearCookies();
   await page.goto("/login");
   await page.getByLabel("Сотрудник").selectOption("e2e_owner");
   await page.getByRole("button", { name: "Войти", exact: true }).click();
   await expect(page).not.toHaveURL(/\/login/);
-  const name = `OWN E2E ${Date.now()}`;
-  await page.goto("/crm/clients");
-  await page.getByRole("button", { name: "Новый клиент", exact: true }).click();
-  const clientForm = page.getByRole("form", { name: "Новый клиент CRM" });
-  await clientForm.getByLabel("Название клиента", { exact: true }).fill(name);
-  await expect(clientForm.getByRole("combobox", { name: "Ответственный", exact: true })).toHaveValue("2901");
-  const createdClient = page.waitForResponse((r) => r.url().endsWith('/api/sales/clients') && r.request().method() === 'POST');
-  await clientForm.getByRole("button", { name: "Создать клиента", exact: true }).click();
-  const clientResponse = await createdClient;
-  expect(clientResponse.status()).toBe(201);
-  const client = await clientResponse.json();
+  const client = await createSyntheticCrmClient(page.request, counterparty, 2901);
+  expect(client.counterparty_id).toBe(counterparty.id);
   expect(client.owner_id).toBe(2901);
-  await page.getByRole("link", { name, exact: true }).click();
+  await page.goto(`/crm/clients/${client.id}`);
   await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Добавить", exact: true }).click();
   await page.getByPlaceholder("ФИО контакта").fill("Анна Контрольная");
@@ -46,15 +40,17 @@ test("own: клиент → контакт → сделка → задача/и�
   await expect(page.getByRole("listitem").filter({ hasText: "Анна Контрольная" })).toBeVisible();
   await page.getByRole("button", { name: "Новая сделка клиента", exact: true }).click();
   const dealForm = page.locator('form.shadow-pop');
-  await dealForm.getByPlaceholder("CRM-2024-0200").fill(`OWN-${Date.now()}`);
+  await dealForm.getByPlaceholder("CRM-2024-0200").fill(`E2E-OWN-${Date.now()}`);
   await dealForm.getByPlaceholder("Поставка ...").fill("Контрольный заказ");
-  await expect(dealForm.getByPlaceholder("ООО ...")).toBeDisabled();
+  await expect(dealForm.getByLabel("Компания", { exact: true })).toBeDisabled();
+  await expect(dealForm.getByLabel("Компания", { exact: true })).toHaveValue(client.name);
   const createdDeal = page.waitForResponse((r) => r.url().endsWith('/api/sales/deals') && r.request().method() === 'POST');
   await dealForm.getByRole("button", { name: "Создать", exact: true }).click();
   const dealResponse = await createdDeal;
   expect(dealResponse.status()).toBe(201);
   const deal = await dealResponse.json();
   expect(deal.crm_client_id).toBe(client.id);
+  expect(deal.counterparty_id).toBe(counterparty.id);
   expect(deal.owner_id).toBe(2901);
   await page.getByRole("link", { name: new RegExp(deal.number) }).click();
   await expect(page).toHaveURL(new RegExp(`/crm/deals/${deal.id}$`));
@@ -83,22 +79,20 @@ test("own: клиент → контакт → сделка → задача/и�
   expect(historyKeys).toHaveLength(2);
   expect(historyKeys[0]).toBe(historyKeys[1]);
   expect(await (await page.request.get(`/api/sales/deals/${deal.id}/messages`)).json()).toHaveLength(1);
-  const selector = page.getByRole("combobox", { name: "Номенклатура (справочник из 1С через MDM)" });
-  const sku = selector.locator('option').filter({ hasText: 'QA-ORDER' });
-  await expect(sku).toHaveCount(1);
-  await selector.selectOption((await sku.getAttribute('value'))!);
-  await page.getByRole("spinbutton", { name: "Количество новой позиции", exact: true }).fill('2');
-  await page.getByLabel("Цена за единицу новой позиции", { exact: true }).fill('125.50');
-  const addedItem = page.waitForResponse((r) => r.url().endsWith(`/deals/${deal.id}/items`) && r.request().method() === 'POST');
-  await page.getByRole("button", { name: "Добавить", exact: true }).first().click();
-  expect((await addedItem).status()).toBe(201);
-  await page.getByRole("checkbox", { name: "Под заказ — без резерва" }).check();
-  const issued = page.waitForResponse((r) => r.url().endsWith(`/deals/${deal.id}/documents`) && r.request().method() === 'POST');
-  await page.getByRole("button", { name: "Сформировать", exact: true }).click();
-  expect((await issued).status()).toBe(201);
+  const item = await addSyntheticDealItem(page, deal.id, "QA-ORDER");
+  expect(item.qty).toBe(2);
+  expect(item.unit_price).toBe(125.5);
+  const fixture = await seedInvoiceE2E(page, deal.id, item.id, "on_order");
+  await prepareInvoiceWizard(page, fixture, "on_order");
+  const issueReply = page.waitForResponse(response => response.url().endsWith(`/api/sales/deals/${deal.id}/documents`)
+    && response.request().method() === "POST");
+  await page.getByRole("button", { name: "Выпустить счёт под заказ", exact: true }).click();
+  expect((await issueReply).status()).toBe(201);
+  await expect(page.getByRole("link", { name: "Открыть оригинал", exact: true })).toBeVisible();
   const documents = await (await page.request.get(`/api/sales/deals/${deal.id}/documents`)).json();
   expect(documents).toHaveLength(1);
   expect(Number(documents[0].amount)).toBe(301.2);
+  expect(documents[0].reserve_status).toBe("unreserved");
   const documentId = documents[0].id;
   const original = await (await page.request.get(`/api/sales/documents/${documentId}/render`)).text();
   await page.reload();
@@ -171,6 +165,11 @@ test("own: клиент → контакт → сделка → задача/и�
     await other.getByLabel('Сотрудник').selectOption('e2e_foreign');
     await other.getByRole('button', { name:'Войти', exact:true }).click();
     await expect(other).not.toHaveURL(/\/login/);
+    const hiddenMdm = await other.request.post('/api/sales/clients', { data: {
+      counterparty_id: counterparty.id, owner_id: 2902, request_key: crypto.randomUUID(),
+    } });
+    expect(hiddenMdm.status()).toBe(422);
+    expect(await hiddenMdm.json()).toEqual({ detail: 'Активный контрагент не найден' });
     for (const path of [`/api/sales/clients/${client.id}`, `/api/sales/clients/${client.id}/contacts`, `/api/sales/clients/${client.id}/documents`, `/api/sales/deals/${deal.id}`, `/api/sales/documents/${documentId}/render`, `/api/sales/deals/${deal.id}/emails/${email.id}/attachments/0`]) {
       expect((await other.request.get(path, { headers: { 'X-User':'e2e_owner', 'X-User-Roles':'director' } })).status()).toBe(404);
     }
