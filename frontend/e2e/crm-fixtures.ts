@@ -240,7 +240,7 @@ export async function prepareInvoiceWizard(
     await page.getByLabel(label, { exact: true }).fill(value);
   }
   await page.getByText("Получить предпросмотр", { exact: true }).click();
-  await expect(page.getByText("Проверить реквизиты и суммы", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Проверьте реквизиты и суммы", exact: true })).toBeVisible();
   await expect(page.getByText(`Покупатель: ${fixture.buyer_name} · УНП ${fixture.buyer_unp} · #${fixture.buyer}`)).toBeVisible();
   await expect(page.getByText("Всего: 301.20 BYN", { exact: true })).toBeVisible();
   if (mode === "on_order") {
