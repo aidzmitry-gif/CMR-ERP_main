@@ -109,7 +109,7 @@ async def test_another_authorized_approver_preserves_exact_preview_and_receipt(b
                 username="second-accountant",
                 full_name="Second synthetic accountant",
                 employee_id=702,
-                role="eschf_accountant",
+                role=h.actor.roles[0],
                 status="active",
                 deal_visibility="all",
             )
