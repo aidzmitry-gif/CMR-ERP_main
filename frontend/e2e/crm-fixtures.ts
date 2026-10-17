@@ -241,7 +241,7 @@ export async function prepareInvoiceWizard(
   }
   await page.getByText("Получить предпросмотр", { exact: true }).click();
   await expect(page.getByRole("heading", { name: "Проверьте реквизиты и суммы", exact: true })).toBeVisible();
-  await expect(page.getByText(`Покупатель: ${fixture.buyer_name} · УНП ${fixture.buyer_unp} · #${fixture.buyer}`)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Проверьте реквизиты и суммы", exact: true }).locator("..").getByText(`Покупатель: ${fixture.buyer_name} · УНП ${fixture.buyer_unp} · #${fixture.buyer}`)).toBeVisible();
   await expect(page.getByText("Всего: 301.20 BYN", { exact: true })).toBeVisible();
   if (mode === "on_order") {
     await page.getByRole("checkbox", { name: "Подтверждаю выпуск без резерва и проверенные данные счёта", exact: true }).check();
