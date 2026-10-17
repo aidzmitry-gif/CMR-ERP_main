@@ -91,6 +91,8 @@ async def _accepted_output_documents(factory, book, *, issuance, same_lot=False)
     await inventory_identities(factory, book)
     documents = {}
     async with factory() as session:
+        await run_migration(session, "crm_rel_001_finished_goods_01.py", "upgrade")
+        await run_migration(session, "crm_rel_001_output_source_completion_01.py", "upgrade")
         assert not (await session.scalars(select(ProductionOrder.id).where(
             ProductionOrder.id.in_((42, 43))))).all()
         location = Location(warehouse="Main", code="ALLOCATION-OUTPUT")
