@@ -50,7 +50,7 @@ from modules.accounting.models import Organization
 from modules.eschf.bridge import MappingReceipt, SalesNativeSourceProvider, VerifiedCapture
 from modules.eschf.models import Original, Snapshot
 from modules.sales.deal_loss import DealLossRequest, DealLossResolution
-from modules.sales.models import Deal, DealDocument, Stage
+from modules.sales.models import CrmClient, Deal, DealDocument, Stage
 from tests.eschf.test_repository_postgres import pg as pg
 from tests.onec_eschf.test_adapter import (
     binding_for,
@@ -69,6 +69,7 @@ async def source_pg(pg):
         User.__table__,
         Counterparty.__table__,
         CounterpartyBranch.__table__,
+        CrmClient.__table__,
         Deal.__table__,
         DealDocument.__table__,
         Organization.__table__,

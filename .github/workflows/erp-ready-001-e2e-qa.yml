@@ -49,7 +49,7 @@ jobs:
           root = Path.cwd()
           temp = Path(os.environ['RUNNER_TEMP'])
           summary_path = temp / 'erp-ready-e2e-summary.json'
-          expected_sources = {'frontend/e2e/counterparties.spec.ts': '27e7b1bae0477a983c21a8a215d237f1361c62e61e4bd01615b4b0adb660501e', 'frontend/e2e/crm-own-cycle.spec.ts': '6d642dafe2fa6214a9302037f8ad7e6d40b83688c3a31474439394241bf62bf5', 'frontend/e2e/crm-own-outcomes.spec.ts': '7c13375bd03937af425a817cf3f2e3bd2f47728a256b81f126d81dea2567ca24', 'frontend/e2e/deal-card.spec.ts': 'bcb66f622e6f54e51437e712c1f8a1327a4bfc6b6c2d6b46b6ad95cfb5621ec9', 'frontend/e2e/deals-board.spec.ts': '694519c4eefda774fb32cb82336e128b0f99f6ab23ae522a32e28e8fcb5df9b8', 'frontend/e2e/navigation.spec.ts': '996b3f56c58b0385b8e180d2bb6b83602cb844c38e4953983e2fa866f371a39f', 'frontend/e2e/procurement-deadlines.spec.ts': '5ffdb586955d4379bbb87bb591b8251116db732f4de53fe32dbb76d59c6a5155', 'frontend/e2e/crm-fixtures.ts': '43be79105c3fa04f1875ef7507e38e56cb5f25800e27d50221c1177100d75f98', 'scripts/seed_invoice_e2e.py': 'c83b6069b25aa6e43924281a7a210c4e065a1a685aa1e5aaaee14e4b68da3281'}
+          expected_sources = {'frontend/e2e/counterparties.spec.ts': '27e7b1bae0477a983c21a8a215d237f1361c62e61e4bd01615b4b0adb660501e', 'frontend/e2e/crm-own-cycle.spec.ts': '2abbcecd942765f164eec448ce6737f39e9e152012151a8cdd3f0e4b2458a6f1', 'frontend/e2e/crm-own-outcomes.spec.ts': '7c13375bd03937af425a817cf3f2e3bd2f47728a256b81f126d81dea2567ca24', 'frontend/e2e/deal-card.spec.ts': 'bcb66f622e6f54e51437e712c1f8a1327a4bfc6b6c2d6b46b6ad95cfb5621ec9', 'frontend/e2e/deals-board.spec.ts': '694519c4eefda774fb32cb82336e128b0f99f6ab23ae522a32e28e8fcb5df9b8', 'frontend/e2e/navigation.spec.ts': '996b3f56c58b0385b8e180d2bb6b83602cb844c38e4953983e2fa866f371a39f', 'frontend/e2e/procurement-deadlines.spec.ts': '5ffdb586955d4379bbb87bb591b8251116db732f4de53fe32dbb76d59c6a5155', 'frontend/e2e/crm-fixtures.ts': '43be79105c3fa04f1875ef7507e38e56cb5f25800e27d50221c1177100d75f98', 'scripts/seed_invoice_e2e.py': 'c83b6069b25aa6e43924281a7a210c4e065a1a685aa1e5aaaee14e4b68da3281'}
           expected_modules = {'finance': '59832b2f14a2ee02d8db266a67f8206616bdcd94', 'hr': 'f8a6e0142f1920b07ec56818f42d156a602ff9c3', 'leads': '9a304f771ba74369ded199168e0e1da3ad6348d2', 'logistics': '6923d2e021980ef2546f382364d38dc34a0fef29', 'marketing': 'd4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282', 'procurement': 'f29ea84bd13342ae572e8c4499031d2f053d3d47', 'production': 'be7d7e198bf09cc41c642d22125db401da5adc48', 'sales': '37b3b1d752fe5b16d89ae01a535dc84360ac7591', 'service': '3d33800c44865cd7a7373b29192c5d59d3c4bec8', 'wms': '8b6fb881a03f1a268f07e65f4fa89d195fc933a2'}
           expected_cases = {tuple(case) for case in [["chromium", "crm-own-cycle.spec.ts", "own: \u043a\u043b\u0438\u0435\u043d\u0442 \u2192 \u043a\u043e\u043d\u0442\u0430\u043a\u0442 \u2192 \u0441\u0434\u0435\u043b\u043a\u0430 \u2192 \u0437\u0430\u0434\u0430\u0447\u0430/\u0438\u0441\u0442\u043e\u0440\u0438\u044f \u2192 \u0441\u0447\u0451\u0442 \u043f\u043e\u0434 \u0437\u0430\u043a\u0430\u0437 \u0438 \u0447\u0443\u0436\u043e\u0439 \u0434\u043e\u0441\u0442\u0443\u043f"], ["setup", "auth.setup.ts", "dev-\u043b\u043e\u0433\u0438\u043d (\u0414\u0438\u0440\u0435\u043a\u0442\u043e\u0440)"]]}
           summary = {'schemaVersion': 1, 'stage': 'preflight', 'passed': False,
@@ -227,5 +227,215 @@ jobs:
         with:
           name: erp-ready-selective-e2e-summary
           path: ${{ runner.temp }}/erp-ready-e2e-summary.json
+          if-no-files-found: error
+          retention-days: 7
+
+  eschf_pg:
+    name: ESCHF isolated source and freshness (89)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      eschf-postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: eschf_test
+          POSTGRES_PASSWORD: eschf_test
+          POSTGRES_DB: eschf_g04_test
+        ports:
+          - "15439:5432"
+        options: >-
+          --health-cmd "pg_isready -U eschf_test -d eschf_g04_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      AIOS_ENVIRONMENT: dev
+      AIOS_DATABASE_URL: postgresql+psycopg://eschf_test:eschf_test@127.0.0.1:15439/eschf_g04_test
+      ESCHF_TEST_DATABASE_URL: postgresql+psycopg://eschf_test:eschf_test@127.0.0.1:15439/eschf_g04_test
+      AIOS_SALES_EMAIL_ENABLED: 'false'
+      AIOS_AI_ENABLED: 'false'
+      AIOS_SMTP_HOST: ''
+      AIOS_SMTP_USER: ''
+      AIOS_SMTP_PASSWORD: ''
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install existing backend dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Verify isolated ESCHF source and freshness cases
+        shell: python
+        run: |
+          import hashlib
+          import json
+          import os
+          import subprocess
+          import sys
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          EXPECTED_SOURCES = {'tests/eschf/test_source_postgres.py': '6c103390a39a21cb447d642bb4620fa5213df20dc160f3712619970a634f2d8b', 'tests/eschf/test_freshness_postgres.py': '041ea6042d5789c419b576e36d6607b39bb74343b494978a1467218ba74ce94b', 'tests/eschf/test_repository_postgres.py': '74fb84bef7e87e66471d15192e7468e19fd884d500d4c9fb926aff254ee4caad', 'migrations/versions/0121_eschf_durable_state.py': '0f0700b64de476426361041d005ce25a76b392a4ddb72af2f4a52d3c5eb7fee2'}
+          EXPECTED_MODULES = {'finance': '59832b2f14a2ee02d8db266a67f8206616bdcd94', 'hr': 'f8a6e0142f1920b07ec56818f42d156a602ff9c3', 'leads': '9a304f771ba74369ded199168e0e1da3ad6348d2', 'logistics': '6923d2e021980ef2546f382364d38dc34a0fef29', 'marketing': 'd4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282', 'procurement': 'f29ea84bd13342ae572e8c4499031d2f053d3d47', 'production': 'be7d7e198bf09cc41c642d22125db401da5adc48', 'sales': '37b3b1d752fe5b16d89ae01a535dc84360ac7591', 'service': '3d33800c44865cd7a7373b29192c5d59d3c4bec8', 'wms': '8b6fb881a03f1a268f07e65f4fa89d195fc933a2'}
+          EXPECTED_CASES = set(['008e0b0440f8a9a21b026d6865f93486bdb8763c6b503f45b552e020fc2ea413', '028133740592b9d1669a2ec0ae02137944bcc80313902e7f8489134ea87eda4a', '07cffd8a1ad2153ef8ff0502c245126a172e0bf99fa7408c9eb57d7fb9779716', '0818f0ab33a41c9fc95a883605af1ca0adf29241107d302b702d2a03c2e7a9d3', '1026399bc9b5cd8e65f367e8df3353a020d3ec771628eec699b04511c4efd5b8', '15291f04d0872b6be9addde5c721a1bcde2b33da2c645efa9ac8db3f0234ce22', '1c345b4cc11699bc8c84a0263fff25abe06f6ca340f2179cdf62d727e4182a9f', '1fb8963e88228176a2cf1c8d86fb394f03fba02d4b055402883270b13eec7ee1', '20d7c3bd321692d731ced50ddd22a32dee365dee24c0352d2ca28df8e12f400b', '21db5f6e72658b3c6a28a8dbc85cfcac277921654150fa9191ff191352bb7153', '2256c644cfc107423ce071798af145862eb2502c83ff36049adb3c4d6be6a4b9', '260c11a43e73e915938b0faacea796d4818eef7aa6e9d204b32f172b8a968469', '2d52778833b7e1c8acdb50dd7a69bcd6c4eeea0b1b6058131c8568047323d802', '2dc9f4c09d64f8e78959455d667990ce628067d32c1bbb8d6440457a90209642', '2dfc477d3ca20be5055e7f937eff1b0b81b2c29e75e818499909133ad76f4176', '30a334ddd9b2e5f09d4af7977b75c09600b76ede68fd1982bfc1f677181f06c3', '32f2d0e705467a20164f1600f3f8a791a5c22cae41e60cefad45e13eaa6cf0f5', '3c3fd4c41bb5b0234835e44735a1b7a7c900e4561a8dc8aaa67e66e6bd5d1f81', '3d87153621874f6031b8898bd7f5704e9e87924058800a61b02a40f669611bb4', '42946e76c18eaf7448fbc277ef0f16c0a499df40b171241f1306eb54bbc19538', '42b7b7e4e84de918058c5a42b7a23475fa70bc6a608279bb01372f7b49d905e4', '430dcb4d76cbac2f60a56240ba8a6db38258b22f504d47459df0a4bb0a8a6ba4', '444c8064dc81cd06954aa40299e43a14d1f0726af5334b8ff81cefeea91ee349', '4636bd04e1ca7d3b3c0eace8cd3ca359a9f4d659b2f47653169226b8faf43cc1', '47c43cb21d9b3be1e2192d9d513a87d71d55c651accf7327678fbd28604ee18e', '4b90bc59b7b0fbea8872bad86cd3843d10ac1c5ddf78f58918f899755a1847f3', '4e18f30c644edc1a25d0e73a128a3d7c75272bf1b84eaf04ad382b72f46f6218', '50f0b00e42cdf35c29a7793ad682b133b937f66c8f7594a12cda34ed11ed934d', '54ce0cc009e6b0eb69f55c2ebd435d34a1e6bd2b113ff5922e8d844216874acb', '5625ed9ad753c9226d7726430ff0ede8a6fe66c340adaf0e20ebd79a9a57d9fc', '5a9b534ee9139208250906fea756692e712113d5fda0bde545b2609d76d42a24', '5ab5a0aae6a7f117b870c45193efb4415d2c99f7f669be16f8a9480fba2aaeef', '65af22f79bbebc26040a94e7f3fa42850b56a18423f4a5aa2a312785fcbede81', '6654e9511ccf4e7d64903af281d9d1b63f1400dbdd5763ff8e3fd620e5a19748', '6706a4517adce7f9efd733e738d2b44f151152254de570463a13bc398a578a36', '6b9e89146b0847a04ea4a4d44275fd5b4e09086c2f64975a8e589606a6d3c18e', '6ef99bcbb84868a77c6aad63baaf49ed2fa6ee3683c3742bcb8826af8e6dcdbc', '7435c0571a68dffcdbb6af66bd3dc089931027d12681f2cd7012d4c0f6eb738d', '75fb011c4699e507d3fbb293df9b45b9353927b031995c5e9bf74bce78e13015', '776ae95d9fa70f79e283c0ba601e622a06e25fe3be8e8e14c4f54ac0f6d886b0', '7773cbe27ffd1e3d7eef947bc0760c18cba29a1407c813133b98795ed21ed8fb', '79789c9690c01a97e92293b219317839119ff3b1414bee21c62afd1459509f5a', '806573c0963638462f2a84ec3c3c066b13c0ca8379b62e1eda437815168fdc1b', '85f0d7a01d690d338939b3de551a1aff07fe33eb7cfb784f6e2a1590b6600351', '894614cf8a0edd95650e7eb896db4b941b1978fe37dfb7854f23d7889090707b', '8b2f8e99217721ddfc1cf166f26296a6b957768bd36064223ce9c35986081ce4', '8e4a9c2dfe91b59a6e4e795ea3b1f863905e04b10e3840aad7d557803f5e9481', '90729fd2845439ee4476869b12b34dad113be551f2ada3da75e03c367dde2dd7', '90dc7a1329665f0c16f552bf278f7f35fc93254876589b030ba9604877c3b4de', '95b22797c4500a35b0b86eaed6ddf7c7661df8bdc16ccf42ddb4c688387c35db', '95e8c09350134c9d8e70f4e886d8b243e777444a4c0afeeb1dbad8f6062ca068', '96b2564227ae237caf5102051197d5e9123fa908db3bc14a09544fef81b4c0cf', '98face57f76118ce56be52d4c567cdd74944ad6ebd5e9f7da33837ea45dec5ab', '9d14bffcf0e5c208d5a4e36cc05acb299090fa3095f6bbfd39491cae48e49bba', '9e0290806f62bf2d0c3a8f14ba6ddae0bff19c13242673cf5c590c3f5fbb2b4c', 'a1bab8832f0a99b3014aff854ec3d1cf7496d0b616f6cf0ba77d92830120a04d', 'a384a7f810f3d87f48a451308103464c1fe1e251b84c7a1d7e6f1a16e58fd88a', 'a9e3f968bc0ba3bd11c3a0c92e5d3f474b8e87b148996862f0935c258c5093b9', 'aa2410320fab59d3335d58019e0a38316306421679f1c8b010a1476462a89ffa', 'aa5f262ad3c33bd9d03716926bc03f5f99bc156f6cf1d5d339bcb6e7471b4cf1', 'ad559893961e2ea3f074a08eff656b230b4ca5a6455ba17f5cc958afe6bef1cd', 'aed275a09d170f164518e75a130be923cd162b9d5755b73ae687c04fd212dd32', 'b19d8f4ba4c2e415239f11f79793a20653612bdabcff46e9028229e2b51efeda', 'b3d06cca2541f6975043aa91c8978188935ecdc33d375a26e2be5fc294574fda', 'b924a822c7a8ac26c641ee2269969f40bc21560ae96e60aa1e44036411f1b6dc', 'ba6560dd3f71340bead075e930071b40f36eeaeeeb659a8ee9257d401bf90956', 'bdf5571d36e2b98d03c9801f1cda9b13983b90abfb3068b90911da33b0a9c9f6', 'beadca6678b2dfccfc6f5dfaa00492896c1e0457c155bf30d4ae1d724de7ccfe', 'c0e072f7ec7058f9cd1cf53855390ba0777982023a4bde5a653e82db76021284', 'c456b51c1460cd8604a2f917e5909dd119b8f8d9144e692719a07827bc603232', 'c5efef59f1a002d35d56cc9347ae22834d5fdfe4b1f67770ed1d8f206c39b69a', 'c711e865621c2b8b8b20ee3b5271550963374d2671d5eaf603ff1e273fac9630', 'ca929dcc1eb900d39f739fbc70ae1db35e7ec0d2a3d0017c8b27d49ec806c633', 'cb93d551cfab3e1fc94e86cc97fa6e8162e5970b97e67bc4d88c781bf046e6b2', 'd279a50c53c9a1e10b837a58bee06ac2e080ca14a04b6cd145c5ba17ed4f674b', 'd425c08d2edb851464798b067b6a82ca8d9f1a3f905a8538e66c2067c795da75', 'dad07daa5fa5c2c8041eda4769eb93b4941302141d219c12405372631a1fbb4e', 'de4c08610a1dfa9d69fa1cbda57c1aa04a55a372bd8ef9aa9992906ed060a39e', 'de5be26953a6cdfcec9f7d091ee48be0efe19e4ceb09f1e6014ef1ac72509f7b', 'e2080ae5033a720a113cafbfb7c66249485c3f5140309d8b460739fa59736f60', 'e885b3d1631bf83c32af4f73050753dc63dadd0b439c1257ce9bc02666f33466', 'ed0e1b9a64307802c77cefc1599f3aa6c3dfd5bf723677b3e6d481d59b065ed3', 'ee0244380b0c503c73c3843ec18d44280312f4da45105028740400aa03bae935', 'fc6aa7a6f544d08e60df449e308800e167e0669a58e47e114de95a1cdc459d68', 'fd0c5c0389382f9033b8fe41ff15179d30e5f823d8ab1856cb2d465e2c901a6f', 'fd282e2b2754fa45e4aed792ffefc7c10fea2dcc5778e90de67852a0694bbe70', 'fe09de3e177d71c10f89ca28aa071f9b6b265ab95aef037c1118718ea9332f1f', 'fe7671a225d345c452ad1044afe04b2d2710cec20c1c22e43802f32aee90b3d1', 'ff5241b056c58b192c659f3103e10a114f6f2e205a0e71f444d5fb9bf6b2616f'])
+          FILES = ('tests/eschf/test_source_postgres.py', 'tests/eschf/test_freshness_postgres.py')
+          CLASSES = {'tests.eschf.test_source_postgres': FILES[0],
+                     'tests.eschf.test_freshness_postgres': FILES[1]}
+          PLANNED = 89
+
+
+          def collection(data):
+              ids = [line for line in data.decode('utf-8').splitlines()
+                     if '::' in line]
+              assert len(ids) == len(set(ids)) == PLANNED
+              assert {hashlib.sha256(value.encode()).hexdigest() for value in ids} == EXPECTED_CASES
+              return set(ids)
+
+
+          def results(data, collected, returncode):
+              assert type(returncode) is int and returncode in (0, 1)
+              root = ET.fromstring(data)
+              assert root.tag in {'testsuites', 'testsuite'}
+              cases = list(root.iter('testcase'))
+              assert 0 < len(cases) <= PLANNED
+              seen, output = set(), []
+              for case in cases:
+                  filename = CLASSES[case.attrib['classname']]
+                  identity = filename + '::' + case.attrib['name']
+                  assert identity in collected and identity not in seen
+                  seen.add(identity)
+                  statuses = [tag for tag in ('failure', 'error', 'skipped')
+                              if case.find(tag) is not None]
+                  assert len(statuses) <= 1
+                  assert sum(child.tag in {'failure', 'error', 'skipped'} for child in case) == len(statuses)
+                  status = {'failure': 'failed', 'error': 'error', 'skipped': 'skipped'}.get(
+                      statuses[0] if statuses else '', 'passed')
+                  output.append({'id': hashlib.sha256(identity.encode()).hexdigest(), 'status': status})
+              for tag in ('failure', 'error', 'skipped'):
+                  assert len(list(root.iter(tag))) == sum(case.find(tag) is not None for case in cases)
+              failures = sum(c['status'] in {'failed', 'error'} for c in output)
+              if returncode == 0:
+                  assert len(output) == PLANNED and failures == 0
+              else:
+                  assert failures > 0
+              return {'countsKnown': True, 'passedCount': sum(c['status'] == 'passed' for c in output),
+                      'failedCount': sum(c['status'] == 'failed' for c in output),
+                      'errorCount': sum(c['status'] == 'error' for c in output),
+                      'skippedCount': sum(c['status'] == 'skipped' for c in output),
+                      'notRunCount': PLANNED - len(output), 'cases': output}
+
+
+          def verify_sources(root):
+              def git(*args):
+                  return subprocess.check_output(['git', *args], cwd=root, text=True).strip()
+              assert git('rev-parse', 'HEAD') == os.environ['GITHUB_SHA']
+              subprocess.run(['git', 'diff', '--quiet', 'HEAD', '--ignore-submodules=untracked'],
+                             cwd=root, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+              for filename, expected in EXPECTED_SOURCES.items():
+                  assert hashlib.sha256((root / filename).read_bytes()).hexdigest() == expected
+              for name, expected in EXPECTED_MODULES.items():
+                  assert git('-C', 'modules/' + name, 'rev-parse', 'HEAD') == expected
+
+
+          def pg_snapshot():
+              import psycopg
+              expected = 'postgresql+psycopg://eschf_test:eschf_test@127.0.0.1:15439/eschf_g04_test'
+              assert os.environ['ESCHF_TEST_DATABASE_URL'] == os.environ['AIOS_DATABASE_URL'] == expected
+              with psycopg.connect(expected.replace('postgresql+psycopg://', 'postgresql://', 1),
+                                   connect_timeout=10, options='-c statement_timeout=5000') as connection:
+                  connection.execute('SET TRANSACTION READ ONLY')
+                  database, actor, version = connection.execute(
+                      "SELECT current_database(), current_user, current_setting('server_version_num')::int"
+                  ).fetchone()
+                  assert database == 'eschf_g04_test' and actor == 'eschf_test'
+                  assert type(version) is int and 160000 <= version < 170000
+                  schemas = connection.execute(
+                      "SELECT count(*) FROM pg_namespace WHERE nspname = 'eschf' "
+                      "OR nspname LIKE 'eschf_source_fixture_%'"
+                  ).fetchone()[0]
+                  locks = connection.execute(
+                      "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' "
+                      'AND classid = 0 AND objid = 904121 AND granted'
+                  ).fetchone()[0]
+                  return version, schemas == 0 and locks == 0
+
+
+          def main():
+              root, temp = Path.cwd(), Path(os.environ['RUNNER_TEMP'])
+              summary = {'schemaVersion': 1, 'kind': 'eschf-pg89', 'stage': 'preflight',
+                         'passed': False, 'planned': PLANNED, 'countsKnown': False,
+                         'passedCount': None, 'failedCount': None, 'errorCount': None,
+                         'skippedCount': None, 'notRunCount': None, 'cases': [],
+                         'sourceVerifiedAfter': False, 'postflightSchemaClean': False,
+                         'cleanupDeferredToHostedJobTeardown': True}
+              code = 1
+              try:
+                  verify_sources(root)
+                  for directory in (root, root / 'frontend'):
+                      assert not any((directory / name).exists() for name in (
+                          '.env', '.env.local', '.env.development', '.env.development.local',
+                          '.env.production', '.env.production.local', '.env.test', '.env.test.local'))
+                  assert os.environ['AIOS_ENVIRONMENT'] == 'dev'
+                  assert os.environ['AIOS_SALES_EMAIL_ENABLED'] == os.environ['AIOS_AI_ENABLED'] == 'false'
+                  assert all(os.environ[name] == '' for name in (
+                      'AIOS_SMTP_HOST', 'AIOS_SMTP_USER', 'AIOS_SMTP_PASSWORD'))
+                  version, clean = pg_snapshot()
+                  assert clean
+                  summary.update(commit=os.environ['GITHUB_SHA'], sourceSha256=EXPECTED_SOURCES,
+                                 moduleSha=EXPECTED_MODULES, postgresVersion=version)
+                  summary['stage'] = 'collection'
+                  with (temp / 'eschf-collection.log').open('wb') as log:
+                      collected = subprocess.run([sys.executable, '-m', 'pytest', '--color=no', '--collect-only', '-q', *FILES],
+                                                 stdout=log, stderr=subprocess.STDOUT, timeout=90)
+                  assert collected.returncode == 0
+                  identities = collection((temp / 'eschf-collection.log').read_bytes())
+                  summary['collectedIds'] = sorted(EXPECTED_CASES)
+                  summary['stage'] = 'execution'
+                  junit = temp / 'eschf-pg.junit.xml'
+                  with (temp / 'eschf-execution.log').open('wb') as log:
+                      completed = subprocess.run([sys.executable, '-m', 'pytest', '--color=no', '-q', '-x',
+                                                  '--junitxml=' + str(junit), *FILES],
+                                                 stdout=log, stderr=subprocess.STDOUT, timeout=900)
+                  numbers = results(junit.read_bytes(), identities, completed.returncode)
+                  summary.update(numbers)
+                  summary['stage'] = 'completed'
+                  summary['passed'] = completed.returncode == 0 and numbers['passedCount'] == PLANNED
+                  code = 0 if summary['passed'] else 1
+              except Exception:
+                  summary['stage'] = 'hold'
+                  summary['passed'] = False
+              finally:
+                  try:
+                      verify_sources(root)
+                      summary['sourceVerifiedAfter'] = True
+                  except Exception:
+                      summary['passed'] = False
+                  try:
+                      version, clean = pg_snapshot()
+                      summary['postflightSchemaClean'] = clean
+                      summary['postgresVersion'] = version
+                      if not clean:
+                          summary['passed'] = False
+                  except Exception:
+                      summary['passed'] = False
+                  if not summary['passed']:
+                      code = 1
+                  (temp / 'erp-ready-eschf-summary.json').write_text(json.dumps(summary, sort_keys=True) + '\n')
+                  print('ESCHF stage:', summary['stage'], 'passed:', summary['passedCount'],
+                        'failed:', summary['failedCount'], 'not run:', summary['notRunCount'])
+              return code
+
+
+          if __name__ == '__main__':
+              sys.exit(main())
+      - name: Upload allowlisted numerical ESCHF summary only
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: erp-ready-selective-eschf-summary
+          path: ${{ runner.temp }}/erp-ready-eschf-summary.json
           if-no-files-found: error
           retention-days: 7

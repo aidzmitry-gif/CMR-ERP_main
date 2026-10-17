@@ -146,7 +146,11 @@ test("own: клиент → контакт → сделка → задача/и�
   expect(email.attempt_count).toBe(0);
   expect(email.accepted_at).toBeNull();
   expect(email.attachments).toHaveLength(2);
-  await expect(emailPanel.getByRole('button',{name:'Подтвердить отправку',exact:true})).toBeDisabled();
+  expect(email.can_confirm).toBe(false);
+  await expect(emailPanel.getByRole('status').filter({
+    hasText: 'Подтверждение недоступно для текущей сессии: проверьте права и настройки отправителя.',
+  })).toBeVisible();
+  await expect(emailPanel.getByRole('button',{name:'Подтвердить отправку',exact:true})).toHaveCount(0);
   test.info().annotations.push({ type: "erp_ready_checkpoint", description: "18" });
   const pdf = await page.request.get(`/api/sales/deals/${deal.id}/emails/${email.id}/attachments/0`);
   expect(pdf.status()).toBe(200);
