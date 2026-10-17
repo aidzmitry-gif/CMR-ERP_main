@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   e2e:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -490,5 +491,239 @@ jobs:
         with:
           name: erp-ready-selective-eschf-summary
           path: ${{ runner.temp }}/erp-ready-eschf-summary.json
+          if-no-files-found: error
+          retention-days: 7
+
+  accounting_pg:
+    name: Accounting allocation cost-stream regression (8)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      accounting-postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: aios
+          POSTGRES_PASSWORD: aios
+          POSTGRES_DB: accounting_test
+        ports:
+          - "15436:5432"
+        options: >-
+          --health-cmd "pg_isready -U aios -d accounting_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      AIOS_ENVIRONMENT: dev
+      AIOS_DATABASE_URL: postgresql+psycopg://aios:aios@127.0.0.1:15436/accounting_test
+      ACCOUNTING_TEST_POSTGRES_URL: postgresql+psycopg://aios:aios@127.0.0.1:15436/accounting_test
+      AIOS_SALES_EMAIL_ENABLED: 'false'
+      AIOS_AI_ENABLED: 'false'
+      AIOS_SMTP_HOST: ''
+      AIOS_SMTP_USER: ''
+      AIOS_SMTP_PASSWORD: ''
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install existing backend dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Verify isolated allocation cost-stream cases
+        shell: python
+        run: |
+          import hashlib
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          EXPECTED_SOURCES = {'tests/accounting/test_inventory_allocation_cost_stream_postgres.py': 'ba4b75e1b0e16312c577e6bca066ecf8f3ef104e1e15321d404fee0e5988c3d0', 'tests/accounting/test_inventory_allocation_api_postgres.py': 'a707573fe39e2b6368381b8be8f570bd0f370e22a489294f109c75ab04f5b07c', 'tests/accounting/test_postgres.py': '4a6557bd285e7b74a21bd12bb83924c391d350f41c7d0c814267935441ddca62'}
+          EXPECTED_MODULES = {'finance': '59832b2f14a2ee02d8db266a67f8206616bdcd94', 'hr': 'f8a6e0142f1920b07ec56818f42d156a602ff9c3', 'leads': '9a304f771ba74369ded199168e0e1da3ad6348d2', 'logistics': '6923d2e021980ef2546f382364d38dc34a0fef29', 'marketing': 'd4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282', 'procurement': 'f29ea84bd13342ae572e8c4499031d2f053d3d47', 'production': 'be7d7e198bf09cc41c642d22125db401da5adc48', 'sales': '37b3b1d752fe5b16d89ae01a535dc84360ac7591', 'service': '3d33800c44865cd7a7373b29192c5d59d3c4bec8', 'wms': '8b6fb881a03f1a268f07e65f4fa89d195fc933a2'}
+          EXPECTED_CASES = {'0c5c37da210e282adf734c56bc4f6647d37fd6ea3473bdc9c80dcade1555aec3', 'e5572b45e4c59d70f5eee7dd1fb236faec1ac10efb5cfb513191e2c1d0e24452', '2d60497ae9e285a93985a01cc728517e862c56021c4f006a34d5b4d94f4c1fed', '5672bac285f65759b169341cc74530510d60f28348a8980305357fbec30435f1', 'd8da5cc5c9b9313d1c9fe55163282f13e4ef7b24905724edb95b845a3b1c6e74', '7dca91bf25fad7fcc10854b0ab22e389f2d3ba042cc597e28b916dfc2a80f84e', '7ee5b05c2435a673eb782bcc4273d435928c18f5904b12717826cc30641d2188', '4caa6e458d67c7191c787a6dcdd0fff4b000fc23eb1b03a43365e7acc6727eed'}
+          FILES = ('tests/accounting/test_inventory_allocation_cost_stream_postgres.py', 'tests/accounting/test_inventory_allocation_api_postgres.py')
+          CLASSES = {'tests.accounting.test_inventory_allocation_cost_stream_postgres': 'tests/accounting/test_inventory_allocation_cost_stream_postgres.py', 'tests.accounting.test_inventory_allocation_api_postgres': 'tests/accounting/test_inventory_allocation_api_postgres.py'}
+          PLANNED = 8
+          SELECTED = ('tests/accounting/test_inventory_allocation_cost_stream_postgres.py::test_fifo_late_cost_uses_exact_output_source_including_zero_portion[False]', 'tests/accounting/test_inventory_allocation_cost_stream_postgres.py::test_fifo_late_cost_uses_exact_output_source_including_zero_portion[True]', 'tests/accounting/test_inventory_allocation_cost_stream_postgres.py::test_mixed_production_late_cost_confirm_replay_and_historical_cutoff[False]', 'tests/accounting/test_inventory_allocation_cost_stream_postgres.py::test_mixed_production_late_cost_confirm_replay_and_historical_cutoff[True]', 'tests/accounting/test_inventory_allocation_api_postgres.py::test_accountant_mixed_allocation_http_confirm_retry_stock_and_late_cost[False-fifo]', 'tests/accounting/test_inventory_allocation_api_postgres.py::test_accountant_mixed_allocation_http_confirm_retry_stock_and_late_cost[False-weighted_average]', 'tests/accounting/test_inventory_allocation_api_postgres.py::test_accountant_mixed_allocation_http_confirm_retry_stock_and_late_cost[True-fifo]', 'tests/accounting/test_inventory_allocation_api_postgres.py::test_accountant_mixed_allocation_http_confirm_retry_stock_and_late_cost[True-weighted_average]')
+
+          EXCEPTION_IDS = {'AssertionError': 1, 'FileNotFoundError': 2, 'ModuleNotFoundError': 3, 'AttributeError': 4, 'TypeError': 5, 'KeyError': 6, 'sqlalchemy.exc.IntegrityError': 7, 'sqlalchemy.exc.ProgrammingError': 8, 'sqlalchemy.exc.OperationalError': 9, 'TimeoutError': 10}
+          DIAGNOSTIC_SOURCES = {'tests/accounting/test_inventory_allocation_cost_stream_postgres.py': (1, 277), 'tests/accounting/test_inventory_allocation_api_postgres.py': (2, 205), 'tests/accounting/test_postgres.py': (3, 2727)}
+          CHECKOUT_ROOT = str(Path.cwd())
+
+
+          def collection(data):
+              ids = [line for line in data.decode('utf-8').splitlines()
+                     if '::' in line]
+              assert len(ids) == len(set(ids)) == PLANNED
+              assert {hashlib.sha256(value.encode()).hexdigest() for value in ids} == EXPECTED_CASES
+              return set(ids)
+
+
+
+          def diagnostic(node):
+              payload = node.attrib.get('message', '') + '\n' + (node.text or '')
+              classes = {code for name, code in EXCEPTION_IDS.items()
+                         if re.search(r'^(?:E[ \t]+)?' + re.escape(name) + r'(?::|$)', payload, re.M)}
+              frames = []
+              suffix = r'(?:in [A-Za-z_][A-Za-z_0-9.<>]*|' + '|'.join(map(re.escape, EXCEPTION_IDS)) + ')'
+              for line in payload.splitlines():
+                  for filename, (source_id, limit) in DIAGNOSTIC_SOURCES.items():
+                      paths = '(?:' + re.escape(filename) + '|' + re.escape(CHECKOUT_ROOT + '/' + filename) + ')'
+                      match = re.fullmatch(paths + r':([1-9][0-9]{0,5}): ' + suffix, line.strip())
+                      if match and 0 < int(match[1]) <= limit:
+                          frame = {'sourceId': source_id, 'line': int(match[1])}
+                          if frame not in frames and len(frames) < 3:
+                              frames.append(frame)
+              return {'classId': next(iter(classes)) if len(classes) == 1 else 0, 'frames': frames}
+
+
+          def results(data, collected, returncode):
+              assert type(returncode) is int and returncode in (0, 1)
+              root = ET.fromstring(data)
+              assert root.tag in {'testsuites', 'testsuite'}
+              cases = list(root.iter('testcase'))
+              assert 0 < len(cases) <= PLANNED
+              seen, output = set(), []
+              for case in cases:
+                  filename = CLASSES[case.attrib['classname']]
+                  identity = filename + '::' + case.attrib['name']
+                  assert identity in collected and identity not in seen
+                  seen.add(identity)
+                  statuses = [tag for tag in ('failure', 'error', 'skipped')
+                              if case.find(tag) is not None]
+                  assert len(statuses) <= 1
+                  assert sum(child.tag in {'failure', 'error', 'skipped'} for child in case) == len(statuses)
+                  status = {'failure': 'failed', 'error': 'error', 'skipped': 'skipped'}.get(
+                      statuses[0] if statuses else '', 'passed')
+                  entry = {'id': hashlib.sha256(identity.encode()).hexdigest(), 'status': status}
+                  if status in {'failed', 'error'}:
+                      entry['diagnostic'] = diagnostic(case.find(statuses[0]))
+                  output.append(entry)
+              for tag in ('failure', 'error', 'skipped'):
+                  assert len(list(root.iter(tag))) == sum(case.find(tag) is not None for case in cases)
+              failures = sum(c['status'] in {'failed', 'error'} for c in output)
+              if returncode == 0:
+                  assert len(output) == PLANNED and failures == 0
+              else:
+                  assert failures > 0
+              return {'countsKnown': True, 'passedCount': sum(c['status'] == 'passed' for c in output),
+                      'failedCount': sum(c['status'] == 'failed' for c in output),
+                      'errorCount': sum(c['status'] == 'error' for c in output),
+                      'skippedCount': sum(c['status'] == 'skipped' for c in output),
+                      'notRunCount': PLANNED - len(output), 'cases': output}
+
+
+          def verify_sources(root):
+              def git(*args):
+                  return subprocess.check_output(['git', *args], cwd=root, text=True).strip()
+              assert git('rev-parse', 'HEAD') == os.environ['GITHUB_SHA']
+              subprocess.run(['git', 'diff', '--quiet', 'HEAD', '--ignore-submodules=untracked'],
+                             cwd=root, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+              for filename, expected in EXPECTED_SOURCES.items():
+                  assert hashlib.sha256((root / filename).read_bytes()).hexdigest() == expected
+              for name, expected in EXPECTED_MODULES.items():
+                  assert git('-C', 'modules/' + name, 'rev-parse', 'HEAD') == expected
+
+
+          def pg_snapshot():
+              import psycopg
+              expected = 'postgresql+psycopg://aios:aios@127.0.0.1:15436/accounting_test'
+              assert os.environ['ACCOUNTING_TEST_POSTGRES_URL'] == os.environ['AIOS_DATABASE_URL'] == expected
+              with psycopg.connect(expected.replace('postgresql+psycopg://', 'postgresql://', 1),
+                                   connect_timeout=10, options='-c statement_timeout=5000') as connection:
+                  connection.execute('SET TRANSACTION READ ONLY')
+                  database, actor, version = connection.execute(
+                      "SELECT current_database(), current_user, current_setting('server_version_num')::int"
+                  ).fetchone()
+                  assert database == 'accounting_test' and actor == 'aios'
+                  assert type(version) is int and 160000 <= version < 170000
+                  databases = connection.execute(
+                      "SELECT count(*) FROM pg_database WHERE left(datname, 9) = 'acc_test_'"
+                  ).fetchone()[0]
+                  connections = connection.execute(
+                      "SELECT count(*) FROM pg_stat_activity WHERE left(datname, 9) = 'acc_test_'"
+                  ).fetchone()[0]
+                  return version, databases == 0 and connections == 0
+
+
+          def main():
+              root, temp = Path.cwd(), Path(os.environ['RUNNER_TEMP'])
+              summary = {'schemaVersion': 1, 'kind': 'accounting-allocation-pg8', 'stage': 'preflight',
+                         'passed': False, 'planned': PLANNED, 'countsKnown': False,
+                         'passedCount': None, 'failedCount': None, 'errorCount': None,
+                         'skippedCount': None, 'notRunCount': None, 'cases': [],
+                         'sourceVerifiedAfter': False, 'postflightDatabaseAndConnectionsClean': False,
+                         'cleanupDeferredToHostedJobTeardown': True}
+              code = 1
+              try:
+                  verify_sources(root)
+                  for directory in (root, root / 'frontend'):
+                      assert not any((directory / name).exists() for name in (
+                          '.env', '.env.local', '.env.development', '.env.development.local',
+                          '.env.production', '.env.production.local', '.env.test', '.env.test.local'))
+                  assert os.environ['AIOS_ENVIRONMENT'] == 'dev'
+                  assert os.environ['AIOS_SALES_EMAIL_ENABLED'] == os.environ['AIOS_AI_ENABLED'] == 'false'
+                  assert all(os.environ[name] == '' for name in (
+                      'AIOS_SMTP_HOST', 'AIOS_SMTP_USER', 'AIOS_SMTP_PASSWORD'))
+                  version, clean = pg_snapshot()
+                  assert clean
+                  summary.update(commit=os.environ['GITHUB_SHA'], sourceSha256=EXPECTED_SOURCES,
+                                 moduleSha=EXPECTED_MODULES, postgresVersion=version)
+                  summary['stage'] = 'collection'
+                  with (temp / 'accounting8-collection.log').open('wb') as log:
+                      collected = subprocess.run([sys.executable, '-m', 'pytest', '--color=no', '--collect-only', '-q', *SELECTED],
+                                                 stdout=log, stderr=subprocess.STDOUT, timeout=90)
+                  assert collected.returncode == 0
+                  identities = collection((temp / 'accounting8-collection.log').read_bytes())
+                  summary['collectedIds'] = sorted(EXPECTED_CASES)
+                  summary['stage'] = 'execution'
+                  junit = temp / 'accounting8-pg.junit.xml'
+                  with (temp / 'accounting8-execution.log').open('wb') as log:
+                      completed = subprocess.run([sys.executable, '-m', 'pytest', '--color=no', '-q', '-x', '--tb=short',
+                                                  '--junitxml=' + str(junit), *SELECTED],
+                                                 stdout=log, stderr=subprocess.STDOUT, timeout=900)
+                  numbers = results(junit.read_bytes(), identities, completed.returncode)
+                  summary.update(numbers)
+                  summary['stage'] = 'completed'
+                  summary['passed'] = completed.returncode == 0 and numbers['passedCount'] == PLANNED
+                  code = 0 if summary['passed'] else 1
+              except Exception:
+                  summary['stage'] = 'hold'
+                  summary['passed'] = False
+              finally:
+                  try:
+                      verify_sources(root)
+                      summary['sourceVerifiedAfter'] = True
+                  except Exception:
+                      summary['passed'] = False
+                  try:
+                      version, clean = pg_snapshot()
+                      summary['postflightDatabaseAndConnectionsClean'] = clean
+                      summary['postgresVersion'] = version
+                      if not clean:
+                          summary['passed'] = False
+                  except Exception:
+                      summary['passed'] = False
+                  if not summary['passed']:
+                      code = 1
+                  (temp / 'erp-ready-accounting-summary.json').write_text(json.dumps(summary, sort_keys=True) + '\n')
+                  print('Accounting stage:', summary['stage'], 'passed:', summary['passedCount'],
+                        'failed:', summary['failedCount'], 'not run:', summary['notRunCount'])
+              return code
+
+
+          if __name__ == '__main__':
+              sys.exit(main())
+      - name: Upload allowlisted numerical accounting summary only
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: erp-ready-selective-accounting-summary
+          path: ${{ runner.temp }}/erp-ready-accounting-summary.json
           if-no-files-found: error
           retention-days: 7

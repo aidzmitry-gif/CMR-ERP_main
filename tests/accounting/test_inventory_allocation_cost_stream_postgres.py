@@ -58,10 +58,6 @@ async def mixed_production_disposal(factory, book, *, method="weighted_average",
     production = TwoOutputs(same_lot)
     output_ids = []
     async with factory() as session:
-        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
-                         "0142_zero_value_command_dates.py", "0143_zero_value_sales.py",
-                         "0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py"):
-            await run_migration(session, revision, "upgrade")
         for order_id in (42, 43):
             command = transfer_input(policy_id).model_copy(update={
                 "order_id": order_id, "analytical_order": f"ORDER-{order_id}", "output_document_ids": [order_id + 59]})
