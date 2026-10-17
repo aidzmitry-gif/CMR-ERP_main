@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { KnowledgeEnrollmentsView } from "@/components/erp/knowledge-enrollments-view";
@@ -19,6 +19,18 @@ type Row = {
 let getRows: Row[] = [];
 let postResult: { ok: boolean; status?: number } = { ok: true, status: 200 };
 let fetchMock: ReturnType<typeof vi.fn>;
+let getHandler: ((url: string, opts?: RequestInit) => Promise<Response>) | null = null;
+let postHandler: (() => Promise<Response>) | null = null;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 function lastGetUrl(): string {
   const getCalls = fetchMock.mock.calls.filter(
@@ -30,11 +42,17 @@ function lastGetUrl(): string {
 beforeEach(() => {
   getRows = [];
   postResult = { ok: true, status: 200 };
+  getHandler = null;
+  postHandler = null;
   fetchMock = vi.fn((url: string, opts?: RequestInit) => {
     if (opts?.method === "POST") {
-      return Promise.resolve({ ok: postResult.ok, status: postResult.status ?? 200 });
+      return postHandler
+        ? postHandler()
+        : Promise.resolve({ ok: postResult.ok, status: postResult.status ?? 200 } as Response);
     }
-    return Promise.resolve({ ok: true, json: async () => getRows });
+    return getHandler
+      ? getHandler(String(url), opts)
+      : Promise.resolve({ ok: true, json: async () => getRows } as Response);
   });
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -161,5 +179,135 @@ describe("KnowledgeEnrollmentsView", () => {
     expect(await screen.findByText("Ошибка 422")).toBeInTheDocument();
     // форма не закрылась — данные не потеряны
     expect(screen.getByText("Назначение курса сотруднику")).toBeInTheDocument();
+  });
+
+  it("GET 503 показывает отдельную ошибку списка, а не успешное пустое состояние", async () => {
+    getHandler = async () => ({ ok: false, status: 503 } as Response);
+    render(<KnowledgeEnrollmentsView />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ошибка 503");
+    expect(screen.getByText("Не удалось загрузить назначения")).toBeInTheDocument();
+    expect(screen.queryByText("Назначений нет")).not.toBeInTheDocument();
+    expect(screen.getByText("Ошибка 503").closest("form")).toBeNull();
+  });
+
+  it("сетевая ошибка списка повторяется с текущими фильтрами и может завершиться успехом", async () => {
+    let filteredCalls = 0;
+    getHandler = async (url) => {
+      if (!url.includes("status=in_progress")) return { ok: true, json: async () => [] } as Response;
+      filteredCalls += 1;
+      if (filteredCalls === 1) throw new TypeError("Failed to fetch");
+      return { ok: true, json: async () => [row({ employee_name: "Retry", status: "in_progress" })] } as Response;
+    };
+    render(<KnowledgeEnrollmentsView />);
+    await screen.findByText("Назначений нет");
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "in_progress" } });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ошибка сети");
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    expect(await screen.findByText("Retry")).toBeInTheDocument();
+    expect(decodeURIComponent(lastGetUrl())).toContain("status=in_progress");
+  });
+
+  it("сбой обновления оставляет назначения тех же фильтров и явно помечает данные устаревшими", async () => {
+    let calls = 0;
+    getHandler = async () => {
+      calls += 1;
+      return calls === 1
+        ? ({ ok: true, json: async () => [row()] } as Response)
+        : ({ ok: false, status: 503 } as Response);
+    };
+    render(<KnowledgeEnrollmentsView />);
+    expect(await screen.findByText("Иванов Иван")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Назначить курс" }));
+    fireEvent.change(screen.getByPlaceholderText("1"), { target: { value: "5" } });
+    fireEvent.change(screen.getByPlaceholderText("Иванов Иван"), { target: { value: "Петров П.П." } });
+    fireEvent.click(screen.getByRole("button", { name: "Назначить" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Показаны ранее загруженные данные");
+    expect(screen.getByText("Иванов Иван")).toBeInTheDocument();
+    expect(screen.queryByText("Назначений нет")).not.toBeInTheDocument();
+  });
+
+  it("при смене фильтра очищает предыдущие назначения, пока загружается новый список", async () => {
+    const pending = deferred<Response>();
+    let calls = 0;
+    getHandler = () => (++calls === 1
+      ? Promise.resolve({ ok: true, json: async () => [row()] } as Response)
+      : pending.promise);
+    render(<KnowledgeEnrollmentsView />);
+    expect(await screen.findByText("Иванов Иван")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("Фильтр по сотруднику"), { target: { value: "Петров" } });
+    expect(screen.queryByText("Иванов Иван")).not.toBeInTheDocument();
+    expect(screen.getByText("Загрузка списка…")).toBeInTheDocument();
+    expect(screen.queryByText("Назначений нет")).not.toBeInTheDocument();
+  });
+
+  it("поздний ответ предыдущего фильтра не перезаписывает текущий, даже если mock игнорирует abort", async () => {
+    const first = deferred<Response>();
+    const second = deferred<Response>();
+    let calls = 0;
+    getHandler = () => (++calls === 1 ? first.promise : second.promise);
+    render(<KnowledgeEnrollmentsView />);
+    await waitFor(() => expect(fetchMock.mock.calls).toHaveLength(1));
+    const firstSignal = fetchMock.mock.calls[0][1]?.signal;
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "completed" } });
+    await waitFor(() => expect(fetchMock.mock.calls).toHaveLength(2));
+    expect(firstSignal?.aborted).toBe(true);
+    second.resolve({ ok: true, json: async () => [row({ employee_name: "Current", status: "completed" })] } as Response);
+    expect(await screen.findByText("Current")).toBeInTheDocument();
+
+    await act(async () => {
+      first.resolve({ ok: true, json: async () => [row({ employee_name: "Old" })] } as Response);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.getByText("Current")).toBeInTheDocument();
+    expect(screen.queryByText("Old")).not.toBeInTheDocument();
+  });
+
+  it("размонтирование отменяет GET и поздний ответ не создаёт ошибку или новый запрос", async () => {
+    const pending = deferred<Response>();
+    getHandler = () => pending.promise;
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => undefined);
+    const view = render(<KnowledgeEnrollmentsView />);
+    await waitFor(() => expect(fetchMock.mock.calls).toHaveLength(1));
+    const signal = fetchMock.mock.calls[0][1]?.signal;
+
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      pending.resolve({ ok: false, status: 503 } as Response);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(view.container.querySelector('[role="alert"]')).toBeNull();
+    expect(alertSpy).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls).toHaveLength(1);
+  });
+
+  it("успех POST после смены фильтра перезагружает текущий фильтр, а не захваченный", async () => {
+    const pendingPost = deferred<Response>();
+    postHandler = () => pendingPost.promise;
+    render(<KnowledgeEnrollmentsView />);
+    await screen.findByText("Назначений нет");
+    const employeeFilter = screen.getByPlaceholderText("Фильтр по сотруднику");
+    fireEvent.change(employeeFilter, { target: { value: "Сидоров" } });
+    await waitFor(() => expect(decodeURIComponent(lastGetUrl())).toContain("employee_name=Сидоров"));
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Назначить курс" }));
+    fireEvent.change(screen.getByPlaceholderText("1"), { target: { value: "5" } });
+    fireEvent.change(screen.getByPlaceholderText("Иванов Иван"), { target: { value: "Новиков Н.Н." } });
+    fireEvent.click(screen.getByRole("button", { name: "Назначить" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, opts]) => opts?.method === "POST")).toBe(true));
+
+    fireEvent.change(employeeFilter, { target: { value: "Петров" } });
+    await waitFor(() => expect(decodeURIComponent(lastGetUrl())).toContain("employee_name=Петров"));
+    const beforePostComplete = fetchMock.mock.calls.filter(([, opts]) => opts?.method !== "POST").length;
+    pendingPost.resolve({ ok: true, status: 201 } as Response);
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, opts]) => opts?.method !== "POST").length).toBe(beforePostComplete + 1));
+    expect(decodeURIComponent(lastGetUrl())).toContain("employee_name=Петров");
+    expect(decodeURIComponent(lastGetUrl())).not.toContain("employee_name=Сидоров");
   });
 });

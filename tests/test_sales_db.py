@@ -1,6 +1,54 @@
 """БД-зависимые тесты модуля Sales (SQLite в памяти)."""
 from decimal import Decimal
 
+import pytest
+
+
+def _set_activity_api_user(api, *, username: str, subject: str | None, roles=("director",)):
+    from core.services.auth import CurrentUser, get_current_user
+
+    app = api._transport.app
+    identity = CurrentUser(username=username, roles=list(roles), keycloak_user_id=subject)
+    app.dependency_overrides[get_current_user] = lambda: identity
+    return app, get_current_user
+
+
+async def _seed_activity_actor(
+    session,
+    *,
+    username: str,
+    subject: str,
+    employee_id: int | None,
+    employee_name: str = "Сотрудник теста",
+    user_status: str = "active",
+    employee_status: str = "active",
+    create_employee: bool = True,
+):
+    from core.domain.models import User
+    from modules.hr.models import Employee
+
+    if create_employee and employee_id is not None:
+        session.add(
+            Employee(
+                id=employee_id,
+                full_name=employee_name,
+                department="Продажи",
+                status=employee_status,
+            )
+        )
+    session.add(
+        User(
+            username=username,
+            full_name=username,
+            keycloak_user_id=subject,
+            employee_id=employee_id,
+            department="Продажи",
+            role="director",
+            status=user_status,
+        )
+    )
+    await session.commit()
+
 
 async def test_create_and_list_deal(api):
     r = await api.post(
@@ -186,15 +234,24 @@ async def test_update_deal_stage(api):
     assert (await api.patch("/sales/deals/999999", json={"stage": "won"})).status_code == 404
 
 
-async def test_kpis(session, api):
+async def test_kpis(monkeypatch, session, api):
     from datetime import date
 
     from modules.sales.models import Activity, KpiTarget
 
+    today = date(2026, 6, 2)
+    monkeypatch.setattr("modules.sales.routes._minsk_today", lambda: today)
     session.add(KpiTarget(key="calls_all", title="Всего звонков", target=100, unit="count", icon="phone", tone="indigo", sort_order=1))
     for _ in range(3):
-        session.add(Activity(kpi_key="calls_all", value=1, date=date(2026, 6, 2)))
+        session.add(Activity(kpi_key="calls_all", value=1, date=today))
     await session.commit()
+
+    app, dependency = _set_activity_api_user(
+        api, username="reader-without-access", subject=None, roles=("Гость",)
+    )
+    denied = await api.get("/sales/kpis")
+    assert denied.status_code == 403
+    app.dependency_overrides.pop(dependency, None)
 
     r = await api.get("/sales/kpis")
     assert r.status_code == 200
@@ -268,14 +325,16 @@ async def test_kpis_operational_facts_from_db(session, api):
     assert by_key["new_deals_count"]["actual"] == 1.0
 
 
-async def test_kpis_period_scaling(session, api):
+async def test_kpis_period_scaling(monkeypatch, session, api):
     from datetime import date
 
     from modules.sales.models import Activity, KpiTarget
 
+    today = date(2026, 6, 2)
+    monkeypatch.setattr("modules.sales.routes._minsk_today", lambda: today)
     session.add(KpiTarget(key="calls_p", title="Звонки", target=10, unit="count", icon="phone", tone="indigo", sort_order=1))
     for _ in range(8):
-        session.add(Activity(kpi_key="calls_p", value=1, date=date(2026, 6, 2)))
+        session.add(Activity(kpi_key="calls_p", value=1, date=today))
     await session.commit()
 
     # день: план = дневная цель 10, факт 8 → 80%
@@ -460,14 +519,25 @@ async def test_deal_items_crud(session, api):
     ).status_code == 404
 
 
-async def test_log_activity_increments_kpi(session, api):
+async def test_log_activity_increments_kpi(monkeypatch, session, api):
     from datetime import date
 
     from modules.sales.models import Activity, KpiTarget
 
+    today = date(2026, 6, 2)
+    monkeypatch.setattr("modules.sales.routes._minsk_today", lambda: today)
     session.add(KpiTarget(key="calls_all", title="Всего звонков", target=100, unit="count", icon="phone", tone="indigo", sort_order=1))
-    session.add(Activity(kpi_key="calls_all", value=1, date=date(2026, 6, 2)))
-    await session.commit()
+    session.add(Activity(kpi_key="calls_all", value=1, date=today))
+    await _seed_activity_actor(
+        session,
+        username="activity-owner",
+        subject="activity-owner-subject",
+        employee_id=901,
+        employee_name="Текущий сотрудник",
+    )
+    _set_activity_api_user(
+        api, username="activity-owner", subject="activity-owner-subject"
+    )
 
     before = next(x for x in (await api.get("/sales/kpis")).json() if x["key"] == "calls_all")
     assert before["actual"] == 1
@@ -478,6 +548,283 @@ async def test_log_activity_increments_kpi(session, api):
     after = next(x for x in (await api.get("/sales/kpis")).json() if x["key"] == "calls_all")
     assert after["actual"] == 2
     assert after["percent"] == 2
+
+
+def test_minsk_today_uses_timezone_at_utc_day_boundary(monkeypatch):
+    from datetime import date, datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    from modules.sales.routes import _minsk_today
+
+    class FixedClock:
+        current = datetime(2026, 6, 1, 20, 59, tzinfo=timezone.utc)
+
+        @classmethod
+        def now(cls, tz):
+            assert tz == ZoneInfo("Europe/Minsk")
+            return cls.current.astimezone(tz)
+
+    monkeypatch.setattr("modules.sales.routes.datetime", FixedClock)
+    assert _minsk_today() == date(2026, 6, 1)
+    FixedClock.current = datetime(2026, 6, 1, 21, 0, tzinfo=timezone.utc)
+    assert _minsk_today() == date(2026, 6, 2)
+
+
+async def test_create_activity_without_date_uses_minsk_today(monkeypatch, session, api):
+    from datetime import date
+
+    from sqlalchemy import select
+
+    from modules.sales.models import Activity
+
+    today = date(2026, 6, 2)
+    monkeypatch.setattr("modules.sales.routes._minsk_today", lambda: today)
+    session.add(
+        Activity(
+            kpi_key="calls_all",
+            value=3,
+            date=date(2025, 1, 15),
+            owner="Архивный владелец",
+        )
+    )
+    await _seed_activity_actor(
+        session,
+        username="date-owner",
+        subject="date-owner-subject",
+        employee_id=901,
+        employee_name="Владелец даты",
+    )
+    _set_activity_api_user(api, username="date-owner", subject="date-owner-subject")
+
+    response = await api.post(
+        "/sales/activities",
+        json={"kpi_key": "calls_all", "value": 1, "owner": "Подделанный владелец"},
+    )
+    assert response.status_code == 201
+    assert response.json() == {"ok": True, "date": today.isoformat()}
+    activities = (await session.execute(select(Activity).order_by(Activity.id))).scalars().all()
+    assert len(activities) == 2
+    assert (activities[0].date, activities[0].owner) == (date(2025, 1, 15), "Архивный владелец")
+    assert (activities[1].date, activities[1].owner_id) == (today, 901)
+
+
+async def test_kpis_relative_periods_anchor_today_not_latest_activity(monkeypatch, session, api):
+    from datetime import date, timedelta
+
+    from modules.sales.models import Activity, KpiTarget
+
+    today = date(2026, 6, 2)
+    monkeypatch.setattr("modules.sales.routes._minsk_today", lambda: today)
+    session.add(
+        KpiTarget(
+            key="relative_today",
+            title="Проверка текущего периода",
+            target=10,
+            unit="count",
+            icon="phone",
+            tone="indigo",
+            sort_order=1,
+        )
+    )
+    session.add(Activity(kpi_key="relative_today", value=100, date=today - timedelta(days=800)))
+    await session.commit()
+
+    for period in ("day", "week", "month", "quarter", "year"):
+        response = await api.get(f"/sales/kpis?period={period}")
+        assert response.status_code == 200
+        item = next(row for row in response.json() if row["key"] == "relative_today")
+        assert item["actual"] == 0
+
+    session.add(Activity(kpi_key="relative_today", value=1, date=today))
+    await session.commit()
+    for period in ("day", "week", "month", "quarter", "year"):
+        response = await api.get(f"/sales/kpis?period={period}")
+        assert response.status_code == 200
+        item = next(row for row in response.json() if row["key"] == "relative_today")
+        assert item["actual"] == 1
+
+
+async def test_kpis_explicit_month_period_preserves_calendar_window(session, api):
+    from datetime import date
+
+    from modules.sales.models import Activity, KpiTarget
+
+    session.add(
+        KpiTarget(
+            key="explicit_month",
+            title="Проверка календарного месяца",
+            target=10,
+            unit="count",
+            icon="phone",
+            tone="indigo",
+            sort_order=1,
+        )
+    )
+    session.add_all(
+        [
+            Activity(kpi_key="explicit_month", value=8, date=date(2026, 6, 2)),
+            Activity(kpi_key="explicit_month", value=90, date=date(2026, 7, 1)),
+        ]
+    )
+    await session.commit()
+
+    response = await api.get("/sales/kpis?period=2026-06")
+    assert response.status_code == 200
+    item = next(row for row in response.json() if row["key"] == "explicit_month")
+    assert item["actual"] == 8
+    assert item["target"] == 220
+
+
+async def test_create_activity_uses_authenticated_director_employee_and_ignores_payload_owner(
+    session, api
+):
+    from sqlalchemy import func, select
+
+    from modules.sales.models import Activity
+
+    await _seed_activity_actor(
+        session,
+        username="signed-actor",
+        subject="signed-subject-actor",
+        employee_id=911,
+        employee_name="Сотрудник по subject",
+    )
+    await _seed_activity_actor(
+        session,
+        username="conflicting-username",
+        subject="other-signed-subject",
+        employee_id=912,
+        employee_name="Сотрудник по username",
+    )
+    _set_activity_api_user(
+        api, username="conflicting-username", subject="signed-subject-actor"
+    )
+
+    payload = {
+        "kpi_key": "calls_all",
+        "value": 1,
+        "date": "2026-06-02",
+        "owner": "Подделанный владелец",
+    }
+    response = await api.post("/sales/activities", json=payload)
+    assert response.status_code == 201
+    assert response.json() == {"ok": True, "date": "2026-06-02"}
+    activity = (await session.execute(select(Activity))).scalar_one()
+    assert activity.owner_id == 911
+    assert activity.owner == "Сотрудник по subject"
+
+    _set_activity_api_user(api, username="conflicting-username", subject="unknown-subject")
+    unknown_subject = await api.post("/sales/activities", json=payload)
+    assert unknown_subject.status_code == 403
+    assert await session.scalar(select(func.count()).select_from(Activity)) == 1
+
+    _set_activity_api_user(api, username="conflicting-username", subject=None)
+    username_fallback = await api.post("/sales/activities", json=payload)
+    assert username_fallback.status_code == 201
+    activities = (await session.execute(select(Activity).order_by(Activity.id))).scalars().all()
+    assert len(activities) == 2
+    assert (activities[1].owner_id, activities[1].owner) == (912, "Сотрудник по username")
+
+
+@pytest.mark.parametrize("status", ["inactive", "onboarding"])
+async def test_create_activity_rejects_inactive_persistent_user(status, session, api):
+    from sqlalchemy import func, select
+
+    from modules.sales.models import Activity
+
+    await _seed_activity_actor(
+        session,
+        username=f"inactive-{status}",
+        subject=f"inactive-subject-{status}",
+        employee_id=913,
+        user_status=status,
+    )
+    _set_activity_api_user(
+        api, username=f"inactive-{status}", subject=f"inactive-subject-{status}"
+    )
+
+    response = await api.post(
+        "/sales/activities",
+        json={"kpi_key": "calls_all", "date": "2026-06-02", "owner": "Forged"},
+    )
+    assert response.status_code == 403
+    assert await session.scalar(select(func.count()).select_from(Activity)) == 0
+
+
+async def test_create_activity_rejects_active_user_without_employee(session, api):
+    from sqlalchemy import func, select
+
+    from modules.sales.models import Activity
+
+    for username, subject, employee_id in (
+        ("no-employee-link", "no-employee-subject", None),
+        ("missing-employee-row", "missing-employee-subject", 914),
+    ):
+        await _seed_activity_actor(
+            session,
+            username=username,
+            subject=subject,
+            employee_id=employee_id,
+            create_employee=False,
+        )
+        _set_activity_api_user(api, username=username, subject=subject)
+        response = await api.post(
+            "/sales/activities",
+            json={"kpi_key": "calls_all", "date": "2026-06-02"},
+        )
+        assert response.status_code == 403
+    assert await session.scalar(select(func.count()).select_from(Activity)) == 0
+
+
+async def test_create_activity_rejects_inactive_employee(session, api):
+    from sqlalchemy import func, select
+
+    from modules.sales.models import Activity
+
+    await _seed_activity_actor(
+        session,
+        username="inactive-employee-user",
+        subject="inactive-employee-subject",
+        employee_id=915,
+        employee_status="inactive",
+    )
+    _set_activity_api_user(
+        api, username="inactive-employee-user", subject="inactive-employee-subject"
+    )
+
+    response = await api.post(
+        "/sales/activities",
+        json={"kpi_key": "calls_all", "date": "2026-06-02"},
+    )
+    assert response.status_code == 403
+    assert await session.scalar(select(func.count()).select_from(Activity)) == 0
+
+
+async def test_create_activity_requires_sales_deal_write_permission(session, api):
+    from sqlalchemy import func, select
+
+    from modules.sales.models import Activity
+
+    await _seed_activity_actor(
+        session,
+        username="guest-without-write",
+        subject="guest-write-subject",
+        employee_id=916,
+        employee_name="Действующий сотрудник",
+    )
+    _set_activity_api_user(
+        api,
+        username="guest-without-write",
+        subject="guest-write-subject",
+        roles=("Гость",),
+    )
+    response = await api.post(
+        "/sales/activities",
+        json={"kpi_key": "calls_all", "date": "2026-06-02"},
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Недостаточно прав: sales.deal.write"
+    assert await session.scalar(select(func.count()).select_from(Activity)) == 0
 
 
 async def test_outbox_emit_and_relay(session):

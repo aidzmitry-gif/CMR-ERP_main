@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type ContractType = "supply" | "service" | "lease" | "nda";
 type ContractStatus = "active" | "expired" | "terminated";
@@ -48,6 +48,18 @@ interface CreateForm {
   description: string;
 }
 
+type ContractFilters = {
+  status: ContractStatus | "";
+  type: ContractType | "";
+};
+
+function contractFilterKey(filters: ContractFilters) {
+  const params = new URLSearchParams();
+  if (filters.status) params.set("status", filters.status);
+  if (filters.type) params.set("contract_type", filters.type);
+  return params.toString();
+}
+
 const EMPTY_FORM: CreateForm = {
   counterparty_name: "",
   contract_type: "supply",
@@ -58,29 +70,78 @@ const EMPTY_FORM: CreateForm = {
 };
 
 export function OfficeLegalView() {
-  const [contracts, setContracts] = useState<LegalContract[]>([]);
+  const [contractResult, setContractResult] = useState<{ filterKey: string; rows: LegalContract[] } | null>(null);
   const [filterStatus, setFilterStatus] = useState<ContractStatus | "">("");
   const [filterType, setFilterType] = useState<ContractType | "">("");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<CreateForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [listError, setListError] = useState<{ filterKey: string; message: string } | null>(null);
+  const [loadingFilterKey, setLoadingFilterKey] = useState<string | null>(null);
+  const currentFilters = { status: filterStatus, type: filterType };
+  const filtersRef = useRef<ContractFilters>(currentFilters);
+  const activeRequest = useRef<AbortController | null>(null);
+  const requestVersion = useRef(0);
+  const mounted = useRef(false);
+  const currentFilterKey = contractFilterKey(currentFilters);
+  const currentResult = contractResult?.filterKey === currentFilterKey ? contractResult : null;
+  const currentListError = listError?.filterKey === currentFilterKey ? listError.message : null;
+  const isLoading = loadingFilterKey === currentFilterKey;
 
-  async function load() {
-    const params = new URLSearchParams();
-    if (filterStatus) params.set("status", filterStatus);
-    if (filterType) params.set("contract_type", filterType);
+  async function load(filters: ContractFilters = filtersRef.current) {
+    if (!mounted.current) return;
+    const filterKey = contractFilterKey(filters);
+    const version = ++requestVersion.current;
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    setLoadingFilterKey(filterKey);
+    setListError(null);
     try {
-      const res = await fetch(`/api/office/contracts?${params.toString()}`, { cache: "no-store" });
-      if (res.ok) setContracts(await res.json());
+      const res = await fetch(`/api/office/contracts?${filterKey}`, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        if (!controller.signal.aborted && mounted.current && version === requestVersion.current) {
+          setListError({ filterKey, message: `Ошибка ${res.status}` });
+        }
+        return;
+      }
+      const rows = (await res.json()) as LegalContract[];
+      if (!controller.signal.aborted && mounted.current && version === requestVersion.current) {
+        setContractResult({ filterKey, rows });
+      }
     } catch {
-      /* сеть недоступна — показываем пустой список */
+      if (!controller.signal.aborted && mounted.current && version === requestVersion.current) {
+        setListError({ filterKey, message: "Ошибка сети" });
+      }
+    } finally {
+      if (!controller.signal.aborted && mounted.current && version === requestVersion.current) {
+        setLoadingFilterKey(null);
+      }
     }
   }
 
+  function clearListForFilterChange() {
+    requestVersion.current += 1;
+    activeRequest.current?.abort();
+    setLoadingFilterKey(null);
+    setListError(null);
+    setContractResult(null);
+  }
+
   useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      activeRequest.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    void load({ status: filterStatus, type: filterType });
   }, [filterStatus, filterType]);
 
   async function handleCreate(e: React.FormEvent) {
@@ -103,16 +164,16 @@ export function OfficeLegalView() {
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        setError(`Ошибка ${res.status}`);
-      } else {
+        if (mounted.current) setError(`Ошибка ${res.status}`);
+      } else if (mounted.current) {
         setForm(EMPTY_FORM);
         setShowForm(false);
-        await load();
+        await load(filtersRef.current);
       }
     } catch {
-      setError("Ошибка сети");
+      if (mounted.current) setError("Ошибка сети");
     } finally {
-      setSaving(false);
+      if (mounted.current) setSaving(false);
     }
   }
 
@@ -122,7 +183,12 @@ export function OfficeLegalView() {
       <div className="flex flex-wrap items-center gap-3">
         <select
           value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value as ContractStatus | "")}
+          onChange={(e) => {
+            const status = e.target.value as ContractStatus | "";
+            filtersRef.current = { ...filtersRef.current, status };
+            clearListForFilterChange();
+            setFilterStatus(status);
+          }}
           className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
         >
           <option value="">Все статусы</option>
@@ -135,7 +201,12 @@ export function OfficeLegalView() {
 
         <select
           value={filterType}
-          onChange={(e) => setFilterType(e.target.value as ContractType | "")}
+          onChange={(e) => {
+            const type = e.target.value as ContractType | "";
+            filtersRef.current = { ...filtersRef.current, type };
+            clearListForFilterChange();
+            setFilterType(type);
+          }}
           className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
         >
           <option value="">Все типы</option>
@@ -246,6 +317,23 @@ export function OfficeLegalView() {
 
       {/* Таблица договоров */}
       <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-sm">
+        {currentListError && (
+          <div role="alert" className="flex flex-wrap items-center gap-3 border-b border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            <span>{currentListError}</span>
+            {currentResult && <span>Показаны ранее загруженные данные.</span>}
+            <button
+              type="button"
+              onClick={() => void load(filtersRef.current)}
+              disabled={isLoading}
+              className="rounded border border-red-300 px-3 py-1 font-medium hover:bg-red-100 disabled:opacity-60"
+            >
+              Повторить
+            </button>
+          </div>
+        )}
+        {isLoading && currentResult && (
+          <p role="status" className="px-4 py-2 text-xs text-muted">Обновление списка…</p>
+        )}
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-line bg-sunken text-xs text-muted">
@@ -259,14 +347,20 @@ export function OfficeLegalView() {
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
-            {contracts.length === 0 ? (
+            {!currentResult ? (
+              <tr>
+                <td colSpan={7} className="px-4 py-8 text-center text-muted">
+                  {currentListError ? "Не удалось загрузить договоры" : "Загрузка списка…"}
+                </td>
+              </tr>
+            ) : currentResult.rows.length === 0 ? (
               <tr>
                 <td colSpan={7} className="px-4 py-8 text-center text-muted">
                   Договоров нет
                 </td>
               </tr>
             ) : (
-              contracts.map((c) => (
+              currentResult.rows.map((c) => (
                 <tr key={c.id} className="hover:bg-sunken/50">
                   <td className="px-4 py-3 font-mono text-xs text-accent">{c.number}</td>
                   <td className="px-4 py-3 font-medium text-ink">{c.counterparty_name}</td>

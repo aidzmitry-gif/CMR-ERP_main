@@ -11,7 +11,7 @@ import {
 import { AppShell } from "@/components/app-shell";
 import { OwnerAiInsight } from "@/components/owner-ai-insight";
 import { fetchOwnerDashboard } from "@/lib/api";
-import { formatMoney } from "@/lib/format";
+import { formatByn } from "@/lib/format";
 import { currentAccessToken, currentRole } from "@/lib/role-server";
 
 type IconCmp = React.ComponentType<{ size?: number }>;
@@ -44,22 +44,28 @@ export default async function OwnerPage() {
   const role = await currentRole();
   const token = (await currentAccessToken()) ?? undefined;
   const data = await fetchOwnerDashboard(role, token);
-  if (!data) {
-    return (
-      <AppShell crumbs={["CRM", "Панель владельца"]}>
-        <main className="flex-1 p-6 text-muted">Нет данных (бэкенд недоступен).</main>
-      </AppShell>
-    );
-  }
-  const { metrics, stages, kpis } = data;
-  const active = stages.filter((s) => s.id !== "won" && s.id !== "lost");
-  const activeCount = active.reduce((a, s) => a + s.count, 0);
-  const activeSum = active.reduce((a, s) => a + s.sum, 0);
-  const wonCount = stages.find((s) => s.id === "won")?.count ?? 0;
-  const plannedKpis = kpis.filter((k) => k.target > 0 && Number.isFinite(k.percent));
-  const avgKpi = plannedKpis.length
+  const metrics = data.metrics.status === "ok" ? data.metrics.data : undefined;
+  const stages = data.stages.status === "ok" ? data.stages.data : undefined;
+  const kpis = data.kpis.status === "ok" ? data.kpis.data : undefined;
+  const active = stages?.filter((s) => s.id !== "won" && s.id !== "lost");
+  const activeCount = active?.reduce((a, s) => a + s.count, 0);
+  const activeSum = active?.reduce((a, s) => a + s.sum, 0);
+  const wonCount = stages?.find((s) => s.id === "won")?.count ?? (stages ? 0 : undefined);
+  const plannedKpis = kpis?.filter((k) => k.target > 0 && Number.isFinite(k.percent));
+  const unknown = (status: string) => status === "auth" ? "Нет доступа" : "Нет данных";
+  const avgKpi = plannedKpis?.length
     ? `${Math.round(plannedKpis.reduce((a, k) => a + k.percent, 0) / plannedKpis.length)}%`
-    : "Нет данных";
+    : kpis
+      ? "Нет данных"
+      : unknown(data.kpis.status);
+  const sourceMessage = (source: "metrics" | "stages" | "kpis", status: "auth" | "unavailable") => {
+    const messages = {
+      metrics: { auth: "Нет доступа к метрикам владельца.", unavailable: "Метрики владельца временно недоступны." },
+      stages: { auth: "Нет доступа к воронке продаж.", unavailable: "Воронка продаж временно недоступна." },
+      kpis: { auth: "Нет доступа к показателям KPI.", unavailable: "Показатели KPI временно недоступны." },
+    };
+    return messages[source][status];
+  };
 
   return (
     <AppShell crumbs={["CRM", "Панель владельца"]}>
@@ -70,27 +76,31 @@ export default async function OwnerPage() {
         </p>
 
         <div className="mt-5 grid grid-cols-2 gap-4 md:grid-cols-4">
-          <Metric Icon={Workflow} label="Сделок в работе" value={String(activeCount)} tone="bg-accent-soft text-accent-ink" />
-          <Metric Icon={Wallet} label="Сумма в работе" value={formatMoney(activeSum)} tone="bg-emerald-50 text-emerald-600" />
-          <Metric Icon={Trophy} label="Выиграно сделок" value={String(wonCount)} tone="bg-amber-50 text-amber-600" />
+          <Metric Icon={Workflow} label="Сделок в работе" value={activeCount === undefined ? unknown(data.stages.status) : String(activeCount)} tone="bg-accent-soft text-accent-ink" />
+          <Metric Icon={Wallet} label="Сумма в работе" value={activeSum === undefined ? unknown(data.stages.status) : formatByn(activeSum)} tone="bg-emerald-50 text-emerald-600" />
+          <Metric Icon={Trophy} label="Выиграно сделок" value={wonCount === undefined ? unknown(data.stages.status) : String(wonCount)} tone="bg-amber-50 text-amber-600" />
           <Metric Icon={Gauge} label="Среднее выполнение KPI с планом" value={avgKpi} tone="bg-indigo-50 text-indigo-600" />
-          <Metric Icon={CheckSquare} label="Согласований ждут" value={String(metrics.approvals_pending)} tone="bg-amber-50 text-amber-600" />
-          <Metric Icon={Radio} label="Событий в шине" value={String(metrics.events_count)} tone="bg-cyan-50 text-cyan-600" />
-          <Metric Icon={FileText} label="Записей аудита" value={String(metrics.audit_count)} tone="bg-sunken text-muted" />
-          <Metric Icon={Users} label="Контрагентов" value={String(metrics.counterparties)} tone="bg-violet-50 text-violet-600" />
+          <Metric Icon={CheckSquare} label="Согласований ждут" value={metrics ? String(metrics.approvals_pending) : unknown(data.metrics.status)} tone="bg-amber-50 text-amber-600" />
+          <Metric Icon={Radio} label="Событий в шине" value={metrics ? String(metrics.events_count) : unknown(data.metrics.status)} tone="bg-cyan-50 text-cyan-600" />
+          <Metric Icon={FileText} label="Записей аудита" value={metrics ? String(metrics.audit_count) : unknown(data.metrics.status)} tone="bg-sunken text-muted" />
+          <Metric Icon={Users} label="Контрагентов" value={metrics ? String(metrics.counterparties) : unknown(data.metrics.status)} tone="bg-violet-50 text-violet-600" />
         </div>
+        {data.metrics.status !== "ok" && <p role="status" className="mt-3 text-sm text-muted">{sourceMessage("metrics", data.metrics.status)}</p>}
+        {data.kpis.status !== "ok" && <p role="status" className="mt-1 text-sm text-muted">{sourceMessage("kpis", data.kpis.status)}</p>}
 
         <OwnerAiInsight />
 
         <section className="mt-6 rounded-2xl bg-surface p-5 shadow-card">
           <h2 className="font-semibold text-ink">Воронка по стадиям</h2>
           <div className="mt-3 space-y-2">
-            {stages.map((s) => (
+            {data.stages.status !== "ok" && <p role="status" className="text-sm text-muted">{sourceMessage("stages", data.stages.status)}</p>}
+            {data.stages.status === "ok" && stages?.length === 0 && <p className="text-sm text-muted">Стадий пока нет.</p>}
+            {stages?.map((s) => (
               <div key={s.id} className="flex items-center gap-3">
                 <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: s.color }} />
                 <span className="w-44 shrink-0 text-sm text-ink">{s.title}</span>
                 <span className="text-sm text-muted">
-                  {s.count} · {formatMoney(s.sum)}
+                  {s.count} · {formatByn(s.sum)}
                 </span>
               </div>
             ))}
@@ -101,7 +111,7 @@ export default async function OwnerPage() {
           <div className="rounded-2xl bg-surface p-5 shadow-card">
             <h2 className="font-semibold text-ink">Подключённые модули</h2>
             <div className="mt-3 flex flex-wrap gap-2">
-              {metrics.modules.map((m) => (
+              {metrics?.modules.map((m) => (
                 <span key={m} className="rounded-lg bg-accent-soft px-3 py-1 text-sm font-medium text-accent-ink">
                   {m}
                 </span>
@@ -111,8 +121,8 @@ export default async function OwnerPage() {
           <div className="rounded-2xl bg-surface p-5 shadow-card">
             <h2 className="font-semibold text-ink">Виджеты модулей</h2>
             <div className="mt-3 flex flex-wrap gap-2">
-              {metrics.widgets.length === 0 && <span className="text-sm text-muted">Нет виджетов</span>}
-              {metrics.widgets.map((w) => (
+              {metrics?.widgets.length === 0 && <span className="text-sm text-muted">Нет виджетов</span>}
+              {metrics?.widgets.map((w) => (
                 <span key={w.key} className="rounded-lg bg-sunken px-3 py-1 text-sm text-muted">
                   {w.title}
                 </span>

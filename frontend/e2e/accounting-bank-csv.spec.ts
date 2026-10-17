@@ -9,6 +9,7 @@ test("CSV проверяется и сохраняется без повторн
   const org = await created.json();
   await page.goto("/erp/accounting");
   await page.getByLabel("Организация", { exact: true }).selectOption(String(org.id));
+  await page.getByRole("button", { name: "Банк и платежи", exact: true }).click();
   await page.getByRole("button", { name: "Импорт выписки", exact: true }).click();
   await page.getByText("Загрузить выписку CSV", { exact: true }).click();
   await page.getByLabel("Банк для CSV", { exact: true }).fill("Synthetic CSV bank");

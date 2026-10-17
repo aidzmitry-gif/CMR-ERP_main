@@ -1,10 +1,12 @@
 "use client";
 
 import { Bell, HelpCircle } from "lucide-react";
+import Link from "next/link";
 import { ChatsPanel } from "@/components/chats-panel";
 import { useEffect, useState } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { fetchEvents, type SystemEvent } from "@/lib/api";
+import { userInitials } from "@/lib/user-initials";
 
 const EVENT_LABEL: Record<string, string> = {
   "sales.deal.created": "Создана сделка",
@@ -61,10 +63,12 @@ function IconButton({
 export function Topbar({
   crumbs,
   headerActions,
+  userName,
 }: {
   crumbs: string[];
   /** Доп. контент правее хлебных крошек, в одну строку (напр. переключатель ЮЛ, «Стадии»). */
   headerActions?: React.ReactNode;
+  userName?: string;
 }) {
   const [open, setOpen] = useState<null | "bell" | "help">(null);
   const [events, setEvents] = useState<SystemEvent[]>([]);
@@ -105,9 +109,16 @@ export function Topbar({
         >
           <HelpCircle size={19} />
         </IconButton>
-        <span className="ml-1 flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-slate-500 to-slate-700 text-xs font-semibold text-white">
-          ИП
-        </span>
+        {userName?.trim() && (
+          <Link
+            href="/profile"
+            title={`${userName} — Моя карточка`}
+            aria-label={`${userName} — Моя карточка`}
+            className="ml-1 flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-slate-500 to-slate-700 text-xs font-semibold text-white"
+          >
+            {userInitials(userName)}
+          </Link>
+        )}
       </div>
 
       {open && (

@@ -13,6 +13,7 @@ from datetime import date
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from core.domain.models import Counterparty, CounterpartyBranch, Sku
 from core.domain.reference import (
@@ -92,6 +93,9 @@ async def query(
     group_by: str | None = None,
     resolve: bool = False,
     limit: int = 10,
+    search: str | None = None,
+    category_subtree_id: int | None = None,
+    offset: int | None = None,
 ) -> dict:
     """Структурный lookup по справочнику ``ref`` — возвращает точное значение(я).
 
@@ -100,7 +104,9 @@ async def query(
       ``as_of`` → версия, действовавшая на дату (или текущая без ``as_of``), с периодом
       ``start_date/end_date``; для ``core.sku_history`` ``key`` — код товара (sku_code);
     - ``core.counterparties``: ``key``=УНП или ``name`` → эталоны (active, не слитые);
-    - ``core.skus``: ``key``=code → позиция; ``category_id`` → товары группы (членство); иначе список;
+    - ``core.skus``: ``key``=code → позиция; ``category_id`` → товары группы (точное членство);
+      ``category_subtree_id`` + optional ``search`` + ``offset`` → одна страница активного каталога;
+      без новых параметров сохраняется legacy-ответ ``result`` без метаданных страницы;
     - ``core.nomenclature_groups``: ``key``=code → группа; без key → активные группы (дерево).
 
     Расширения (только чтение, whitelist — без сырого SQL от AI):
@@ -126,7 +132,9 @@ async def query(
     if ref == "core.counterparties":
         return await _query_counterparties(session, key, name, limit)
     if ref == "core.skus":
-        return await _query_skus(session, key, limit, category_id)
+        return await _query_skus(
+            session, key, limit, category_id, search, category_subtree_id, offset
+        )
     if ref == "core.nomenclature_groups":
         return await _query_categories(session, key, limit)
     raise ReferenceQueryError(f"неизвестный справочник: {ref}")
@@ -217,15 +225,64 @@ async def _query_counterparties(
 
 
 async def _query_skus(
-    session: AsyncSession, key: str | None, limit: int, category_id: int | None = None
+    session: AsyncSession,
+    key: str | None,
+    limit: int,
+    category_id: int | None = None,
+    search: str | None = None,
+    category_subtree_id: int | None = None,
+    offset: int | None = None,
 ) -> dict:
     # только активные: архивный SKU (M4) не должен подставляться AI в спецификацию/сделку
-    stmt = select(Sku).where(Sku.is_active.is_(True))
+    filters = [Sku.is_active.is_(True)]
     if key:
-        stmt = stmt.where(Sku.code == key)
+        filters.append(Sku.code == key)
     if category_id is not None:  # товары группы (членство по category_id) — вид «что в категории»
-        stmt = stmt.where(Sku.category_id == category_id)
-    rows = (await session.execute(stmt.order_by(Sku.code).limit(limit))).scalars().all()
+        filters.append(Sku.category_id == category_id)
+    if category_subtree_id is not None:
+        if category_id is not None:
+            raise ReferenceQueryError("укажите category_id или category_subtree_id, не оба")
+        root = select(NomenclatureCategory.id.label("id")).where(
+            NomenclatureCategory.id == category_subtree_id,
+            NomenclatureCategory.is_active.is_(True),
+        ).cte("active_sku_category_scope", recursive=True)
+        child = aliased(NomenclatureCategory)
+        # UNION (а не UNION ALL) служит visited-набором по id и завершает обход при цикле parent_id.
+        root = root.union(
+            select(child.id).join(root, child.parent_id == root.c.id).where(
+                child.is_active.is_(True)
+            )
+        )
+        if await session.scalar(select(root.c.id).limit(1)) is None:
+            raise ReferenceQueryError("активная группа номенклатуры не найдена")
+        filters.append(Sku.category_id.in_(select(root.c.id)))
+    if search:
+        # Экранируем SQL LIKE wildcard-символы, чтобы поиск воспринимал их буквально.
+        tokens = search.lower().split()
+        for token in tokens:
+            escaped = token.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+            pattern = f"%{escaped}%"
+            filters.append(or_(Sku.code.ilike(pattern, escape="!"), Sku.title.ilike(pattern, escape="!")))
+
+    stmt = select(Sku).where(*filters).order_by(Sku.code)
+    if offset is not None:
+        total = await session.scalar(select(func.count(Sku.id)).where(*filters))
+        rows = (await session.execute(stmt.offset(offset).limit(limit))).scalars().all()
+        return {
+            "ref": "core.skus",
+            "result": [
+                {
+                    "code": r.code, "title": r.title, "unit": r.unit, "category_id": r.category_id,
+                    "vat_code": r.vat_code, "volume_m3": r.volume_m3,
+                }
+                for r in rows
+            ],
+            "total": int(total or 0),
+            "offset": offset,
+            "limit": limit,
+        }
+
+    rows = (await session.execute(stmt.limit(limit))).scalars().all()
     return {
         "ref": "core.skus",
         "result": [

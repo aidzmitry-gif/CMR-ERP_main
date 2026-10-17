@@ -430,6 +430,7 @@ async def test_calls_stream_uses_authenticated_employee_and_rejects_owner_overri
         owner=None,
         user=CurrentUser(username="call-stream-owner", roles=["sales"]),
         access=CrmAccess("own", employee_id),
+        session=session,
     )
     stream = stream_response.body_iterator
     try:
@@ -444,6 +445,46 @@ async def test_calls_stream_uses_authenticated_employee_and_rejects_owner_overri
     finally:
         await stream.aclose()
     assert not has_subscriber(employee_id)
+
+
+@pytest.mark.asyncio
+async def test_calls_stream_releases_read_transaction_before_subscribing(session, monkeypatch):
+    from sqlalchemy import select
+
+    from core.services.auth import CurrentUser
+    from core.services.crm_access import CrmAccess
+    from modules.sales import calls
+    from modules.sales.routes import calls_stream
+
+    employee_id = 615
+    await session.execute(select(User.id).limit(1))
+    assert session.in_transaction()
+    original_subscribe = calls.subscribe
+
+    def subscribe_without_transaction(subscriber_id):
+        assert not session.in_transaction()
+        return original_subscribe(subscriber_id)
+
+    monkeypatch.setattr(calls, "subscribe", subscribe_without_transaction)
+    response = await calls_stream(
+        owner=None,
+        user=CurrentUser(username="stream-transaction-owner", roles=["sales"]),
+        access=CrmAccess("own", employee_id),
+        session=session,
+    )
+    stream = response.body_iterator
+    try:
+        assert await stream.__anext__() == ": connected\n\n"
+        assert calls.has_subscriber(employee_id)
+        call = CallLog(
+            id=3002, call_id="STREAM-TRANSACTION", direction="in", owner="Synthetic Seller",
+            owner_id=employee_id, status="ringing",
+        )
+        assert calls._push_card(call)
+        assert "STREAM-TRANSACTION" in await asyncio.wait_for(stream.__anext__(), timeout=1)
+    finally:
+        await stream.aclose()
+    assert not calls.has_subscriber(employee_id)
 
 
 @pytest.mark.parametrize("roles", [["sales"], ["admin"]])

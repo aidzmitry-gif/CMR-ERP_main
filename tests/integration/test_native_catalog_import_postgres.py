@@ -3,28 +3,33 @@
 Uses the established G03 local role/database guard. The server controller must
 also prove container ownership, pinned images, no bindings and network=none.
 """
-from concurrent.futures import ThreadPoolExecutor
-import json
-import os
 import gzip
 import hashlib
-from pathlib import Path
+import json
+import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from uuid import UUID, uuid4
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from sqlalchemy import create_engine, select, func, text
+import crm_rel_001_migration_proof as migration
+from psycopg import sql
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
-from psycopg import sql
 
-import crm_rel_001_migration_proof as migration
 from core.domain.models import CatalogSourceIdentity, CatalogSourceRevision, Sku
 from core.domain.reference import NomenclatureCategory
 from core.services.native_catalog_import import (
-    COUNTERPARTIES, NOMENCLATURE, CatalogImportConflict, SourceRow, digest, import_catalog,
+    COUNTERPARTIES,
+    NOMENCLATURE,
+    CatalogImportConflict,
+    SourceRow,
+    digest,
+    import_catalog,
 )
 
 HEAD = "crm_rel_001_native_catalog_01"
@@ -115,8 +120,10 @@ def real_source_enrichment(session, identities):
         target = session.get(Sku, identity.sku_id) if identity.kind == "sku" else session.get(NomenclatureCategory, identity.group_id)
         assert target.attributes["source_catalog"]["observed_shape"] == "enriched"
         assert target.attributes["source_catalog"]["group_review"] == "PENDING"
-        if identity.kind == "sku": assert not target.is_active and target.unit == "" and "UNKNOWN_UNIT" in identity.holds
-        if "SOURCE_TOMBSTONE" in identity.holds: assert not target.is_active
+        if identity.kind == "sku":
+            assert not target.is_active and target.unit == "" and "UNKNOWN_UNIT" in identity.holds
+        if "SOURCE_TOMBSTONE" in identity.holds:
+            assert not target.is_active
     revisions = list(session.scalars(select(CatalogSourceRevision).join(
         CatalogSourceIdentity, CatalogSourceIdentity.id == CatalogSourceRevision.identity_id).where(
             CatalogSourceIdentity.namespace == "1c:ka_copy")))
@@ -227,7 +234,8 @@ def main():
 
         with Session(engine) as session:
             original = row(10, folder=True)
-            load(session, [original], namespace="synthetic:correction"); session.commit()
+            load(session, [original], namespace="synthetic:correction")
+            session.commit()
             key = (NOMENCLATURE, json.loads(original.source_text)["Ref_Key"])
             changed = row(10, folder=True, version="v2", DeletionMark=True)
             load(session, [changed], namespace="synthetic:correction", expected_previous={key: digest(original.source_text)})
@@ -254,7 +262,8 @@ def main():
         full = [row(20, folder=True, AdditionalSourceField=True), row(21, parent=20, AdditionalSourceField=True)]
         previous = {(v.entity, v.parse()[0]): digest(v.source_text) for v in projections}
         with Session(engine) as session:
-            load(session, projections, namespace="synthetic:enrichment"); session.commit()
+            load(session, projections, namespace="synthetic:enrichment")
+            session.commit()
 
         def concurrent_enrich():
             with Session(engine) as session:

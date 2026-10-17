@@ -11,10 +11,10 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from modules.procurement.models import SupplierClaim
 from core.runtime.app import create_app
 from core.runtime.deps import get_session
 from core.services.eventbus import EventContext
+from modules.procurement.models import SupplierClaim
 
 pytestmark = pytest.mark.asyncio
 

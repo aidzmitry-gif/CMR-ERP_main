@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { OfficeClaimsView } from "@/components/erp/office-claims-view";
@@ -32,13 +32,30 @@ function res(ok: boolean, body: unknown, status = ok ? 200 : 500) {
 }
 
 // fetch, различающий GET-загрузку списка и POST-создание. По умолчанию POST успешен.
-function installFetch(getBody: Claim[] = [], postOk = true) {
-  const fetchMock = vi.fn(async (_url: string, opts?: RequestInit) => {
-    if (opts?.method === "POST") return res(postOk, {}, postOk ? 201 : 500);
-    return res(true, getBody);
+function installFetch(
+  getBody: Claim[] = [],
+  postOk = true,
+  getHandler?: (url: string, opts?: RequestInit) => Promise<Response>,
+  postHandler?: () => Promise<Response>,
+) {
+  const fetchMock = vi.fn(async (url: string, opts?: RequestInit) => {
+    if (opts?.method === "POST") {
+      return postHandler ? postHandler() : res(postOk, {}, postOk ? 201 : 500);
+    }
+    return getHandler ? getHandler(String(url), opts) : res(true, getBody);
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 // URL последнего GET-запроса (пропуская POST-и) — для проверки строки фильтров.
@@ -158,5 +175,129 @@ describe("OfficeClaimsView", () => {
     expect(await screen.findByText("Ошибка 500")).toBeInTheDocument();
     // форма НЕ закрылась — пользователь видит, что сохранить не удалось
     expect(screen.getByText("Новая претензия")).toBeInTheDocument();
+  });
+
+  it("GET 503 показывает отдельную ошибку списка, а не успешное пустое состояние", async () => {
+    installFetch([], true, async () => ({ ok: false, status: 503 } as Response));
+    render(<OfficeClaimsView />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ошибка 503");
+    expect(screen.getByText("Не удалось загрузить претензии")).toBeInTheDocument();
+    expect(screen.queryByText("Претензий нет")).not.toBeInTheDocument();
+    expect(screen.getByText("Ошибка 503").closest("form")).toBeNull();
+  });
+
+  it("сетевая ошибка списка повторяется с текущими фильтрами и может завершиться успехом", async () => {
+    let filteredCalls = 0;
+    const fetchMock = installFetch([], true, async (url) => {
+      if (!url.includes("claim_type=defect")) return res(true, []);
+      filteredCalls += 1;
+      if (filteredCalls === 1) throw new TypeError("Failed to fetch");
+      return res(true, [{ ...SAMPLE, number: "ПРЕТ-RETRY" }]);
+    });
+    render(<OfficeClaimsView />);
+    await screen.findByText("Претензий нет");
+    fireEvent.change(screen.getAllByRole("combobox")[1], { target: { value: "defect" } });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ошибка сети");
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    expect(await screen.findByText("ПРЕТ-RETRY")).toBeInTheDocument();
+    expect(lastGetUrl(fetchMock)).toContain("claim_type=defect");
+  });
+
+  it("сбой обновления оставляет претензии тех же фильтров и явно помечает данные устаревшими", async () => {
+    let calls = 0;
+    installFetch([], true, async () => {
+      calls += 1;
+      return calls === 1 ? res(true, [SAMPLE]) : res(false, {}, 503);
+    });
+    render(<OfficeClaimsView />);
+    expect(await screen.findByText("ПРЕТ-2026-0001")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Претензия" }));
+    const form = screen.getByText("Новая претензия").closest("form") as HTMLElement;
+    fireEvent.change(within(form).getByPlaceholderText("ООО Поставщик"), { target: { value: "ООО Обновление" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Создать" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Показаны ранее загруженные данные");
+    expect(screen.getByText("ПРЕТ-2026-0001")).toBeInTheDocument();
+    expect(screen.queryByText("Претензий нет")).not.toBeInTheDocument();
+  });
+
+  it("при смене фильтра очищает предыдущие претензии, пока загружается новый список", async () => {
+    const pending = deferred<Response>();
+    let calls = 0;
+    installFetch([], true, () => (++calls === 1 ? res(true, [SAMPLE]) : pending.promise));
+    render(<OfficeClaimsView />);
+    expect(await screen.findByText("ПРЕТ-2026-0001")).toBeInTheDocument();
+
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "resolved" } });
+    expect(screen.queryByText("ПРЕТ-2026-0001")).not.toBeInTheDocument();
+    expect(screen.getByText("Загрузка списка…")).toBeInTheDocument();
+    expect(screen.queryByText("Претензий нет")).not.toBeInTheDocument();
+  });
+
+  it("поздний ответ предыдущего фильтра не перезаписывает текущий, даже если mock игнорирует abort", async () => {
+    const first = deferred<Response>();
+    const second = deferred<Response>();
+    let calls = 0;
+    const fetchMock = installFetch([], true, () => (++calls === 1 ? first.promise : second.promise));
+    render(<OfficeClaimsView />);
+    await waitFor(() => expect(fetchMock.mock.calls).toHaveLength(1));
+    const firstSignal = fetchMock.mock.calls[0][1]?.signal;
+
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "resolved" } });
+    await waitFor(() => expect(fetchMock.mock.calls).toHaveLength(2));
+    expect(firstSignal?.aborted).toBe(true);
+    second.resolve(res(true, [{ ...SAMPLE, number: "ПРЕТ-CURRENT" }]));
+    expect(await screen.findByText("ПРЕТ-CURRENT")).toBeInTheDocument();
+
+    await act(async () => {
+      first.resolve(res(true, [{ ...SAMPLE, number: "ПРЕТ-OLD" }]));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.getByText("ПРЕТ-CURRENT")).toBeInTheDocument();
+    expect(screen.queryByText("ПРЕТ-OLD")).not.toBeInTheDocument();
+  });
+
+  it("размонтирование отменяет GET и поздний ответ не создаёт ошибку или новый запрос", async () => {
+    const pending = deferred<Response>();
+    const fetchMock = installFetch([], true, () => pending.promise);
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => undefined);
+    const view = render(<OfficeClaimsView />);
+    await waitFor(() => expect(fetchMock.mock.calls).toHaveLength(1));
+    const signal = fetchMock.mock.calls[0][1]?.signal;
+
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      pending.resolve(res(false, {}, 503));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(view.container.querySelector('[role="alert"]')).toBeNull();
+    expect(alertSpy).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls).toHaveLength(1);
+  });
+
+  it("успех POST после смены фильтра перезагружает текущий фильтр, а не захваченный", async () => {
+    const pendingPost = deferred<Response>();
+    const fetchMock = installFetch([], true, async () => res(true, []), () => pendingPost.promise);
+    render(<OfficeClaimsView />);
+    await screen.findByText("Претензий нет");
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "sent" } });
+    await waitFor(() => expect(lastGetUrl(fetchMock)).toContain("status=sent"));
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Претензия" }));
+    const form = screen.getByText("Новая претензия").closest("form") as HTMLElement;
+    fireEvent.change(within(form).getByPlaceholderText("ООО Поставщик"), { target: { value: "ООО Тест" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Создать" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, opts]) => opts?.method === "POST")).toBe(true));
+
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "resolved" } });
+    await waitFor(() => expect(lastGetUrl(fetchMock)).toContain("status=resolved"));
+    const beforePostComplete = fetchMock.mock.calls.length;
+    pendingPost.resolve(res(true, {}, 201));
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBe(beforePostComplete + 1));
+    expect(lastGetUrl(fetchMock)).toContain("status=resolved");
+    expect(lastGetUrl(fetchMock)).not.toContain("status=sent");
   });
 });

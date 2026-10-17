@@ -7,6 +7,7 @@ import {
   buildCategoryTree,
   bulkUpsertRef,
   changedFields,
+  CATALOG_ROW_LIMIT,
   COUNTERPARTY_SEARCH_LIMIT,
   createCounterparty,
   createNomenclatureGroup,
@@ -28,6 +29,7 @@ import {
   fetchRefRowsByKey,
   fetchSimpleRef,
   fetchSkuCard,
+  fetchSkuCatalogPage,
   fetchSkuLandedInputs,
   fetchSkusByCategory,
   fetchSurvivorshipRules,
@@ -115,6 +117,17 @@ function mockFetch(impl: (...args: unknown[]) => Promise<unknown>) {
 }
 
 const BASE = "http://127.0.0.1:8000";
+const serverAuthHeaders = {
+  Authorization: "Bearer synthetic-g09c-token",
+  "X-User-Roles": "director",
+};
+
+function expectServerAuthFetch(url: string) {
+  expect(global.fetch).toHaveBeenCalledWith(
+    url,
+    expect.objectContaining({ cache: "no-store", headers: serverAuthHeaders }),
+  );
+}
 
 function version(over: Partial<SkuVersionRow> = {}): SkuVersionRow {
   return {
@@ -331,6 +344,12 @@ describe("fetchAiCatalog", () => {
     expect(f).toHaveBeenCalledWith(`${BASE}/system/references/ai-catalog`, expect.anything());
   });
 
+  it("[HELPER-AI] forwards server auth headers", async () => {
+    mockFetch(async () => ({ ok: true, json: async () => ({ tool: {}, references: [] }) }));
+    await fetchAiCatalog("director", serverAuthHeaders);
+    expectServerAuthFetch(`${BASE}/system/references/ai-catalog`);
+  });
+
   it("не-200 → null", async () => {
     mockFetch(async () => ({ ok: false }));
     expect(await fetchAiCatalog()).toBeNull();
@@ -489,6 +508,34 @@ describe("fetchAllSkus", () => {
     expect(res).toEqual(rows);
   });
 
+  it("[AUTH-SKUS] forwards server auth headers and keeps the strict bounded query", async () => {
+    const authHeaders = { Authorization: "Bearer synthetic-test", "X-User-Roles": "director" };
+    const f = vi.fn(async () => ({ ok: true, json: async () => ({ result: [] }) }));
+    mockFetch(f);
+    await fetchAllSkus("director", CATALOG_ROW_LIMIT, true, authHeaders);
+    expect(f).toHaveBeenCalledWith(
+      `${BASE}/system/references/query`,
+      expect.objectContaining({
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify({ ref: "core.skus", limit: CATALOG_ROW_LIMIT }),
+      }),
+    );
+  });
+
+  it("[STRICT-MALFORMED] rejects a malformed 200 envelope and forwards auth headers", async () => {
+    const authHeaders = { Authorization: "Bearer synthetic-test", "X-User-Roles": "director" };
+    const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ result: "not-an-array" }) }));
+    mockFetch(f);
+    await expect(fetchAllSkus("director", CATALOG_ROW_LIMIT, true, authHeaders))
+      .rejects.toThrow("Некорректный ответ каталога номенклатуры.");
+    expect(f).toHaveBeenCalledWith(
+      `${BASE}/system/references/query`,
+      expect.objectContaining({ headers: { "Content-Type": "application/json", ...authHeaders } }),
+    );
+  });
+
   it("свой limit прокидывается в тело", async () => {
     const f = vi.fn(async () => ({ ok: true, json: async () => ({ result: [] }) }));
     mockFetch(f);
@@ -509,6 +556,79 @@ describe("fetchAllSkus", () => {
       throw new Error("x");
     });
     expect(await fetchAllSkus()).toEqual([]);
+  });
+});
+
+describe("fetchSkuCatalogPage", () => {
+  it("[HELPER-SKU-PAGE] forwards current filters and validates a bounded page", async () => {
+    const page = {
+      ref: "core.skus",
+      result: [{ code: "A-1", title: "Реле 12В", unit: "шт", category_id: 3, vat_code: "20" }],
+      total: 251,
+      offset: 250,
+      limit: 250,
+    };
+    const f = vi.fn(async () => ({ ok: true, json: async () => page }));
+    mockFetch(f);
+    const input = { search: "Реле 12В", categorySubtreeId: 3, offset: 250 };
+    await expect(fetchSkuCatalogPage(input, "director", serverAuthHeaders)).resolves.toEqual({
+      rows: page.result,
+      total: 251,
+      offset: 250,
+      limit: 250,
+    });
+    expect(f).toHaveBeenCalledWith(`${BASE}/system/references/query`, expect.objectContaining({
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json", ...serverAuthHeaders },
+      body: JSON.stringify({
+        ref: "core.skus", limit: CATALOG_ROW_LIMIT, offset: 250, search: "Реле 12В", category_subtree_id: 3,
+      }),
+    }));
+  });
+
+  it("[HELPER-SKU-UNKNOWN-EMPTY] keeps valid empty distinct from HTTP, network, and malformed results", async () => {
+    mockFetch(async () => ({
+      ok: true,
+      json: async () => ({ ref: "core.skus", result: [], total: 0, offset: 0, limit: 250 }),
+    }));
+    await expect(fetchSkuCatalogPage({ search: "", categorySubtreeId: null, offset: 0 }))
+      .resolves.toMatchObject({ rows: [], total: 0 });
+
+    mockFetch(async () => ({
+      ok: true,
+      json: async () => ({ ref: "core.skus", result: [], total: 251, offset: 500, limit: 250 }),
+    }));
+    await expect(fetchSkuCatalogPage({ search: "", categorySubtreeId: null, offset: 500 }))
+      .resolves.toMatchObject({ rows: [], total: 251, offset: 500 });
+
+    mockFetch(async () => ({ ok: false, status: 503 }));
+    await expect(fetchSkuCatalogPage({ search: "", categorySubtreeId: null, offset: 0 })).rejects.toThrow("503");
+
+    mockFetch(async () => { throw new TypeError("offline"); });
+    await expect(fetchSkuCatalogPage({ search: "", categorySubtreeId: null, offset: 0 })).rejects.toThrow("offline");
+
+    mockFetch(async () => ({
+      ok: true,
+      json: async () => ({ ref: "core.skus", result: [], total: "0", offset: 0, limit: 250 }),
+    }));
+    await expect(fetchSkuCatalogPage({ search: "", categorySubtreeId: null, offset: 0 }))
+      .rejects.toThrow("Некорректный ответ");
+
+    mockFetch(async () => ({
+      ok: true,
+      json: async () => ({ ref: "core.skus", result: [], total: 1, offset: 0, limit: 250 }),
+    }));
+    await expect(fetchSkuCatalogPage({ search: "", categorySubtreeId: null, offset: 0 }))
+      .rejects.toThrow("Некорректный ответ");
+
+    const duplicate = { code: "DUP", title: "Дубликат", unit: null, category_id: null, vat_code: null };
+    mockFetch(async () => ({
+      ok: true,
+      json: async () => ({ ref: "core.skus", result: [duplicate, duplicate], total: 2, offset: 0, limit: 250 }),
+    }));
+    await expect(fetchSkuCatalogPage({ search: "", categorySubtreeId: null, offset: 0 }))
+      .rejects.toThrow("Некорректный ответ");
   });
 });
 
@@ -539,6 +659,12 @@ describe("fetchPendingReferenceApprovals", () => {
   it("не-200 → []", async () => {
     mockFetch(async () => ({ ok: false }));
     expect(await fetchPendingReferenceApprovals()).toEqual([]);
+  });
+
+  it("[HELPER-APPROVALS] forwards server auth headers", async () => {
+    mockFetch(async () => ({ ok: true, json: async () => [] }));
+    await fetchPendingReferenceApprovals("director", serverAuthHeaders);
+    expectServerAuthFetch(`${BASE}/approvals?status=pending`);
   });
 });
 
@@ -616,6 +742,12 @@ describe("fetchQualitySummary", () => {
   it("не-200 → []", async () => {
     mockFetch(async () => ({ ok: false }));
     expect(await fetchQualitySummary()).toEqual([]);
+  });
+
+  it("[HELPER-QUALITY] forwards server auth headers", async () => {
+    mockFetch(async () => ({ ok: true, json: async () => ({ references: [] }) }));
+    await fetchQualitySummary("director", serverAuthHeaders);
+    expectServerAuthFetch(`${BASE}/system/references/quality`);
   });
 });
 
@@ -782,6 +914,12 @@ describe("fetchCurrencyRates / fetchVatRates", () => {
     expect(await fetchCurrencyRates()).toEqual([]);
   });
 
+  it("[HELPER-RATES] forwards server auth headers and keeps the currency filter", async () => {
+    mockFetch(async () => ({ ok: true, json: async () => [] }));
+    await fetchCurrencyRates("USD/BYN", "director", serverAuthHeaders);
+    expectServerAuthFetch(`${BASE}/system/refs/currency-rates?key=${encodeURIComponent("USD/BYN")}`);
+  });
+
   it("fetchVatRates с key — ?key=..., URL vat-rates", async () => {
     const rows = [{ id: 1, code: "20", title: "НДС20", rate: 20, start_date: "2026-01-01", end_date: null }];
     const f = vi.fn(async () => ({ ok: true, json: async () => rows }));
@@ -794,9 +932,41 @@ describe("fetchCurrencyRates / fetchVatRates", () => {
     expect(res).toEqual(rows);
   });
 
+  it("[AUTH-VAT] forwards server auth headers and preserves the key filter", async () => {
+    const authHeaders = { Authorization: "Bearer synthetic-test", "X-User-Roles": "rop" };
+    const f = vi.fn(async () => ({ ok: true, json: async () => [] }));
+    mockFetch(f);
+    await fetchVatRates("20", "rop", authHeaders, true);
+    expect(f).toHaveBeenCalledWith(
+      `${BASE}/system/refs/vat-rates?key=20`,
+      expect.objectContaining({ cache: "no-store", headers: authHeaders }),
+    );
+  });
+
+  it("[HELPER-VAT-DECIMAL-WIRE] normalizes valid wire decimals only in strict mode", async () => {
+    const base = { id: 1, code: "20", title: "НДС20", start_date: "2026-01-01", end_date: null };
+    const wireRows = [{ ...base, rate: "20.00" }, { ...base, id: 2, code: "5", rate: 5 }];
+    mockFetch(async () => ({ ok: true, json: async () => wireRows }));
+    await expect(fetchVatRates(undefined, undefined, undefined, true)).resolves.toEqual([
+      { ...base, rate: 20 }, { ...base, id: 2, code: "5", rate: 5 },
+    ]);
+
+    mockFetch(async () => ({ ok: true, json: async () => [{ ...base, rate: "20.00" }] }));
+    await expect(fetchVatRates()).resolves.toEqual([{ ...base, rate: "20.00" }]);
+
+    for (const rate of ["", " ", null, "not-a-rate", "NaN", "Infinity", "-Infinity"]) {
+      mockFetch(async () => ({ ok: true, json: async () => [{ ...base, rate }] }));
+      await expect(fetchVatRates(undefined, undefined, undefined, true))
+        .rejects.toThrow("Некорректный ответ ставок НДС.");
+    }
+  });
+
   it("fetchVatRates не-200 → []", async () => {
     mockFetch(async () => ({ ok: false }));
     expect(await fetchVatRates()).toEqual([]);
+    await expect(fetchVatRates(undefined, undefined, undefined, true)).rejects.toThrow();
+    mockFetch(async () => ({ ok: true, json: async () => ({ not: "an array" }) }));
+    await expect(fetchVatRates(undefined, undefined, undefined, true)).rejects.toThrow("Некорректный");
   });
 });
 
@@ -859,6 +1029,12 @@ describe("fetchDuplicateClusters / mergeCounterparties / unmergeCounterparty", (
   it("fetchDuplicateClusters не-200 → []", async () => {
     mockFetch(async () => ({ ok: false }));
     expect(await fetchDuplicateClusters()).toEqual([]);
+  });
+
+  it("[HELPER-DUPLICATES] forwards server auth headers", async () => {
+    mockFetch(async () => ({ ok: true, json: async () => ({ clusters: [] }) }));
+    await fetchDuplicateClusters("director", serverAuthHeaders);
+    expectServerAuthFetch(`${BASE}/system/mdm/duplicates`);
   });
 
   it("mergeCounterparties → POST /api/system/mdm/merge с survivor_id/duplicate_id", async () => {
@@ -1018,6 +1194,12 @@ describe("fetchSyncJournal", () => {
     mockFetch(async () => ({ ok: false }));
     expect(await fetchSyncJournal()).toEqual([]);
   });
+
+  it("[HELPER-SYNC] forwards server auth headers", async () => {
+    mockFetch(async () => ({ ok: true, json: async () => ({ entries: [] }) }));
+    await fetchSyncJournal("director", serverAuthHeaders);
+    expectServerAuthFetch(`${BASE}/integrations/1c/sync-journal`);
+  });
 });
 
 describe("fetchSkuCard", () => {
@@ -1033,6 +1215,12 @@ describe("fetchSkuCard", () => {
   it("не-200 → null", async () => {
     mockFetch(async () => ({ ok: false }));
     expect(await fetchSkuCard("A1")).toBeNull();
+  });
+
+  it("[HELPER-CARD] forwards server auth headers and keeps encoded SKU code", async () => {
+    mockFetch(async () => ({ ok: true, json: async () => ({ code: "A 1/x" }) }));
+    await fetchSkuCard("A 1/x", "director", serverAuthHeaders);
+    expectServerAuthFetch(`${BASE}/system/sku/${encodeURIComponent("A 1/x")}`);
   });
 });
 
@@ -1099,6 +1287,12 @@ describe("fetchSurvivorshipRules", () => {
     mockFetch(async () => ({ ok: false }));
     expect(await fetchSurvivorshipRules()).toEqual([]);
   });
+
+  it("[HELPER-RULES] forwards server auth headers and keeps the entity filter", async () => {
+    mockFetch(async () => ({ ok: true, json: async () => ({ rules: [] }) }));
+    await fetchSurvivorshipRules("sku", "director", serverAuthHeaders);
+    expectServerAuthFetch(`${BASE}/system/mdm/rules?entity_type=sku`);
+  });
 });
 
 describe("fetchNomenclatureGroups", () => {
@@ -1109,6 +1303,8 @@ describe("fetchNomenclatureGroups", () => {
     const res = await fetchNomenclatureGroups();
     expect(f).toHaveBeenCalledWith(`${BASE}/system/refs/nomenclature-groups`, expect.objectContaining({ headers: undefined }));
     expect(res).toEqual(groups);
+    await expect(fetchNomenclatureGroups({ strict: true })).resolves.toEqual(groups);
+    expect(f).toHaveBeenCalledTimes(2);
   });
 
   it("archived=true — ?archived=true", async () => {
@@ -1121,9 +1317,23 @@ describe("fetchNomenclatureGroups", () => {
     );
   });
 
+  it("[AUTH-GROUPS] forwards server auth headers and preserves archived filtering", async () => {
+    const authHeaders = { Authorization: "Bearer synthetic-test", "X-User-Roles": "admin" };
+    const f = vi.fn(async () => ({ ok: true, json: async () => [] }));
+    mockFetch(f);
+    await fetchNomenclatureGroups({ archived: true, roles: "admin" }, authHeaders);
+    expect(f).toHaveBeenCalledWith(
+      `${BASE}/system/refs/nomenclature-groups?archived=true`,
+      expect.objectContaining({ cache: "no-store", headers: authHeaders }),
+    );
+  });
+
   it("не-200 → []", async () => {
     mockFetch(async () => ({ ok: false }));
     expect(await fetchNomenclatureGroups()).toEqual([]);
+    await expect(fetchNomenclatureGroups({ strict: true })).rejects.toThrow();
+    mockFetch(async () => ({ ok: true, json: async () => ({ not: "an array" }) }));
+    await expect(fetchNomenclatureGroups({ strict: true })).rejects.toThrow("Некорректный");
   });
 });
 

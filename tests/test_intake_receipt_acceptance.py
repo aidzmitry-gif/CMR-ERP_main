@@ -19,6 +19,7 @@ import threading
 from email.message import EmailMessage
 from pathlib import Path
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 import pytest
 
@@ -34,13 +35,14 @@ import mail_stage  # noqa: E402
 import mottor_bridge  # noqa: E402
 import mottor_receipts  # noqa: E402
 import receipt_queue  # noqa: E402
+
 from tests import test_intake_receipts as receiver  # noqa: E402
 
 
 def _email(*, message_id: str, sender: str = "buyer@example.invalid", attachment: bool = False) -> bytes:
     message = EmailMessage()
     message["From"] = f"Synthetic Buyer <{sender}>"
-    message["To"] = "admin@enersys.by"
+    message["To"] = "intake-fixture@example.invalid"
     message["Subject"] = "Запрос аккумуляторов для синтетического стенда"
     message["Message-ID"] = f"<{message_id}@example.invalid>"
     message.set_content("Просим рассчитать аккумуляторы для тестового оборудования.")
@@ -396,7 +398,7 @@ async def test_mail_producer_delivers_receipt_and_reports_missing_file_as_unavai
     )
 
     payload = result["payload"]
-    assert payload["namespace"] == "admin@enersys.by"
+    assert payload["namespace"] == mail_receipts.MAILBOX
     assert payload["source_id"].startswith("mail:")
     assert payload["delivery_id"] == payload["source_id"]
     assert result["accepted"] == 0
@@ -440,7 +442,7 @@ async def test_mail_failed_receipt_remains_visible_in_producer_queue(intake_env,
 
 async def test_legat_mail_stays_reviewable_without_verified_tender_parser(tmp_path):
     raw = _email(
-        message_id="g05-legat-review", sender="notices@legat.by",
+        message_id="g05-legat-review", sender=f"fixture-{uuid4().hex}@legat.by",
     )
     queue_path = tmp_path / "legat-review.sqlite3"
     db = mail_stage.open_queue(queue_path)
@@ -469,7 +471,7 @@ async def test_mail_producer_creates_one_receipted_lead_and_replay_is_idempotent
     )
 
     payload = result["payload"]
-    assert payload["namespace"] == "admin@enersys.by"
+    assert payload["namespace"] == mail_receipts.MAILBOX
     assert payload["source_id"].startswith("mail:")
     assert payload["delivery_id"] == payload["source_id"]
     assert result["accepted"] == 1

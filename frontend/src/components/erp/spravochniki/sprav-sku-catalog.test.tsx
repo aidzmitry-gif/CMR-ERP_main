@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 // next/link → простая <a> в jsdom (роутер App Router в тесте недоступен).
@@ -28,112 +28,183 @@ const skus: SkuRow[] = [
   { code: "SKU-003", title: "Без категории", unit: null, category_id: null, vat_code: "ЗАГАДКА" },
 ];
 
+const baseProps = {
+  skus,
+  total: skus.length,
+  offset: 0,
+  search: "",
+  categoryId: null,
+  groups,
+  groupsUnavailable: false,
+  vatRates,
+  vatUnavailable: false,
+  unavailable: false,
+};
+
+function renderCatalog(props: Partial<typeof baseProps> = {}) {
+  return render(<SpravSkuCatalog {...baseProps} {...props} />);
+}
+
 describe("SpravSkuCatalog", () => {
-  it("includes descendant groups, accepts reordered search terms, and resets combined filters", () => {
-    render(<SpravSkuCatalog skus={[...skus, { ...skus[0], code: "CHILD", category_id: 4 }]} groups={[...groups, { id: 4, code: "li", name: "Литиевые", parent_id: 1, is_active: true }]} vatRates={vatRates} />);
-    fireEvent.change(screen.getByLabelText("Группа номенклатуры"), { target: { value: "1" } });
+  it("renders the server-filtered subtree result and current combined filter values", () => {
+    const child: SkuRow = { ...skus[0], code: "CHILD", category_id: 4 };
+    renderCatalog({
+      skus: [child],
+      total: 1,
+      search: "18650 CHILD",
+      categoryId: 1,
+      groups: [...groups, { id: 4, code: "li", name: "Литиевые", parent_id: 1, is_active: true }],
+    });
+
     expect(screen.getByText("CHILD")).toBeInTheDocument();
-    expect(screen.queryByText("SKU-002")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Поиск номенклатуры"), { target: { value: "18650 CHILD" } });
-    expect(screen.getByText("CHILD")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("1 из 4");
-    fireEvent.click(screen.getByRole("button", { name: "Сбросить фильтры" }));
-    expect(screen.getByText("SKU-002")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("4 из 4");
+    expect(screen.getByLabelText("Поиск номенклатуры")).toHaveValue("18650 CHILD");
+    expect(screen.getByLabelText("Группа номенклатуры")).toHaveValue("1");
+    expect(screen.getByRole("link", { name: "Сбросить фильтры" })).toHaveAttribute("href", "/erp/spravochniki/sku");
+    expect(screen.getByRole("status")).toHaveTextContent("Найдено 1 позиций");
   });
 
   it("shows an unavailable source rather than an empty catalog", () => {
-    render(<SpravSkuCatalog skus={[]} groups={groups} vatRates={vatRates} unavailable />);
+    renderCatalog({ skus: [], total: 0, search: "A %_ B", categoryId: 3, offset: 250, unavailable: true });
     expect(screen.getByRole("alert")).toHaveTextContent("Список товаров неизвестен");
     expect(screen.queryByText("Нет данных")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Повторить загрузку" })).toHaveAttribute("href", "/erp/spravochniki/sku");
+    expect(screen.getByRole("link", { name: "Повторить загрузку" })).toHaveAttribute(
+      "href", "/erp/spravochniki/sku?search=A+%25_+B&category_subtree_id=3&offset=250",
+    );
+    expect(screen.getByRole("link", { name: "Сбросить фильтры" })).toHaveAttribute("href", "/erp/spravochniki/sku");
   });
-  it("рендерит счётчик позиций и все строки без фильтра", () => {
-    render(<SpravSkuCatalog skus={skus} groups={groups} vatRates={vatRates} />);
+
+  it("рендерит точный счётчик и строки текущей страницы", () => {
+    renderCatalog();
     expect(screen.getByText("3 позиций")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Найдено 3 позиций · показаны 1–3");
     expect(screen.getByText("Аккумулятор 18650")).toBeInTheDocument();
     expect(screen.getByText("Зарядное устройство USB-C")).toBeInTheDocument();
     expect(screen.getByText("Без категории")).toBeInTheDocument();
   });
 
   it("резолвит НДС по коду, показывает title+rate; неизвестный код печатает как есть; отсутствие — «нет данных»", () => {
-    render(<SpravSkuCatalog skus={skus} groups={groups} vatRates={vatRates} />);
+    renderCatalog();
     expect(screen.getByText("НДС (20%)")).toBeInTheDocument();
     expect(screen.getByText("ЗАГАДКА")).toBeInTheDocument();
     expect(screen.getByText("нет данных")).toBeInTheDocument();
   });
 
   it("резолвит категорию по id и показывает «не задана» для строк без category_id", () => {
-    render(<SpravSkuCatalog skus={skus} groups={groups} vatRates={vatRates} />);
-    // "Батареи"/"Зарядки" встречаются и в select (option), и в ячейке таблицы — берём ячейку строки.
+    renderCatalog();
     expect(screen.getByText("SKU-001").closest("tr")).toHaveTextContent("Батареи");
     expect(screen.getByText("SKU-002").closest("tr")).toHaveTextContent("Зарядки");
     expect(screen.getByText("не задана")).toBeInTheDocument();
   });
 
   it("ед. измерения — тире, если unit=null", () => {
-    render(<SpravSkuCatalog skus={skus} groups={groups} vatRates={vatRates} />);
-    // SKU-003 unit=null → «—»
+    renderCatalog();
     const row = screen.getByText("SKU-003").closest("tr")!;
     expect(row).toHaveTextContent("—");
   });
 
-  it("фильтр по категории в select оставляет только строки этой категории", () => {
-    render(<SpravSkuCatalog skus={skus} groups={groups} vatRates={vatRates} />);
-    const select = screen.getByRole("combobox");
-    fireEvent.change(select, { target: { value: "1" } });
-
+  it("select показывает категорию текущего серверного результата", () => {
+    renderCatalog({ skus: [skus[0]], total: 1, categoryId: 1 });
+    expect(screen.getByLabelText("Группа номенклатуры")).toHaveValue("1");
     expect(screen.getByText("Аккумулятор 18650")).toBeInTheDocument();
     expect(screen.queryByText("Зарядное устройство USB-C")).not.toBeInTheDocument();
     expect(screen.queryByText("Без категории")).not.toBeInTheDocument();
   });
 
   it("select не предлагает архивную категорию в списке опций", () => {
-    render(<SpravSkuCatalog skus={skus} groups={groups} vatRates={vatRates} />);
+    renderCatalog();
     expect(screen.queryByRole("option", { name: "Архивная группа" })).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Батареи" })).toBeInTheDocument();
   });
 
-  it("поиск фильтрует по коду/названию (регистронезависимо) и показывает «Ничего не найдено»", () => {
-    render(<SpravSkuCatalog skus={skus} groups={groups} vatRates={vatRates} />);
-    const search = screen.getByPlaceholderText("Найти по коду или наименованию…");
-
-    fireEvent.change(search, { target: { value: "зарядное" } });
+  it("search field carries the current server-filtered result and shows no match state", () => {
+    const { unmount } = renderCatalog({ skus: [skus[1]], total: 1, search: "зарядное" });
+    expect(screen.getByLabelText("Поиск номенклатуры")).toHaveValue("зарядное");
     expect(screen.getByText("Зарядное устройство USB-C")).toBeInTheDocument();
     expect(screen.queryByText("Аккумулятор 18650")).not.toBeInTheDocument();
+    unmount();
 
-    fireEvent.change(search, { target: { value: "нет-такого-zzz" } });
+    renderCatalog({ skus: [], total: 0, search: "нет-такого-zzz" });
     expect(screen.getByText("Ничего не найдено")).toBeInTheDocument();
   });
 
-  it("пустой список skus без фильтра показывает «Нет данных»", () => {
-    render(<SpravSkuCatalog skus={[]} groups={groups} vatRates={vatRates} />);
+  it("пустой список без фильтра показывает «Нет данных»", () => {
+    renderCatalog({ skus: [], total: 0 });
     expect(screen.getByText("Нет данных")).toBeInTheDocument();
   });
 
   it("ссылка на карточку SKU кодирует код в href", () => {
-    render(<SpravSkuCatalog skus={skus} groups={groups} vatRates={vatRates} />);
+    renderCatalog();
     const link = screen.getByRole("link", { name: "SKU-001" });
     expect(link).toHaveAttribute("href", "/erp/spravochniki/sku/SKU-001");
   });
 
-  it("при достижении потолка запроса показывает «+» и предупреждение", () => {
-    const capSkus: SkuRow[] = Array.from({ length: CATALOG_ROW_LIMIT }, (_, i) => ({
+  it("при достижении лимита страницы показывает полный total и следующую страницу", () => {
+    const pageSkus: SkuRow[] = Array.from({ length: CATALOG_ROW_LIMIT }, (_, i) => ({
       code: `SKU-${i}`,
       title: `Товар ${i}`,
       unit: "шт",
       category_id: null,
       vat_code: null,
     }));
-    render(<SpravSkuCatalog skus={capSkus} groups={groups} vatRates={vatRates} />);
-    expect(screen.getByText(`${CATALOG_ROW_LIMIT}+ позиций`)).toBeInTheDocument();
-    expect(
-      screen.getByText(/Показаны первые 250 позиций \(потолок одного запроса\)/),
-    ).toBeInTheDocument();
+    renderCatalog({ skus: pageSkus, total: CATALOG_ROW_LIMIT + 1 });
+    expect(screen.getByText(`${CATALOG_ROW_LIMIT + 1} позиций`)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Следующая страница" })).toHaveAttribute(
+      "href", `/erp/spravochniki/sku?offset=${CATALOG_ROW_LIMIT}`,
+    );
+    expect(screen.queryByText(/потолок одного запроса/)).not.toBeInTheDocument();
   });
 
-  it("ниже потолка запроса предупреждение не показывается", () => {
-    render(<SpravSkuCatalog skus={skus} groups={groups} vatRates={vatRates} />);
-    expect(screen.queryByText(/потолок одного запроса/)).not.toBeInTheDocument();
+  it("ниже лимита страницы навигация не показывается", () => {
+    renderCatalog();
+    expect(screen.queryByRole("navigation", { name: "Страницы каталога" })).not.toBeInTheDocument();
+  });
+
+  it("[UI-SKU-GET-FILTERS] submits search and category through native GET without retaining offset", () => {
+    renderCatalog({ search: "A %_ B", categoryId: 1, offset: 250 });
+    const form = screen.getByLabelText("Поиск номенклатуры").closest("form");
+    expect(form).toHaveAttribute("method", "get");
+    expect(form).toHaveAttribute("action", "/erp/spravochniki/sku");
+    expect(screen.getByLabelText("Поиск номенклатуры")).toHaveAttribute("name", "search");
+    // HTML maxlength counts UTF-16 units; 1024 units can represent 512 Unicode code points.
+    expect(screen.getByLabelText("Поиск номенклатуры")).toHaveAttribute("maxlength", "1024");
+    expect(screen.getByLabelText("Группа номенклатуры")).toHaveAttribute("name", "category_subtree_id");
+    expect(form?.querySelector('[name="offset"]')).toBeNull();
+  });
+
+  it("[UI-SKU-PAGING-FILTERS] preserves encoded search and category on previous and next links", () => {
+    const pageSkus = Array.from({ length: CATALOG_ROW_LIMIT }, (_, index) => ({
+      code: `SKU-${index}`, title: `Товар ${index}`, unit: "шт", category_id: 1, vat_code: null,
+    }));
+    const { unmount } = renderCatalog({ skus: pageSkus, total: 501, offset: 250, search: "A %_ B", categoryId: 1 });
+    const previous = screen.getByRole("link", { name: "Предыдущая страница" });
+    const next = screen.getByRole("link", { name: "Следующая страница" });
+    expect(previous).toHaveAttribute("href", "/erp/spravochniki/sku?search=A+%25_+B&category_subtree_id=1&offset=0");
+    expect(next).toHaveAttribute("href", "/erp/spravochniki/sku?search=A+%25_+B&category_subtree_id=1&offset=500");
+
+    unmount();
+    renderCatalog({ skus: [], total: 301, offset: 500, search: "A %_ B", categoryId: 1 });
+    expect(screen.getByRole("status")).toHaveTextContent("Найдено 301 позиций · страница вне диапазона");
+    expect(screen.getByRole("status")).not.toHaveTextContent("показаны 501–301");
+    expect(screen.getByRole("link", { name: "Первая страница" })).toHaveAttribute(
+      "href", "/erp/spravochniki/sku?search=A+%25_+B&category_subtree_id=1&offset=0",
+    );
+  });
+
+  it("[UI-SKU-METADATA-UNKNOWN] keeps unavailable group and VAT metadata distinct from missing values", () => {
+    const { unmount } = renderCatalog({ groups: [], groupsUnavailable: true, vatRates: [], vatUnavailable: true, categoryId: 99 });
+    expect(screen.getByText("Справочник групп номенклатуры недоступен; названия категорий неизвестны.")).toHaveAttribute("role", "alert");
+    expect(screen.getByText("Справочник ставок НДС недоступен; названия ставок неизвестны.")).toHaveAttribute("role", "alert");
+    expect(screen.getByRole("option", { name: "Категория #99 (справочник недоступен)" })).toHaveValue("99");
+
+    const skuWithUnknownMetadata = within(screen.getByRole("row", { name: /SKU-001/ }));
+    expect(skuWithUnknownMetadata.getByText("Справочник групп недоступен")).toBeInTheDocument();
+    expect(skuWithUnknownMetadata.getByText("Справочник ставок НДС недоступен")).toBeInTheDocument();
+
+    expect(within(screen.getByRole("row", { name: /SKU-003/ })).getByText("не задана")).toBeInTheDocument();
+    expect(within(screen.getByRole("row", { name: /SKU-002/ })).getByText("нет данных")).toBeInTheDocument();
+
+    unmount();
+    renderCatalog({ categoryId: 99 });
+    expect(screen.getByRole("option", { name: "Категория #99 (название неизвестно)" })).toHaveValue("99");
   });
 });

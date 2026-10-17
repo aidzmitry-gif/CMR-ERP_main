@@ -178,8 +178,8 @@ async def system_references_ai_catalog(request: Request) -> dict:
         "tool": {
             "name": "reference.query",
             "endpoint": "/system/references/query",
-            "params": ["ref", "key", "as_of", "name", "category_id",
-                       "aggregate", "group_by", "resolve", "limit"],
+            "params": ["ref", "key", "as_of", "name", "category_id", "search",
+                       "category_subtree_id", "offset", "aggregate", "group_by", "resolve", "limit"],
             "note": "точные значения структурно, с историчностью as_of; pgvector — вторично",
             "capabilities": {
                 "aggregate": {
@@ -251,6 +251,30 @@ async def references_query(
         limit = max(1, min(int(payload.get("limit", 10)), _QUERY_LIMIT_MAX))  # clamp от DoS
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=422, detail="category_id/limit должны быть числами") from exc
+    search = None
+    category_subtree_id = None
+    offset = None
+    if ref == "core.skus" and payload.get("aggregate") is None and not bool(payload.get("resolve")):
+        if "search" in payload:
+            search = payload["search"]
+            if not isinstance(search, str) or len(search) > 512:
+                raise HTTPException(status_code=422, detail="search должен быть строкой до 512 символов")
+        if "category_subtree_id" in payload:
+            category_subtree_id = payload["category_subtree_id"]
+            if (type(category_subtree_id) is not int or category_subtree_id < 1
+                    or category_subtree_id > 9_007_199_254_740_991):
+                raise HTTPException(status_code=422, detail="category_subtree_id должен быть положительным целым ID")
+            if category_id is not None:
+                raise HTTPException(status_code=422, detail="укажите category_id или category_subtree_id, не оба")
+        has_catalog_filters = any(
+            field in payload for field in ("search", "category_subtree_id", "offset")
+        )
+        if "offset" in payload:
+            offset = payload["offset"]
+            if type(offset) is not int or offset < 0 or offset > 2_147_483_647:
+                raise HTTPException(status_code=422, detail="offset должен быть целым числом от 0 до 2147483647")
+        elif has_catalog_filters:
+            offset = 0
     try:
         return await reference_query.query(
             session,
@@ -263,6 +287,9 @@ async def references_query(
             group_by=payload.get("group_by"),
             resolve=bool(payload.get("resolve")),
             limit=limit,
+            search=search,
+            category_subtree_id=category_subtree_id,
+            offset=offset,
         )
     except reference_query.ReferenceQueryError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -7,10 +7,10 @@ retained on hold until a separate, authoritative requisites mapper is accepted.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from decimal import Decimal
 from hashlib import blake2b, sha256
-import json
 from uuid import UUID
 
 from sqlalchemy import select, text
@@ -276,8 +276,10 @@ def import_catalog(session: Session, namespace: str, rows: list[SourceRow], *, a
                     target.name, target.parent_id, target.unit = row["Description"], parent.group_id if parent else None, None
                     totals["native_groups"] += 1
                 session.flush()
-                if kind == "sku": identity.sku_id = target.id
-                else: identity.group_id = target.id
+                if kind == "sku":
+                    identity.sku_id = target.id
+                else:
+                    identity.group_id = target.id
             elif target is not None:
                 target.is_active = False
                 session.flush()
