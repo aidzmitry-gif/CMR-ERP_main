@@ -160,7 +160,8 @@ async def mixed_production_disposal(factory, book, *, issuance, method="weighted
         document = InventoryIssueDocument(source="mixed-output-issue", source_version=1,
             document_date="2026-10-31", operation_date="2026-10-31", posting_date="2026-10-31", policy_id=policy_id,
             account="43", warehouse="Main", sku="SYN-WIDGET", lot="", quantity="2.1", expense_account="90.4",
-            expense_dimensions={}, explanation="Reviewed mixed output disposal")
+            expense_dimensions={}, explanation="Reviewed mixed output disposal",
+            **(await inventory_identities(factory, book)))
         request = InventoryIssuePreviewInput(**document.model_dump(include=set(InventoryIssuePreviewInput.model_fields)))
         policy, rows, verified, finished = await inventory_cost._inventory_rows(session, book[0], request)
         cost = inventory_cost.issue_result(policy, rows, book[0], request,
