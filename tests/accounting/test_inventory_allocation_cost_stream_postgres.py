@@ -79,7 +79,9 @@ async def inventory_identities(factory, book):
         return result
 
 
-async def _accepted_output_documents(factory, book, *, issuance, same_lot=False):
+async def _accepted_output_documents(
+    factory, book, *, issuance, same_lot=False, order_ids=(42, 43), lot=None,
+):
     """Create accepted physical sources through the current native services."""
     api, issuance_factory = issuance
     assert issuance_factory is factory
@@ -94,11 +96,11 @@ async def _accepted_output_documents(factory, book, *, issuance, same_lot=False)
         await run_migration(session, "crm_rel_001_finished_goods_01.py", "upgrade")
         await run_migration(session, "crm_rel_001_output_source_completion_01.py", "upgrade")
         assert not (await session.scalars(select(ProductionOrder.id).where(
-            ProductionOrder.id.in_((42, 43))))).all()
+            ProductionOrder.id.in_(order_ids)))).all()
         location = Location(warehouse="Main", code="ALLOCATION-OUTPUT")
         session.add(location)
         await session.flush()
-        for order_id in (42, 43):
+        for order_id in order_ids:
             order = ProductionOrder(id=order_id, number=f"ALLOCATION-{order_id}", product="Synthetic widget", qty=2)
             session.add(order)
             await session.flush()
@@ -108,14 +110,14 @@ async def _accepted_output_documents(factory, book, *, issuance, same_lot=False)
             document = await prepare_output(session, gateway, book[0], user, OutputCommand(
                 request_id=uuid4(), order_id=order_id, expected_order_digest=digest,
                 operation_date="2026-10-10", sku_code="SYN-WIDGET", quantity="2.00", warehouse="Main",
-                location_id=location.id, lot="SHARED" if same_lot else f"LOT-{order_id}",
+                location_id=location.id, lot=lot if lot is not None else ("SHARED" if same_lot else f"LOT-{order_id}"),
                 evidence="Synthetic reviewed output"), warehouse_gateway=warehouse)
             confirmation = await confirm_output(session, gateway, book[0], user, document.id, document.digest,
                                                 warehouse_gateway=warehouse)
             documents[order_id] = (document.id, confirmation.event_id)
         await session.commit()
     assert await core.event_bus.relay_pending(factory, core.services,
-        event_types=("production.output.confirmed",)) == 2
+        event_types=("production.output.confirmed",)) == len(order_ids)
     for document_id, event_id in documents.values():
         async with factory() as session:
             receipt = await session.scalar(select(Receipt).where(Receipt.source_event_id == event_id))

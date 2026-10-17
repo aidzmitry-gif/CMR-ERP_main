@@ -6,14 +6,21 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from tests.accounting.test_finished_goods_inventory_postgres import _output_cost_command
 from tests.accounting.test_inventory_allocation_api_postgres import (
     inventory_identities,
     output_sources,
 )
+from tests.accounting.test_inventory_allocation_cost_stream_postgres import (
+    _accepted_output_documents,
+)
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
-from tests.accounting.test_zero_value_disposals_postgres import zeroed_output
+from tests.accounting.test_production_output_transfer_postgres import (
+    _seed_production_book,
+    _seed_wip,
+    transfer_input,
+)
 from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 from core.domain.models import Sku
@@ -21,16 +28,56 @@ from core.runtime.deps import get_session
 from core.services.auth import CurrentUser, get_current_user
 from modules.accounting import inventory_issues, routes, service
 from modules.accounting.gateway import AccountingService
-from modules.accounting.models import Audit, Organization, Period, ZeroValueInventoryDisposalReceipt
+from modules.accounting.models import (
+    Audit,
+    Organization,
+    Period,
+    SourceControl,
+    ZeroValueInventoryDisposalReceipt,
+)
 from modules.accounting.production_output_cost_workflow import confirm_output_cost_correction
+from modules.accounting.production_output_transfer import (
+    ProductionOutputTransferConfirmInput,
+    confirm_output_transfer,
+    prepare_output_transfer,
+)
 from modules.accounting.schemas import LineInput, PostingInput
 from modules.wms.models import WarehouseDirectory
 
 pytestmark = pytest.mark.integration
 
+async def _zeroed_specific_output(factory, book, *, issuance):
+    policy_id = await _seed_production_book(factory, book)
+    await _seed_wip(factory, book, policy_id)
+    production, warehouse, documents = await _accepted_output_documents(
+        factory, book, issuance=issuance, order_ids=(42,), lot="LOT-1")
+    async with factory() as session:
+        command = transfer_input(policy_id).model_copy(update={"output_document_ids": [documents[42]]})
+        preview = await prepare_output_transfer(session, book[0], "2026-10", command, production, warehouse)
+        confirmation = ProductionOutputTransferConfirmInput.model_validate({
+            **command.model_dump(mode="json"), "basis_digest": preview["basis_digest"], "digest": preview["digest"]})
+        output = await confirm_output_transfer(session, book[0], "2026-10", confirmation, "tester",
+            production=production, warehouse_gateway=warehouse)
+        control = await session.scalar(select(SourceControl).where(
+            SourceControl.organization_id == book[0], SourceControl.source == f"production:output:{documents[42]}"))
+        assert control is not None and control.entry_id == output.id
+        await session.commit()
+        await service.post(session, book[0], PostingInput(source="production:reverse-wip:zero", source_version=1,
+            operation="manual", document_date="2026-10-31", operation_date="2026-10-31", posting_date="2026-10-31",
+            policy_id=policy_id, rule_version="synthetic", explanation="Reverse all WIP", lines=[
+                LineInput(account="20", side="credit", amount="100", dimensions={"department": "SHOP", "order": "ORDER-42"}),
+                LineInput(account="60", side="debit", amount="100"),
+            ]), "tester")
+        revision = await confirm_output_cost_correction(session, book[0], "2026-10", await _output_cost_command(session, book[0], output.id), "tester")
+        assert revision.entry_id is not None
+        output_line = await session.scalar(text("SELECT id FROM accounting.line WHERE entry_id=:id AND side='debit'"), {"id": output.id})
+        await session.commit()
+    return policy_id, output.id, output_line
+
+
 @pytest.mark.parametrize("concurrent", [False, True])
-async def test_http_specific_zero_issue_preview_confirm_retry_and_remaining(pg_factory, pg_book, concurrent):
-    policy_id, output_id, _ = await zeroed_output(pg_factory, pg_book)
+async def test_http_specific_zero_issue_preview_confirm_retry_and_remaining(pg_factory, pg_book, issuance_pg, concurrent):
+    policy_id, output_id, _ = await _zeroed_specific_output(pg_factory, pg_book, issuance=issuance_pg)
     identities = await inventory_identities(pg_factory, pg_book)
     app = FastAPI()
     app.include_router(routes.router, prefix="/accounting")
