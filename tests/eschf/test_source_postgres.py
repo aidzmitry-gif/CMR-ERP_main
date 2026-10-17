@@ -166,7 +166,7 @@ async def bridge_http(source_pg, monkeypatch):
     for name in (
         "core.services.auth.get_settings",
         "core.runtime.access.get_settings",
-        "modules.sales.access.get_settings",
+        "core.services.crm_access.get_settings",
     ):
         monkeypatch.setattr(name, lambda: settings)
     core = Core(
