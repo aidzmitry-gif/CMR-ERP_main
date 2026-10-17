@@ -174,7 +174,8 @@ export default async function DealDetailPage({ params, searchParams }: { params:
             <DealMessages dealId={id} />
             <DealLossControl dealId={id} dealLabel={`№ ${d.number} · ${d.company}`} />
             <DealTimelineComments dealId={id} />
-            <DealLinkedDeals company={d.company} currentId={id} roles={roles} />
+            <DealLinkedDeals key={`related-deals:${d.counterparty?.id ?? "none"}:${id}`}
+              counterpartyId={d.counterparty?.id} currentId={id} />
             <DealApprovals dealId={id} />
             <DealActions dealId={id} starred={d.starred} priority={d.priority} />
             <Card className="px-[18px] py-[14px]">

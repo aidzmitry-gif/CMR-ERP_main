@@ -134,7 +134,7 @@ function ClientDocuments({ clientId }: { clientId: number }) {
   </section>;
 }
 
-export function CrmClientDetail({ clientId }: { clientId: number }) {
+export function CrmClientDetail({ clientId, focusContactId }: { clientId: number; focusContactId?: number }) {
   const [revision, setRevision] = useState(0);
   const [creating, setCreating] = useState(false);
   const generation = useRef(0);
@@ -177,7 +177,7 @@ export function CrmClientDetail({ clientId }: { clientId: number }) {
       <h1 className="text-xl font-semibold">{state.client.name}</h1>
       <p className="text-sm text-muted">УНП: {state.client.unp ?? "Не указан"}</p>
       <p>Ответственный менеджер: {responsibleManagerText(state.client.responsible_manager)}</p>
-      <DealContacts key={`contacts:${clientId}`} clientId={clientId} />
+      <DealContacts key={`contacts:${clientId}`} clientId={clientId} focusContactId={focusContactId} />
       <ClientCallHistory key={`calls:${clientId}:${state.client.counterparty_id ?? "none"}`} counterpartyId={state.client.counterparty_id} deals={state.deals ?? []} />
       <ClientDocuments key={`documents:${clientId}`} clientId={clientId} />
       <div className="space-y-3 rounded-xl border border-line p-4">

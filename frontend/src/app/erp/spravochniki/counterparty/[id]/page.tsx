@@ -4,6 +4,7 @@ import { ClientResponsibleManager } from "@/components/client-responsible-manage
 import { AppShell } from "@/components/app-shell";
 import { SpravCard } from "@/components/erp/spravochniki/sprav-card";
 import { SpravCounterpartyEditor } from "@/components/erp/spravochniki/sprav-counterparty-editor";
+import { CounterpartyRelationships } from "@/components/counterparty-relationships";
 import Link from "next/link";
 
 import { backendAuthHeaders } from "@/lib/auth-headers-server";
@@ -44,12 +45,16 @@ export default async function CounterpartyCardPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ name?: SearchParam; unp?: SearchParam }>;
+  searchParams?: Promise<{ name?: SearchParam; unp?: SearchParam; contact?: SearchParam }>;
 }) {
   const { id } = await params;
   const search = await searchParams;
   const name = firstParam(search?.name);
   const unp = firstParam(search?.unp);
+  const rawContactId = firstParam(search?.contact);
+  const parsedContactId = /^\d+$/.test(rawContactId) ? Number(rawContactId) : null;
+  const focusContactId = parsedContactId !== null && Number.isSafeInteger(parsedContactId) && parsedContactId > 0
+    ? parsedContactId : undefined;
   const role = await currentRole();
   const result = await fetchCounterpartyCardResult(Number(id), role, await backendAuthHeaders(role));
   const backHref = searchHref(name, unp);
@@ -66,9 +71,10 @@ export default async function CounterpartyCardPage({
               ← К поиску контрагентов
             </Link>
           </div>
-          <SpravCard card={result.card} />
+          <SpravCard card={result.card} showContacts={false} />
           <div className="mx-auto min-w-0 max-w-5xl px-6 py-4 pr-[74px] lg:pr-6">
             <ClientResponsibleManager key={result.card.id} clientId={result.card.id} />
+            <CounterpartyRelationships key={`relationships:${result.card.id}:${focusContactId ?? "all"}`} counterpartyId={result.card.id} focusContactId={focusContactId} />
             <ClientDocumentRegister clientId={String(result.card.id)} />
           </div>
           <SpravCounterpartyEditor

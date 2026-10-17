@@ -25,7 +25,7 @@ function plural(n: number, forms: [string, string, string]): string {
   return forms[2];
 }
 
-export function SpravCard({ card }: { card: CounterpartyCard }) {
+export function SpravCard({ card, showContacts = true }: { card: CounterpartyCard; showContacts?: boolean }) {
   const sourceCount = card.aliases.length;
   const prov = card.provenance ?? {};
   const counts = provenanceCounts(prov);
@@ -121,7 +121,7 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
               </div>
             </div>
 
-            <div className="rounded-2xl bg-surface p-5 shadow-card">
+            {showContacts && <div className="rounded-2xl bg-surface p-5 shadow-card">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Контакты</p>
                 <ProvenanceBadge prov={prov.contacts} />
@@ -161,7 +161,7 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
                   ))}
                 </div>
               )}
-            </div>
+            </div>}
           </div>
 
           {/* Right — Доверие к данным + Golden record + Слитые дубли */}

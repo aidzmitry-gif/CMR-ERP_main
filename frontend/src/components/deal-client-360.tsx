@@ -1,6 +1,7 @@
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { fetchCounterpartyCardResult, type CounterpartyCard } from "@/lib/reference-data";
 import { backendAuthHeaders } from "@/lib/auth-headers-server";
+import Link from "next/link";
 
 const SOURCE_LABEL: Record<string, string> = { "1c": "1С", bitrix: "Bitrix", erp: "ERP", egr: "ЕГР" };
 
@@ -75,10 +76,14 @@ function Body({ card }: { card: CounterpartyCard }) {
 
       {primary && (
         <div className="text-[12px] text-muted">
-          <span aria-hidden>👤</span> <span className="text-ink">{primary.full_name}</span>
+          <span aria-hidden>👤</span> <Link className="text-ink underline" href={`/erp/spravochniki/counterparty/${card.id}?contact=${primary.id}#counterparty-contact-${primary.id}`}>{primary.full_name}</Link>
           {primary.phone && <span> · {primary.phone}</span>}
         </div>
       )}
+
+      <Link className="inline-block text-[12px] font-medium text-accent-ink underline" href={`/erp/spravochniki/counterparty/${card.id}#counterparty-relationships`}>
+        Открыть карточку контрагента
+      </Link>
 
       {ts && (
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] text-muted">

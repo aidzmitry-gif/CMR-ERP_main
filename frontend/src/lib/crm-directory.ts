@@ -31,9 +31,9 @@ export interface ContactRow {
   email: string | null;
   is_primary: boolean;
   counterparty_id: number | null;
-  crm_client_id?: number;
+  crm_client_id?: number | null;
   source?: "crm";
-  counterparty_name: string;
+  counterparty_name: string | null;
   deal_id: number | null;
 }
 
@@ -58,10 +58,13 @@ function validRow(value: unknown, kind: DirectoryKind): value is ClientRow | Con
       && (row.source === undefined || row.source === "crm")
       && (row.responsible_manager === undefined || validResponsibleManager(row.responsible_manager))
     : typeof row.full_name === "string" && nullableText(row.phone) && nullableText(row.email)
-      && typeof row.is_primary === "boolean"
-      && (row.source === "crm" ? row.counterparty_id === null && positiveId(row.crm_client_id)
-        : row.source === undefined && positiveId(row.counterparty_id))
-      && typeof row.counterparty_name === "string";
+      && typeof row.is_primary === "boolean" && nullableText(row.counterparty_name)
+      && (row.source === "crm" ? row.counterparty_id === null && nullableId(row.crm_client_id)
+        : row.source === undefined && nullableId(row.counterparty_id) && row.crm_client_id === undefined);
+}
+
+function nullableId(value: unknown): value is number | null {
+  return value === null || positiveId(value);
 }
 
 export async function loadDirectory(

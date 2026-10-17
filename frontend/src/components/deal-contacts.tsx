@@ -36,7 +36,7 @@ function refreshFailureMessage(
   return `${outcome}, но список контактов не удалось обновить: ${failureReason(result)}. Повторите попытку.`;
 }
 
-export function DealContacts({ dealId: dealProp, clientId }: { dealId: string; clientId?: never } | { clientId: number; dealId?: never }) {
+export function DealContacts({ dealId: dealProp, clientId, focusContactId }: ({ dealId: string; clientId?: never } | { clientId: number; dealId?: never }) & { focusContactId?: number }) {
   const dealId = useMemo<ContactTarget>(() => clientId === undefined ? dealProp! : { clientId }, [dealProp, clientId]);
   const requestKey = useRef<string | null>(null);
   const [items, setItems] = useState<DealContact[]>([]);
@@ -135,8 +135,18 @@ export function DealContacts({ dealId: dealProp, clientId }: { dealId: string; c
     };
   }, [dealId, loadContacts]);
 
-  const visibleItems = itemsDealId === dealId ? items : [];
+  const visibleItems = useMemo(() => itemsDealId === dealId ? items : [], [dealId, items, itemsDealId]);
   const hasLoadedData = itemsDealId === dealId && loadState === "ready";
+  const scrolledToContact = useRef<number | null>(null);
+  useEffect(() => {
+    if (focusContactId == null || !hasLoadedData || !visibleItems.some((contact) => contact.id === focusContactId)
+      || scrolledToContact.current === focusContactId) return;
+    const node = document.getElementById(`crm-contact-${focusContactId}`);
+    if (node && typeof node.scrollIntoView === "function") {
+      node.scrollIntoView({ block: "center" });
+      scrolledToContact.current = focusContactId;
+    }
+  }, [focusContactId, hasLoadedData, visibleItems]);
   const showEmpty = hasLoadedData && !refreshing && !refreshError && visibleItems.length === 0;
   const showCount = hasLoadedData && (visibleItems.length > 0 || showEmpty);
   const canMutate = hasLoadedData && !refreshing && !refreshError;
@@ -249,7 +259,7 @@ export function DealContacts({ dealId: dealProp, clientId }: { dealId: string; c
         <ul className="mt-3 space-y-2">
           {showEmpty && <li className="text-sm text-muted">Контактов пока нет</li>}
           {visibleItems.map((c) => (
-            <li key={c.id} className="flex items-center gap-3 rounded-lg bg-sunken px-3 py-2">
+            <li id={`crm-contact-${c.id}`} key={c.id} className="flex items-center gap-3 rounded-lg bg-sunken px-3 py-2">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 text-sm font-medium text-ink">
                   {c.full_name}
