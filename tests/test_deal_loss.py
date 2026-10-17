@@ -86,6 +86,49 @@ async def test_context_requires_current_book_access(api, session):
     assert "organization" not in response.json()
 
 
+@pytest.mark.parametrize("mode", ["canonical", "multiple", "none"])
+async def test_context_lost_stage_codes(api, session, mode):
+    await seed(api, session)
+    await session.execute(delete(Stage).where(Stage.funnel == "new_clients"))
+    expected = {"lost"}
+    if mode != "canonical":
+        session.add(Stage(code="context_normal", title="Normal", funnel="new_clients", kind="normal"))
+        session.add(Stage(code="context_inactive", title="Inactive", funnel="new_clients", kind="lost", is_active=False))
+        session.add(Stage(code="context_foreign", title="Foreign", funnel="context_foreign_funnel", kind="lost"))
+        expected = set()
+        if mode == "multiple":
+            expected = {"context_lost", "context_rejected"}
+            for code in sorted(expected):
+                session.add(Stage(code=code, title="Lost", funnel="new_clients", kind="lost"))
+    await session.commit()
+    response = await api.get("/sales/deals/1/loss-context")
+    assert response.status_code == 200, response.text
+    current = response.json()
+    assert len(current["lost_stages"]) == len(expected)
+    assert set(current["lost_stages"]) == expected
+    assert (current["lost_stage"] in expected) if expected else current["lost_stage"] is None
+
+
+async def test_context_own_metadata_preserves_admin_boundary(api, session):
+    await seed(api, session)
+    deal = await session.get(Deal, 1)
+    deal.owner_id = 777
+    session.add(User(username="issuer", full_name="Synthetic seller", role="sales", status="active",
+                     employee_id=777, deal_visibility="own"))
+    foreign = Deal(number="context-foreign", title="Foreign", counterparty="Synthetic", amount=0, owner_id=888)
+    session.add(foreign)
+    await session.commit()
+    foreign_id = foreign.id
+    api.headers["X-User-Roles"] = "sales"
+    response = await api.get("/sales/deals/1/loss-context")
+    assert response.status_code == 200, response.text
+    assert response.json()["lost_stages"] == ["lost"]
+    assert (await api.get("/sales/stages")).status_code == 403
+    hidden = await api.get(f"/sales/deals/{foreign_id}/loss-context")
+    assert hidden.status_code == 404
+    assert "lost_stages" not in hidden.json()
+
+
 @pytest.mark.parametrize("header,status", [(None, 422), ("other-session", 409)])
 async def test_principal_required_before_new_and_replayed_commands(api, session, header, status):
     ids, _ = await seed(api, session)

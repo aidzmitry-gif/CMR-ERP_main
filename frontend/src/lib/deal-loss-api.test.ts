@@ -6,7 +6,7 @@ import { beginLossCommand, dispatchLoss, fetchLossContext, fetchLossPreview, has
 const scope: LossScope = { deal: 1, org: 7, principal: "seller" };
 const key = "12345678-1234-1234-1234-123456789abc";
 const context = { deal_id: 1, principal: "seller", organization_id: 7, organization: { id: 7, name: "Book", unp: "123" },
-  mapping_required: false, funnel: "repeat_clients", stage: "rp_new", lost_stage: "rp_lost", pending_request_id: null,
+  mapping_required: false, funnel: "repeat_clients", stage: "rp_new", lost_stage: "rp_lost", lost_stages: ["rp_lost", "custom_rejected"], pending_request_id: null,
   latest_request_id: null, latest_request_state: null };
 const snapshot = { funnel: "repeat_clients", stage: "rp_new", lost_stage: "rp_lost", invoices: [] };
 const ok = (v: unknown) => ({ ok: true, status: 200, json: async () => v });
@@ -148,8 +148,28 @@ it("validates immutable request and resolution hashes", async () => {
   await expect(validateRecord({ ...record, actor: "forged" }, scope)).rejects.toThrow("сверка");
   await expect(validateResolution({ resolution_id: key, request_id: key, digest: "0".repeat(64) }, scope)).rejects.toThrow("сверка");
 });
-it.each(["rp_lost", "custom_rejected"])("routes %s by current funnel semantics", async target => {
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => ok(url.endsWith("loss-context") ? context
-    : [{ code: "custom_rejected", funnel: "repeat_clients", kind: "lost", is_active: true }])));
-  expect(await lossGate("1", target)).toBe(true);
+it.each([
+  { name: "primary lost", target: "rp_lost", current: context, expected: true },
+  { name: "second custom lost", target: "custom_rejected", current: context, expected: true },
+  { name: "won", target: "rp_won", current: context, expected: false },
+  { name: "normal", target: "rp_work", current: context, expected: false },
+  { name: "pending", target: "rp_won", current: { ...context, pending_request_id: key }, expected: true },
+  { name: "no lost stages", target: "rp_won", current: { ...context, lost_stage: null, lost_stages: [] }, expected: false },
+])("routes $name using only scoped current context", async ({ target, current, expected }) => {
+  const fetcher = vi.fn(async () => ok(current)); vi.stubGlobal("fetch", fetcher);
+  expect(await lossGate("1", target)).toBe(expected);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher).toHaveBeenCalledWith("/api/sales/deals/1/loss-context", { cache: "no-store" });
+});
+it.each([
+  { name: "missing", lost_stages: undefined },
+  { name: "not array", lost_stages: "rp_lost" },
+  { name: "non-string code", lost_stages: ["rp_lost", 7] },
+  { name: "duplicate code", lost_stages: ["rp_lost", "rp_lost"] },
+  { name: "missing primary", lost_stages: ["custom_rejected"] },
+  { name: "null primary with codes", lost_stage: null, lost_stages: ["rp_lost"] },
+])("rejects malformed lost metadata: $name", async malformed => {
+  const fetcher = vi.fn(async () => ok({ ...context, ...malformed })); vi.stubGlobal("fetch", fetcher);
+  await expect(lossGate("1", "rp_won")).rejects.toThrow("сверка");
+  expect(fetcher).toHaveBeenCalledTimes(1);
 });
