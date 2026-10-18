@@ -517,29 +517,28 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  identity_pg:
-    if: ${{ true }}
-    name: Employee identity and owner PostgreSQL (8)
+  finance_migration_pg:
+    name: Finance organization migration PostgreSQL (1)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
-      owner-postgres:
+      finance-postgres:
         image: pgvector/pgvector:pg16
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: crm_ready_h02
+          POSTGRES_USER: aios
+          POSTGRES_PASSWORD: aios
+          POSTGRES_DB: accounting_test
         ports:
-          - "15441:5432"
+          - "15436:5432"
         options: >-
-          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-cmd "pg_isready -U aios -d postgres"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
     env:
       AIOS_ENVIRONMENT: dev
-      AIOS_DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:15441/crm_ready_h02
-      CRM_READY_OWNERS_DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:15441/crm_ready_h02
+      AIOS_DATABASE_URL: postgresql+psycopg://aios:aios@127.0.0.1:15436/accounting_test
+      ACCOUNTING_TEST_POSTGRES_URL: postgresql+psycopg://aios:aios@127.0.0.1:15436/accounting_test
       CRM_JOINT_POSTGRES_ACCEPTANCE: '0'
       AIOS_SALES_EMAIL_ENABLED: 'false'
       AIOS_AI_ENABLED: 'false'
@@ -556,7 +555,7 @@ jobs:
           python-version: '3.12'
       - name: Install existing backend dependencies
         run: pip install -r requirements-dev.txt
-      - name: Verify isolated employee identity and owner cases
+      - name: Verify isolated Finance migration case
         shell: python
         run: |
           import hashlib
@@ -568,16 +567,16 @@ jobs:
           import xml.etree.ElementTree as ET
           from pathlib import Path
 
-          EXPECTED_SOURCES = {'core/domain/models.py': '4d6c7698688d431f3b0699c9b76acc855c8a08913a0a419534fea0f100213ce3', 'core/runtime/identity_routes.py': '9e86858d5bb7fde6336f2d61d61feba5ba12d378e2a1f30d803ca4670065c9b2', 'core/services/crm_owners.py': '23e46b8a7155b9c120556428d9f0b4175184c1dfd1662d39302a531f7000372a', 'migrations/versions/0195_employee_login_accounts.py': '7723f5c9f4b68b261f399813dffaad82fecff89745c12860c4dc11f42c413e32', 'tests/integration/test_crm_owner_conversion_postgres.py': 'cf03b7698590233c082663efc94baed549a54d0ce555a9e13cc72cbdddb13068', 'core/services/crm_access.py': '530bfc924e9838f86058b9d81ee9d02e71d114c1bb673ae657863fe577ed4713', 'core/services/auth.py': '158f66802ef5af0e6337e97a45eac2de3f722d691df90c2f83b6f0b2fba2c89c', 'core/services/eventbus.py': 'b78f46ba13a8e899796c6c5b978dfe7e14338e7fbcb92853b9be8ba757d9100d', 'core/db/base.py': 'bd55d885c6900ef4c0f435f306e7ec794d4717d6a02807a11ec923aeed03f04f', 'tests/conftest.py': 'cde292a2c66763f57af7da643aaf65b246f27c48ebd7b847a8de96fbbec6d714', 'tests/integration/joint_postgres.py': '6ebaa7bde22b2914ac7428d20801dc67cf592c1c38ebfe27f29632b67f6cf98d', 'modules/leads/routes.py': 'fad57fdcb6bd578500cbdeffb41577443371ecedc12d3a5a0d0864284d78f20c', 'modules/leads/events.py': 'f0528d3abffa803e1996f4636b4a44802c1fa9515bc8f24150d4485d1510ad82', 'modules/leads/models.py': '6ae1f04f5b6b16e8299bc6382813cc82e2122db633c191c4269e8cce858d0ded', 'modules/sales/events.py': 'b089a066496f08e75e62faec804fd25bbe3c586fb5315469bb86b721a6cbc500', 'modules/sales/models.py': '19de0381028040aaad425c4ca68c53f78a45fc5aeb08507987727e7ff77eff48'}
+          EXPECTED_SOURCES = {'migrations/versions/0196_finance_organization_ownership.py': '043f173d9178e8976122d685abecf1b86513abf7b518fe2872706c5027d840de', 'tests/test_finance_organization_bank_postgres.py': '652edfbe2a1fc301348a6aa8906c681338a4f740846d4dba22076f207e1ff7f9', 'migrations/versions/0075_finance_bank_account.py': '811cfec265127dfd7d360aeaa22fe9458e9fdd2cf191dd3970e588e332dbbcf9', 'tests/conftest.py': 'cde292a2c66763f57af7da643aaf65b246f27c48ebd7b847a8de96fbbec6d714', 'core/db/base.py': 'bd55d885c6900ef4c0f435f306e7ec794d4717d6a02807a11ec923aeed03f04f', 'core/domain/models.py': '4d6c7698688d431f3b0699c9b76acc855c8a08913a0a419534fea0f100213ce3', 'core/runtime/deps.py': 'b73217d72ccb9c3f011c5a331c0279fabf89a278bdc0ed9214d77d476e513636', 'core/services/auth.py': '158f66802ef5af0e6337e97a45eac2de3f722d691df90c2f83b6f0b2fba2c89c', 'core/services/eventbus.py': 'b78f46ba13a8e899796c6c5b978dfe7e14338e7fbcb92853b9be8ba757d9100d', 'core/services/accounting.py': '0bc4ae2f9115bec159309da52ab1bf722ca69b7f6cf4cb362d7861db1ff1f3c6', 'modules/accounting/models.py': '85314d8d866f6df8de90983128bd25c6b72e79e1fa5839ebee7672a3c1ff239e', 'modules/accounting/gateway.py': '04a0cb089cad205458ffc2f7b3d44a93eab9737966a8eb1e22f6b0b5c4b6f448', 'config/settings.py': '5712caeda80cc397bfd995141f29cc5c248835718c0dc0075796fc0c43b167a4', 'modules/finance/models.py': '07df20a79b2b01690e8b0e4b375ac370bbbe53dca3eeab5a977b6ddacb8a9e04', 'modules/finance/routes.py': '27393d24771a078a8dff7cfd282aaf4e5708976f599f4ecf8f0132513645a319', 'modules/finance/schemas.py': '360abc13ff1448075cc924ebcb5534e2922f7a26787646f8ffff0a29c8517e8c', 'modules/finance/allocation.py': 'ed557a55f747c524cd454663d27b5f0f7b51d8776a902f673770d910e692e880'}
           EXPECTED_MODULES = {'finance': 'f98ffe21bf4d239f09ce0472910637ab686284b1', 'hr': 'f8a6e0142f1920b07ec56818f42d156a602ff9c3', 'leads': '9a304f771ba74369ded199168e0e1da3ad6348d2', 'logistics': '6923d2e021980ef2546f382364d38dc34a0fef29', 'marketing': 'd4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282', 'procurement': 'f29ea84bd13342ae572e8c4499031d2f053d3d47', 'production': 'be7d7e198bf09cc41c642d22125db401da5adc48', 'sales': 'b92a576a3d6398068bcaec3d50753cf3aa9bab0f', 'service': '3d33800c44865cd7a7373b29192c5d59d3c4bec8', 'wms': '8b6fb881a03f1a268f07e65f4fa89d195fc933a2'}
-          EXPECTED_CASES = {'a52005e40cb41d3e709769b9bf63ea881a92486eb8c27192c7cb605f3e812183', '5b6fe6a28935130b6ab85772e1c024180ec54baca3df784078c549839a983d46', 'a41c536d88637531a44e9153461e8775cdd2fe163903f950f03c9f97b638614a', 'f09100aad0ddde2a0b2750fee0c8841ec939e9c75da76b4b8d4e9c427dc2757d', '706d6881dd1e0a7507c7fa5a833fea64fed6c3e85763edfc525164a52e4f25a2', '2fa69a540b0a6c1b947220ecc0eee18ac5d2c21103f2c5a76b512254d03841d9', 'c86986e47c64c557252a0ed72ccadb8f2fc7f8bf06005a0c09bf38a6c8a97ba6', '6e95b1ff103b5bd26a52152487ceb53b8c2e4036059e54ca6538e473fe1702a3'}
-          FILES = ['core/domain/models.py', 'core/runtime/identity_routes.py', 'core/services/crm_owners.py', 'migrations/versions/0195_employee_login_accounts.py', 'tests/integration/test_crm_owner_conversion_postgres.py', 'core/services/crm_access.py', 'core/services/auth.py', 'core/services/eventbus.py', 'core/db/base.py', 'tests/conftest.py', 'tests/integration/joint_postgres.py', 'modules/leads/routes.py', 'modules/leads/events.py', 'modules/leads/models.py', 'modules/sales/events.py', 'modules/sales/models.py']
-          CLASSES = {'tests.integration.test_crm_owner_conversion_postgres': 'tests/integration/test_crm_owner_conversion_postgres.py'}
-          PLANNED = 8
-          SELECTED = ('tests/integration/test_crm_owner_conversion_postgres.py::test_deactivated_owner_is_rechecked_after_conversion_waits[False]', 'tests/integration/test_crm_owner_conversion_postgres.py::test_deactivated_owner_is_rechecked_after_conversion_waits[True]', 'tests/integration/test_crm_owner_conversion_postgres.py::test_owner_share_lock_is_held_until_conversion_commit[False]', 'tests/integration/test_crm_owner_conversion_postgres.py::test_owner_share_lock_is_held_until_conversion_commit[True]', 'tests/integration/test_crm_owner_conversion_postgres.py::test_renamed_aliases_are_rechecked_after_conversion_waits', 'tests/integration/test_crm_owner_conversion_postgres.py::test_double_conversion_waits_then_rejects_stale_request', 'tests/integration/test_crm_owner_conversion_postgres.py::test_background_relay_allows_pending_then_read_only_resume', 'tests/integration/test_crm_owner_conversion_postgres.py::test_employee_login_alias_migration_roundtrip')
+          EXPECTED_CASES = {'1973424d802b1c83f1c0dbe2adccd40af9cf4912be2d4cc77eefb9db156e25b0'}
+          FILES = ['migrations/versions/0196_finance_organization_ownership.py', 'tests/test_finance_organization_bank_postgres.py', 'migrations/versions/0075_finance_bank_account.py', 'tests/conftest.py', 'core/db/base.py', 'core/domain/models.py', 'core/runtime/deps.py', 'core/services/auth.py', 'core/services/eventbus.py', 'core/services/accounting.py', 'modules/accounting/models.py', 'modules/accounting/gateway.py', 'config/settings.py', 'modules/finance/models.py', 'modules/finance/routes.py', 'modules/finance/schemas.py', 'modules/finance/allocation.py']
+          CLASSES = {'tests.test_finance_organization_bank_postgres': 'tests/test_finance_organization_bank_postgres.py'}
+          PLANNED = 1
+          SELECTED = ('tests/test_finance_organization_bank_postgres.py::test_finance_organization_migration_roundtrip[migration_0196]',)
 
           EXCEPTION_IDS = {'AssertionError': 1, 'FileNotFoundError': 2, 'ModuleNotFoundError': 3, 'AttributeError': 4, 'TypeError': 5, 'KeyError': 6, 'sqlalchemy.exc.IntegrityError': 7, 'sqlalchemy.exc.ProgrammingError': 8, 'sqlalchemy.exc.OperationalError': 9, 'TimeoutError': 10, 'AccountingError': 11, 'modules.accounting.service.AccountingError': 11}
-          DIAGNOSTIC_SOURCES = {'core/domain/models.py': (1, 522), 'core/runtime/identity_routes.py': (2, 1633), 'core/services/crm_owners.py': (3, 90), 'migrations/versions/0195_employee_login_accounts.py': (4, 27), 'tests/integration/test_crm_owner_conversion_postgres.py': (5, 447), 'core/services/crm_access.py': (6, 74), 'core/services/auth.py': (7, 322), 'core/services/eventbus.py': (8, 275), 'core/db/base.py': (9, 23), 'tests/conftest.py': (10, 163), 'tests/integration/joint_postgres.py': (11, 13), 'modules/leads/routes.py': (12, 1223), 'modules/leads/events.py': (13, 477), 'modules/leads/models.py': (14, 160), 'modules/sales/events.py': (15, 437), 'modules/sales/models.py': (16, 720)}
+          DIAGNOSTIC_SOURCES = {'migrations/versions/0196_finance_organization_ownership.py': (1, 97), 'tests/test_finance_organization_bank_postgres.py': (2, 382), 'migrations/versions/0075_finance_bank_account.py': (3, 67), 'tests/conftest.py': (4, 163), 'core/db/base.py': (5, 23), 'core/domain/models.py': (6, 522), 'core/runtime/deps.py': (7, 24), 'core/services/auth.py': (8, 322), 'core/services/eventbus.py': (9, 275), 'core/services/accounting.py': (10, 108), 'modules/accounting/models.py': (11, 1639), 'modules/accounting/gateway.py': (12, 388), 'config/settings.py': (13, 165), 'modules/finance/models.py': (14, 180), 'modules/finance/routes.py': (15, 801), 'modules/finance/schemas.py': (16, 169), 'modules/finance/allocation.py': (17, 78)}
           CHECKOUT_ROOT = str(Path.cwd())
 
 
@@ -659,31 +658,28 @@ jobs:
 
           def pg_snapshot():
               import psycopg
-              expected = 'postgresql+psycopg://postgres:postgres@127.0.0.1:15441/crm_ready_h02'
-              assert os.environ['CRM_READY_OWNERS_DATABASE_URL'] == os.environ['AIOS_DATABASE_URL'] == expected
-              assert os.environ['CRM_JOINT_POSTGRES_ACCEPTANCE'] == '0'
-              assert 'ACCOUNTING_TEST_POSTGRES_URL' not in os.environ
+              expected = 'postgresql+psycopg://aios:aios@127.0.0.1:15436/accounting_test'
+              assert os.environ['ACCOUNTING_TEST_POSTGRES_URL'] == os.environ['AIOS_DATABASE_URL'] == expected
               with psycopg.connect(expected.replace('postgresql+psycopg://', 'postgresql://', 1),
                                    connect_timeout=10, options='-c statement_timeout=5000') as connection:
                   connection.execute('SET TRANSACTION READ ONLY')
                   database, actor, version = connection.execute(
                       "SELECT current_database(), current_user, current_setting('server_version_num')::int"
                   ).fetchone()
-                  assert database == 'crm_ready_h02' and actor == 'postgres'
+                  assert database == 'accounting_test' and actor == 'aios'
                   assert type(version) is int and 160000 <= version < 170000
-                  schemas = connection.execute(
-                      "SELECT count(*) FROM pg_namespace WHERE left(nspname, 7) = 'owners_'"
+                  databases = connection.execute(
+                      "SELECT count(*) FROM pg_database WHERE left(datname, 9) = 'acc_test_'"
                   ).fetchone()[0]
                   connections = connection.execute(
-                      "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
-                      "AND backend_type = 'client backend' AND pid <> pg_backend_pid()"
+                      "SELECT count(*) FROM pg_stat_activity WHERE left(datname, 9) = 'acc_test_'"
                   ).fetchone()[0]
-                  return version, schemas == 0 and connections == 0
+                  return version, databases == 0 and connections == 0
 
 
           def main():
               root, temp = Path.cwd(), Path(os.environ['RUNNER_TEMP'])
-              summary = {'schemaVersion': 1, 'kind': 'identity-owner-pg8', 'stage': 'preflight',
+              summary = {'schemaVersion': 1, 'kind': 'finance-organization-migration-pg1', 'stage': 'preflight',
                          'passed': False, 'planned': PLANNED, 'countsKnown': False,
                          'passedCount': None, 'failedCount': None, 'errorCount': None,
                          'skippedCount': None, 'notRunCount': None, 'cases': [],
@@ -705,15 +701,15 @@ jobs:
                   summary.update(commit=os.environ['GITHUB_SHA'], sourceSha256=EXPECTED_SOURCES,
                                  moduleSha=EXPECTED_MODULES, postgresVersion=version)
                   summary['stage'] = 'collection'
-                  with (temp / 'identity8-collection.log').open('wb') as log:
+                  with (temp / 'finance0196-collection.log').open('wb') as log:
                       collected = subprocess.run([sys.executable, '-m', 'pytest', '--color=no', '--collect-only', '-q', *SELECTED],
                                                  stdout=log, stderr=subprocess.STDOUT, timeout=90)
                   assert collected.returncode == 0
-                  identities = collection((temp / 'identity8-collection.log').read_bytes())
+                  identities = collection((temp / 'finance0196-collection.log').read_bytes())
                   summary['collectedIds'] = sorted(EXPECTED_CASES)
                   summary['stage'] = 'execution'
-                  junit = temp / 'identity8-pg.junit.xml'
-                  with (temp / 'identity8-execution.log').open('wb') as log:
+                  junit = temp / 'finance0196-pg.junit.xml'
+                  with (temp / 'finance0196-execution.log').open('wb') as log:
                       completed = subprocess.run([sys.executable, '-m', 'pytest', '--color=no', '-q', '-x', '--tb=short',
                                                   '--junitxml=' + str(junit), *SELECTED],
                                                  stdout=log, stderr=subprocess.STDOUT, timeout=900)
@@ -741,19 +737,19 @@ jobs:
                       summary['passed'] = False
                   if not summary['passed']:
                       code = 1
-                  (temp / 'erp-ready-identity-summary.json').write_text(json.dumps(summary, sort_keys=True) + '\n')
-                  print('Identity stage:', summary['stage'], 'passed:', summary['passedCount'],
+                  (temp / 'erp-ready-finance-summary.json').write_text(json.dumps(summary, sort_keys=True) + '\n')
+                  print('Accounting stage:', summary['stage'], 'passed:', summary['passedCount'],
                         'failed:', summary['failedCount'], 'not run:', summary['notRunCount'])
               return code
 
 
           if __name__ == '__main__':
               sys.exit(main())
-      - name: Upload allowlisted numerical identity summary only
+      - name: Upload allowlisted numerical Finance summary only
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: erp-ready-selective-identity-summary
-          path: ${{ runner.temp }}/erp-ready-identity-summary.json
+          name: erp-ready-finance-numeric
+          path: ${{ runner.temp }}/erp-ready-finance-summary.json
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1

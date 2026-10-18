@@ -4,20 +4,26 @@ This exercises current ORM constraints, not the production migration path.
 """
 import asyncio
 import os
+import runpy
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select, text
+from sqlalchemy import MetaData, inspect, select, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from config.settings import get_settings
+from core.db.base import Base
 from core.domain.models import IdentityInvitationRequest, OutboxEvent, User
 from core.runtime.deps import get_core, get_session
 from core.services.auth import CurrentUser, get_current_user
@@ -29,7 +35,7 @@ from modules.finance.routes import router
 
 
 @pytest_asyncio.fixture
-async def native_bank_factory():
+async def native_bank_factory(request):
     url = os.getenv("ACCOUNTING_TEST_POSTGRES_URL")
     if not url:
         pytest.skip("Isolated PostgreSQL acceptance requires ACCOUNTING_TEST_POSTGRES_URL")
@@ -67,7 +73,32 @@ async def native_bank_factory():
                 ):
                     model.__table__.create(connection)
 
-            await conn.run_sync(create_tables)
+            def create_legacy_tables(connection):
+                for model in (User, IdentityInvitationRequest, OutboxEvent, Organization, AccessGrant, SourceBinding):
+                    model.__table__.create(connection)
+                # Start from the existing Payment columns, then use actual 0075
+                # to build its historical account reference and account table.
+                legacy = Payment.__table__.to_metadata(MetaData(naming_convention=Base.metadata.naming_convention))
+                assert {"organization_id", "account_id"} <= set(legacy.c.keys())
+                for constraint in list(legacy.constraints):
+                    if {"organization_id", "account_id"} & set(constraint.columns.keys()) or "organization_id" in str(getattr(constraint, "sqltext", "")):
+                        legacy.constraints.remove(constraint)
+                for index in list(legacy.indexes):
+                    if {"organization_id", "account_id"} & set(index.columns.keys()):
+                        legacy.indexes.remove(index)
+                for column in ("organization_id", "account_id"):
+                    legacy._columns.remove(legacy.c[column])
+                legacy.create(connection)
+                old = Path(__file__).resolve().parents[1] / "migrations/versions/0075_finance_bank_account.py"
+                context = MigrationContext.configure(connection, opts={"target_metadata": Base.metadata})
+                with Operations.context(context):
+                    runpy.run_path(str(old))["upgrade"]()
+                for model in (PaymentAllocation, BankTransaction):
+                    model.__table__.create(connection)
+
+            mode = getattr(request, "param", "current_orm")
+            assert mode in {"current_orm", "migration_0196"}
+            await conn.run_sync(create_legacy_tables if mode == "migration_0196" else create_tables)
         yield async_sessionmaker(engine, expire_on_commit=False)
     finally:
         try:
@@ -237,3 +268,115 @@ async def test_different_bank_transactions_concurrent_same_payment(native_bank_f
     assert {row.allocation_id for row in transactions} == {row.id for row in allocations}
     by_id = {row.id: row for row in allocations}
     assert all(by_id[row.allocation_id].amount == row.amount for row in transactions)
+
+
+@pytest.mark.parametrize("native_bank_factory", ["migration_0196"], indirect=True)
+async def test_finance_organization_migration_roundtrip(native_bank_factory):
+    """Real Operations upgrade/guarded downgrade; prepared Finance predecessor only."""
+    root = Path(__file__).resolve().parents[1]
+    migration = runpy.run_path(str(root / "migrations/versions/0196_finance_organization_ownership.py"))
+    assert migration["revision"] == "0196" and migration["down_revision"] == "0195"
+
+    async def apply(session, function):
+        connection = await session.connection()
+        def migrate(sync_connection):
+            context = MigrationContext.configure(sync_connection, opts={"target_metadata": Base.metadata})
+            with Operations.context(context):
+                function()
+        await connection.run_sync(migrate)
+
+    async def shape(session):
+        connection = await session.connection()
+        def read(sync_connection):
+            inspector = inspect(sync_connection)
+            return {table: {
+                "columns": {c["name"]: c["nullable"] for c in inspector.get_columns(table, schema="finance")},
+                "fks": {c["name"]: c for c in inspector.get_foreign_keys(table, schema="finance", postgresql_ignore_search_path=True)},
+                "unique": {c["name"]: c["column_names"] for c in inspector.get_unique_constraints(table, schema="finance")},
+                "checks": {c["name"] for c in inspector.get_check_constraints(table, schema="finance")},
+                "indexes": {c["name"] for c in inspector.get_indexes(table, schema="finance")},
+            } for table in ("payment", "bank_account")}
+        return await connection.run_sync(read)
+
+    async def snapshots(session):
+        return [await session.scalar(text(f"SELECT to_jsonb(row) FROM finance.{table} row WHERE id=:id"), {"id": ident})
+                for table, ident in (("bank_account", 41), ("payment", 51))]
+
+    async with native_bank_factory() as session:
+        before_shape = await shape(session)
+        assert before_shape["bank_account"]["unique"] == {"uq_bank_account_code": ["code"]}
+        assert before_shape["payment"]["fks"]["fk_payment_account_id_bank_account"]["options"]["ondelete"] == "SET NULL"
+        await session.execute(text("INSERT INTO finance.bank_account(id,code,title) VALUES (41,'synthetic-legacy','Synthetic legacy account')"))
+        await session.execute(text("INSERT INTO finance.payment(id,ref,amount,account_id) VALUES (51,'Synthetic legacy payment',12.34,41)"))
+        before_rows = await snapshots(session)
+        await session.commit()
+        await apply(session, migration["upgrade"])
+        await session.commit()
+        after_rows = await snapshots(session)
+        assert all(row.pop("organization_id") is None for row in after_rows)
+        assert after_rows == before_rows
+        target = await shape(session)
+        for table in ("payment", "bank_account"):
+            assert target[table]["columns"]["organization_id"] is True
+            assert f"fk_{table}_organization_id_organization" in target[table]["fks"]
+            assert f"ix_finance_{table}_organization_id" in target[table]["indexes"]
+            assert f"ck_{table}_ck_finance_{table}_organization_positive" in target[table]["checks"]
+        assert "uq_bank_account_code" not in target["bank_account"]["unique"]
+        assert target["bank_account"]["unique"]["uq_finance_bank_account_organization_code"] == ["organization_id", "code"]
+        assert target["bank_account"]["unique"]["uq_finance_bank_account_organization_id"] == ["organization_id", "id"]
+        composite = target["payment"]["fks"]["fk_finance_payment_account_organization"]
+        assert composite["constrained_columns"] == ["organization_id", "account_id"]
+        assert composite["referred_columns"] == ["organization_id", "id"]
+        assert composite["options"]["ondelete"] == "RESTRICT"
+        assert target["payment"]["fks"]["fk_payment_account_id_bank_account"]["options"]["ondelete"] == "RESTRICT"
+        session.add_all([Organization(id=7, name="Synthetic seven", unp="900000007"), Organization(id=9, name="Synthetic nine", unp="900000009")])
+        await session.flush()
+        await session.execute(text("INSERT INTO finance.bank_account(id,organization_id,code,title) VALUES (71,7,'same','Synthetic seven'),(91,9,'same','Synthetic nine')"))
+        await session.execute(text("INSERT INTO finance.payment(id,organization_id,ref,amount,account_id) VALUES (72,7,'Synthetic owned payment',5.00,71)"))
+        await session.commit()
+        for sql in (
+            "INSERT INTO finance.payment(organization_id,ref,account_id) VALUES (7,'Synthetic cross book',91)",
+            "INSERT INTO finance.bank_account(organization_id,code,title) VALUES (7,'same','Synthetic duplicate')",
+            "INSERT INTO finance.bank_account(organization_id,code,title) VALUES (999,'unknown','Synthetic unknown book')",
+            "INSERT INTO finance.payment(organization_id,ref) VALUES (0,'Synthetic zero book')",
+            "DELETE FROM finance.bank_account WHERE id=71",
+        ):
+            with pytest.raises(IntegrityError):
+                async with session.begin_nested():
+                    await session.execute(text(sql))
+        with pytest.raises(RuntimeError, match="ownership cannot be discarded"):
+            async with session.begin_nested():
+                await apply(session, migration["downgrade"])
+        assert await shape(session) == target
+        await session.commit()
+
+    # A fresh session proves refusal preserved committed owners and original rows.
+    async with native_bank_factory() as session:
+        assert await session.scalar(text("SELECT organization_id FROM finance.payment WHERE id=72")) == 7
+        assert await session.scalar(text("SELECT account_id FROM finance.payment WHERE id=72")) == 71
+        assert await session.scalar(text("SELECT count(*) FROM finance.bank_account WHERE organization_id IS NOT NULL")) == 2
+        await session.execute(text("DELETE FROM finance.payment WHERE id=72"))
+        await session.execute(text("DELETE FROM finance.bank_account WHERE id IN (71,91)"))
+        await session.execute(text("INSERT INTO finance.bank_account(id,code,title) VALUES (61,'synthetic-legacy','Synthetic duplicate legacy')"))
+        await session.commit()
+        with pytest.raises(RuntimeError, match="Duplicate legacy account codes"):
+            async with session.begin_nested():
+                await apply(session, migration["downgrade"])
+        assert await shape(session) == target
+        assert await session.scalar(text("SELECT count(*) FROM finance.bank_account WHERE code='synthetic-legacy'")) == 2
+        await session.commit()
+        await session.execute(text("DELETE FROM finance.bank_account WHERE id=61"))
+        await session.commit()
+        await apply(session, migration["downgrade"])
+        await session.commit()
+        assert await shape(session) == before_shape
+        assert await snapshots(session) == before_rows
+        with pytest.raises(IntegrityError):
+            async with session.begin_nested():
+                await session.execute(text("INSERT INTO finance.bank_account(code,title) VALUES ('synthetic-legacy','Synthetic blocked duplicate')"))
+        # Actual historical consumer accepts restored constraint/index names.
+        old = runpy.run_path(str(root / "migrations/versions/0075_finance_bank_account.py"))
+        await apply(session, old["downgrade"])
+        await session.commit()
+        assert await session.scalar(text("SELECT amount::text FROM finance.payment WHERE id=51")) == "12.34"
+        assert await session.scalar(text("SELECT ref FROM finance.payment WHERE id=51")) == "Synthetic legacy payment"
