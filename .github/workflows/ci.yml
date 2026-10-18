@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    branches-ignore:
+      - "agent/erp-ready-001-catalogue-qa-20261018"
   pull_request:
 
 # Push and pull_request can target the same commit. Keep one run for that SHA;

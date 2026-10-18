@@ -111,5 +111,8 @@ if __name__ == '__main__':
     bind_host = os.environ.get('E2E_BIND_HOST', '127.0.0.1')
     if bind_host not in ('127.0.0.1', '0.0.0.0'):
         raise ValueError('Unsupported E2E bind address')
+    bind_port = int(os.environ.get('E2E_BIND_PORT', '8000'))
+    if not 1024 <= bind_port <= 65535:
+        raise ValueError('Unsupported E2E bind port')
     asyncio.run(seed())
-    uvicorn.run(app, host=bind_host, port=8000)
+    uvicorn.run(app, host=bind_host, port=bind_port)
