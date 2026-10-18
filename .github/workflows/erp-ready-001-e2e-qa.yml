@@ -11,7 +11,7 @@ permissions:
 jobs:
   e2e:
     name: CRM own outcomes (2)
-    if: ${{ false }}
+    if: ${{ true }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -51,7 +51,7 @@ jobs:
           root = Path.cwd()
           temp = Path(os.environ['RUNNER_TEMP'])
           summary_path = temp / 'erp-ready-e2e-summary.json'
-          expected_sources = {'frontend/e2e/counterparties.spec.ts': '27e7b1bae0477a983c21a8a215d237f1361c62e61e4bd01615b4b0adb660501e', 'frontend/e2e/crm-own-cycle.spec.ts': '2abbcecd942765f164eec448ce6737f39e9e152012151a8cdd3f0e4b2458a6f1', 'frontend/e2e/crm-own-outcomes.spec.ts': 'a9cdd4e50ca499496f242e5ce38cbe55c92eb7ebc2c35fbf4cc691b2fa23e4bc', 'frontend/e2e/deal-card.spec.ts': 'bcb66f622e6f54e51437e712c1f8a1327a4bfc6b6c2d6b46b6ad95cfb5621ec9', 'frontend/e2e/deals-board.spec.ts': '694519c4eefda774fb32cb82336e128b0f99f6ab23ae522a32e28e8fcb5df9b8', 'frontend/e2e/navigation.spec.ts': '996b3f56c58b0385b8e180d2bb6b83602cb844c38e4953983e2fa866f371a39f', 'frontend/e2e/procurement-deadlines.spec.ts': '5ffdb586955d4379bbb87bb591b8251116db732f4de53fe32dbb76d59c6a5155', 'frontend/e2e/crm-fixtures.ts': '43be79105c3fa04f1875ef7507e38e56cb5f25800e27d50221c1177100d75f98', 'scripts/seed_invoice_e2e.py': 'c83b6069b25aa6e43924281a7a210c4e065a1a685aa1e5aaaee14e4b68da3281', 'frontend/src/lib/deal-loss-api.ts': '2039b12a8e13d2cce2bd220af84a57d2821a3837c3aac87dc15af360bbab2264', 'frontend/src/components/kanban/lose-deal-modal.tsx': 'bbb2032393c6683687898c28e8519e67e36584a5a3882798ef9466296c4dc2b4', 'frontend/src/components/kanban/lose-deal-modal.test.tsx': 'd9a80de326d629996305a6869b42d6a582015718b1db0453782c1707e33bbef5', 'tests/test_deal_loss.py': '3b796afa311b72dc36a033e752160ee839b90699a61cae42cc01cf225586cb65', 'frontend/src/lib/deal-loss-api.test.ts': 'f139b06d895c6835eb36a3c390a3915024b23c1ab6879257d9e477031c9c8587'}
+          expected_sources = {'frontend/e2e/counterparties.spec.ts': '27e7b1bae0477a983c21a8a215d237f1361c62e61e4bd01615b4b0adb660501e', 'frontend/e2e/crm-own-cycle.spec.ts': '2abbcecd942765f164eec448ce6737f39e9e152012151a8cdd3f0e4b2458a6f1', 'frontend/e2e/crm-own-outcomes.spec.ts': 'a9cdd4e50ca499496f242e5ce38cbe55c92eb7ebc2c35fbf4cc691b2fa23e4bc', 'frontend/e2e/deal-card.spec.ts': 'bcb66f622e6f54e51437e712c1f8a1327a4bfc6b6c2d6b46b6ad95cfb5621ec9', 'frontend/e2e/deals-board.spec.ts': '694519c4eefda774fb32cb82336e128b0f99f6ab23ae522a32e28e8fcb5df9b8', 'frontend/e2e/navigation.spec.ts': '996b3f56c58b0385b8e180d2bb6b83602cb844c38e4953983e2fa866f371a39f', 'frontend/e2e/procurement-deadlines.spec.ts': '5ffdb586955d4379bbb87bb591b8251116db732f4de53fe32dbb76d59c6a5155', 'frontend/e2e/crm-fixtures.ts': '43be79105c3fa04f1875ef7507e38e56cb5f25800e27d50221c1177100d75f98', 'scripts/seed_invoice_e2e.py': 'c83b6069b25aa6e43924281a7a210c4e065a1a685aa1e5aaaee14e4b68da3281', 'frontend/src/lib/deal-loss-api.ts': '2039b12a8e13d2cce2bd220af84a57d2821a3837c3aac87dc15af360bbab2264', 'frontend/src/components/kanban/lose-deal-modal.tsx': 'bbb2032393c6683687898c28e8519e67e36584a5a3882798ef9466296c4dc2b4', 'frontend/src/components/kanban/lose-deal-modal.test.tsx': 'd9a80de326d629996305a6869b42d6a582015718b1db0453782c1707e33bbef5', 'tests/test_deal_loss.py': '3b796afa311b72dc36a033e752160ee839b90699a61cae42cc01cf225586cb65', 'frontend/src/lib/deal-loss-api.test.ts': 'f139b06d895c6835eb36a3c390a3915024b23c1ab6879257d9e477031c9c8587', 'frontend/src/components/deal-documents.tsx': 'abda7fa435d0cd8cdca77c013ab13a6c370cd67c1c7e9dd952921c74c1288e89', 'frontend/src/components/deal-documents.test.tsx': '93ff35c9774adc7ed59c4a04739f5800eaf89ca8fc73fbfb9cbba138d99f322d'}
           expected_modules = {'finance': '59832b2f14a2ee02d8db266a67f8206616bdcd94', 'hr': 'f8a6e0142f1920b07ec56818f42d156a602ff9c3', 'leads': '9a304f771ba74369ded199168e0e1da3ad6348d2', 'logistics': '6923d2e021980ef2546f382364d38dc34a0fef29', 'marketing': 'd4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282', 'procurement': 'f29ea84bd13342ae572e8c4499031d2f053d3d47', 'production': 'be7d7e198bf09cc41c642d22125db401da5adc48', 'sales': '74359d6460c0c870c96825e23d9dd42a12832587', 'service': '3d33800c44865cd7a7373b29192c5d59d3c4bec8', 'wms': '8b6fb881a03f1a268f07e65f4fa89d195fc933a2'}
           expected_cases = {tuple(case) for case in [["chromium", "crm-own-outcomes.spec.ts", "own outcomes preserve originals, tasks and stock reserve"], ["setup", "auth.setup.ts", "dev-\u043b\u043e\u0433\u0438\u043d (\u0414\u0438\u0440\u0435\u043a\u0442\u043e\u0440)"]]}
           summary = {'schemaVersion': 1, 'stage': 'preflight', 'passed': False,
@@ -518,7 +518,7 @@ jobs:
           retention-days: 7
 
   accounting_pg:
-    if: ${{ true }}
+    if: ${{ false }}
     name: Inventory issue snapshot compatibility (2)
     runs-on: ubuntu-latest
     timeout-minutes: 20

@@ -39,7 +39,7 @@ describe("DealDocuments — загрузка", () => {
 });
 
 describe("DealDocuments — сумма выпущенного счёта", () => {
-  it.each(["posted", "paid"])("сумма с НДС 360 берётся из оригинала %s, оплата и остаток неизвестны", async (status) => {
+  it.each(["issued", "posted", "paid"])("сумма с НДС 360 берётся из оригинала %s, оплата и остаток неизвестны", async (status) => {
     mock(api.fetchDocuments).mockResolvedValue([{ ...issuedInvoice, status }]);
     render(<DealDocuments dealId="1" />);
     expect(await moneySummary().findByText("360 BYN")).toBeInTheDocument();

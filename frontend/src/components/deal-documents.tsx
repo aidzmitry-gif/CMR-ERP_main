@@ -63,7 +63,7 @@ function reserveBadge(d: DealDoc): { label: string; cls: string } | null {
 
 function InvoiceMoney({ items }: { items: DealDoc[] }) {
   const current = items.filter((doc) => doc.kind === "invoice"
-    && ["posted", "paid"].includes(doc.status) && !doc.superseded_by_id);
+    && ["issued", "posted", "paid"].includes(doc.status) && !doc.superseded_by_id);
   const candidate = current.length === 1 ? current[0] : null;
   const invoice = candidate?.original_state === "issued"
     && typeof candidate.amount === "number" && Number.isFinite(candidate.amount) && candidate.amount >= 0
