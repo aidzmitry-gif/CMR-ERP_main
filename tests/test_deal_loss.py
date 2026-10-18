@@ -5,9 +5,9 @@ import pytest
 from sqlalchemy import delete, func, select, update
 
 from core.domain.models import OutboxEvent, User
-from modules.accounting.models import AccessGrant, Policy
+from modules.accounting.models import AccessGrant, Organization, Policy
 from modules.sales.deal_loss import DealLossRequest, DealLossResolution
-from modules.sales.models import Deal, DealDocument, Stage
+from modules.sales.models import Deal, DealDocument, LossReason, Stage
 from modules.sales.reservation_source import SalesReservationSource
 from tests.accounting.test_invoice_settlements import bank
 from tests.test_invoice_cancellation import cancel_request, prepared
@@ -479,3 +479,80 @@ async def test_durable_cancelled_evidence_survives_midnight(api, session, monkey
     monkeypatch.setattr(invoice_reconciliation, "date", Tomorrow)
     response = await api.post(endpoint(org, row, "finalize"), json=resolution(row))
     assert response.status_code == 200, response.text
+
+
+async def own_loss_seller(session):
+    deal = await session.get(Deal, 1)
+    deal.owner_id = 777
+    session.add(User(username="issuer", full_name="Synthetic seller", role="sales", status="active",
+                     employee_id=777, deal_visibility="own"))
+    await session.commit()
+
+
+async def test_context_own_active_reasons_authorizes_custom_command(api, session):
+    ids, _ = await seed(api, session)
+    await own_loss_seller(session)
+    await session.execute(delete(LossReason))
+    session.add_all([
+        LossReason(code="custom_b", title="Synthetic B", active=True, sort_order=20),
+        LossReason(code="custom_a", title="Synthetic A", active=True, sort_order=20),
+        LossReason(code="custom_first", title="Synthetic first", active=True, sort_order=10),
+        LossReason(code="inactive", title="Hidden", active=False, sort_order=0),
+        Deal(number="catalog-foreign", title="Foreign", counterparty="Synthetic", amount=0, owner_id=888),
+    ])
+    await session.commit()
+    foreign_id = await session.scalar(select(Deal.id).where(Deal.number == "catalog-foreign"))
+    api.headers["X-User-Roles"] = "sales"
+    current = await api.get("/sales/deals/1/loss-context")
+    assert current.status_code == 200, current.text
+    assert current.json()["loss_reasons"] == [
+        {"code": "custom_first", "title": "Synthetic first"},
+        {"code": "custom_a", "title": "Synthetic A"}, {"code": "custom_b", "title": "Synthetic B"},
+    ]
+    assert (await api.get("/sales/loss-reasons")).status_code == 403
+    hidden = await api.get(f"/sales/deals/{foreign_id}/loss-context")
+    assert hidden.status_code == 404 and "loss_reasons" not in hidden.json()
+    data, row = await submit(api, ids["org"], reason_code="custom_a")
+    assert row["command"]["reason_code"] == data["reason_code"] == "custom_a"
+
+
+async def test_context_own_empty_reasons_do_not_use_global_defaults(api, session):
+    await seed(api, session)
+    await own_loss_seller(session)
+    await session.execute(delete(LossReason))
+    await session.commit()
+    api.headers["X-User-Roles"] = "sales"
+    response = await api.get("/sales/deals/1/loss-context")
+    assert response.status_code == 200, response.text
+    assert response.json()["loss_reasons"] == []
+    assert (await api.get("/sales/loss-reasons")).status_code == 403
+
+
+async def test_context_own_reasons_require_current_book_grant(api, session):
+    await seed(api, session)
+    await own_loss_seller(session)
+    await session.execute(delete(AccessGrant))
+    foreign = Organization(name="Synthetic unrelated company", unp="999999998")
+    session.add(foreign)
+    await session.flush()
+    session.add(AccessGrant(organization_id=foreign.id, subject="issuer", role="chief"))
+    await session.commit()
+    api.headers["X-User-Roles"] = "sales"
+    response = await api.get("/sales/deals/1/loss-context")
+    assert response.status_code == 403, response.text
+    assert "loss_reasons" not in response.json() and "organization" not in response.json()
+
+
+@pytest.mark.parametrize("reason", ["inactive", "unknown"])
+async def test_context_own_catalog_never_accepts_inactive_or_unknown_reason(api, session, reason):
+    ids, _ = await seed(api, session)
+    await own_loss_seller(session)
+    await session.execute(delete(LossReason))
+    session.add_all([LossReason(code="active", title="Active", active=True),
+                     LossReason(code="inactive", title="Inactive", active=False)])
+    await session.commit()
+    api.headers["X-User-Roles"] = "sales"
+    data = await loss_command(api, ids["org"], reason_code=reason)
+    response = await api.post("/sales/deals/1/lose", json=data)
+    assert response.status_code == 422, response.text
+    assert await session.scalar(select(func.count()).select_from(DealLossRequest)) == 0

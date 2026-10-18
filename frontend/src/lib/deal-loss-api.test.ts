@@ -173,3 +173,21 @@ it.each([
   await expect(lossGate("1", "rp_won")).rejects.toThrow("сверка");
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
+
+
+it.each([{}, { loss_reasons: [] }, { loss_reasons: [{ code: "x".repeat(128), title: "Scoped reason" }] }])(
+  "accepts an absent, authoritative empty or valid scoped reason catalog %j", async extra => {
+    vi.stubGlobal("fetch", vi.fn(async () => ok({ ...context, ...extra })));
+    const current = await fetchLossContext(1);
+    expect(current.loss_reasons).toEqual("loss_reasons" in extra ? extra.loss_reasons : undefined);
+  },
+);
+it.each([
+  null, {}, [null], [{ code: "", title: "Reason" }], [{ code: " reason", title: "Reason" }],
+  [{ code: "reason ", title: "Reason" }], [{ code: "x".repeat(129), title: "Reason" }],
+  [{ code: "reason", title: "" }], [{ code: "reason", title: 42 }],
+  [{ code: "same", title: "First" }, { code: "same", title: "Second" }],
+])("rejects malformed present scoped reasons %j", async loss_reasons => {
+  vi.stubGlobal("fetch", vi.fn(async () => ok({ ...context, loss_reasons })));
+  await expect(fetchLossContext(1)).rejects.toThrow("сверка");
+});

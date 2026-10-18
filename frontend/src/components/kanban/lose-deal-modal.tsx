@@ -42,8 +42,10 @@ export function LoseDealModal({ dealId, dealLabel, reasons: suppliedReasons, onC
   const [record, setRecord] = useState<LossRecord | null>(null);
   const [journal, setJournal] = useState<Journal>({ raw: null, attempt: null });
   const [fetchedReasons, setFetchedReasons] = useState<LossReason[]>([]);
-  const reasons = suppliedReasons ?? fetchedReasons;
+  const scopedReasons = ctx?.loss_reasons;
+  const reasons = scopedReasons ?? suppliedReasons ?? fetchedReasons;
   const [reason, setReason] = useState("");
+  const reasonAllowed = scopedReasons === undefined || scopedReasons.some(row => row.code === reason.trim());
   const [comment, setComment] = useState("");
   const [empty, setEmpty] = useState(false);
   const [evidence, setEvidence] = useState("");
@@ -60,6 +62,7 @@ export function LoseDealModal({ dealId, dealLabel, reasons: suppliedReasons, onC
     if (epoch.current !== token) return;
     // Clear prior principal data before reading the new principal's journal.
     setCtx(current); setRecord(null); setPreview(null); setJournal({ raw: null, attempt: null });
+    if (current.loss_reasons !== undefined) setReason(selected => current.loss_reasons?.some(row => row.code === selected) ? selected : "");
     if (current.mapping_required) return;
     const scope = scopeOf(current);
     const saved = await readLossJournal(scope);
@@ -74,6 +77,7 @@ export function LoseDealModal({ dealId, dealLabel, reasons: suppliedReasons, onC
     }
     if (epoch.current !== token) return;
     setCtx(refreshed); setJournal(saved); setRecord(active); setPreview(nextPreview);
+    if (refreshed.loss_reasons !== undefined) setReason(selected => refreshed.loss_reasons?.some(row => row.code === selected) ? selected : "");
     callbacks.current.onPending?.(active?.state === "pending" ? active.request_id : null);
     if (completed && active?.state === "finalized" && active.resolution
       && refreshed.stage === active.resolution.snapshot.to_stage && refreshed.latest_request_id === active.request_id
@@ -114,8 +118,13 @@ export function LoseDealModal({ dealId, dealLabel, reasons: suppliedReasons, onC
     void run(async token => {
       if (!ctx) return;
       const scope = scopeOf(ctx);
-      await requireScope(scope);
+      const current = await requireScope(scope);
       if (epoch.current !== token) return;
+      if (kind === "request" && current.loss_reasons !== undefined
+        && !current.loss_reasons.some(row => row.code === reason.trim())) {
+        setCtx(current); setReason("");
+        throw new Error("Причина отказа больше не доступна. Выберите активную причину после обновления сведений.");
+      }
       const requestKey = crypto.randomUUID();
       let body: RequestBody | ResolveBody;
       let requestId: string;
@@ -149,7 +158,7 @@ export function LoseDealModal({ dealId, dealLabel, reasons: suppliedReasons, onC
       const current = await requireScope(scope);
       if (current.pending_request_id) { await load(token); return; }
       const next = await fetchLossPreview(scope);
-      if (epoch.current === token) { setRecord(null); setPreview(next); setReason(""); setComment(""); setEmpty(false); setEvidence(""); }
+      if (epoch.current === token) { setCtx(current); setRecord(null); setPreview(next); setReason(""); setComment(""); setEmpty(false); setEvidence(""); }
     });
   }
   const unresolved = !!journal.attempt && ["pending", "uncertain"].includes(journal.attempt.outcome);
@@ -202,12 +211,14 @@ export function LoseDealModal({ dealId, dealLabel, reasons: suppliedReasons, onC
         <p className="text-xs">Автор запроса: {record.actor}. {record.resolution && `Квитанция: ${record.resolution.resolution_id}.`}</p>
       </div>}
       {ctx && !ctx.mapping_required && !record && preview && !unresolved && <div className="space-y-3">
-        <label className="block">Причина отказа{reasons.length ? <select className={INPUT} aria-label="Причина отказа" value={reason} onChange={e => setReason(e.target.value)} disabled={busy}>
+        <label className="block">Причина отказа{scopedReasons?.length === 0
+          ? <span role="alert">Нет активных причин отказа. Попросите администратора настроить справочник и обновите сведения.</span>
+          : reasons.length ? <select className={INPUT} aria-label="Причина отказа" value={reason} onChange={e => setReason(e.target.value)} disabled={busy}>
           <option value="">Выберите причину</option>{reasons.map(r => <option key={r.code} value={r.code}>{r.title}</option>)}</select>
           : <input className={INPUT} aria-label="Причина отказа" placeholder="Код причины отказа" maxLength={128} value={reason} onChange={e => setReason(e.target.value)} disabled={busy} />}</label>
         <textarea className={INPUT} aria-label="Комментарий к отказу" placeholder="Комментарий (необязательно)" maxLength={2000} value={comment} onChange={e => setComment(e.target.value)} disabled={busy} />
         {preview.snapshot.invoices.length === 0 && <label className="block"><input type="checkbox" checked={empty} onChange={e => setEmpty(e.target.checked)} disabled={busy} /> Закрыть сейчас, если счетов нет</label>}
-        <button className={BUTTON} disabled={busy || !reason.trim() || !preview.snapshot.lost_stage} onClick={() => send("request")}>Запросить отказ</button>
+        <button className={BUTTON} disabled={busy || !reason.trim() || !reasonAllowed || !preview.snapshot.lost_stage} onClick={() => send("request")}>Запросить отказ</button>
       </div>}
       {record?.state === "pending" && !unresolved && <div className="space-y-3">
         <p>Сделка остаётся на исходной стадии до подтверждённого завершения отказа. Выпуск и отгрузка новых счетов приостановлены.</p>

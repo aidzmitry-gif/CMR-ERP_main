@@ -15,7 +15,8 @@ async function server(invoices = false) {
   const snapshot: LossSnapshot = { funnel: "repeat_clients", stage: "rp_new", lost_stage: "rp_lost", invoices: invoices
     ? [{ id: 4, deal_id: 1, kind: "invoice", version: 2, content_sha256: "a".repeat(64), supersedes_id: 3, superseded_by_id: null }] : [] };
   const s = { principal: "seller", unowned: false, lostReply: false, record: null as LossRecord | null,
-    ready: !invoices, posts: [] as { url: string; body: string }[] };
+    ready: !invoices, posts: [] as { url: string; body: string }[],
+    reasons: undefined as { code: string; title: string }[] | undefined };
   const rows = (): InvoiceProgress[] => invoices ? [{ document_id: 4, status: s.ready ? "cancelled" : "paid", reserve_status: s.ready ? "released" : "reserved",
     ready: s.ready, blockers: s.ready ? [] : ["funds_not_fully_refunded"], money: { state: s.ready ? "fully_refunded" : "funds_held", digest: "b".repeat(64), received: "100.00", refunded: s.ready ? "100.00" : "0.00" } }] : [];
   async function resolve(body: ResolveBody, action: "finalized" | "withdrawn") {
@@ -33,7 +34,8 @@ async function server(invoices = false) {
       funnel: snapshot.funnel, stage: s.record?.state === "finalized" ? snapshot.lost_stage : snapshot.stage,
       lost_stage: snapshot.lost_stage, lost_stages: snapshot.lost_stage ? [snapshot.lost_stage] : [],
       pending_request_id: s.record?.state === "pending" ? s.record.request_id : null,
-      latest_request_id: s.record?.request_id ?? null, latest_request_state: s.record?.state ?? null });
+      latest_request_id: s.record?.request_id ?? null, latest_request_state: s.record?.state ?? null,
+      ...(s.reasons === undefined ? {} : { loss_reasons: s.reasons }) });
     if (url.endsWith("loss-preview")) return ok({ organization_id: 7, deal_id: 1, snapshot, composition_digest: await hash(snapshot),
       pending_request_id: s.record?.state === "pending" ? s.record.request_id : null, invoices: rows() });
     if (!options?.method) return s.record ? ok({ ...s.record, invoices: rows(), ready_to_finalize: s.record.state === "pending" && s.ready }) : { ok: false, status: 404 };
@@ -214,4 +216,89 @@ it("publishes finalized history even when a new monetary preview is unavailable"
   await waitFor(() => expect(done).toHaveBeenCalledOnce());
   expect(screen.getByText(/отказ завершён/)).toBeInTheDocument();
   expect(fetcher.mock.calls.filter(([url]) => url.endsWith("loss-preview"))).toHaveLength(1);
+});
+
+
+it.each(["supplied", "standalone"])("prefers scoped reasons to %s fallback and sends the explicit choice", async fallback => {
+  const { s } = await server();
+  s.reasons = [{ code: "custom_reason", title: "Scoped custom reason" }];
+  render(<LoseDealModal dealId="1" dealLabel="Сделка 1" onCancel={vi.fn()}
+    {...(fallback === "supplied" ? { reasons } : {})} />);
+  await screen.findByRole("option", { name: "Scoped custom reason" });
+  expect(screen.queryByRole("option", { name: "Цена" })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Причина отказа")).toHaveValue("");
+  expect(screen.getByRole("button", { name: "Запросить отказ" })).toBeDisabled();
+  expect(s.posts).toHaveLength(0);
+  fireEvent.change(screen.getByLabelText("Причина отказа"), { target: { value: "custom_reason" } });
+  fireEvent.click(screen.getByRole("button", { name: "Запросить отказ" }));
+  await screen.findByLabelText("Основание завершения или отзыва");
+  expect(s.posts).toHaveLength(1);
+  expect(JSON.parse(s.posts[0].body).reason_code).toBe("custom_reason");
+});
+it("blocks a new request for an authoritative empty catalog without a free code input", async () => {
+  const { s } = await server(); s.reasons = [];
+  render(<LoseDealModal dealId="1" dealLabel="Сделка 1" reasons={reasons} onCancel={vi.fn()} />);
+  await screen.findByText(/Нет активных причин отказа/);
+  expect(screen.queryByLabelText("Причина отказа")).not.toBeInTheDocument();
+  expect(screen.queryByPlaceholderText("Код причины отказа")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Запросить отказ" })).toBeDisabled();
+  expect(s.posts).toHaveLength(0);
+});
+it("rejects a removed reason on fresh preflight before writing a journal or POST", async () => {
+  const { s } = await server(); s.reasons = reasons;
+  render(<LoseDealModal dealId="1" dealLabel="Сделка 1" reasons={reasons} onCancel={vi.fn()} />);
+  await screen.findByLabelText("Причина отказа");
+  fireEvent.change(screen.getByLabelText("Причина отказа"), { target: { value: "price" } });
+  s.reasons = [];
+  fireEvent.click(screen.getByRole("button", { name: "Запросить отказ" }));
+  await screen.findByText(/Причина отказа больше не доступна/);
+  expect(screen.getByText(/Нет активных причин отказа/)).toBeInTheDocument();
+  expect(s.posts).toHaveLength(0);
+  expect(sessionStorage.length).toBe(0);
+});
+it("recovers an original committed request after the scoped catalog becomes empty", async () => {
+  const { s } = await server(); s.reasons = reasons; s.lostReply = true;
+  const view = render(<LoseDealModal dealId="1" dealLabel="Сделка 1" reasons={reasons} onCancel={vi.fn()} />);
+  await screen.findByLabelText("Причина отказа");
+  fireEvent.change(screen.getByLabelText("Причина отказа"), { target: { value: "price" } });
+  fireEvent.click(screen.getByRole("button", { name: "Запросить отказ" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Проверить результат команды" })).toBeEnabled());
+  const original = s.posts[0].body;
+  s.reasons = []; view.unmount();
+  render(<LoseDealModal dealId="1" dealLabel="Сделка 1" reasons={reasons} onCancel={vi.fn()} />);
+  const recover = await screen.findByRole("button", { name: "Проверить результат команды" });
+  await waitFor(() => expect(recover).toBeEnabled());
+  fireEvent.click(recover);
+  await screen.findByLabelText("Основание завершения или отзыва");
+  expect(s.posts).toHaveLength(1);
+  expect(s.posts[0].body).toBe(original);
+  expect(JSON.parse(original).reason_code).toBe("price");
+});
+
+it("clears a removed selection from the second load context without restoring it later", async () => {
+  const { s, fetcher } = await server();
+  const both = [...reasons, { code: "other", title: "Другая причина" }];
+  s.reasons = both;
+  render(<LoseDealModal dealId="1" dealLabel="Сделка 1" reasons={reasons} onCancel={vi.fn()} />);
+  const refresh = await screen.findByRole("button", { name: "Обновить сведения" });
+  await waitFor(() => expect(refresh).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("Причина отказа"), { target: { value: "price" } });
+  const original = fetcher.getMockImplementation()!;
+  let contexts = 0;
+  fetcher.mockImplementation(async (url, options) => {
+    if (url.endsWith("loss-context") && ++contexts === 2) s.reasons = [both[1]];
+    return original(url, options);
+  });
+  fireEvent.click(refresh);
+  await waitFor(() => expect(screen.queryByRole("option", { name: "Цена" })).not.toBeInTheDocument());
+  await waitFor(() => expect(refresh).toBeEnabled());
+  expect(screen.getByLabelText("Причина отказа")).toHaveValue("");
+  s.reasons = both;
+  fireEvent.click(refresh);
+  await screen.findByRole("option", { name: "Цена" });
+  await waitFor(() => expect(refresh).toBeEnabled());
+  expect(screen.getByLabelText("Причина отказа")).toHaveValue("");
+  expect(screen.getByRole("button", { name: "Запросить отказ" })).toBeDisabled();
+  expect(s.posts).toHaveLength(0);
+  expect(sessionStorage.length).toBe(0);
 });

@@ -4,7 +4,8 @@ export type LossScope = { deal: number; org: number; principal: string };
 export type LossContext = { deal_id: number; principal: string; organization_id: number | null;
   organization: { id: number; name: string; unp: string } | null; mapping_required: boolean;
   funnel: string; stage: string; lost_stage: string | null; lost_stages: string[]; pending_request_id: string | null;
-  latest_request_id: string | null; latest_request_state: LossState | null };
+  latest_request_id: string | null; latest_request_state: LossState | null;
+  loss_reasons?: { code: string; title: string }[] };
 export type InvoiceIdentity = { id: number; deal_id: number; kind: "invoice"; version: number;
   content_sha256: string | null; supersedes_id: number | null; superseded_by_id: number | null };
 export type LossSnapshot = { funnel: string; stage: string; lost_stage: string | null; invoices: InvoiceIdentity[] };
@@ -78,6 +79,12 @@ export async function fetchLossContext(deal: string | number): Promise<LossConte
   if (v.mapping_required ? v.organization_id !== null || v.organization !== null
     : !obj(v.organization) || !id(v.organization_id) || v.organization.id !== v.organization_id
       || !str(v.organization.name) || typeof v.organization.unp !== "string") invalid();
+  if (Object.hasOwn(v, "loss_reasons")) {
+    const reasons = v.loss_reasons;
+    if (!Array.isArray(reasons) || !reasons.every(r => obj(r) && str(r.code) && r.code === r.code.trim()
+      && r.code.length <= 128 && str(r.title))
+      || new Set(reasons.map(r => r.code)).size !== reasons.length) invalid();
+  }
   return v as unknown as LossContext;
 }
 export async function requireScope(scope: LossScope) {
