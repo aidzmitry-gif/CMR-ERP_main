@@ -376,7 +376,10 @@ async def test_primary_receipt_http_concurrent_replay_and_snapshot(pg_factory, p
 
 
 @pytest_asyncio.fixture
-async def pg_factory():
+async def pg_factory(request):
+    mode = getattr(request, "param", None)
+    if mode not in {None, "finance_0196"}:
+        pytest.fail("Unknown isolated accounting fixture mode")
     from sqlalchemy.engine import make_url
 
     url = os.getenv("ACCOUNTING_TEST_POSTGRES_URL")
@@ -394,8 +397,13 @@ async def pg_factory():
             await conn.execute(text(f'CREATE DATABASE "{database}"'))
             created = True
             await conn.execute(text(f'COMMENT ON DATABASE "{database}" IS \'crm-acc-fixture:{database}\''))
-        engine = create_async_engine(parsed.set(database=database))
+        engine_options = ({"connect_args": {"options": "-c statement_timeout=15000 -c lock_timeout=12000"}}
+                          if mode == "finance_0196" else {})
+        engine = create_async_engine(parsed.set(database=database), **engine_options)
         async with engine.begin() as conn:
+            if mode == "finance_0196":
+                version = int(await conn.scalar(text("SHOW server_version_num")))
+                assert 160000 <= version < 170000, "PostgreSQL 16 acceptance required"
             # Exercise the frozen proposal via real Alembic Operations, not create_all.
             # Revision registration remains subject to the shared allocator/operator.
             from alembic.migration import MigrationContext
@@ -508,7 +516,10 @@ async def pg_factory():
                 # actual 128 -> 200 upgrade, not merely accept current ORM widths.
                 connection.execute(text("ALTER TABLE sales.deal_document ALTER COLUMN issued_by TYPE varchar(128)"))
                 connection.execute(text("ALTER TABLE public.audit_log ALTER COLUMN actor TYPE varchar(128)"))
-                with Operations.context(MigrationContext.configure(connection)):
+                from core.db.base import Base
+                migration_context = (MigrationContext.configure(connection, opts={"target_metadata": Base.metadata})
+                                     if mode == "finance_0196" else MigrationContext.configure(connection))
+                with Operations.context(migration_context):
                     migration["upgrade"]()
                     # Finance organization FKs need the frozen accounting baseline;
                     # bank-source tables must still precede the closing-control tail.
@@ -520,8 +531,35 @@ async def pg_factory():
                     )
 
                     connection.execute(text("CREATE SCHEMA finance"))
-                    for table in (BankAccount.__table__, Payment.__table__, PaymentAllocation.__table__, BankTransaction.__table__):
-                        table.create(connection)
+                    if mode == "finance_0196":
+                        # Accepted HA predecessor pattern; no second ORM/Base.
+                        # Actual 0075 builds the historical account and SET NULL FK.
+                        legacy = Payment.__table__.to_metadata(MetaData(naming_convention=Base.metadata.naming_convention))
+                        for constraint in list(legacy.constraints):
+                            if ({"organization_id", "account_id"} & set(constraint.columns.keys())
+                                    or "organization_id" in str(getattr(constraint, "sqltext", ""))):
+                                legacy.constraints.remove(constraint)
+                        for index in list(legacy.indexes):
+                            if {"organization_id", "account_id"} & set(index.columns.keys()):
+                                legacy.indexes.remove(index)
+                        for column in ("organization_id", "account_id"):
+                            legacy._columns.remove(legacy.c[column])
+                        legacy.create(connection)
+                        runpy.run_path("migrations/versions/0075_finance_bank_account.py")["upgrade"]()
+                        from sqlalchemy import inspect
+                        inspector = inspect(connection)
+                        assert any(row["name"] == "uq_bank_account_code" and row["column_names"] == ["code"]
+                                   for row in inspector.get_unique_constraints("bank_account", schema="finance"))
+                        assert any(row["name"] == "fk_payment_account_id_bank_account"
+                                   and row["options"].get("ondelete") == "SET NULL"
+                                   and row["referred_schema"] == "finance"
+                                   for row in inspector.get_foreign_keys("payment", schema="finance",
+                                                                          postgresql_ignore_search_path=True))
+                        for table in (PaymentAllocation.__table__, BankTransaction.__table__):
+                            table.create(connection)
+                    else:
+                        for table in (BankAccount.__table__, Payment.__table__, PaymentAllocation.__table__, BankTransaction.__table__):
+                            table.create(connection)
 
                     remainder = runpy.run_path("migrations/versions/0131_invoice_remainder.py")
                     remainder["upgrade"]()
@@ -531,6 +569,20 @@ async def pg_factory():
                         *ACCOUNTING_TAIL_MIGRATIONS,
                     ):
                         runpy.run_path(f"migrations/versions/{migration_name}")["upgrade"]()
+                    if mode == "finance_0196":
+                        runpy.run_path("migrations/versions/0196_finance_organization_ownership.py")["upgrade"]()
+                        inspector = inspect(connection)
+                        for table in ("payment", "bank_account"):
+                            columns = {row["name"]: row for row in inspector.get_columns(table, schema="finance")}
+                            assert columns["organization_id"]["nullable"] is True
+                        assert any(row["name"] == "uq_finance_bank_account_organization_code"
+                                   and row["column_names"] == ["organization_id", "code"]
+                                   for row in inspector.get_unique_constraints("bank_account", schema="finance"))
+                        assert any(row["name"] == "fk_finance_payment_account_organization"
+                                   and row["constrained_columns"] == ["organization_id", "account_id"]
+                                   and row["options"].get("ondelete") == "RESTRICT"
+                                   for row in inspector.get_foreign_keys("payment", schema="finance",
+                                                                          postgresql_ignore_search_path=True))
 
             await conn.run_sync(upgrade)
         yield async_sessionmaker(engine, expire_on_commit=False)
@@ -555,6 +607,9 @@ async def pg_factory():
                     if active:
                         raise RuntimeError(f"Fixture database still has connections: {database}")
                     await conn.execute(text(f'DROP DATABASE "{database}"'))
+                    if mode == "finance_0196":
+                        assert await conn.scalar(text("SELECT count(*) FROM pg_database WHERE datname=:name"), {"name": database}) == 0
+                        assert await conn.scalar(text("SELECT count(*) FROM pg_stat_activity WHERE datname=:name"), {"name": database}) == 0
         finally:
             await admin.dispose()
 

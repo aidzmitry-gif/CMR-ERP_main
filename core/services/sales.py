@@ -37,3 +37,25 @@ class SalesSourceGateway(Protocol):
         and must compare event facts and the locked owner to the discovery result.
         """
         ...
+
+    async def invoice_financial_source(
+        self, session: Any, document_id: int, *, organization_id: int,
+        expected_version: int, expected_content_sha256: str,
+    ) -> dict:
+        """Return locked exact invoice/receipt facts for a receivable projection.
+
+        Caller holds the explicit organization lock and owns the transaction.
+        Includes current terminal/replacement state; supports stock/on_order.
+        No user grant, reservation requirement, shipment proof or cash fact.
+        """
+        ...
+
+    async def invoice_financial_lifecycle(
+        self, session: Any, document_id: int, *, organization_id: int,
+        expected_version: int, expected_content_sha256: str,
+    ) -> dict:
+        """Exact original plus verified cancellation and one predecessor only.
+
+        Internal event caller holds the organization lock; no cash assertion.
+        """
+        ...
