@@ -519,7 +519,7 @@ jobs:
 
   accounting_pg:
     if: ${{ true }}
-    name: Inventory issue snapshot compatibility (2)
+    name: Inventory receipt binding and Finance schema (3)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -567,16 +567,16 @@ jobs:
           import xml.etree.ElementTree as ET
           from pathlib import Path
 
-          EXPECTED_SOURCES = {'modules/accounting/inventory_allocation_receipts.py': '51a6cc0d2af983c2cd8914cc75c5eeff33c103428c950e15ea8a16ccf278a430', 'tests/accounting/test_inventory_allocation_receipts.py': 'cb5ee80a7c4ba60a00bf5c245a5eda2f9b5a8c9a3a59b28017c27cfdc5643ecd', 'tests/accounting/test_production_material_issue_postgres.py': '013397d50efd62628b7cb438f95c9e089725e85a16e72d136f3108b6be939f3a', 'tests/accounting/test_postgres.py': '3ce326ac555467368f8c0ea6898c26f98cc358492d31979e9f7238c339936cf4', 'modules/accounting/inventory_issues.py': '8031e8e1dad7139293cdc175abcaefe6f74c98c8b30188c3329c9b2f3c2dc6f4', 'modules/accounting/schemas.py': '70c226ce82f4d457e47a947e8f26422fe91abd280e064fda3cb8b2096233f42d', 'modules/accounting/sales.py': '685a1c2478dd5a3d4713e5855b31ec2e50d2b9471c0d1f433d65916478ed9c3e', 'modules/accounting/service.py': '7760afd1dc32b1f3c1d262bfd005bc4fa59b5a5e7e8d84b53493e6774480c58d', 'modules/accounting/zero_value_disposals.py': 'fcd27096b94cbbcfd24904ee71558c58e733f1cadd8665f5284cedd378bfabc8'}
+          EXPECTED_SOURCES = {'modules/accounting/inventory_allocation_receipts.py': '51a6cc0d2af983c2cd8914cc75c5eeff33c103428c950e15ea8a16ccf278a430', 'tests/accounting/test_inventory_allocation_receipts.py': 'cb5ee80a7c4ba60a00bf5c245a5eda2f9b5a8c9a3a59b28017c27cfdc5643ecd', 'tests/accounting/test_production_material_issue_postgres.py': '013397d50efd62628b7cb438f95c9e089725e85a16e72d136f3108b6be939f3a', 'tests/accounting/test_postgres.py': 'b480982548c2feccb73f67a6216671c4c9ba1ffd961e9305cc9b1c0bfd35c103', 'modules/accounting/inventory_issues.py': '8031e8e1dad7139293cdc175abcaefe6f74c98c8b30188c3329c9b2f3c2dc6f4', 'modules/accounting/schemas.py': '70c226ce82f4d457e47a947e8f26422fe91abd280e064fda3cb8b2096233f42d', 'modules/accounting/sales.py': '685a1c2478dd5a3d4713e5855b31ec2e50d2b9471c0d1f433d65916478ed9c3e', 'modules/accounting/service.py': '7760afd1dc32b1f3c1d262bfd005bc4fa59b5a5e7e8d84b53493e6774480c58d', 'modules/accounting/zero_value_disposals.py': 'fcd27096b94cbbcfd24904ee71558c58e733f1cadd8665f5284cedd378bfabc8'}
           EXPECTED_MODULES = {'finance': 'f98ffe21bf4d239f09ce0472910637ab686284b1', 'hr': 'f8a6e0142f1920b07ec56818f42d156a602ff9c3', 'leads': '9a304f771ba74369ded199168e0e1da3ad6348d2', 'logistics': '6923d2e021980ef2546f382364d38dc34a0fef29', 'marketing': 'd4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282', 'procurement': 'f29ea84bd13342ae572e8c4499031d2f053d3d47', 'production': 'be7d7e198bf09cc41c642d22125db401da5adc48', 'sales': '74359d6460c0c870c96825e23d9dd42a12832587', 'service': '3d33800c44865cd7a7373b29192c5d59d3c4bec8', 'wms': '8b6fb881a03f1a268f07e65f4fa89d195fc933a2'}
-          EXPECTED_CASES = {'7e96895cbd5ac8b85c46918d6a3a369fa175beee460ea6d7d478c596a2c4e3a0', '2e9ee16875a40fbaee9468318cdca10e8e889bd7ad8aecb19db61e8f461d8e03'}
+          EXPECTED_CASES = {'2e9ee16875a40fbaee9468318cdca10e8e889bd7ad8aecb19db61e8f461d8e03', '7e96895cbd5ac8b85c46918d6a3a369fa175beee460ea6d7d478c596a2c4e3a0', '8d3e0b44f9efa0053f9501dbcc20e9ed4f270833b5ae759c97a9bc396ac71812'}
           FILES = ['modules/accounting/inventory_allocation_receipts.py', 'tests/accounting/test_inventory_allocation_receipts.py', 'tests/accounting/test_production_material_issue_postgres.py', 'tests/accounting/test_postgres.py', 'modules/accounting/inventory_issues.py', 'modules/accounting/schemas.py', 'modules/accounting/sales.py', 'modules/accounting/service.py', 'modules/accounting/zero_value_disposals.py']
-          CLASSES = {'tests.accounting.test_production_material_issue_postgres': 'tests/accounting/test_production_material_issue_postgres.py'}
-          PLANNED = 2
-          SELECTED = ('tests/accounting/test_production_material_issue_postgres.py::test_material_issue_persists_complete_mixed_allocation[fifo]', 'tests/accounting/test_production_material_issue_postgres.py::test_material_issue_persists_complete_mixed_allocation[weighted_average]')
+          CLASSES = {'tests.accounting.test_production_material_issue_postgres': 'tests/accounting/test_production_material_issue_postgres.py', 'tests.accounting.test_postgres': 'tests/accounting/test_postgres.py'}
+          PLANNED = 3
+          SELECTED = ('tests/accounting/test_production_material_issue_postgres.py::test_material_issue_persists_complete_mixed_allocation[fifo]', 'tests/accounting/test_production_material_issue_postgres.py::test_material_issue_persists_complete_mixed_allocation[weighted_average]', 'tests/accounting/test_postgres.py::test_pg_factory_finance_ownership_constraints')
 
           EXCEPTION_IDS = {'AssertionError': 1, 'FileNotFoundError': 2, 'ModuleNotFoundError': 3, 'AttributeError': 4, 'TypeError': 5, 'KeyError': 6, 'sqlalchemy.exc.IntegrityError': 7, 'sqlalchemy.exc.ProgrammingError': 8, 'sqlalchemy.exc.OperationalError': 9, 'TimeoutError': 10, 'AccountingError': 11, 'modules.accounting.service.AccountingError': 11}
-          DIAGNOSTIC_SOURCES = {'modules/accounting/inventory_allocation_receipts.py': (1, 124), 'tests/accounting/test_inventory_allocation_receipts.py': (2, 285), 'tests/accounting/test_production_material_issue_postgres.py': (3, 1123), 'tests/accounting/test_postgres.py': (4, 2727), 'modules/accounting/inventory_issues.py': (5, 286), 'modules/accounting/schemas.py': (6, 565), 'modules/accounting/sales.py': (7, 291), 'modules/accounting/service.py': (8, 654), 'modules/accounting/zero_value_disposals.py': (9, 642)}
+          DIAGNOSTIC_SOURCES = {'modules/accounting/inventory_allocation_receipts.py': (1, 124), 'tests/accounting/test_inventory_allocation_receipts.py': (2, 285), 'tests/accounting/test_production_material_issue_postgres.py': (3, 1123), 'tests/accounting/test_postgres.py': (4, 2791), 'modules/accounting/inventory_issues.py': (5, 286), 'modules/accounting/schemas.py': (6, 565), 'modules/accounting/sales.py': (7, 291), 'modules/accounting/service.py': (8, 654), 'modules/accounting/zero_value_disposals.py': (9, 642)}
           CHECKOUT_ROOT = str(Path.cwd())
 
 
@@ -679,7 +679,7 @@ jobs:
 
           def main():
               root, temp = Path.cwd(), Path(os.environ['RUNNER_TEMP'])
-              summary = {'schemaVersion': 1, 'kind': 'accounting-inventory-receipt-rule-pg2', 'stage': 'preflight',
+              summary = {'schemaVersion': 1, 'kind': 'accounting-current-finance-bootstrap-rule-pg3', 'stage': 'preflight',
                          'passed': False, 'planned': PLANNED, 'countsKnown': False,
                          'passedCount': None, 'failedCount': None, 'errorCount': None,
                          'skippedCount': None, 'notRunCount': None, 'cases': [],

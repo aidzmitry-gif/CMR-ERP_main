@@ -465,19 +465,6 @@ async def pg_factory():
                 DealStageEvent.__table__.create(connection)
                 LossReason.__table__.create(connection)
 
-                # Bank-source completeness is part of month closing; these
-                # existing finance tables precede the accounting migration.
-                from modules.finance.models import (
-                    BankAccount,
-                    BankTransaction,
-                    Payment,
-                    PaymentAllocation,
-                )
-
-                connection.execute(text("CREATE SCHEMA finance"))
-                for table in (BankAccount.__table__, Payment.__table__, PaymentAllocation.__table__, BankTransaction.__table__):
-                    table.create(connection)
-
                 connection.execute(text("CREATE SCHEMA logistics"))
                 Shipment.__table__.create(connection)
                 CarrierRfq.__table__.create(connection)
@@ -523,6 +510,19 @@ async def pg_factory():
                 connection.execute(text("ALTER TABLE public.audit_log ALTER COLUMN actor TYPE varchar(128)"))
                 with Operations.context(MigrationContext.configure(connection)):
                     migration["upgrade"]()
+                    # Finance organization FKs need the frozen accounting baseline;
+                    # bank-source tables must still precede the closing-control tail.
+                    from modules.finance.models import (
+                        BankAccount,
+                        BankTransaction,
+                        Payment,
+                        PaymentAllocation,
+                    )
+
+                    connection.execute(text("CREATE SCHEMA finance"))
+                    for table in (BankAccount.__table__, Payment.__table__, PaymentAllocation.__table__, BankTransaction.__table__):
+                        table.create(connection)
+
                     remainder = runpy.run_path("migrations/versions/0131_invoice_remainder.py")
                     remainder["upgrade"]()
                     runpy.run_path("migrations/versions/0132_expense_approval_digest.py")["upgrade"]()
@@ -2725,3 +2725,67 @@ async def test_manual_production_order_snapshot_isolates_and_replays_after_stage
         ownership = await session.get(ProductionOrderOwnership, order_id)
         assert ownership.snapshot["stage"] == "queue"
         await session.commit()
+
+
+async def test_pg_factory_finance_ownership_constraints(pg_factory):
+    """The current Finance metadata keeps its real constraints after bootstrap."""
+    async with pg_factory() as session:
+        rows = (await session.execute(text("""
+            SELECT relation.relname AS table_name, constraint_row.conname AS name,
+                   constraint_row.contype::text AS kind,
+                   ARRAY(SELECT attribute.attname::text
+                         FROM unnest(constraint_row.conkey) WITH ORDINALITY AS key(attnum, position)
+                         JOIN pg_attribute AS attribute
+                           ON attribute.attrelid = relation.oid AND attribute.attnum = key.attnum
+                         ORDER BY key.position) AS local_columns,
+                   target_namespace.nspname AS target_schema, target.relname AS target_table,
+                   ARRAY(SELECT attribute.attname::text
+                         FROM unnest(constraint_row.confkey) WITH ORDINALITY AS key(attnum, position)
+                         JOIN pg_attribute AS attribute
+                           ON attribute.attrelid = target.oid AND attribute.attnum = key.attnum
+                         ORDER BY key.position) AS target_columns,
+                   constraint_row.confdeltype::text AS delete_action,
+                   constraint_row.confupdtype::text AS update_action,
+                   constraint_row.convalidated AS validated,
+                   constraint_row.condeferrable AS deferrable,
+                   constraint_row.condeferred AS deferred,
+                   pg_get_expr(constraint_row.conbin, relation.oid) AS expression
+            FROM pg_constraint AS constraint_row
+            JOIN pg_class AS relation ON relation.oid = constraint_row.conrelid
+            JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+            LEFT JOIN pg_class AS target ON target.oid = constraint_row.confrelid
+            LEFT JOIN pg_namespace AS target_namespace ON target_namespace.oid = target.relnamespace
+            WHERE namespace.nspname = 'finance'
+              AND relation.relname IN ('bank_account', 'payment', 'payment_allocation', 'bank_transaction')
+              AND constraint_row.contype IN ('f', 'u', 'c')
+        """))).mappings().all()
+    foreign_keys = [row for row in rows if row["kind"] == "f"]
+    assert {(row["table_name"], tuple(row["local_columns"]), row["target_schema"],
+             row["target_table"], tuple(row["target_columns"]), row["delete_action"])
+            for row in foreign_keys} == {
+        ("bank_account", ("organization_id",), "accounting", "organization", ("id",), "r"),
+        ("payment", ("organization_id",), "accounting", "organization", ("id",), "r"),
+        ("payment", ("account_id",), "finance", "bank_account", ("id",), "r"),
+        ("payment", ("organization_id", "account_id"), "finance", "bank_account", ("organization_id", "id"), "r"),
+        ("payment_allocation", ("payment_id",), "finance", "payment", ("id",), "c"),
+        ("bank_transaction", ("payment_id",), "finance", "payment", ("id",), "n"),
+        ("bank_transaction", ("allocation_id",), "finance", "payment_allocation", ("id",), "n"),
+    }
+    assert len(foreign_keys) == 7
+    assert all(row["validated"] and not row["deferrable"] and not row["deferred"]
+               and row["update_action"] == "a" for row in foreign_keys)
+    unique = [row for row in rows if row["kind"] == "u" and row["table_name"] == "bank_account"]
+    assert {(row["name"], tuple(row["local_columns"])) for row in unique} == {
+        ("uq_finance_bank_account_organization_code", ("organization_id", "code")),
+        ("uq_finance_bank_account_organization_id", ("organization_id", "id")),
+    }
+    assert len(unique) == 2
+    checks = [row for row in rows if row["kind"] == "c" and row["table_name"] in {"bank_account", "payment"}]
+    assert {(row["table_name"], row["name"],
+             "".join(row["expression"].translate(str.maketrans("", "", "()")).split()).lower())
+            for row in checks} == {
+        ("bank_account", "ck_finance_bank_account_organization_positive", "organization_idisnullororganization_id>0"),
+        ("payment", "ck_finance_payment_organization_positive", "organization_idisnullororganization_id>0"),
+    }
+    assert len(checks) == 2
+    assert all(row["validated"] and not row["deferrable"] and not row["deferred"] for row in unique + checks)
