@@ -66,6 +66,15 @@ class ReceiptAccountingConfirmation(ReceiptAccountingOptions):
 
 
 class ProcurementSourceGateway(Protocol):
+    async def landed_financial_source(self, session: Any, organization_id: int,
+                                      purchase_order_id: int, event_id: int) -> dict:
+        """Lock the owned PO and verify the exact immutable calculation/event receipt.
+
+        Caller holds the organization lock. This is cost, not cash or a posting.
+        Historical receipts without the calculation cannot establish a new owner.
+        """
+        ...
+
     async def additional_expense_source(self, session: Any, organization_id: int, expense_id: int,
                                         expected_version: int) -> dict:
         """Read exact current expense revision and verify its stored receipt snapshots.
