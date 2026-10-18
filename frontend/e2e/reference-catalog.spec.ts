@@ -20,11 +20,25 @@ for (const scenario of [
 
     const pageErrors: string[] = [];
     const failedRequests: string[] = [];
+    const requestDiagnostics: { pathId: number; status: number }[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
     page.on("response", (response) => {
       const url = new URL(response.url());
       if (url.origin === new URL(baseURL!).origin && response.status() >= 400) {
         failedRequests.push(`${response.status()} ${url.pathname}`);
+        if (requestDiagnostics.length < 16) {
+          // Fixed route families only; URLs, query strings and entity IDs stay private.
+          const pathId = url.pathname === "/api/sales/chats" ? 1
+            : url.pathname === "/api/sales/calls/stream" ? 2
+            : url.pathname.startsWith("/api/sales/") ? 3
+            : url.pathname.startsWith("/api/system/") ? 4
+            : url.pathname.startsWith("/api/hr/") ? 5
+            : url.pathname.startsWith("/api/finance/") ? 6
+            : url.pathname.startsWith("/_next/") ? 7
+            : url.pathname === "/favicon.ico" ? 8
+            : url.pathname.startsWith("/api/auth/") ? 9 : 0;
+          requestDiagnostics.push({ pathId, status: response.status() });
+        }
       }
     });
     await page.setViewportSize({ width: scenario.width, height: 900 });
@@ -56,7 +70,16 @@ for (const scenario of [
     await expect(page.getByRole("heading", {
       name: "Контрольный аккумулятор — в наличии", exact: true,
     }), "The SKU link must open a filled product card").toBeVisible();
-    expect(pageErrors, "Browser rendering errors").toEqual([]);
-    expect(failedRequests, "Failed application requests (status and path)").toEqual([]);
+    try {
+      expect(pageErrors, "Browser rendering errors").toEqual([]);
+      expect(failedRequests, "Failed application requests (status and path)").toEqual([]);
+    } finally {
+      await testInfo.attach("catalogue-http-numeric", {
+        body: Buffer.from(JSON.stringify({
+          total: failedRequests.length, dropped: failedRequests.length - requestDiagnostics.length,
+          entries: requestDiagnostics,
+        })), contentType: "application/json",
+      });
+    }
   });
 }
