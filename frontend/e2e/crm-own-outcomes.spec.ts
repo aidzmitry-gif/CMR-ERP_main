@@ -220,7 +220,7 @@ for (const mode of ['stock', 'on_order'] as const) {
       await preserved();
       test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '30' });
       await retryLoss.click();
-      await expect(page.getByText(/ожидает завершения/)).toBeVisible();
+      await expect(page.getByRole('dialog', { name: 'Отказ сделки', exact: true }).getByText(/ожидает завершения/)).toBeVisible();
       await expect(page.getByRole('button', { name: 'Завершить отказ', exact: true })).toBeDisabled();
       expect(attempts).toBe(2);
       test.info().annotations.push({ type: 'erp_ready_outcome_checkpoint', description: '31' });
