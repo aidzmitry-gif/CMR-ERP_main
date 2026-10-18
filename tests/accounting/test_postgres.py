@@ -2784,8 +2784,8 @@ async def test_pg_factory_finance_ownership_constraints(pg_factory):
     assert {(row["table_name"], row["name"],
              "".join(row["expression"].translate(str.maketrans("", "", "()")).split()).lower())
             for row in checks} == {
-        ("bank_account", "ck_finance_bank_account_organization_positive", "organization_idisnullororganization_id>0"),
-        ("payment", "ck_finance_payment_organization_positive", "organization_idisnullororganization_id>0"),
+        ("bank_account", "ck_bank_account_ck_finance_bank_account_organization_positive", "organization_idisnullororganization_id>0"),
+        ("payment", "ck_payment_ck_finance_payment_organization_positive", "organization_idisnullororganization_id>0"),
     }
     assert len(checks) == 2
     assert all(row["validated"] and not row["deferrable"] and not row["deferred"] for row in unique + checks)
