@@ -13,7 +13,7 @@ from modules.sales.models import Deal, DealDocument, DealItem
 from modules.sales.reservation_source import SalesReservationSource
 from modules.sales.reserve import tick_invoice_reserve
 from modules.wms.invoice_reservations import InvoiceReservation
-from modules.wms.models import ReservationVersion, StockMovement
+from modules.wms.models import ReservationVersion, StockMovement, WarehouseDirectory
 
 
 async def seed(api, session, *, qty="2", physical="10", suffix=""):
@@ -54,6 +54,10 @@ async def seed(api, session, *, qty="2", physical="10", suffix=""):
             actor="issuer",
         )
     )
+    session.add(WarehouseDirectory(
+        organization_id=org.id, name="W", title="Synthetic issuance warehouse", created_by="issuer",
+        is_active=True, wms_enabled=True, prohibit_negative_stock=True,
+    ))
     session.add(
         StockMovement(
             organization_id=org.id,

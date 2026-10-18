@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, select, update
 from core.domain.models import OutboxEvent, User
 from modules.accounting.models import AccessGrant, Organization, Policy
 from modules.sales.deal_loss import DealLossRequest, DealLossResolution
-from modules.sales.models import Deal, DealDocument, LossReason, Stage
+from modules.sales.models import Deal, DealDocument, DealStageEvent, LossReason, Stage
 from modules.sales.reservation_source import SalesReservationSource
 from tests.accounting.test_invoice_settlements import bank
 from tests.test_invoice_cancellation import cancel_request, prepared
@@ -15,8 +15,10 @@ from tests.test_invoice_issuance import command, create, erp_money_flow, seed
 
 
 @pytest.fixture(autouse=True)
-def expected_principal(api):
+async def expected_principal(api, session):
     api.headers["X-Expected-Principal"] = "issuer"
+    session.add(LossReason(code="price", title="Synthetic price reason", active=True))
+    await session.commit()
 
 
 async def loss_command(api, org, deal=1, **changes):
@@ -204,7 +206,8 @@ async def test_generic_patch_cannot_set_effective_lost_pair(api, session, funnel
 async def test_pending_freezes_stages_issuance_and_physical_fulfillment_but_allows_replay(api, session):
     ids, base = await seed(api, session)
     issued_data, _ = await command(api, ids, base)
-    assert (await create(api, ids, issued_data)).status_code == 201
+    issued_response = await create(api, ids, issued_data)
+    assert issued_response.status_code == 201, issued_response.text
     _, row = await submit(api, ids["org"])
     assert (await api.patch("/sales/deals/1", json={"stage": "won"})).status_code == 409
     await session.rollback()
@@ -556,3 +559,60 @@ async def test_context_own_catalog_never_accepts_inactive_or_unknown_reason(api,
     response = await api.post("/sales/deals/1/lose", json=data)
     assert response.status_code == 422, response.text
     assert await session.scalar(select(func.count()).select_from(DealLossRequest)) == 0
+
+
+async def test_empty_catalog_rejects_new_loss_request(api, session):
+    ids, _ = await seed(api, session)
+    data = await loss_command(api, ids["org"])
+    await session.execute(delete(LossReason))
+    await session.commit()
+    before = {model: await session.scalar(select(func.count()).select_from(model))
+              for model in (DealLossRequest, DealLossResolution, DealStageEvent, OutboxEvent)}
+    deal = await session.get(Deal, 1, populate_existing=True)
+    stage = deal.stage
+    response = await api.post("/sales/deals/1/lose", json=data)
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == "Unknown loss reason"
+    for model, count in before.items():
+        assert await session.scalar(select(func.count()).select_from(model)) == count
+    await session.refresh(deal)
+    assert deal.stage == stage and deal.lost_reason_code is None
+
+
+async def test_inactive_only_catalog_rejects_new_loss_request(api, session):
+    ids, _ = await seed(api, session)
+    data = await loss_command(api, ids["org"])
+    await session.execute(update(LossReason).values(active=False))
+    await session.commit()
+    before = {model: await session.scalar(select(func.count()).select_from(model))
+              for model in (DealLossRequest, DealLossResolution, DealStageEvent, OutboxEvent)}
+    deal = await session.get(Deal, 1, populate_existing=True)
+    stage = deal.stage
+    response = await api.post("/sales/deals/1/lose", json=data)
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == "Unknown loss reason"
+    for model, count in before.items():
+        assert await session.scalar(select(func.count()).select_from(model)) == count
+    await session.refresh(deal)
+    assert deal.stage == stage and deal.lost_reason_code is None
+
+
+async def test_original_loss_request_replays_after_reason_revocation(api, session):
+    ids, _ = await seed(api, session)
+    data, original = await submit(api, ids["org"], finalize_if_empty=True)
+    assert original["state"] == "finalized" and original["resolution"] is not None
+    await session.execute(update(LossReason).values(active=False))
+    await session.commit()
+    before = {model: await session.scalar(select(func.count()).select_from(model))
+              for model in (DealLossRequest, DealLossResolution, DealStageEvent, OutboxEvent)}
+    response = await api.post("/sales/deals/1/lose", json=data)
+    assert response.status_code == 200, response.text
+    replay = response.json()
+    assert replay["replayed"] is True
+    for key in ("request_id", "request_digest", "state", "organization_id", "deal_id", "command_hash",
+                "actor", "command", "snapshot", "resolution"):
+        assert replay[key] == original[key]
+    for model, count in before.items():
+        assert await session.scalar(select(func.count()).select_from(model)) == count
+    deal = await session.get(Deal, 1, populate_existing=True)
+    assert deal.stage == "lost" and deal.lost_reason_code == "price"

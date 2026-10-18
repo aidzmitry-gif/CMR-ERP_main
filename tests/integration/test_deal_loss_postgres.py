@@ -8,7 +8,7 @@ from core.services.auth import CurrentUser
 from modules.sales import deal_loss
 from modules.sales.access import DealAccess
 from modules.sales.deal_loss import DealLossRequest, DealLossResolution
-from modules.sales.models import Deal
+from modules.sales.models import Deal, LossReason
 from tests.accounting.test_postgres import pg_factory  # noqa: F401
 from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 from tests.test_deal_loss import endpoint, loss_command, resolution
@@ -21,6 +21,8 @@ async def test_pg_empty_loss_request_resolution_and_historical_replay(issuance_p
     api.headers["X-Expected-Principal"] = "issuer"
     async with factory() as session:
         ids, _ = await seed(api, session)
+        session.add(LossReason(code="price", title="Synthetic price reason", active=True))
+        await session.commit()
     body = await loss_command(api, ids["org"])
     response = await api.post("/sales/deals/1/lose", json=body)
     assert response.status_code == 200, response.text
@@ -49,6 +51,8 @@ async def test_pg_loss_finalize_inside_savepoint(issuance_pg):  # noqa: F811
     api.headers["X-Expected-Principal"] = "issuer"
     async with factory() as session:
         ids, _ = await seed(api, session)
+        session.add(LossReason(code="price", title="Synthetic price reason", active=True))
+        await session.commit()
     body = await loss_command(api, ids["org"])
     response = await api.post("/sales/deals/1/lose", json=body)
     assert response.status_code == 200, response.text
