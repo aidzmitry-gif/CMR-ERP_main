@@ -347,7 +347,8 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(255))
     email: Mapped[str | None] = mapped_column(String(255), unique=True)
     # Мягкая ссылка: ядро не должно иметь FK-зависимость от опционального HR-модуля.
-    employee_id: Mapped[int | None] = mapped_column(unique=True)
+    # Several verified login subjects may belong to the same real person.
+    employee_id: Mapped[int | None] = mapped_column(index=True)
     department: Mapped[str | None] = mapped_column(String(128))
     role: Mapped[str | None] = mapped_column(String(64))
     # Независимо от рабочей роли: сервер читает актуальный scope на каждом запросе.

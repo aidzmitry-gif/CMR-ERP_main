@@ -67,13 +67,16 @@ def _conversion_core(conversion_handler=on_lead_converted):
     return SimpleNamespace(event_bus=bus, services=SimpleNamespace(event_bus=bus))
 
 
-async def _seed(factory):
+async def _seed(factory, aliases=False):
     async with factory() as session:
         owner = User(username="owner", full_name="Synthetic CRM Owner", employee_id=901,
                      department="Продажи", role="sales", status="active")
         lead = Lead(source="site", company="Synthetic owner race", status="routed",
                     assigned_to=owner.full_name)
         session.add_all([owner, lead])
+        if aliases:
+            session.add(User(username="synthetic-owner-alias", full_name=owner.full_name, employee_id=901,
+                             department="Продажи", role="sales", status="active", deal_visibility="own"))
         await session.commit()
         return owner.id, lead.id
 
@@ -121,8 +124,9 @@ def _pause_first_commit(session, monkeypatch):
     return reached, release
 
 
-async def test_deactivated_owner_is_rechecked_after_conversion_waits(owner_factory):
-    owner_id, lead_id = await _seed(owner_factory)
+@pytest.mark.parametrize("aliases", [False, True])
+async def test_deactivated_owner_is_rechecked_after_conversion_waits(owner_factory, aliases):
+    owner_id, lead_id = await _seed(owner_factory, aliases)
     async with owner_factory() as holder, owner_factory() as converter:
         task = None
         try:
@@ -131,7 +135,7 @@ async def test_deactivated_owner_is_rechecked_after_conversion_waits(owner_facto
             assert stale_owner.status == "active" and stale_lead.status == "routed"
             holder_pid = await holder.scalar(text("SELECT pg_backend_pid()"))
             converter_pid = await converter.scalar(text("SELECT pg_backend_pid()"))
-            await holder.execute(update(User).where(User.id == owner_id).values(status="inactive"))
+            await holder.execute(update(User).where(User.employee_id == 901).values(status="inactive"))
 
             task = asyncio.create_task(_convert(converter, lead_id, _conversion_core()))
             await _wait_for_lock(owner_factory, holder_pid, converter_pid, task)
@@ -149,8 +153,12 @@ async def test_deactivated_owner_is_rechecked_after_conversion_waits(owner_facto
         assert await verify.scalar(select(func.count()).select_from(Deal)) == 0
 
 
-async def test_owner_share_lock_is_held_until_conversion_commit(owner_factory, monkeypatch):
-    owner_id, lead_id = await _seed(owner_factory)
+@pytest.mark.parametrize("aliases", [False, True])
+async def test_owner_share_lock_is_held_until_conversion_commit(owner_factory, monkeypatch, aliases):
+    owner_id, lead_id = await _seed(owner_factory, aliases)
+    if aliases:
+        async with owner_factory() as lookup:
+            owner_id = await lookup.scalar(select(User.id).where(User.username == "synthetic-owner-alias"))
     async with owner_factory() as converter, owner_factory() as deactivator:
         conversion = deactivation = None
         reached, release = _pause_first_commit(converter, monkeypatch)
@@ -186,6 +194,33 @@ async def test_owner_share_lock_is_held_until_conversion_commit(owner_factory, m
         deal = await verify.get(Deal, lead.deal_id)
         assert lead.status == "converted" and deal.owner_id == 901
         assert deal.owner == "Synthetic CRM Owner"
+
+
+async def test_renamed_aliases_are_rechecked_after_conversion_waits(owner_factory):
+    owner_id, lead_id = await _seed(owner_factory, aliases=True)
+    async with owner_factory() as holder, owner_factory() as converter:
+        task = None
+        try:
+            cached = await converter.get(User, owner_id)
+            assert cached.full_name == "Synthetic CRM Owner"
+            holder_pid = await holder.scalar(text("SELECT pg_backend_pid()"))
+            converter_pid = await converter.scalar(text("SELECT pg_backend_pid()"))
+            await holder.execute(update(User).where(User.employee_id == 901).values(full_name="Synthetic renamed owner"))
+            task = asyncio.create_task(_convert(converter, lead_id, _conversion_core()))
+            await _wait_for_lock(owner_factory, holder_pid, converter_pid, task)
+            await holder.commit()
+            with pytest.raises(HTTPException) as denied:
+                await asyncio.wait_for(task, timeout=10)
+            assert denied.value.status_code == 422
+        finally:
+            await _finish_tasks(task)
+    async with owner_factory() as verify:
+        names = (await verify.execute(select(User.full_name).where(User.employee_id == 901))).scalars().all()
+        assert names == ["Synthetic renamed owner", "Synthetic renamed owner"]
+        lead = await verify.get(Lead, lead_id)
+        assert lead.status == "routed" and lead.converted_at is None and lead.deal_id is None
+        assert await verify.scalar(select(func.count()).select_from(Deal)) == 0
+        assert await verify.scalar(select(func.count()).select_from(OutboxEvent)) == 0
 
 
 async def test_double_conversion_waits_then_rejects_stale_request(owner_factory, monkeypatch):
@@ -296,3 +331,117 @@ async def test_background_relay_allows_pending_then_read_only_resume(owner_facto
             "leads.lead.converted", "sales.deal.created",
         ]
         assert all(event.processed_at is not None for event in events)
+
+
+
+async def test_employee_login_alias_migration_roundtrip(owner_factory):
+    import importlib.util
+    import re
+    from pathlib import Path
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import inspect
+    from sqlalchemy.exc import IntegrityError
+
+    path = Path(__file__).resolve().parents[2] / "migrations/versions/0195_employee_login_accounts.py"
+    spec = importlib.util.spec_from_file_location("synthetic_employee_alias_migration", path)
+    version = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(version)
+    assert version.revision == "0195" and version.down_revision == "0194"
+
+    def invoke(connection, function):
+        version.op = Operations(MigrationContext.configure(connection))
+        getattr(version, function)()
+
+    def catalog(connection, schema):
+        inspector = inspect(connection)
+        return (inspector.get_unique_constraints("app_user", schema=schema),
+                inspector.get_indexes("app_user", schema=schema))
+
+    def account(username, email, subject):
+        return User(username=username, email=email, keycloak_user_id=subject, employee_id=9900195,
+                    full_name="Synthetic migration employee", department="Продажи", role="sales",
+                    status="active", deal_visibility="own")
+
+    async with owner_factory() as session:
+        connection = await session.connection()
+        schema = connection.sync_connection.get_execution_options()["schema_translate_map"][None]
+        assert re.fullmatch(r"owners_[0-9a-f]{32}", schema)
+        await session.execute(text(f'SET LOCAL search_path TO "{schema}"'))
+        assert await session.scalar(text("SELECT current_schema()")) == schema
+        assert 160000 <= int(await session.scalar(text("SHOW server_version_num"))) < 170000
+        assert await session.scalar(text("SELECT 'app_user'::regclass::oid")) == await session.scalar(
+            text("SELECT to_regclass(:qualified)::oid"), {"qualified": f'"{schema}".app_user'},
+        )
+
+        # Recreate the actual predecessor contract from 0107, not just an ORM table.
+        def predecessor(sync):
+            operations = Operations(MigrationContext.configure(sync))
+            operations.drop_index("ix_app_user_employee_id", table_name="app_user")
+            operations.create_unique_constraint(operations.f("uq_app_user_employee_id"), "app_user", ["employee_id"])
+        await connection.run_sync(predecessor)
+        original = account("synthetic-primary", "primary@example.invalid", "synthetic-primary-subject")
+        session.add(original)
+        await session.flush()
+        original_id = original.id
+        before = dict((await session.execute(select(User.__table__).where(User.id == original_id))).mappings().one())
+        constraints, indexes = await connection.run_sync(lambda sync: catalog(sync, schema))
+        assert [c["name"] for c in constraints if c["column_names"] == ["employee_id"]] == ["uq_app_user_employee_id"]
+        assert not any(i["name"] == "ix_app_user_employee_id" for i in indexes)
+        with pytest.raises(IntegrityError):
+            async with session.begin_nested():
+                session.add(account("synthetic-before", "before@example.invalid", "synthetic-before-subject"))
+                await session.flush()
+
+        await connection.run_sync(lambda sync: invoke(sync, "upgrade"))
+        assert dict((await session.execute(select(User.__table__).where(User.id == original_id))).mappings().one()) == before
+        constraints, indexes = await connection.run_sync(lambda sync: catalog(sync, schema))
+        assert not any(c["column_names"] == ["employee_id"] for c in constraints)
+        index = next(i for i in indexes if i["name"] == "ix_app_user_employee_id")
+        assert index["column_names"] == ["employee_id"] and not index["unique"]
+        alias = account("synthetic-alias", "alias@example.invalid", "synthetic-alias-subject")
+        session.add(alias)
+        await session.flush()
+        assert await session.scalar(select(func.count()).select_from(User)) == 2
+        for username, email, subject in [
+            ("synthetic-primary", "unique-a@example.invalid", "synthetic-unique-a"),
+            ("synthetic-unique-b", "primary@example.invalid", "synthetic-unique-b"),
+            ("synthetic-unique-c", "unique-c@example.invalid", "synthetic-primary-subject"),
+        ]:
+            with pytest.raises(IntegrityError):
+                async with session.begin_nested():
+                    session.add(account(username, email, subject))
+                    await session.flush()
+
+        upgraded_catalog = await connection.run_sync(lambda sync: catalog(sync, schema))
+        with pytest.raises(RuntimeError, match="Resolve login aliases"):
+            async with session.begin_nested():
+                await connection.run_sync(lambda sync: invoke(sync, "downgrade"))
+        assert await session.scalar(select(func.count()).select_from(User)) == 2
+        assert await connection.run_sync(lambda sync: catalog(sync, schema)) == upgraded_catalog
+        assert dict((await session.execute(select(User.__table__).where(User.id == original_id))).mappings().one()) == before
+
+        await session.delete(alias)
+        await session.flush()
+        await connection.run_sync(lambda sync: invoke(sync, "downgrade"))
+        constraints, indexes = await connection.run_sync(lambda sync: catalog(sync, schema))
+        assert [c["name"] for c in constraints if c["column_names"] == ["employee_id"]] == ["uq_app_user_employee_id"]
+        assert not any(i["name"] == "ix_app_user_employee_id" for i in indexes)
+        assert any(i["name"] == "uq_app_user_employee_id" and i["unique"] for i in indexes)
+        with pytest.raises(IntegrityError):
+            async with session.begin_nested():
+                session.add(account("synthetic-after", "after@example.invalid", "synthetic-after-subject"))
+                await session.flush()
+        assert dict((await session.execute(select(User.__table__).where(User.id == original_id))).mappings().one()) == before
+        await session.commit()
+
+    async with owner_factory() as verify:
+        await verify.execute(text(f'SET LOCAL search_path TO "{schema}"'))
+        assert await verify.scalar(text("SELECT current_schema()")) == schema
+        assert await verify.scalar(select(func.count()).select_from(User)) == 1
+        assert dict((await verify.execute(select(User.__table__).where(User.id == original_id))).mappings().one()) == before
+        connection = await verify.connection()
+        constraints, indexes = await connection.run_sync(lambda sync: catalog(sync, schema))
+        assert [c["name"] for c in constraints if c["column_names"] == ["employee_id"]] == ["uq_app_user_employee_id"]
+        assert not any(i["name"] == "ix_app_user_employee_id" for i in indexes)

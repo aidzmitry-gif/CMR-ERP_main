@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -10,6 +11,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.domain.models import User
 
 CRM_OWNER_ROLES = frozenset({"sales_head", "sales", "sales_manager", "sales_cli"})
+
+
+@dataclass(frozen=True)
+class CrmOwner:
+    employee_id: int
+    full_name: str
+
+
+def _employees(accounts: list[User]) -> list[CrmOwner]:
+    names: dict[int, set[str]] = {}
+    for account in accounts:
+        names.setdefault(account.employee_id, set()).add(account.full_name)
+    return [CrmOwner(employee_id, next(iter(labels)))
+            for employee_id, labels in names.items()
+            if len(labels) == 1 and next(iter(labels)).strip()]
 
 
 def _eligible_owners():
@@ -21,12 +37,14 @@ def _eligible_owners():
     )
 
 
-async def list_crm_owners(session: AsyncSession) -> list[User]:
+async def list_crm_owners(session: AsyncSession) -> list[CrmOwner]:
     """Return real candidates addressable by the existing exact-name lead API."""
     owners = (await session.execute(
         _eligible_owners().order_by(User.employee_id).execution_options(populate_existing=True)
     )).scalars().all()
-    counts = Counter(owner.full_name for owner in owners)
+    accounts = owners
+    owners = _employees(accounts)
+    counts = Counter(name for _, name in {(row.employee_id, row.full_name) for row in accounts})
     return [owner for owner in owners if owner.full_name.strip() and counts[owner.full_name] == 1]
 
 
@@ -36,7 +54,7 @@ async def resolve_crm_owner(
     employee_id: int | None = None,
     name: str | None = None,
     lock: bool = False,
-) -> User:
+) -> CrmOwner:
     """Resolve an employee ID or an unambiguous exact display name.
 
     The optional row lock keeps eligibility stable until the caller commits.
@@ -46,7 +64,12 @@ async def resolve_crm_owner(
     if employee_id is not None:
         stmt = stmt.where(User.employee_id == employee_id)
     elif name and name.strip():
-        stmt = stmt.where(User.full_name == name)
+        # Read every eligible alias of each matching employee, including aliases
+        # with another name; otherwise a conflicting name would be hidden.
+        candidates = _eligible_owners().with_only_columns(User.employee_id).where(
+            User.full_name == name,
+        ).correlate(None)
+        stmt = stmt.where(User.employee_id.in_(candidates))
     else:
         raise HTTPException(status_code=422, detail="Не выбран активный сотрудник CRM")
     if lock:
@@ -56,6 +79,12 @@ async def resolve_crm_owner(
     )).scalars().all()
     if not owners:
         raise HTTPException(status_code=422, detail="Владелец сделки не является активным сотрудником CRM")
+    employee_count = len({owner.employee_id for owner in owners})
+    owners = _employees(owners)
+    if len(owners) != employee_count:
+        raise HTTPException(status_code=422, detail="Данные учётных записей менеджера расходятся: требуется сверка сотрудника CRM")
     if len(owners) != 1:
         raise HTTPException(status_code=422, detail="Имя менеджера неоднозначно: выберите другого сотрудника CRM")
+    if employee_id is None and owners[0].full_name != name:
+        raise HTTPException(status_code=422, detail="Имя менеджера изменилось: обновите список сотрудников CRM")
     return owners[0]
