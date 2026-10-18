@@ -11,7 +11,7 @@ permissions:
 jobs:
   e2e:
     name: CRM own outcomes (2)
-    if: ${{ true }}
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -518,8 +518,8 @@ jobs:
           retention-days: 7
 
   accounting_pg:
-    if: ${{ false }}
-    name: Inventory issue snapshot compatibility (2)
+    if: ${{ true }}
+    name: Finance bank matching concurrency (2)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -555,7 +555,7 @@ jobs:
           python-version: '3.12'
       - name: Install existing backend dependencies
         run: pip install -r requirements-dev.txt
-      - name: Verify isolated allocation cost-stream cases
+      - name: Verify isolated Finance bank concurrency
         shell: python
         run: |
           import hashlib
@@ -567,16 +567,16 @@ jobs:
           import xml.etree.ElementTree as ET
           from pathlib import Path
 
-          EXPECTED_SOURCES = {'modules/accounting/inventory_allocation_receipts.py': '9db303a376a85b48a6cbf1a59440d1d53363d58f9fd94f0c945a271c2d7ae515', 'tests/accounting/test_inventory_allocation_receipts.py': 'f13cae0a7a189365ac7173679c1109034c75f5b998aadb68b8c438baaeabc1ef', 'tests/accounting/test_production_material_issue_postgres.py': '013397d50efd62628b7cb438f95c9e089725e85a16e72d136f3108b6be939f3a', 'tests/accounting/test_postgres.py': '3ce326ac555467368f8c0ea6898c26f98cc358492d31979e9f7238c339936cf4'}
-          EXPECTED_MODULES = {'finance': '59832b2f14a2ee02d8db266a67f8206616bdcd94', 'hr': 'f8a6e0142f1920b07ec56818f42d156a602ff9c3', 'leads': '9a304f771ba74369ded199168e0e1da3ad6348d2', 'logistics': '6923d2e021980ef2546f382364d38dc34a0fef29', 'marketing': 'd4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282', 'procurement': 'f29ea84bd13342ae572e8c4499031d2f053d3d47', 'production': 'be7d7e198bf09cc41c642d22125db401da5adc48', 'sales': '74359d6460c0c870c96825e23d9dd42a12832587', 'service': '3d33800c44865cd7a7373b29192c5d59d3c4bec8', 'wms': '8b6fb881a03f1a268f07e65f4fa89d195fc933a2'}
-          EXPECTED_CASES = {'2e9ee16875a40fbaee9468318cdca10e8e889bd7ad8aecb19db61e8f461d8e03', '7e96895cbd5ac8b85c46918d6a3a369fa175beee460ea6d7d478c596a2c4e3a0'}
-          FILES = ['modules/accounting/inventory_allocation_receipts.py', 'tests/accounting/test_inventory_allocation_receipts.py', 'tests/accounting/test_production_material_issue_postgres.py', 'tests/accounting/test_postgres.py']
-          CLASSES = {'tests.accounting.test_production_material_issue_postgres': 'tests/accounting/test_production_material_issue_postgres.py'}
+          EXPECTED_SOURCES = {'core/services/accounting.py': '0bc4ae2f9115bec159309da52ab1bf722ca69b7f6cf4cb362d7861db1ff1f3c6', 'modules/accounting/gateway.py': '04a0cb089cad205458ffc2f7b3d44a93eab9737966a8eb1e22f6b0b5c4b6f448', 'modules/finance/routes.py': '27393d24771a078a8dff7cfd282aaf4e5708976f599f4ecf8f0132513645a319', 'modules/finance/schemas.py': '360abc13ff1448075cc924ebcb5534e2922f7a26787646f8ffff0a29c8517e8c', 'modules/finance/models.py': '07df20a79b2b01690e8b0e4b375ac370bbbe53dca3eeab5a977b6ddacb8a9e04', 'modules/finance/summary.py': 'd5928ef17d01bed313983eab6b95ba4606b6fc9b023b0a6c4eb2dac30e1e6473', 'modules/finance/aging.py': 'cb44b2740588a4ff455013e936d275f027589ae61fbc681a5bb5c341c57bc0f4', 'modules/finance/cost_center.py': '8a2413de27236f6e2ab0a097fd21bdd1f6c760a87a98be6f1f9986c2bdc0a32c', 'modules/finance/margin.py': '662e86ef0a2e2443c3ee8701245686a2fe19dc90c4c20ec1e614f642d4501d54', 'modules/finance/cashflow.py': '2bfc24104814a9004842d633a688d40dd1fc3ccef9d82ce5ddd5d3b384310ecb', 'modules/finance/allocation.py': 'ed557a55f747c524cd454663d27b5f0f7b51d8776a902f673770d910e692e880', 'modules/finance/pnl.py': '7aea2db17a422e287f175a882216360cbfe0fb8690b0bf64115208c892495973', 'modules/finance/cashflow_dds.py': '055f52df081ae4d143490634f81e5fa0ff8a840da31ffddfc906eee237d01b64', 'modules/finance/balance_sheet.py': 'a1db99f79ed8d9a17da9c3d4383654b88b284a2aedd2d00498a8e9d2cd800f45', 'tests/test_finance_organization_bank_postgres.py': '7115f54fd1575b7ec55fbbb0f0191824eb83dfb3744a1c1d935cae23d1640655', 'tests/conftest.py': 'cde292a2c66763f57af7da643aaf65b246f27c48ebd7b847a8de96fbbec6d714'}
+          EXPECTED_MODULES = {'finance': 'f98ffe21bf4d239f09ce0472910637ab686284b1', 'hr': 'f8a6e0142f1920b07ec56818f42d156a602ff9c3', 'leads': '9a304f771ba74369ded199168e0e1da3ad6348d2', 'logistics': '6923d2e021980ef2546f382364d38dc34a0fef29', 'marketing': 'd4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282', 'procurement': 'f29ea84bd13342ae572e8c4499031d2f053d3d47', 'production': 'be7d7e198bf09cc41c642d22125db401da5adc48', 'sales': '74359d6460c0c870c96825e23d9dd42a12832587', 'service': '3d33800c44865cd7a7373b29192c5d59d3c4bec8', 'wms': '8b6fb881a03f1a268f07e65f4fa89d195fc933a2'}
+          EXPECTED_CASES = {'94d508cad0985c8bb32a3fcda9e879ebd758e09c0b06eb871d5ed38aa5616f0e', '43cd4aae2ef171dcd7e5a8868620acc6790ca4065099bc3799f28115afe009c0'}
+          FILES = ['core/services/accounting.py', 'modules/accounting/gateway.py', 'modules/finance/routes.py', 'modules/finance/schemas.py', 'modules/finance/models.py', 'modules/finance/summary.py', 'modules/finance/aging.py', 'modules/finance/cost_center.py', 'modules/finance/margin.py', 'modules/finance/cashflow.py', 'modules/finance/allocation.py', 'modules/finance/pnl.py', 'modules/finance/cashflow_dds.py', 'modules/finance/balance_sheet.py', 'tests/test_finance_organization_bank_postgres.py', 'tests/conftest.py']
+          CLASSES = {'tests.test_finance_organization_bank_postgres': 'tests/test_finance_organization_bank_postgres.py'}
           PLANNED = 2
-          SELECTED = ('tests/accounting/test_production_material_issue_postgres.py::test_material_issue_persists_complete_mixed_allocation[fifo]', 'tests/accounting/test_production_material_issue_postgres.py::test_material_issue_persists_complete_mixed_allocation[weighted_average]')
+          SELECTED = ('tests/test_finance_organization_bank_postgres.py::test_same_bank_transaction_concurrent_manual_match_once', 'tests/test_finance_organization_bank_postgres.py::test_different_bank_transactions_concurrent_same_payment')
 
           EXCEPTION_IDS = {'AssertionError': 1, 'FileNotFoundError': 2, 'ModuleNotFoundError': 3, 'AttributeError': 4, 'TypeError': 5, 'KeyError': 6, 'sqlalchemy.exc.IntegrityError': 7, 'sqlalchemy.exc.ProgrammingError': 8, 'sqlalchemy.exc.OperationalError': 9, 'TimeoutError': 10, 'AccountingError': 11, 'modules.accounting.service.AccountingError': 11}
-          DIAGNOSTIC_SOURCES = {'modules/accounting/inventory_allocation_receipts.py': (1, 119), 'tests/accounting/test_inventory_allocation_receipts.py': (2, 254), 'tests/accounting/test_production_material_issue_postgres.py': (3, 1123), 'tests/accounting/test_postgres.py': (4, 2727)}
+          DIAGNOSTIC_SOURCES = {'core/services/accounting.py': (1, 108), 'modules/accounting/gateway.py': (2, 388), 'modules/finance/routes.py': (3, 801), 'modules/finance/schemas.py': (4, 169), 'modules/finance/models.py': (5, 180), 'modules/finance/summary.py': (6, 117), 'modules/finance/aging.py': (7, 97), 'modules/finance/cost_center.py': (8, 82), 'modules/finance/margin.py': (9, 239), 'modules/finance/cashflow.py': (10, 192), 'modules/finance/allocation.py': (11, 78), 'modules/finance/pnl.py': (12, 124), 'modules/finance/cashflow_dds.py': (13, 105), 'modules/finance/balance_sheet.py': (14, 111), 'tests/test_finance_organization_bank_postgres.py': (15, 239), 'tests/conftest.py': (16, 163)}
           CHECKOUT_ROOT = str(Path.cwd())
 
 
@@ -679,7 +679,7 @@ jobs:
 
           def main():
               root, temp = Path.cwd(), Path(os.environ['RUNNER_TEMP'])
-              summary = {'schemaVersion': 1, 'kind': 'accounting-issue-snapshot-compatibility-pg2', 'stage': 'preflight',
+              summary = {'schemaVersion': 1, 'kind': 'finance-organization-bank-concurrency-pg2', 'stage': 'preflight',
                          'passed': False, 'planned': PLANNED, 'countsKnown': False,
                          'passedCount': None, 'failedCount': None, 'errorCount': None,
                          'skippedCount': None, 'notRunCount': None, 'cases': [],
@@ -738,7 +738,7 @@ jobs:
                   if not summary['passed']:
                       code = 1
                   (temp / 'erp-ready-accounting-summary.json').write_text(json.dumps(summary, sort_keys=True) + '\n')
-                  print('Accounting stage:', summary['stage'], 'passed:', summary['passedCount'],
+                  print('Finance bank stage:', summary['stage'], 'passed:', summary['passedCount'],
                         'failed:', summary['failedCount'], 'not run:', summary['notRunCount'])
               return code
 
