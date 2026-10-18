@@ -3,9 +3,15 @@ import { Search } from "lucide-react";
 
 import type { NomenclatureGroup, SkuRow, VatRateRow } from "@/lib/reference-data";
 import { CATALOG_ROW_LIMIT } from "@/lib/reference-data";
+import { backendAuthHeaders } from "@/lib/auth-headers-server";
+import { currentRole } from "@/lib/role-server";
+import { fetchNomenclatureGroups, fetchSkuCatalogPage, fetchVatRates } from "@/lib/reference-data";
 import { categoryNameMap } from "@/lib/spravochniki-sku-catalog";
 
+export type SkuCatalogBaseHref = "/erp/spravochniki/sku" | "/crm/catalog";
+
 interface Props {
+  baseHref?: SkuCatalogBaseHref;
   skus: SkuRow[];
   total: number;
   offset: number;
@@ -18,16 +24,17 @@ interface Props {
   unavailable?: boolean;
 }
 
-function pageHref(search: string, categoryId: number | null, offset: number): string {
+function pageHref(baseHref: SkuCatalogBaseHref, search: string, categoryId: number | null, offset: number): string {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (categoryId !== null) params.set("category_subtree_id", String(categoryId));
   params.set("offset", String(offset));
-  return `/erp/spravochniki/sku?${params.toString()}`;
+  return `${baseHref}?${params.toString()}`;
 }
 
 /** Каталог SKU с серверной фильтрацией и страницами по лимиту structural-query. */
 export function SpravSkuCatalog({
+  baseHref = "/erp/spravochniki/sku",
   skus,
   total,
   offset,
@@ -51,8 +58,8 @@ export function SpravSkuCatalog({
   if (unavailable) return <section className="p-6">
     <h2 className="font-bold">Номенклатура (SKU)</h2>
     <p role="alert">Не удалось загрузить номенклатуру. Список товаров неизвестен.</p>
-    <Link href={pageHref(search, categoryId, offset)} className="text-accent underline">Повторить загрузку</Link>
-    <Link href="/erp/spravochniki/sku" className="ml-3 text-accent underline">Сбросить фильтры</Link>
+    <Link href={pageHref(baseHref, search, categoryId, offset)} className="text-accent underline">Повторить загрузку</Link>
+    <Link href={baseHref} className="ml-3 text-accent underline">Сбросить фильтры</Link>
   </section>;
 
   return (
@@ -80,7 +87,7 @@ export function SpravSkuCatalog({
           Справочник ставок НДС недоступен; названия ставок неизвестны.
         </p>}
 
-        <form action="/erp/spravochniki/sku" method="get" className="mt-4 flex flex-wrap items-center gap-2">
+        <form action={baseHref} method="get" className="mt-4 flex flex-wrap items-center gap-2">
           <label className="flex min-w-[260px] flex-1 items-center gap-2 rounded-xl bg-sunken px-3 py-2">
             <Search aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-faint" />
             <input
@@ -109,7 +116,7 @@ export function SpravSkuCatalog({
             ))}
           </select>
           <button type="submit" className="text-sm text-accent">Найти</button>
-          <Link href="/erp/spravochniki/sku" className="text-sm text-accent">Сбросить фильтры</Link>
+          <Link href={baseHref} className="text-sm text-accent">Сбросить фильтры</Link>
           <span role="status" className="text-sm text-muted">
             {total === 0
               ? "Найдено 0 позиций"
@@ -120,10 +127,10 @@ export function SpravSkuCatalog({
         </form>
 
         {(hasPrevious || hasNext) && <nav aria-label="Страницы каталога" className="mt-3 flex gap-3 text-sm">
-          {hasPrevious && <Link href={pageHref(search, categoryId, Math.max(0, offset - CATALOG_ROW_LIMIT))}>
+          {hasPrevious && <Link href={pageHref(baseHref, search, categoryId, Math.max(0, offset - CATALOG_ROW_LIMIT))}>
             Предыдущая страница
           </Link>}
-          {hasNext && <Link href={pageHref(search, categoryId, offset + CATALOG_ROW_LIMIT)}>
+          {hasNext && <Link href={pageHref(baseHref, search, categoryId, offset + CATALOG_ROW_LIMIT)}>
             Следующая страница
           </Link>}
         </nav>}
@@ -147,7 +154,7 @@ export function SpravSkuCatalog({
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-muted">
                   {total > 0
                     ? isOutOfRange
-                      ? <>Страница вне диапазона. <Link href={pageHref(search, categoryId, 0)} className="text-accent underline">Первая страница</Link></>
+                      ? <>Страница вне диапазона. <Link href={pageHref(baseHref, search, categoryId, 0)} className="text-accent underline">Первая страница</Link></>
                       : "На этой странице нет строк; перейдите на предыдущую страницу."
                     : search || categoryId !== null ? "Ничего не найдено" : "Нет данных"}
                 </td></tr>
@@ -191,5 +198,96 @@ export function SpravSkuCatalog({
         </div>
       </div>
     </div>
+  );
+}
+
+export type SkuCatalogSearchParams = Record<string, string | string[] | undefined>;
+type CatalogFilters = { search: string; categoryId: number | null; offset: number };
+
+function oneValue(params: SkuCatalogSearchParams, key: string): { value: string | undefined; error: boolean } {
+  const raw = params[key];
+  if (Array.isArray(raw)) return raw.length === 1
+    ? { value: raw[0], error: false }
+    : { value: undefined, error: true };
+  return { value: raw, error: false };
+}
+
+function parseFilters(params: SkuCatalogSearchParams): CatalogFilters | null {
+  const searchValue = oneValue(params, "search");
+  const categoryValue = oneValue(params, "category_subtree_id");
+  const offsetValue = oneValue(params, "offset");
+  if (searchValue.error || categoryValue.error || offsetValue.error) return null;
+
+  const search = searchValue.value ?? "";
+  if (Array.from(search).length > 512) return null;
+
+  let categoryId: number | null = null;
+  if (categoryValue.value && !/^\d+$/.test(categoryValue.value)) return null;
+  if (categoryValue.value) {
+    categoryId = Number(categoryValue.value);
+    if (!Number.isSafeInteger(categoryId) || categoryId < 1) return null;
+  }
+
+  let offset = 0;
+  if (offsetValue.value !== undefined) {
+    if (!/^\d+$/.test(offsetValue.value)) return null;
+    offset = Number(offsetValue.value);
+    if (!Number.isSafeInteger(offset) || offset > 2_147_483_647) return null;
+  }
+
+  return { search, categoryId, offset };
+}
+
+
+/** Общее серверное чтение каталога: авторизация и ошибки одинаковы для ERP и CRM. */
+export async function SkuCatalogContent({
+  searchParams,
+  baseHref = "/erp/spravochniki/sku",
+}: {
+  searchParams?: Promise<SkuCatalogSearchParams>;
+  baseHref?: SkuCatalogBaseHref;
+} = {}) {
+  const filters = parseFilters(searchParams ? await searchParams : {});
+  if (!filters) return <section className="p-6">
+    <h2 className="font-bold">Номенклатура (SKU)</h2>
+    <p role="alert">Некорректные параметры поиска или страницы каталога.</p>
+    <Link href={baseHref} className="text-accent underline">Сбросить параметры</Link>
+  </section>;
+  return renderCatalog(filters, baseHref);
+}
+
+async function renderCatalog(filters: CatalogFilters, baseHref: SkuCatalogBaseHref) {
+  const role = await currentRole();
+  const authHeaders = await backendAuthHeaders(role);
+  const [skuResult, groupsResult, vatResult] = await Promise.all([
+    fetchSkuCatalogPage({
+      search: filters.search,
+      categorySubtreeId: filters.categoryId,
+      offset: filters.offset,
+    }, role, authHeaders)
+      .then((page) => ({ page, unavailable: false as const }))
+      .catch(() => ({ page: null, unavailable: true as const })),
+    fetchNomenclatureGroups({ roles: role, strict: true }, authHeaders)
+      .then((rows) => ({ rows, unavailable: false as const }))
+      .catch(() => ({ rows: [], unavailable: true as const })),
+    fetchVatRates(undefined, role, authHeaders, true)
+      .then((rows) => ({ rows, unavailable: false as const }))
+      .catch(() => ({ rows: [], unavailable: true as const })),
+  ]);
+
+  return (
+    <SpravSkuCatalog
+      baseHref={baseHref}
+      skus={skuResult.page?.rows ?? []}
+      total={skuResult.page?.total ?? 0}
+      offset={filters.offset}
+      search={filters.search}
+      categoryId={filters.categoryId}
+      groups={groupsResult.rows}
+      groupsUnavailable={groupsResult.unavailable}
+      vatRates={vatResult.rows}
+      vatUnavailable={vatResult.unavailable}
+      unavailable={skuResult.unavailable}
+    />
   );
 }

@@ -33,6 +33,7 @@ vi.mock("next/link", () => ({
 }));
 
 import SkuCatalogPage from "./page";
+import CrmCatalogPage from "@/app/crm/catalog/page";
 import { CATALOG_ROW_LIMIT } from "@/lib/reference-data";
 
 const authHeaders = {
@@ -55,10 +56,6 @@ const vatRates = [
 const emptyPage = { rows: [], total: 0, offset: 0, limit: CATALOG_ROW_LIMIT };
 const oneRowPage = { rows: [sku], total: 1, offset: 0, limit: CATALOG_ROW_LIMIT };
 
-async function renderPage(params: Record<string, string | string[] | undefined> = {}) {
-  return render(await SkuCatalogPage({ searchParams: Promise.resolve(params) }));
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
   pageMocks.currentRole.mockResolvedValue("director");
@@ -68,7 +65,14 @@ beforeEach(() => {
   pageMocks.fetchVatRates.mockResolvedValue(vatRates);
 });
 
-describe("SkuCatalogPage", () => {
+describe.each([
+  ["ERP", SkuCatalogPage, "/erp/spravochniki/sku"],
+  ["CRM", CrmCatalogPage, "/crm/catalog"],
+] as const)("%s catalog page", (_name, Page, baseHref) => {
+  async function renderPage(params: Record<string, string | string[] | undefined> = {}) {
+    return render(await Page({ searchParams: Promise.resolve(params) }));
+  }
+
   it("[PAGE-SUCCESS] forwards one server auth header set to the catalog and metadata loaders", async () => {
     const { container } = await renderPage();
 
@@ -82,6 +86,12 @@ describe("SkuCatalogPage", () => {
     expect(pageMocks.fetchNomenclatureGroups).toHaveBeenCalledWith({ roles: "director", strict: true }, authHeaders);
     expect(pageMocks.fetchVatRates).toHaveBeenCalledWith(undefined, "director", authHeaders, true);
     expect(container.innerHTML).not.toContain("synthetic-test-token");
+    expect(screen.getByRole("link", { name: "Сбросить фильтры" })).toHaveAttribute("href", baseHref);
+    expect(screen.getByRole("link", { name: "SKU-TEST" })).toHaveAttribute("href", "/erp/spravochniki/sku/SKU-TEST");
+    expect(container.querySelector("form")).toHaveAttribute("action", baseHref);
+    expect(screen.queryByRole("button", { name: /Перенести в счёт|Подобрать/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/АКБ 6СТ-190|В пути, шт|Минск \(центр/)).not.toBeInTheDocument();
+    if (_name === "CRM") expect(screen.getByText(/Цены и остатки по складам здесь пока неизвестны/)).toBeInTheDocument();
   });
 
   it("[PAGE-403] renders an unavailable source after an authenticated 403", async () => {
@@ -157,6 +167,7 @@ describe("SkuCatalogPage", () => {
       vi.clearAllMocks();
       await renderPage(params);
       expect(screen.getByRole("alert")).toHaveTextContent("Некорректные параметры");
+      expect(screen.getByRole("link", { name: "Сбросить параметры" })).toHaveAttribute("href", baseHref);
       expect(pageMocks.fetchSkuCatalogPage).not.toHaveBeenCalled();
     }
   });

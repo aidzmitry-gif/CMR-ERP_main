@@ -8,6 +8,9 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+vi.mock("@/lib/auth-headers-server", () => ({ backendAuthHeaders: vi.fn() }));
+vi.mock("@/lib/role-server", () => ({ currentRole: vi.fn() }));
+
 import { SpravSkuCatalog } from "@/components/erp/spravochniki/sprav-sku-catalog";
 import type { NomenclatureGroup, SkuRow, VatRateRow } from "@/lib/reference-data";
 import { CATALOG_ROW_LIMIT } from "@/lib/reference-data";
@@ -206,5 +209,41 @@ describe("SpravSkuCatalog", () => {
     unmount();
     renderCatalog({ categoryId: 99 });
     expect(screen.getByRole("option", { name: "Категория #99 (название неизвестно)" })).toHaveValue("99");
+  });
+});
+
+
+describe("CRM catalog navigation", () => {
+  it("keeps encoded filters on previous and next CRM pages", () => {
+    const rows = Array.from({ length: CATALOG_ROW_LIMIT }, (_, i) => ({ ...skus[0], code: `S-${i}` }));
+    render(<SpravSkuCatalog {...baseProps} skus={rows} baseHref="/crm/catalog" search="A %_ B" categoryId={1} offset={250} total={501} />);
+    expect(screen.getByRole("link", { name: "Предыдущая страница" })).toHaveAttribute("href", "/crm/catalog?search=A+%25_+B&category_subtree_id=1&offset=0");
+    expect(screen.getByRole("link", { name: "Следующая страница" })).toHaveAttribute("href", "/crm/catalog?search=A+%25_+B&category_subtree_id=1&offset=500");
+  });
+
+  it("retries a failed CRM source with its filters rather than showing zero stock", () => {
+    render(<SpravSkuCatalog {...baseProps} baseHref="/crm/catalog" skus={[]} total={0} search="A B" categoryId={1} offset={250} unavailable />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Список товаров неизвестен");
+    expect(screen.getByRole("link", { name: "Повторить загрузку" })).toHaveAttribute("href", "/crm/catalog?search=A+B&category_subtree_id=1&offset=250");
+    expect(screen.getByRole("link", { name: "Сбросить фильтры" })).toHaveAttribute("href", "/crm/catalog");
+    expect(screen.queryByText("Нет данных")).not.toBeInTheDocument();
+  });
+
+  it("offers the first CRM page for an out-of-range offset", () => {
+    render(<SpravSkuCatalog {...baseProps} baseHref="/crm/catalog" skus={[]} total={1} search="A B" categoryId={1} offset={250} />);
+    expect(screen.getByRole("status")).toHaveTextContent("страница вне диапазона");
+    expect(screen.getByRole("link", { name: "Первая страница" })).toHaveAttribute("href", "/crm/catalog?search=A+B&category_subtree_id=1&offset=0");
+  });
+
+  it("searches within CRM from the first page and preserves canonical SKU detail links", () => {
+    const { container } = render(<SpravSkuCatalog {...baseProps} baseHref="/crm/catalog" search="A" categoryId={1} offset={250} total={253} />);
+    const form = container.querySelector("form")!;
+    expect(form).toHaveAttribute("action", "/crm/catalog");
+    expect(form).toHaveAttribute("method", "get");
+    expect(form.querySelector('[name="offset"]')).toBeNull();
+    expect(screen.getByLabelText("Поиск номенклатуры")).toHaveValue("A");
+    expect(screen.getByLabelText("Группа номенклатуры")).toHaveValue("1");
+    expect(screen.getByRole("link", { name: "Сбросить фильтры" })).toHaveAttribute("href", "/crm/catalog");
+    expect(screen.getByRole("link", { name: "SKU-001" })).toHaveAttribute("href", "/erp/spravochniki/sku/SKU-001");
   });
 });
