@@ -642,12 +642,6 @@ async def test_material_issue_persists_complete_mixed_allocation(pg_factory, pg_
     _, movement_id, physical = await seed_physical_issue(pg_factory, pg_book, order_id)
     data = posting_input(policy_id).model_copy(update={"order_id": order_id, "wms_movement_id": movement_id})
     async with pg_factory() as session:
-        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
-                         "0142_zero_value_command_dates.py", "0143_zero_value_sales.py",
-                         "0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py",
-                         "0146_zero_value_allocation_basis.py", "0147_zero_value_allocation_runtime.py",
-                         "0148_zero_value_allocated_sales.py", "0149_production_material_allocations.py"):
-            await run_migration(session, revision, "upgrade")
         await session.commit()
         preview = await prepare_material_issue_posting(session, pg_book[0], "2026-10", data, SyntheticProduction())
         cost = preview["inventory_cost"]
@@ -663,6 +657,8 @@ async def test_material_issue_persists_complete_mixed_allocation(pg_factory, pg_
         assert (await confirm_material_issue_posting(session, pg_book[0], "2026-10", confirmed, "tester")).id == entry.id
         receipt = await session.get(InventoryIssueReceipt, entry.id)
         assert receipt.cost["source_allocation_version"] == 1
+        assert "warehouse_identity" not in receipt.command
+        assert "sku_identity" not in receipt.command
         lines = (await session.scalars(select(Line).where(Line.entry_id == entry.id).order_by(Line.id))).all()
         assert [(line.side, line.account_code, str(line.amount)) for line in lines] == [
             ("debit", "20", "0.01"), ("credit", "10.1", "0.01"),

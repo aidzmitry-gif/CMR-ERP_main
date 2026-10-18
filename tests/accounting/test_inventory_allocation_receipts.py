@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from modules.accounting.inventory_allocation_receipts import validate_inventory_disposition_binding
-from modules.accounting.inventory_issues import posting_for, rule_version
+from modules.accounting.inventory_issues import document_snapshot, posting_for, rule_version
 from modules.accounting.sales import SaleDocument
 from modules.accounting.sales import posting_for as sale_posting_for
 from modules.accounting.schemas import (
@@ -190,4 +190,65 @@ def test_rejects_strict_version_and_saved_identity_mismatches(edit, match):
     entry, receipt, document, allocation = binding()
     edit(entry, receipt, document, allocation)
     with pytest.raises(AccountingError, match=match):
+        check(entry, receipt, document, allocation)
+
+
+@pytest.mark.parametrize("saved_format", ["full", "writer"])
+def test_issue_writer_snapshot_roundtrip_binds_without_mutating_history(saved_format):
+    entry, receipt, document, allocation = binding()
+    receipt.command = document.model_dump(mode="json") if saved_format == "full" else document_snapshot(document)
+    history = json.loads(json.dumps(receipt.command))
+    restored = InventoryIssueDocument.model_validate(receipt.command)
+    check(entry, receipt, restored, allocation)
+    assert receipt.command == history
+    assert restored.warehouse_identity is None and restored.sku_identity is None
+
+
+def test_complete_directory_identity_issue_keeps_exact_saved_command():
+    entry, receipt, document, allocation = binding()
+    document = document.model_copy(update={
+        "warehouse_identity": InventoryWarehouseIdentity(id=4, name="W", title="Main warehouse"),
+        "sku_identity": InventorySkuIdentity(id=8, code="S", title="Item S", unit="шт"),
+    })
+    receipt.command = document_snapshot(document)
+    history = json.loads(json.dumps(receipt.command))
+    check(entry, receipt, InventoryIssueDocument.model_validate(receipt.command), allocation)
+    assert receipt.command == history
+
+
+@pytest.mark.parametrize("edit", [
+    lambda command: command.pop("quantity"),
+    lambda command: command.update(unreviewed=True),
+    lambda command: command.update(source="forged:1"),
+    lambda command: command.update(warehouse="OTHER"),
+    lambda command: command.update(warehouse_identity={"id": 4, "name": "W", "title": "Main warehouse"}),
+])
+def test_legacy_snapshot_rejects_partial_or_tampered_saved_commands(edit):
+    entry, receipt, document, allocation = binding()
+    receipt.command = document_snapshot(document)
+    edit(receipt.command)
+    with pytest.raises(AccountingError, match="command differs"):
+        check(entry, receipt, document, allocation)
+
+
+@pytest.mark.parametrize("selected_identity", ["warehouse", "sku"])
+def test_partial_directory_identity_document_cannot_use_legacy_fallback(selected_identity):
+    entry, receipt, document, allocation = binding()
+    if selected_identity == "warehouse":
+        identity = {"warehouse_identity": InventoryWarehouseIdentity(id=4, name="W", title="Main warehouse")}
+    else:
+        identity = {"sku_identity": InventorySkuIdentity(id=8, code="S", title="Item S", unit="шт")}
+    receipt.command = document_snapshot(document.model_copy(update=identity))
+    restored = InventoryIssueDocument.model_validate(receipt.command)
+    with pytest.raises(AccountingError, match="command differs"):
+        check(entry, receipt, restored, allocation)
+
+
+def test_sale_cannot_use_the_stripped_issue_command_format():
+    entry, receipt, issue, allocation = binding()
+    document = SaleDocument(**issue.model_dump(), net_amount="10.00", vat_rate="0", vat_basis="Synthetic",
+        buyer_account="62", revenue_account="90.1", vat_revenue_account="90.2", vat_payable_account="68",
+        buyer_dimensions={"counterparty": "C", "contract": "D", "settlement_document": "S"})
+    receipt.command = document_snapshot(document)
+    with pytest.raises(AccountingError, match="command differs"):
         check(entry, receipt, document, allocation)

@@ -30,7 +30,13 @@ def validate_inventory_disposition_binding(entry, receipt, document, allocation,
         raise AccountingError("Allocation receipt organization differs from entry")
     if not isinstance(receipt.actor, str) or not receipt.actor.strip() or receipt.actor != receipt.actor.strip() or entry.actor != receipt.actor or entry.digest != receipt.digest:
         raise AccountingError("Allocation receipt actor or digest differs from entry")
-    if receipt.command != document.model_dump(mode="json"):
+    command_matches = receipt.command == document.model_dump(mode="json")
+    if (not command_matches and type(document) is InventoryIssueDocument
+            and document.warehouse_identity is None and document.sku_identity is None):
+        from modules.accounting.inventory_issues import document_snapshot
+
+        command_matches = receipt.command == document_snapshot(document)
+    if not command_matches:
         raise AccountingError("Allocation receipt command differs from document")
 
     expected_operation = "inventory_sale" if isinstance(document, SaleDocument) else "inventory_issue"
