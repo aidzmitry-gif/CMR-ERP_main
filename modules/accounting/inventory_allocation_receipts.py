@@ -74,6 +74,11 @@ def validate_inventory_disposition_binding(entry, receipt, document, allocation,
         raise AccountingError("Saved cost identity differs from document")
     if not isinstance(cost.get("basis_digest"), str) or not re.fullmatch(r"[0-9a-f]{64}", cost["basis_digest"]):
         raise AccountingError("Saved cost basis digest is invalid")
+    if receipt.command != document_json:
+        from modules.accounting.inventory_issues import rule_version
+
+        if posting.rule_version != rule_version(document, cost["basis_digest"], allocation_version=1):
+            raise AccountingError("Legacy allocation receipt rule differs from document")
     try:
         saved = InventoryDispositionAllocation.model_validate({
             "allocation_version": cost["source_allocation_version"],

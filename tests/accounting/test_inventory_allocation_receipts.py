@@ -204,15 +204,29 @@ def test_issue_writer_snapshot_roundtrip_binds_without_mutating_history(saved_fo
     assert restored.warehouse_identity is None and restored.sku_identity is None
 
 
-def test_complete_directory_identity_issue_keeps_exact_saved_command():
+@pytest.mark.parametrize("strip_identities", [False, True])
+def test_complete_directory_identity_issue_keeps_exact_saved_command(strip_identities):
     entry, receipt, document, allocation = binding()
     document = document.model_copy(update={
         "warehouse_identity": InventoryWarehouseIdentity(id=4, name="W", title="Main warehouse"),
         "sku_identity": InventorySkuIdentity(id=8, code="S", title="Item S", unit="шт"),
     })
+    posting = posting_for(document, receipt.cost)
+    receipt.posting = posting.model_dump(mode="json")
+    entry.rule_version = posting.rule_version
+    entry.digest = receipt.digest = digest(posting)
     receipt.command = document_snapshot(document)
+    if strip_identities:
+        receipt.command.pop("warehouse_identity")
+        receipt.command.pop("sku_identity")
     history = json.loads(json.dumps(receipt.command))
-    check(entry, receipt, InventoryIssueDocument.model_validate(receipt.command), allocation)
+    restored = InventoryIssueDocument.model_validate(receipt.command)
+    if strip_identities:
+        assert entry.rule_version != rule_version(restored, receipt.cost["basis_digest"], allocation_version=1)
+        with pytest.raises(AccountingError, match="rule differs"):
+            check(entry, receipt, restored, allocation)
+    else:
+        check(entry, receipt, restored, allocation)
     assert receipt.command == history
 
 
@@ -252,3 +266,20 @@ def test_sale_cannot_use_the_stripped_issue_command_format():
     receipt.command = document_snapshot(document)
     with pytest.raises(AccountingError, match="command differs"):
         check(entry, receipt, document, allocation)
+
+
+@pytest.mark.parametrize("edit", ["basis", "rule"])
+def test_legacy_snapshot_rejects_rebound_rule_mismatch(edit):
+    entry, receipt, document, allocation = binding()
+    receipt.command = document_snapshot(document)
+    if edit == "basis":
+        receipt.cost["basis_digest"] = "b" * 64
+    else:
+        receipt.posting["rule_version"] = "inventory-issue-v2:" + "b" * 64 + ":a1"
+        entry.rule_version = receipt.posting["rule_version"]
+        entry.digest = receipt.digest = digest(PostingInput.model_validate(receipt.posting))
+    history = json.loads(json.dumps(receipt.command))
+    restored = InventoryIssueDocument.model_validate(receipt.command)
+    with pytest.raises(AccountingError, match="rule differs"):
+        check(entry, receipt, restored, allocation)
+    assert receipt.command == history
