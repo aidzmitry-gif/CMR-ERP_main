@@ -2,16 +2,28 @@
 import json
 
 import pytest
-from sqlalchemy import create_engine, select, func
-from sqlalchemy.orm import Session
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from core.db.base import Base
-from core.domain.models import CatalogSourceIdentity, CatalogSourceRevision, Counterparty, CounterpartyAlias, Sku
+from core.domain.models import (
+    CatalogSourceIdentity,
+    CatalogSourceRevision,
+    Counterparty,
+    CounterpartyAlias,
+    Sku,
+)
 from core.domain.reference import NomenclatureCategory
 from core.services.native_catalog_import import (
-    COUNTERPARTIES, NOMENCLATURE, CatalogImportConflict, SourceRow, SourceUnitBinding,
-    bind_source_units, digest, import_catalog,
+    COUNTERPARTIES,
+    NOMENCLATURE,
+    CatalogImportConflict,
+    SourceRow,
+    SourceUnitBinding,
+    bind_source_units,
+    digest,
+    import_catalog,
 )
 
 
@@ -213,8 +225,10 @@ def test_same_name_code_different_guid_and_namespace(db):
 
 def test_replay_and_versioned_correction_keep_old_text(db):
     original = row(1)
-    load(db, [original]); db.commit()
-    result = load(db, [original]); db.commit()
+    load(db, [original])
+    db.commit()
+    result = load(db, [original])
+    db.commit()
     assert result["replayed"] == 1 and count(db, CatalogSourceRevision) == 1
     changed = row(1, version="v2", Description="New name")
     key = (NOMENCLATURE, json.loads(original.source_text)["Ref_Key"])
@@ -227,7 +241,9 @@ def test_replay_and_versioned_correction_keep_old_text(db):
 
 
 def test_stale_correction_and_same_version_change_fail(db):
-    original = row(1); load(db, [original]); db.commit()
+    original = row(1)
+    load(db, [original])
+    db.commit()
     key = (NOMENCLATURE, json.loads(original.source_text)["Ref_Key"])
     with pytest.raises(CatalogImportConflict, match="EXPECTED_PREVIOUS_SHA"):
         load(db, [row(1, version="v2", Description="Changed")])
@@ -237,7 +253,9 @@ def test_stale_correction_and_same_version_change_fail(db):
 
 
 def test_batch_rollback_even_after_first_insert(db):
-    original = row(2); load(db, [original]); db.commit()
+    original = row(2)
+    load(db, [original])
+    db.commit()
     with pytest.raises(CatalogImportConflict, match="EXPECTED_PREVIOUS_SHA"):
         load(db, [row(1), row(2, version="v2")])
     assert count(db, Sku) == 1 and count(db, CatalogSourceIdentity) == 1
@@ -245,8 +263,11 @@ def test_batch_rollback_even_after_first_insert(db):
 
 
 def test_native_manual_change_blocks_replay(db):
-    original = row(1); load(db, [original]); db.commit()
-    db.scalar(select(Sku)).title = "Human correction"; db.commit()
+    original = row(1)
+    load(db, [original])
+    db.commit()
+    db.scalar(select(Sku)).title = "Human correction"
+    db.commit()
     with pytest.raises(CatalogImportConflict, match="NATIVE_TARGET_CHANGED"):
         load(db, [original])
     assert db.scalar(select(Sku)).title == "Human correction"
@@ -258,13 +279,15 @@ def test_native_manual_change_blocks_replay(db):
     ([row(1), row(1)], "DUPLICATE_SOURCE_GUID"),
 ])
 def test_invalid_tree_or_duplicate_has_no_partial_writes(db, records, reason):
-    with pytest.raises(CatalogImportConflict, match=reason): load(db, records)
+    with pytest.raises(CatalogImportConflict, match=reason):
+        load(db, records)
     assert count(db, CatalogSourceIdentity) == count(db, Sku) == 0
 
 
 def test_partial_parent_correction_cannot_create_cycle(db):
     parent, child = row(1, folder=True), row(2, folder=True, parent=1)
-    load(db, [parent, child]); db.commit()
+    load(db, [parent, child])
+    db.commit()
     key = (NOMENCLATURE, json.loads(parent.source_text)["Ref_Key"])
     with pytest.raises(CatalogImportConflict, match="GROUP_CYCLE"):
         load(db, [row(1, folder=True, parent=2, version="v2")], expected_previous={key: digest(parent.source_text)})
@@ -273,7 +296,8 @@ def test_partial_parent_correction_cannot_create_cycle(db):
 
 def test_explicit_tombstone_not_absence_archives(db):
     parent, child = row(1, folder=True), row(2, folder=True)
-    load(db, [parent, child]); db.commit()
+    load(db, [parent, child])
+    db.commit()
     key = (NOMENCLATURE, json.loads(parent.source_text)["Ref_Key"])
     load(db, [row(1, folder=True, version="v2", DeletionMark=True)], expected_previous={key: digest(parent.source_text)})
     identities = {v.source_guid: v for v in db.scalars(select(CatalogSourceIdentity))}
@@ -294,8 +318,10 @@ def test_counterparty_without_source_code_keeps_exact_payload_and_replays(db):
     value = json.loads(row(1, entity=COUNTERPARTIES).source_text)
     del value["Code"]
     incoming = SourceRow(COUNTERPARTIES, json.dumps(value, ensure_ascii=False))
-    first = load(db, [incoming]); db.commit()
-    second = load(db, [incoming]); db.commit()
+    first = load(db, [incoming])
+    db.commit()
+    second = load(db, [incoming])
+    db.commit()
     assert first["held_counterparties"] == second["replayed"] == 1
     assert count(db, CatalogSourceIdentity) == count(db, CatalogSourceRevision) == 1
     assert db.scalar(select(CatalogSourceRevision)).source_text == incoming.source_text
@@ -335,22 +361,28 @@ def test_projection_not_full_source_entity_and_unknown_unit_explicit(db):
 def test_sql_failure_rolls_back_created_group_and_source_identity(db):
     key = json.loads(row(2).source_text)["Ref_Key"]
     code = "SRC-" + digest("1c:ka_copy:" + NOMENCLATURE + ":" + key)[:48]
-    db.add(Sku(code=code, title="Existing manual record", unit="шт")); db.commit()
-    with pytest.raises(IntegrityError): load(db, [row(1, folder=True), row(2, parent=1)])
+    db.add(Sku(code=code, title="Existing manual record", unit="шт"))
+    db.commit()
+    with pytest.raises(IntegrityError):
+        load(db, [row(1, folder=True), row(2, parent=1)])
     assert count(db, CatalogSourceIdentity) == count(db, CatalogSourceRevision) == count(db, NomenclatureCategory) == 0
     assert count(db, Sku) == 1
 
 
 def test_existing_parent_manual_change_blocks_partial_item_load(db):
-    load(db, [row(1, folder=True)]); db.commit()
-    db.scalar(select(NomenclatureCategory)).parent_id = 1; db.commit()
+    load(db, [row(1, folder=True)])
+    db.commit()
+    db.scalar(select(NomenclatureCategory)).parent_id = 1
+    db.commit()
     with pytest.raises(CatalogImportConflict, match="NATIVE_TARGET_CHANGED"):
         load(db, [row(2, parent=1)])
     assert count(db, Sku) == 0
 
 
 def test_invalid_source_title_correction_archives_existing_group(db):
-    original = row(1, folder=True); load(db, [original]); db.commit()
+    original = row(1, folder=True)
+    load(db, [original])
+    db.commit()
     key = (NOMENCLATURE, json.loads(original.source_text)["Ref_Key"])
     load(db, [row(1, folder=True, version="v2", Description="")], expected_previous={key: digest(original.source_text)})
     assert not db.scalar(select(NomenclatureCategory)).is_active
@@ -361,7 +393,8 @@ def test_invalid_source_title_correction_archives_existing_group(db):
 @pytest.mark.parametrize("tombstone", [False, True])
 def test_enrichment_keeps_identity_history_holds_and_replays(db, folder, tombstone):
     original = row(1, folder=folder, DeletionMark=tombstone)
-    load(db, [original]); db.commit()
+    load(db, [original])
+    db.commit()
     identity = db.scalar(select(CatalogSourceIdentity))
     before = (identity.id, identity.sku_id, identity.group_id, list(identity.holds))
     model = NomenclatureCategory if folder else Sku
@@ -389,7 +422,9 @@ def test_enrichment_keeps_identity_history_holds_and_replays(db, folder, tombsto
 
 
 def test_enrichment_requires_explicit_mode_and_exact_previous_sha(db):
-    original = row(1); load(db, [original]); db.commit()
+    original = row(1)
+    load(db, [original])
+    db.commit()
     full = row(1, AdditionalSourceField="extra")
     key = (NOMENCLATURE, json.loads(original.source_text)["Ref_Key"])
     with pytest.raises(CatalogImportConflict, match="DATA_VERSION_REUSED"):
@@ -409,7 +444,8 @@ def test_enrichment_requires_explicit_mode_and_exact_previous_sha(db):
 def test_enrichment_rejects_raw_value_type_or_number_lexeme_change(db, before, after):
     base = row(1).source_text[:-1]
     original = SourceRow(NOMENCLATURE, base + ',"Observed":' + before + '}')
-    load(db, [original]); db.commit()
+    load(db, [original])
+    db.commit()
     changed = SourceRow(NOMENCLATURE, base + ',"Observed":' + after + ',"Added":true}')
     key = (NOMENCLATURE, json.loads(original.source_text)["Ref_Key"])
     with pytest.raises(CatalogImportConflict, match="ENRICHMENT_FIELDS_CHANGED"):
@@ -420,12 +456,17 @@ def test_enrichment_rejects_raw_value_type_or_number_lexeme_change(db, before, a
 @pytest.mark.parametrize("change", ["removed", "normalized_guid", "same_keys", "title"])
 def test_enrichment_requires_preserved_raw_proper_superset(db, change):
     original = row(1, Parent_Key="00000000-0000-0000-0000-000000000000", Observed=None)
-    load(db, [original]); db.commit()
+    load(db, [original])
+    db.commit()
     value = json.loads(original.source_text)
-    if change == "removed": del value["Observed"]
-    if change == "normalized_guid": value["Parent_Key"] = None
-    if change == "title": value["Description"] = "Changed"
-    if change != "same_keys": value["Added"] = True
+    if change == "removed":
+        del value["Observed"]
+    if change == "normalized_guid":
+        value["Parent_Key"] = None
+    if change == "title":
+        value["Description"] = "Changed"
+    if change != "same_keys":
+        value["Added"] = True
     changed = SourceRow(NOMENCLATURE, json.dumps(value, ensure_ascii=False, indent=1 if change == "same_keys" else None))
     key = (NOMENCLATURE, value["Ref_Key"])
     with pytest.raises(CatalogImportConflict, match="ENRICHMENT_FIELDS_CHANGED"):
@@ -435,7 +476,8 @@ def test_enrichment_requires_preserved_raw_proper_superset(db, change):
 
 def test_enrichment_refuses_new_identity_counterparty_new_version_and_chaining(db):
     original, counterparty = row(1), row(2, entity=COUNTERPARTIES)
-    load(db, [original, counterparty]); db.commit()
+    load(db, [original, counterparty])
+    db.commit()
     key = (NOMENCLATURE, json.loads(original.source_text)["Ref_Key"])
     for changed, options in [
         (row(3, Added=True), {}),
@@ -446,7 +488,8 @@ def test_enrichment_refuses_new_identity_counterparty_new_version_and_chaining(d
         with pytest.raises(CatalogImportConflict, match="ENRICHMENT_REQUIRES_PROJECTION"):
             load(db, [changed], enrich_projection=True, **options)
     full = row(1, Added=True)
-    load(db, [full], enrich_projection=True, expected_previous={key: digest(original.source_text)}); db.commit()
+    load(db, [full], enrich_projection=True, expected_previous={key: digest(original.source_text)})
+    db.commit()
     with pytest.raises(CatalogImportConflict, match="ENRICHMENT_REQUIRES_PROJECTION"):
         load(db, [row(1, Added=True, AddedAgain=True)], enrich_projection=True,
              expected_previous={key: digest(full.source_text)})
@@ -455,7 +498,8 @@ def test_enrichment_refuses_new_identity_counterparty_new_version_and_chaining(d
 
 def test_enrichment_batch_failure_rolls_back_an_already_enriched_row(db):
     originals = [row(1), row(2)]
-    load(db, originals); db.commit()
+    load(db, originals)
+    db.commit()
     previous = {(NOMENCLATURE, json.loads(v.source_text)["Ref_Key"]): digest(v.source_text) for v in originals}
     with pytest.raises(CatalogImportConflict, match="ENRICHMENT_FIELDS_CHANGED"):
         load(db, [row(1, Added=True), row(2, Description="Changed", Added=True)],
@@ -469,9 +513,11 @@ def test_enrichment_batch_failure_rolls_back_an_already_enriched_row(db):
 @pytest.mark.parametrize("tamper", ["native", "revision"])
 def test_enriched_replay_checks_integrity_before_replay(db, tamper):
     original, full = row(1), row(1, Added=True)
-    load(db, [original]); db.commit()
+    load(db, [original])
+    db.commit()
     key = (NOMENCLATURE, json.loads(original.source_text)["Ref_Key"])
-    load(db, [full], enrich_projection=True, expected_previous={key: digest(original.source_text)}); db.commit()
+    load(db, [full], enrich_projection=True, expected_previous={key: digest(original.source_text)})
+    db.commit()
     if tamper == "native":
         db.scalar(select(Sku)).title = "Human change"
         reason = "NATIVE_TARGET_CHANGED"
@@ -494,10 +540,12 @@ def test_enrichment_mode_is_an_explicit_boolean(db, mode):
 @pytest.mark.parametrize("folder", [False, True])
 def test_archived_invalid_title_target_cannot_be_enriched_or_chained(db, folder):
     original = row(1, folder=folder)
-    load(db, [original]); db.commit()
+    load(db, [original])
+    db.commit()
     key = (NOMENCLATURE, original.parse()[0])
     invalid = row(1, folder=folder, version="v2", Description="")
-    load(db, [invalid], expected_previous={key: digest(original.source_text)}); db.commit()
+    load(db, [invalid], expected_previous={key: digest(original.source_text)})
+    db.commit()
     identity = db.scalar(select(CatalogSourceIdentity))
     before = (identity.id, identity.sku_id, identity.group_id, identity.source_sha,
               identity.target_sha, identity.revision_no, list(identity.holds))
