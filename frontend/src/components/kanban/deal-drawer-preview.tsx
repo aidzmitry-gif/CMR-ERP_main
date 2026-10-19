@@ -24,7 +24,7 @@ import {
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChannelButtons } from "@/components/channels";
 import { PriorityBadge } from "@/components/priority-badge";
 import { CatalogPickerModal } from "@/components/kanban/catalog-picker-modal";
@@ -152,15 +152,6 @@ export function DealDrawerPreview({
    *  deals-workspace.tsx) — тот же паттерн, что reasonByCode: сырая карта, резолв здесь. */
   approvals?: Map<string, string>;
 }) {
-  // Esc-закрытие
-  useEffect(() => {
-    if (!deal) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [deal, onClose]);
 
   // Локальные draft-стейты для inline-редакторов (next-step + новая задача).
   // Сбрасываем, когда меняется открытая сделка, чтобы не утечь чужой текст.
@@ -197,6 +188,19 @@ export function DealDrawerPreview({
   const messageRequest = useRef<{ fingerprint: string; key: string; pending: boolean } | null>(null);
   // Справочник/остатки грузятся только пока модалка подбора реально открыта.
   const picker = useProductPicker(pickerOpen, deal?.id);
+  const invoiceAction = useRef<object | null>(null);
+  const closeDrawer = useCallback(() => {
+    if (invoiceAction.current) return;
+    if (picker.canClose()) onClose();
+    else setDocMsg("Сначала подтвердите перенос выбранных позиций повторной попыткой.");
+  }, [picker, onClose]);
+  useEffect(() => {
+    if (!deal) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeDrawer(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [deal, closeDrawer]);
+
   // FIX-R6: «живой» id открытой сделки для async-колбэков документов (issueInvoice/
   // prepareContractFromTemplate/issueClientContract) — обновляется эффектом ниже, а не при
   // рендере (react-hooks/refs запрещает писать в ref во время рендера). Замыкание внутри
@@ -206,6 +210,8 @@ export function DealDrawerPreview({
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     dealIdRef.current = deal?.id;
+    if (invoiceAction.current) setDocBusy(false);
+    invoiceAction.current = null;
     if (messageRequest.current?.pending) setDocBusy(false);
     messageRequest.current = null;
     setStepDraft(deal?.nextStep ?? "");
@@ -349,8 +355,17 @@ export function DealDrawerPreview({
   async function issueInvoice() {
     if (!deal) return;
     const dealId = deal.id;
+    if (invoiceAction.current) return;
+    if (!picker.canIssueInvoice(dealId)) {
+      setDocMsg("Сначала перенесите все выбранные позиции в сделку и подтвердите результат переноса.");
+      return;
+    }
+    const operation = {};
+    const token = picker.contextToken();
+    invoiceAction.current = operation;
     // Вкладку печати открываем СИНХРОННО (до await) — иначе popup-блокировщик съест окно.
     const win = window.open("about:blank", "_blank");
+    let navigated = false;
     setDocBusy(true);
     try {
       const requestKey = onOrder ? (invoiceRequestKey.current ??= crypto.randomUUID()) : null;
@@ -358,15 +373,14 @@ export function DealDrawerPreview({
         ? await issueDocument(dealId, "invoice", { reserve_mode: "on_order", request_key: requestKey })
         : await issueDocument(dealId, "invoice");
       if (ok && invoiceRequestKey.current === requestKey) invoiceRequestKey.current = null;
-      if (win && ok && renderUrl) win.location.href = renderUrl;
-      else win?.close();
+      if (win && ok && renderUrl && picker.isCurrentContext(token)) { win.location.href = renderUrl; navigated = true; }
       if (ok) {
         const nextStepAt = presetDateISO(3, Date.now());
         onUpdateFields(dealId, { next_step: INVOICE_NEXT_STEP, next_step_at: nextStepAt });
       }
       // FIX-R6: drawer мог переключиться на другую сделку, пока запрос летел — docs/docMsg
       // не тегированы dealId, поэтому чужой поздний ответ не должен их перезаписывать.
-      if (dealIdRef.current !== dealId) return;
+      if (dealIdRef.current !== dealId || !picker.isCurrentContext(token)) return;
       if (ok) {
         setDocMsg(`${message} · Шаг: Проверить оплату (3 дн)`);
         // новый счёт — сразу виден в блоке «Документы» (тот же гард — на случай, если
@@ -377,9 +391,12 @@ export function DealDrawerPreview({
       } else {
         setDocMsg(message);
       }
+    } catch {
+      if (picker.isCurrentContext(token)) setDocMsg("Результат оформления счёта не подтверждён. Проверьте документы сделки перед повтором.");
     } finally {
       // страховка от залипшего busy/окна-пустышки, если issue-путь когда-нибудь бросит
-      setDocBusy(false);
+      if (!navigated) win?.close();
+      if (invoiceAction.current === operation) { invoiceAction.current = null; setDocBusy(false); }
     }
   }
 
@@ -580,7 +597,7 @@ export function DealDrawerPreview({
     <>
       <div
         aria-hidden
-        onClick={onClose}
+        onClick={closeDrawer}
         className={`fixed inset-0 z-40 bg-ink/30 transition-opacity duration-150 ${
           open ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
@@ -620,7 +637,7 @@ export function DealDrawerPreview({
               </button>
               <button
                 type="button"
-                onClick={onClose}
+                onClick={closeDrawer}
                 aria-label="Закрыть превью"
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-faint hover:bg-sunken hover:text-ink"
               >

@@ -28,6 +28,256 @@ const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
 const fmt = (v: number) => `${v.toFixed(2)} BYN`;
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function selectedHook() {
+  const hook = renderHook(() => useProductPicker(true, "d1"));
+  await waitFor(() => expect(hook.result.current.skus).toHaveLength(skus.length));
+  act(() => hook.result.current.addSku(skus[0]));
+  return hook;
+}
+
+async function selectedModal() {
+  const onClose = vi.fn();
+  const onCommitted = vi.fn();
+  const win = { location: { href: "" }, close: vi.fn() };
+  vi.spyOn(window, "open").mockReturnValue(win as unknown as Window);
+  render(<ProductPickerModal dealId="d1" counterparty="Synthetic customer" onClose={onClose} onCommitted={onCommitted} />);
+  fireEvent.click(await screen.findByText(skus[0].title));
+  return { onClose, onCommitted, win };
+}
+
+describe("JZ immutable picker commands", () => {
+  it.each(["no-op", "qty", "price"])("KB01 confirmed values stay immutable after %s edit", async (edit) => {
+    const { result } = await selectedHook();
+    await act(async () => { await result.current.commitToDeal("d1", "Synthetic customer"); });
+    const row = result.current.rows[0];
+    const price = result.current.agreedPriceOf(row);
+    act(() => {
+      if (edit === "price") result.current.setRowPrice(row.skuId, 17);
+      else result.current.setRowQty(row, edit === "qty" ? 7 : row.qty, price);
+    });
+    expect(result.current.rows[0]).toEqual(row);
+    expect(result.current.agreedPriceOf(result.current.rows[0])).toBe(price);
+    expect(result.current.saveNotice).toContain("Позиция уже сохранена");
+    await act(async () => { await result.current.commitToDeal("d1", "Synthetic customer"); });
+    expect(api.addDealItem).toHaveBeenCalledOnce();
+    expect(api.createPriceQuote).toHaveBeenCalledOnce();
+  });
+
+  it("KB06 explicit quantity append sends only the new quantity", async () => {
+    const { result } = await selectedHook();
+    act(() => result.current.setRowQty(result.current.rows[0], 2));
+    await act(async () => { await result.current.commitToDeal("d1", "Synthetic customer"); });
+    act(() => result.current.addSkuWithQty(skus[0], 3));
+    expect(result.current.rows.map((row) => row.qty)).toEqual([2, 3]);
+    await act(async () => { await result.current.commitToDeal("d1", "Synthetic customer"); });
+    const calls = mock(api.addDealItem).mock.calls;
+    expect(calls.map((call) => call[2])).toEqual([2, 3]);
+    expect(calls[0][4]).not.toBe(calls[1][4]);
+  });
+
+  it("JZ01 partial save blocks invoice and next step", async () => {
+    mock(api.addDealItem).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const { win, onCommitted } = await selectedModal();
+    fireEvent.change(screen.getByPlaceholderText("Подобрать товар по названию / коду…"), { target: { value: "100Ah" } });
+    fireEvent.click(screen.getByText(skus[1].title));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Выставить счёт" })); });
+    expect(api.issueDocument).not.toHaveBeenCalled();
+    expect(api.updateDeal).not.toHaveBeenCalled();
+    expect(onCommitted).not.toHaveBeenCalled();
+    expect(win.close).toHaveBeenCalledOnce();
+    expect(screen.getByText(/Подтверждено позиций: 1\/2/)).toBeInTheDocument();
+    expect(screen.getAllByRole("checkbox", { name: /Включить/ })).toHaveLength(2);
+  });
+
+  it("JZ02 lost acknowledgement and false response reuse the original command", async () => {
+    const receipts = new Set<string>();
+    let calls = 0;
+    mock(api.addDealItem).mockImplementation(async (_deal, _sku, _qty, _price, key: string) => {
+      receipts.add(key);
+      calls++;
+      if (calls === 1) throw new Error("ack lost after commit");
+      return calls !== 2;
+    });
+    const { result } = await selectedHook();
+    await act(async () => {
+      expect((await result.current.commitToDeal("d1", "Synthetic customer")).ok).toBe(0);
+      expect((await result.current.commitToDeal("d1", "Synthetic customer")).ok).toBe(0);
+      expect((await result.current.commitToDeal("d1", "Synthetic customer")).ok).toBe(1);
+    });
+    expect(receipts.size).toBe(1);
+    const sent = mock(api.addDealItem).mock.calls;
+    expect(sent[1]).toEqual(sent[0]);
+    expect(sent[2]).toEqual(sent[0]);
+    expect(api.createPriceQuote).toHaveBeenCalledOnce();
+  });
+
+  it("JZ03 concurrent commits share one POST and one quote", async () => {
+    const pending = deferred<boolean>();
+    mock(api.addDealItem).mockReturnValue(pending.promise);
+    const { result } = await selectedHook();
+    let first!: ReturnType<ProductPickerState["commitToDeal"]>;
+    let second!: ReturnType<ProductPickerState["commitToDeal"]>;
+    act(() => {
+      first = result.current.commitToDeal("d1", "Synthetic customer");
+      second = result.current.commitToDeal("d1", "Synthetic customer");
+    });
+    expect(api.addDealItem).toHaveBeenCalledOnce();
+    await act(async () => {
+      pending.resolve(true);
+      expect((await first).ok).toBe(1);
+      expect((await second).ok).toBe(1);
+    });
+    expect(api.createPriceQuote).toHaveBeenCalledOnce();
+  });
+
+  it("JZ04 duplicate SKU rows retain distinct command identities", async () => {
+    mock(api.fetchLastOrder).mockResolvedValue([100, 200].map((unit_price, index) => ({
+      id: index + 1, sku_id: 1, code: skus[0].code, title: skus[0].title, unit: "шт", qty: 1, unit_price,
+    })));
+    const { result } = renderHook(() => useProductPicker(true, "d1"));
+    await waitFor(() => expect(result.current.skus).toHaveLength(skus.length));
+    await act(async () => { await result.current.repeatLastOrder("d1"); });
+    await act(async () => { expect((await result.current.commitToDeal("d1", "Synthetic customer")).ok).toBe(2); });
+    const sent = mock(api.addDealItem).mock.calls;
+    expect(sent.map((args) => args[3])).toEqual([100, 200]);
+    expect(sent[0][4]).not.toBe(sent[1][4]);
+    expect(result.current.rows[0].clientKey).not.toBe(result.current.rows[1].clientKey);
+  });
+
+  it("JZ05 unknown commands cannot be edited removed deselected or reset", async () => {
+    mock(api.addDealItem).mockResolvedValue(false);
+    const { result } = await selectedHook();
+    await act(async () => { await result.current.commitToDeal("d1", "Synthetic customer"); });
+    const row = result.current.rows[0];
+    act(() => {
+      result.current.setRowQty(row, 99, 999);
+      result.current.setRowPrice(row.skuId, 1000);
+      result.current.toggleRow(row);
+      result.current.removeRow(row);
+      result.current.addSkuWithQty(skus[0], 10);
+      expect(result.current.reset()).toBe(false);
+    });
+    expect(result.current.rows).toEqual([row]);
+    expect(result.current.agreedPriceOf(row)).toBe(150);
+    expect(result.current.canIssueInvoice("d1")).toBe(false);
+    expect(result.current.saveNotice).toMatch(/не подтверждено/);
+  });
+
+  it("JZ06 close retains an unknown cart until successful reconciliation", async () => {
+    mock(api.addDealItem).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const { onClose } = await selectedModal();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Добавить в сделку" })); });
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть" }));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(`Количество ${skus[0].title}`)).toHaveValue("1");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Добавить в сделку" })); });
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть" }));
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(mock(api.addDealItem).mock.calls[1]).toEqual(mock(api.addDealItem).mock.calls[0]);
+  });
+
+  it("JZ07 context switch isolates late results and restores the unknown command", async () => {
+    const pending = deferred<boolean>();
+    mock(api.addDealItem).mockReturnValueOnce(pending.promise).mockResolvedValue(true);
+    const { result, rerender } = renderHook(({ deal }) => useProductPicker(true, deal), { initialProps: { deal: "d1" } });
+    await waitFor(() => expect(result.current.skus).toHaveLength(skus.length));
+    act(() => result.current.addSku(skus[0]));
+    const token = result.current.contextToken();
+    let request!: ReturnType<ProductPickerState["commitToDeal"]>;
+    act(() => { request = result.current.commitToDeal("d1", "Original customer"); });
+    rerender({ deal: "d2" });
+    expect(result.current.rows).toHaveLength(0);
+    await act(async () => { pending.resolve(false); await request; });
+    expect(result.current.isCurrentContext(token)).toBe(false);
+    expect(result.current.rows).toHaveLength(0);
+    expect(result.current.saveNotice).toBeNull();
+    rerender({ deal: "d1" });
+    expect(result.current.rows).toHaveLength(1);
+    await act(async () => { await result.current.commitToDeal("d1", "Changed display name"); });
+    expect(mock(api.addDealItem).mock.calls[1]).toEqual(mock(api.addDealItem).mock.calls[0]);
+    expect(api.createPriceQuote).toHaveBeenCalledWith(skus[0].code, "Original customer", 150);
+  });
+
+  it("JZ08 confirmed commands do not repeat while a deliberate new row gets a new key", async () => {
+    const { result } = await selectedHook();
+    await act(async () => {
+      await result.current.commitToDeal("d1", "Synthetic customer");
+      await result.current.commitToDeal("d1", "Synthetic customer");
+    });
+    expect(api.addDealItem).toHaveBeenCalledOnce();
+    act(() => result.current.removeRow(result.current.rows[0]));
+    act(() => result.current.addSku(skus[0]));
+    await act(async () => { await result.current.commitToDeal("d1", "Synthetic customer"); });
+    expect(api.addDealItem).toHaveBeenCalledTimes(2);
+    expect(mock(api.addDealItem).mock.calls[1][4]).not.toBe(mock(api.addDealItem).mock.calls[0][4]);
+  });
+
+  it("JZ09 frozen null and zero survive stock refresh and exact retry", async () => {
+    for (const price of [null, 0]) {
+      mock(api.addDealItem).mockReset().mockResolvedValueOnce(false).mockResolvedValue(true);
+      mock(api.fetchStock).mockResolvedValue(stockRows);
+      const hook = renderHook(({ active }) => useProductPicker(active, "d1"), { initialProps: { active: true } });
+      await waitFor(() => expect(hook.result.current.skus).toHaveLength(skus.length));
+      act(() => { hook.result.current.addSku(skus[0]); });
+      act(() => { hook.result.current.setRowPrice(skus[0].id, price); });
+      await act(async () => { await hook.result.current.commitToDeal("d1", "Synthetic customer"); });
+      mock(api.fetchStock).mockResolvedValue([{ ...stockRows[0], price: 999 }]);
+      hook.rerender({ active: false });
+      hook.rerender({ active: true });
+      await waitFor(() => expect(hook.result.current.stock[skus[0].code]?.price).toBe(999));
+      expect(hook.result.current.agreedPriceOf(hook.result.current.rows[0])).toBe(price);
+      await act(async () => { await hook.result.current.commitToDeal("d1", "Synthetic customer"); });
+      const sent = mock(api.addDealItem).mock.calls;
+      expect(sent[1]).toEqual(sent[0]);
+      expect(sent[0][3]).toBe(price);
+      hook.unmount();
+    }
+  });
+
+  it("JZ10 quote failure does not unconfirm or resend a persisted item", async () => {
+    mock(api.createPriceQuote).mockRejectedValue(new Error("history unavailable"));
+    const { result } = await selectedHook();
+    await act(async () => {
+      expect((await result.current.commitToDeal("d1", "Synthetic customer")).ok).toBe(1);
+      expect((await result.current.commitToDeal("d1", "Synthetic customer")).ok).toBe(1);
+    });
+    expect(api.addDealItem).toHaveBeenCalledOnce();
+    expect(api.createPriceQuote).toHaveBeenCalledOnce();
+    expect(result.current.canIssueInvoice("d1")).toBe(true);
+  });
+
+  it("JZ11 unexpected commit failure closes popup and releases the action", async () => {
+    const { win, onCommitted } = await selectedModal();
+    vi.spyOn(crypto, "randomUUID").mockImplementationOnce(() => { throw new Error("key unavailable"); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Выставить счёт" })); });
+    expect(win.close).toHaveBeenCalledOnce();
+    expect(api.addDealItem).not.toHaveBeenCalled();
+    expect(api.issueDocument).not.toHaveBeenCalled();
+    expect(api.updateDeal).not.toHaveBeenCalled();
+    expect(onCommitted).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Выставить счёт" })).toBeEnabled();
+  });
+
+  it("JZ12 unexpected invoice failure closes popup and preserves the saved cart", async () => {
+    mock(api.issueDocument).mockRejectedValue(new Error("lost invoice reply"));
+    const { win, onCommitted } = await selectedModal();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Выставить счёт" })); });
+    expect(win.close).toHaveBeenCalledOnce();
+    expect(api.updateDeal).not.toHaveBeenCalled();
+    expect(onCommitted).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Выставить счёт" })).toBeEnabled();
+    expect(screen.getByText(/Проверьте документы сделки перед повтором/)).toBeInTheDocument();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Добавить в сделку" })); });
+    expect(api.addDealItem).toHaveBeenCalledOnce();
+  });
+});
+
 it("встроенный подбор меняет количество, выбор и удаление только одной повторённой строки", async () => {
   mockSkusFetch();
   mock(api.fetchStock).mockResolvedValue([]);
@@ -316,7 +566,7 @@ describe("ProductPickerModal — интеграция: повтор заказа
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /Добавить в сделку/ }));
     });
-    expect(api.addDealItem).toHaveBeenCalledWith("d1", 1, 1, 150);
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", 1, 1, 150, expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i));
     expect(api.createPriceQuote).toHaveBeenCalledWith("AKB-60", "ООО Ромашка", 150);
     expect(screen.getByText("✅ Добавлено в сделку позиций: 1/1")).toBeInTheDocument();
     expect(onCommitted).toHaveBeenCalledTimes(1);
@@ -356,7 +606,7 @@ describe("ProductPickerModal — интеграция: повтор заказа
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /Выставить счёт/ }));
     });
-    expect(api.addDealItem).toHaveBeenCalledWith("d1", 1, 1, 150);
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", 1, 1, 150, expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i));
     expect(api.issueDocument).toHaveBeenCalledWith("d1", "invoice");
     expect(winStub.location.href).toBe("/r");
     expect(screen.getByText("Счёт создан")).toBeInTheDocument();
@@ -431,7 +681,7 @@ describe("useProductPicker — согласованная цена позици�
     await act(async () => {
       expect(await result.current.commitToDeal("d1", "Клиент")).toEqual({ ok: 1, total: 1, successfulRows: [result.current.pickedRows[0]] });
     });
-    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, price);
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, price, expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i));
     expect(api.createPriceQuote).toHaveBeenCalledWith(skus[0].code, "Клиент", price);
   });
 
@@ -441,7 +691,7 @@ describe("useProductPicker — согласованная цена позици�
     await waitFor(() => expect(result.current.skus).toHaveLength(skus.length));
     act(() => result.current.addSku(skus[0]));
     await act(async () => { await result.current.commitToDeal("d1", "Клиент"); });
-    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, price ?? null);
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, price ?? null, expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i));
     if (price == null) expect(api.createPriceQuote).not.toHaveBeenCalled();
     else expect(api.createPriceQuote).toHaveBeenCalledWith(skus[0].code, "Клиент", 0);
   });
@@ -452,7 +702,7 @@ describe("useProductPicker — согласованная цена позици�
     fireEvent.click(await screen.findByText(skus[0].title));
     expect(screen.getByText(/Цена не подтверждена/)).toBeInTheDocument();
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Добавить в сделку/ })); });
-    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, null);
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, null, expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i));
     expect(api.createPriceQuote).not.toHaveBeenCalled();
   });
 
@@ -465,7 +715,7 @@ describe("useProductPicker — согласованная цена позици�
     await waitFor(() => expect(result.current.skus).toHaveLength(skus.length));
     await act(async () => { await result.current.repeatLastOrder("d1"); });
     await act(async () => { await result.current.commitToDeal("d1", "Клиент"); });
-    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 2, unit_price);
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 2, unit_price, expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i));
   });
 
   it("ошибка истории котировок не заменяет подтверждение сохранённой цены строки", async () => {
@@ -476,7 +726,7 @@ describe("useProductPicker — согласованная цена позици�
     await act(async () => {
       expect(await result.current.commitToDeal("d1", "Клиент")).toEqual({ ok: 1, total: 1, successfulRows: [result.current.pickedRows[0]] });
     });
-    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, 150);
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, 150, expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i));
   });
 
   it("при отказе строки не создаёт историю цены и сохраняет подбор", async () => {

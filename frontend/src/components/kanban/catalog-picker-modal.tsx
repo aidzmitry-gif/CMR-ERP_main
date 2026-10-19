@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { RefreshCw, Search, ShoppingCart, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { requestApproval, type SkuOption } from "@/lib/api";
 import { marginOf, srokOf, type SkuStock, type SkuWarehouseStock } from "@/lib/stock";
@@ -72,17 +72,35 @@ export function CatalogPickerModal({
   const busy = committing || saving;
   const [toast, setToast] = useState<string | null>(null);
   const [kbdIndex, setKbdIndex] = useState(-1);
-  const [popover, setPopover] = useState<{ sku: SkuOption; row?: PickerRow } | null>(null);
+  const [popover, setPopover] = useState<{ sku: SkuOption; row?: PickerRow; token: object } | null>(null);
   const popoverSku = popover?.sku;
   function setPopoverSku(sku: SkuOption | null, row = rows.find((r) => r.skuId === sku?.id)) {
-    setPopover(sku ? { sku, row } : null);
+    setPopover(sku ? { sku, row, token: picker.contextToken() } : null);
   }
   // «Мягкий» гардрейл маржи: скидка ниже порога не блокирует перенос, но требует ОДНОГО
   // подтверждения — по нему уходит запрос на согласование скидки (kind=deal.discount, тот
   // же контракт, что и DealApprovals на полной карточке сделки).
   const [confirmingDiscount, setConfirmingDiscount] = useState(false);
-  const [pendingApproval, setPendingApproval] = useState(false);
+  const pendingApproval = !!(dealId && picker.pendingDiscountApprovals[dealId]);
   const [transferError, setTransferError] = useState<string | null>(null);
+  const transferLock = useRef<object | null>(null);
+
+  const closePicker = useCallback(() => {
+    if (busy || transferLock.current) return;
+    if (picker.canClose()) onClose();
+    else setTransferError("Сохранение позиций не подтверждено. Завершите повторный перенос перед закрытием.");
+  }, [busy, picker, onClose]);
+
+  // Согласование хранится в hook по сделке; локальный попап не переживает смену контекста.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    transferLock.current = null;
+    setBusy(false);
+    setPopover(null);
+    setConfirmingDiscount(false);
+    setTransferError(null);
+  }, [dealId, picker.contextKey]);
+  /* eslint-enable react-hooks/set-state-in-effect */
   const searchRef = useRef<HTMLInputElement>(null);
 
   const blendedMarginPct =
@@ -162,7 +180,7 @@ export function CatalogPickerModal({
    *  DealApprovals на полной карточке. Жёсткий блок «не пускать в 1С» — не делаем: см. ROP-
    *  решение в памяти сессии (мягкий гейт, не хард-блок). */
   async function transfer() {
-    if (busy) return;
+    if (busy || transferLock.current) return;
     if (!picker.pickedRows.length && !pendingApproval) return flash("Отметьте хотя бы одну позицию");
     if (belowFloor && !confirmingDiscount && !pendingApproval) {
       setConfirmingDiscount(true);
@@ -176,23 +194,28 @@ export function CatalogPickerModal({
     setTransferError(null);
     setToast(null);
     const needsApproval = pendingApproval || belowFloor;
-    setPendingApproval(needsApproval);
+    if (needsApproval) picker.setDiscountApproval(dealId, true);
+    const token = picker.contextToken();
+    const operation = {};
+    transferLock.current = operation;
     try {
       const { ok, total, successfulRows } = picker.pickedRows.length
         ? await picker.commitToDeal(dealId, counterparty)
         : { ok: 0, total: 0, successfulRows: [] };
+      if (!picker.isCurrentContext(token)) return;
       picker.removeCommittedRows(successfulRows);
       if (ok !== total) {
-        setTransferError(`Перенесено позиций: ${ok}/${total}. Не удалось перенести остальные позиции; они оставлены для повторной попытки.`);
+        setTransferError(`Подтверждено позиций: ${ok}/${total}. Результат остальных позиций не подтверждён; они оставлены для повторной попытки.`);
         return;
       }
       if (needsApproval) {
         const approved = await requestApproval(dealId, "deal.discount").catch(() => false);
+        if (approved) picker.setDiscountApproval(dealId, false);
+        if (!picker.isCurrentContext(token)) return;
         if (!approved) {
           setTransferError("Позиции сохранены, но не удалось отправить скидку на согласование. Повторите согласование без повторного переноса товаров.");
           return;
         }
-        setPendingApproval(false);
       }
       setConfirmingDiscount(false);
       flash(needsApproval
@@ -200,9 +223,12 @@ export function CatalogPickerModal({
         : `✅ Перенесено в документ позиций: ${ok}/${total}`);
       onCommitted?.();
     } catch {
-      setTransferError("Не удалось перенести позиции. Подбор оставлен для повторной попытки.");
+      if (picker.isCurrentContext(token)) setTransferError("Результат переноса не подтверждён. Подбор оставлен для повторной попытки.");
     } finally {
-      setBusy(false);
+      if (transferLock.current === operation) {
+        transferLock.current = null;
+        if (picker.isCurrentContext(token)) setBusy(false);
+      }
     }
   }
 
@@ -233,12 +259,12 @@ export function CatalogPickerModal({
       if (busy) return;
       if (e.key === "Escape") {
         if (popoverSku) setPopover(null);
-        else onClose();
+        else closePicker();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, popoverSku, busy]);
+  }, [closePicker, popoverSku, busy]);
 
   // Автофокус на поиск при открытии — клавиатура ↑↓/Enter работает сразу без лишнего клика.
   useEffect(() => {
@@ -255,7 +281,7 @@ export function CatalogPickerModal({
       aria-busy={busy}
       inert={busy}
       className="fixed inset-0 z-[70] flex items-center justify-center bg-ink/45 p-4"
-      onClick={onClose}
+      onClick={closePicker}
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -275,7 +301,7 @@ export function CatalogPickerModal({
           </Button>
           <button
             type="button"
-            onClick={onClose}
+            onClick={closePicker}
             aria-label="Закрыть"
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-faint hover:bg-sunken"
           >
@@ -283,8 +309,11 @@ export function CatalogPickerModal({
           </button>
         </header>
 
-        {errorMessage && <p role="alert" className="border-b border-line px-4 py-2 text-sm text-danger">{errorMessage}</p>}
-        {transferError && <p role="alert" className="border-b border-line px-4 py-2 text-sm text-danger">{transferError}</p>}
+        {(errorMessage || transferError || (!popover && picker.saveNotice)) && (
+          <p role="alert" className="border-b border-line px-4 py-2 text-sm text-danger">
+            {errorMessage || transferError || picker.saveNotice}
+          </p>
+        )}
 
         {/* toolbar */}
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-3.5 py-2">
@@ -605,7 +634,7 @@ export function CatalogPickerModal({
               </Button>
             )}
             {!confirmingDiscount && (
-              <Button variant="secondary" size="sm" onClick={onClose}>
+              <Button variant="secondary" size="sm" onClick={closePicker}>
                 Отмена
               </Button>
             )}
@@ -636,14 +665,16 @@ export function CatalogPickerModal({
           existingQty={popover?.row?.qty}
           basePrice={stock[popoverSku.code]?.unitPrice ?? null}
           existingPrice={popover?.row ? picker.agreedPriceOf(popover.row) : undefined}
+          errorMessage={picker.saveNotice}
           onCancel={() => setPopoverSku(null)}
           onOk={(qty, price) => {
+            if (!popover || !picker.isCurrentContext(popover.token)) return;
+            setToast(null);
             // Количество и цена меняются атомарно у выбранного снимка строки.
-            if (popover?.row) {
-              picker.setRowQty(popover.row, qty, price);
-            } else {
-              addSkuWithQty(popoverSku, qty, price);
-            }
+            const applied = popover.row
+              ? picker.setRowQty(popover.row, qty, price)
+              : addSkuWithQty(popoverSku, qty, price);
+            if (!applied) return;
             setPopoverSku(null);
             flash(`✓ Подобрано: ${popoverSku.title.slice(0, 28)}`);
           }}
@@ -666,6 +697,7 @@ function QtyPricePopover({
   existingQty,
   existingPrice,
   basePrice,
+  errorMessage,
   onCancel,
   onOk,
 }: {
@@ -677,6 +709,7 @@ function QtyPricePopover({
    *  открытии попапа показываем ЕЁ, а не сбрасываем на цену со склада. */
   existingPrice?: number | null;
   basePrice: number | null;
+  errorMessage?: string | null;
   onCancel: () => void;
   onOk: (qty: number, price: number | null) => void;
 }) {
@@ -806,6 +839,7 @@ function QtyPricePopover({
         </div>
 
         {price == null && <p className="mt-1.5 text-[11px] text-faint">Цена не подтверждена</p>}
+        {errorMessage && <p role="alert" className="mt-1.5 text-[11px] text-danger">{errorMessage}</p>}
         {!priceValid && <p role="alert" className="mt-1.5 text-[11px] text-danger">Укажите цену не меньше нуля или оставьте поле пустым.</p>}
 
         {overFloor && (

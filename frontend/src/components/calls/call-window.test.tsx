@@ -31,6 +31,10 @@ const stub = vi.hoisted(() => ({
   reset: vi.fn(),
   commitToDeal: vi.fn(),
   repeatLastOrder: vi.fn(),
+  canClose: vi.fn(),
+  canIssueInvoice: vi.fn(),
+  contextToken: vi.fn(),
+  isCurrentContext: vi.fn(),
 }));
 
 vi.mock("@/components/kanban/product-picker", () => ({
@@ -40,6 +44,10 @@ vi.mock("@/components/kanban/product-picker", () => ({
     orderTotal: stub.orderTotal,
     commitToDeal: stub.commitToDeal,
     repeatLastOrder: stub.repeatLastOrder,
+    canClose: stub.canClose,
+    canIssueInvoice: stub.canIssueInvoice,
+    contextToken: stub.contextToken,
+    isCurrentContext: stub.isCurrentContext,
   }),
   ProductPicker: () => <div data-testid="product-picker" />,
   ProductPickerTotals: () => null,
@@ -71,6 +79,52 @@ const newCtx: CallContext = { kind: "new", phone: "+375291119999" };
 
 const picked = () => [{ skuId: 1, code: "A1", title: "Насос", unit: "шт", qty: 2, picked: true }];
 
+describe("JZ call picker safety", () => {
+  it("JZ13 known created deal is reused after partial item transfer", async () => {
+    stub.pickedRows = picked();
+    stub.commitToDeal.mockResolvedValueOnce({ ok: 0, total: 1 }).mockResolvedValue({ ok: 1, total: 1 });
+    renderCall(leadCtx);
+    await toLive();
+    const submit = screen.getByRole("button", { name: /Создать сделку с товаром/ });
+    await act(async () => { fireEvent.click(submit); });
+    expect(screen.getByText("CRM-99")).toBeInTheDocument();
+    expect(screen.getByText(/подтверждено позиций: 0\/1/)).toBeInTheDocument();
+    expect(api.createDealTask).not.toHaveBeenCalled();
+    await act(async () => { fireEvent.click(submit); });
+    expect(api.createDeal).toHaveBeenCalledOnce();
+    expect(stub.commitToDeal).toHaveBeenCalledTimes(2);
+    expect(stub.commitToDeal.mock.calls).toEqual([["99", leadCtx.company], ["99", leadCtx.company]]);
+    expect(api.createDealTask).toHaveBeenCalledOnce();
+  });
+
+  it("JZ14 unknown create response does not create another deal on retry", async () => {
+    stub.pickedRows = picked();
+    mock(api.createDeal).mockResolvedValue(null);
+    renderCall(leadCtx);
+    await toLive();
+    const submit = screen.getByRole("button", { name: /Создать сделку с товаром/ });
+    await act(async () => { fireEvent.click(submit); });
+    await act(async () => { fireEvent.click(submit); });
+    expect(api.createDeal).toHaveBeenCalledOnce();
+    expect(stub.commitToDeal).not.toHaveBeenCalled();
+    expect(screen.getByText(/автоматический повтор заблокирован/)).toBeInTheDocument();
+    expect(screen.queryByText("CRM-99")).toBeNull();
+  });
+
+  it("JZ16 call invoice is blocked while its picker has unconfirmed items", async () => {
+    stub.canIssueInvoice.mockReturnValue(false);
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    renderCall(dealCtx);
+    await toLive();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Счёт" })); });
+    expect(api.issueDocument).not.toHaveBeenCalled();
+    expect(api.updateDeal).not.toHaveBeenCalled();
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(/Сначала перенесите все выбранные позиции/)).toBeInTheDocument();
+    openSpy.mockRestore();
+  });
+});
+
 function renderCall(context: CallContext, onClose = vi.fn()) {
   render(<CallWindow context={context} onClose={onClose} />);
   return { onClose };
@@ -86,6 +140,10 @@ async function toLive() {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
+  stub.canClose.mockReturnValue(true);
+  stub.canIssueInvoice.mockReturnValue(true);
+  stub.contextToken.mockReturnValue({});
+  stub.isCurrentContext.mockReturnValue(true);
   stub.pickedRows = [];
   stub.orderTotal = 0;
   stub.commitToDeal.mockResolvedValue({ ok: 1, total: 1 });
@@ -287,7 +345,7 @@ describe("CallWindow — заказ по контексту", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /Создать сделку с товаром/ }));
     });
-    expect(screen.getByText("⚠️ Не удалось создать сделку")).toBeInTheDocument();
+    expect(screen.getByText(/Результат создания сделки не подтверждён/)).toBeInTheDocument();
     expect(screen.queryByText("CRM-99")).not.toBeInTheDocument();
   });
 

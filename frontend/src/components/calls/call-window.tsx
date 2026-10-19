@@ -18,7 +18,7 @@ import {
   Zap,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   createDeal,
@@ -146,6 +146,7 @@ export function CallWindow({
         : `new:${context.phone ?? context.callId ?? ""}`
     : undefined;
   const picker = useProductPicker(!!context, ctxKey); // справочник+остатки+корзина — общий с drawer-preview
+  const resetPicker = picker.reset;
   // «🏬 Подбор товара со склада» (sales-call-popup.html) — per-warehouse таблица поверх
   // инлайн-поиска ProductPicker; отдельная модалка, чтобы не грузить остатки по складам
   // до явного запроса менеджера.
@@ -165,6 +166,17 @@ export function CallWindow({
   const [toast, setToast] = useState<string | null>(null);
   // created = быстрая сделка, созданная из звонка (лид/новый клиент) с перенесёнными позициями.
   const [created, setCreated] = useState<{ id: string; number: string } | null>(null);
+  const createdDeals = useRef(new Map<string, { id: string; number: string; counterparty: string } | null>());
+  const orderAction = useRef<object | null>(null);
+  const closeCall = useCallback(() => {
+    if (orderAction.current) return;
+    if (createdDeals.current.has(ctxKey ?? "") && createdDeals.current.get(ctxKey ?? "") === null) {
+      setToast("Результат создания сделки не подтверждён. Проверьте список сделок; автоматический повтор заблокирован.");
+      return;
+    }
+    if (picker.canClose()) onClose();
+    else setToast("Сначала подтвердите перенос выбранных позиций повторной попыткой.");
+  }, [ctxKey, picker, onClose]);
 
   const kind = context?.kind ?? "deal";
   const script = useMemo(() => scriptFor(kind), [kind]);
@@ -175,10 +187,10 @@ export function CallWindow({
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     lookupId.current += 1;
-    if (!context) return;
+    if (!ctxKey) return;
     setPhase("dialing");
     setSeconds(0);
-    picker.reset();
+    resetPicker();
     setOnOrder(false);
     invoiceRequestKey.current = null;
     setUnp("");
@@ -190,11 +202,12 @@ export function CallWindow({
     setNote("");
     setTaskDraft("");
     setBusy(false);
-    setCreated(null);
+    orderAction.current = null;
+    setCreated(createdDeals.current.get(ctxKey ?? "") ?? null);
     setChecked(new Set(script.flatMap((s) => s.items.filter((i) => i.done).map((i) => i.id))));
     const t = setTimeout(() => setPhase("live"), 1200);
     return () => { clearTimeout(t); lookupId.current += 1; };
-  }, [context, script]);
+  }, [ctxKey, script, resetPicker]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Таймер разговора.
@@ -208,11 +221,11 @@ export function CallWindow({
   useEffect(() => {
     if (!context) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") closeCall();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [context, onClose]);
+  }, [context, closeCall]);
 
   function flash(msg: string) {
     setToast(msg);
@@ -257,14 +270,30 @@ export function CallWindow({
     setReq(result.data);
   }
 
+  function startNewOrder() {
+    if (orderAction.current || !ctxKey || !picker.canClose()) return;
+    if (!resetPicker()) return;
+    createdDeals.current.delete(ctxKey);
+    setCreated(null);
+    invoiceRequestKey.current = null;
+    setToast(null);
+  }
+
   // Колонка «Заказ» — главное действие зависит от контекста.
   async function commitOrder() {
+    if (orderAction.current) return;
     if (!picker.pickedRows.length) return flash("Отметьте хотя бы одну позицию");
+    const operation = {};
+    const token = picker.contextToken();
+    const contextKey = ctxKey ?? "";
+    orderAction.current = operation;
     setBusy(true);
+    try {
     if (ctx.kind === "deal") {
       const { ok, total } = await picker.commitToDeal(ctx.dealId, ctx.company);
-      flash(`✅ В сделку добавлено позиций: ${ok}/${total}`);
-      setBusy(false);
+      if (picker.isCurrentContext(token)) flash(ok === total
+        ? `✅ В сделку добавлено позиций: ${ok}/${total}`
+        : `⚠️ Подтверждено позиций: ${ok}/${total}. Повторите перенос.`);
       return;
     }
     // Быстрая сделка из звонка (лид / новый клиент): создаём сделку и переносим
@@ -276,7 +305,14 @@ export function CallWindow({
     const counterparty = ctx.company || req?.name || ctx.phone || "Новый клиент";
     // Date.now() в обработчике клика (не в рендере) — уникальный номер счёта в момент действия.
     const number = `CRM-CALL-${Date.now().toString(36).toUpperCase()}`;
-    const deal = await createDeal({
+    if (createdDeals.current.has(contextKey) && createdDeals.current.get(contextKey) === null) {
+      flash("Результат создания сделки не подтверждён. Проверьте список сделок; автоматический повтор заблокирован.");
+      return;
+    }
+    let deal = createdDeals.current.get(contextKey);
+    if (!deal) {
+      createdDeals.current.set(contextKey, null);
+      const result = await createDeal({
       number,
       title: `Заявка со звонка${ctx.company ? ` · ${ctx.company}` : ""}`,
       counterparty,
@@ -284,23 +320,32 @@ export function CallWindow({
       priority: "Средний",
       stage: "new",
       owner: "",
-    });
-    if (!deal) {
-      flash("⚠️ Не удалось создать сделку");
-      setBusy(false);
-      return;
+      });
+      if (!result) {
+        if (picker.isCurrentContext(token)) flash("Результат создания сделки не подтверждён. Проверьте список сделок; автоматический повтор заблокирован.");
+        return;
+      }
+      deal = { id: result.id, number: result.number, counterparty };
+      createdDeals.current.set(contextKey, deal);
     }
+    if (!picker.isCurrentContext(token)) return;
+    setCreated(deal);
     const pickedForTask = picker.pickedRows;
-    const { ok, total } = await picker.commitToDeal(deal.id, counterparty);
-    if (ctx.kind === "lead") {
+    const { ok, total } = await picker.commitToDeal(deal.id, deal.counterparty);
+    if (!picker.isCurrentContext(token)) return;
+    if (ctx.kind === "lead" && ok === total) {
       // Пометить лиду намерение конвертации (списком позиций) — пока заметкой.
       void createDealTask(`lead:${ctx.leadId}`, {
         title: `Быстрая сделка ${deal.number} из звонка: ${pickedForTask.map((r) => `${r.title}×${r.qty}`).join(", ")}`,
       });
     }
-    setCreated({ id: deal.id, number: deal.number });
-    flash(`✅ Сделка ${deal.number} создана · позиций: ${ok}/${total}`);
-    setBusy(false);
+    flash(ok === total ? `✅ Сделка ${deal.number} создана · позиций: ${ok}/${total}`
+      : `⚠️ Сделка ${deal.number} сохранена · подтверждено позиций: ${ok}/${total}. Повторите перенос в эту же сделку.`);
+    } catch {
+      if (picker.isCurrentContext(token)) flash("Результат переноса не подтверждён. Повторите перенос без изменения позиций.");
+    } finally {
+      if (orderAction.current === operation) { orderAction.current = null; setBusy(false); }
+    }
   }
 
   /** Повторить прошлый заказ контрагента (только для существующей сделки — есть dealId). */
@@ -319,8 +364,14 @@ export function CallWindow({
    * fire-and-forget updateDeal (нет своего onUpdateFields, как у drawer-preview). */
   async function issueInvoice() {
     if (ctx.kind !== "deal") return flash("Счёт доступен только для существующей сделки");
+    if (orderAction.current) return;
+    if (!picker.canIssueInvoice(ctx.dealId)) return flash("Сначала перенесите все выбранные позиции в сделку и подтвердите результат переноса.");
+    const operation = {};
+    const token = picker.contextToken();
+    orderAction.current = operation;
     // Вкладку печати открываем СИНХРОННО (до await) — иначе popup-блокировщик съест окно.
     const win = window.open("about:blank", "_blank");
+    let navigated = false;
     setBusy(true);
     try {
       const requestKey = onOrder ? (invoiceRequestKey.current ??= crypto.randomUUID()) : null;
@@ -328,8 +379,8 @@ export function CallWindow({
         ? await issueDocument(ctx.dealId, "invoice", { reserve_mode: "on_order", request_key: requestKey })
         : await issueDocument(ctx.dealId, "invoice");
       if (ok && invoiceRequestKey.current === requestKey) invoiceRequestKey.current = null;
-      if (win && ok && renderUrl) win.location.href = renderUrl;
-      else win?.close();
+      if (!picker.isCurrentContext(token)) return;
+      if (win && ok && renderUrl) { win.location.href = renderUrl; navigated = true; }
       if (ok) {
         void updateDeal(ctx.dealId, {
           next_step: INVOICE_NEXT_STEP,
@@ -339,9 +390,12 @@ export function CallWindow({
       } else {
         flash(message);
       }
+    } catch {
+      if (picker.isCurrentContext(token)) flash("Результат оформления счёта не подтверждён. Проверьте документы сделки перед повтором.");
     } finally {
       // страховка от залипшего busy/окна-пустышки, если issue-путь когда-нибудь бросит
-      setBusy(false);
+      if (!navigated) win?.close();
+      if (orderAction.current === operation) { orderAction.current = null; setBusy(false); }
     }
   }
 
@@ -387,7 +441,7 @@ export function CallWindow({
       role="dialog"
       aria-label={`Звонок · ${title}`}
       className="fixed inset-0 z-[60] flex items-center justify-center bg-ink/45 p-4"
-      onClick={onClose}
+      onClick={closeCall}
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -423,7 +477,7 @@ export function CallWindow({
           )}
           <button
             type="button"
-            onClick={onClose}
+            onClick={closeCall}
             aria-label="Закрыть"
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/80 hover:bg-white/20"
           >
@@ -437,7 +491,7 @@ export function CallWindow({
             ctx={ctx}
             seconds={seconds}
             title={title}
-            onClose={onClose}
+            onClose={closeCall}
             taskDraft={taskDraft}
             setTaskDraft={setTaskDraft}
             addTask={addTask}
@@ -646,6 +700,9 @@ export function CallWindow({
                       {created.number}
                     </Link>{" "}
                     с позициями — откройте, чтобы продолжить.
+                    <Button variant="secondary" size="sm" onClick={startNewOrder} disabled={busy}>
+                      Новый заказ
+                    </Button>
                   </div>
                 )}
                 {ctx.kind === "deal" && (

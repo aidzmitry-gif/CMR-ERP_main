@@ -1,7 +1,7 @@
 "use client";
 
 import { Plus, Receipt, RefreshCw, Search, ShoppingCart, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   addDealItem,
@@ -30,6 +30,8 @@ const INVOICE_NEXT_STEP = "Проверить оплату счёта";
  */
 
 export interface PickerRow {
+  /** Локальное намерение добавить строку; одинаковые SKU могут быть разными строками. */
+  clientKey: string;
   skuId: number;
   code: string;
   title: string;
@@ -42,6 +44,20 @@ export interface PickerRow {
   /** Согласованная цена повторяемой строки; null нельзя заменять текущей складской ценой. */
   unitPrice?: number | null;
 }
+
+interface PickerCommand {
+  key: string;
+  scope: string | undefined;
+  dealId: string;
+  row: PickerRow;
+  price: number | null;
+  counterparty: string;
+  state: "in-flight" | "unknown" | "confirmed";
+  promise?: Promise<boolean>;
+  quoteStarted: boolean;
+}
+
+const UNCONFIRMED_ITEMS = "Сохранение части позиций не подтверждено. Повторите перенос: уже сохранённые позиции повторно не добавятся. До подтверждения не меняйте и не закрывайте подбор.";
 
 /**
  * Стейт подбора: справочник+остатки (грузятся при `active`), строки корзины, поиск,
@@ -62,8 +78,64 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
   // genRef — «поколение» контекста: reset() его двигает, поздний async сверяет и не всыпает
   // позиции чужого контрагента, если окно звонка успело переключиться на другую сделку.
   const rowsRef = useRef(rows);
-  rowsRef.current = rows;
+  useLayoutEffect(() => { rowsRef.current = rows; }, [rows]);
   const genRef = useRef(0);
+  const commands = useRef(new Map<string, PickerCommand>());
+  const scopeRef = useRef({ key: refetchKey, version: 0 });
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const [submittedPrices, setSubmittedPrices] = useState<Record<string, number | null>>({});
+  const [pendingDiscountApprovals, setPendingDiscountApprovals] = useState<Record<string, true>>({});
+  const setDiscountApproval = useCallback((dealId: string, pending: boolean) => {
+    setPendingDiscountApprovals((current) => {
+      const next = { ...current };
+      if (pending) next[dealId] = true;
+      else delete next[dealId];
+      return next;
+    });
+  }, []);
+
+  // Старые неподтверждённые команды остаются в этом hook; новый контекст их не получает.
+  // После возврата в прежний контекст восстанавливаем их точные снимки для повтора.
+  // Атомарный сброс при смене внешнего контекста; снимки незавершённых сетевых команд сохраняются.
+  useLayoutEffect(() => {
+    if (scopeRef.current.key !== refetchKey) {
+      scopeRef.current = { key: refetchKey, version: scopeRef.current.version + 1 };
+    }
+    genRef.current++;
+    const retained = [...commands.current.values()].filter((c) => c.scope === refetchKey && c.state !== "confirmed");
+    setRows(retained.map((c) => c.row));
+    setQuery("");
+    setSubmittedPrices(Object.fromEntries(retained.map((c) => [c.row.clientKey, c.price])));
+    setSaveNotice(retained.some((c) => c.state !== "confirmed") ? UNCONFIRMED_ITEMS : null);
+  }, [refetchKey]);
+
+  function hasUnconfirmed(dealId?: string) {
+    return [...commands.current.values()].some((c) => c.scope === scopeRef.current.key
+      && (!dealId || c.dealId === dealId) && (c.state !== "confirmed" || !!c.promise));
+  }
+  function canClose() {
+    if (!hasUnconfirmed()) return true;
+    setSaveNotice(UNCONFIRMED_ITEMS);
+    return false;
+  }
+  function canIssueInvoice(dealId: string) {
+    return !hasUnconfirmed(dealId) && rowsRef.current.filter((r) => r.picked).every((r) => {
+      const command = commands.current.get(r.clientKey);
+      return command?.state === "confirmed" && command.dealId === dealId;
+    });
+  }
+  function editable(row: PickerRow) {
+    const command = commands.current.get(row.clientKey);
+    if (!command || (command.state === "confirmed" && !command.promise)) return true;
+    setSaveNotice(UNCONFIRMED_ITEMS);
+    return false;
+  }
+  function valuesEditable(row: PickerRow) {
+    if (!editable(row)) return false;
+    if (!commands.current.has(row.clientKey)) return true;
+    setSaveNotice("Позиция уже сохранена. Измените её в сделке; для дополнительного количества добавьте новую позицию отдельно.");
+    return false;
+  }
 
   // refetchKey (id открытой сделки/лида) в deps: остатки/цены перезагружаются и при прямой
   // смене контекста звонка (сделка→сделка без промежуточного закрытия), а не только по active.
@@ -125,45 +197,68 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
   function addSku(s: SkuOption) {
     setRows((r) => [
       ...r,
-      { skuId: s.id, code: s.code, title: s.title, unit: s.unit, qty: 1, picked: true },
+      { clientKey: crypto.randomUUID(), skuId: s.id, code: s.code, title: s.title, unit: s.unit, qty: 1, picked: true },
     ]);
     setQuery("");
   }
   /** Добавить с явным кол-вом (CatalogPickerModal — попап «Ввод количества и цены»);
    *  повторный подбор уже добавленной позиции суммирует количество, не дублирует строку. */
   function addSkuWithQty(s: SkuOption, qty: number, priceOverride?: number | null) {
+    const current = rowsRef.current.find((x) => x.skuId === s.id);
+    if (current && !editable(current)) return false;
     setRows((r) => {
       const existing = r.find((x) => x.skuId === s.id);
-      if (existing) {
+      if (existing && !commands.current.has(existing.clientKey)) {
         return r.map((x) => (x === existing ? { ...x, qty: x.qty + qty, picked: true,
           ...(priceOverride !== undefined ? { priceOverride } : {}) } : x));
       }
-      return [...r, { skuId: s.id, code: s.code, title: s.title, unit: s.unit, qty, picked: true, priceOverride }];
+      return [...r, { clientKey: crypto.randomUUID(), skuId: s.id, code: s.code, title: s.title, unit: s.unit, qty, picked: true, priceOverride }];
     });
+    return true;
   }
   function setRowQty(row: PickerRow, qty: number, priceOverride?: number | null) {
+    if (!valuesEditable(row)) return false;
     setRows((r) => r.map((x) => (x === row ? { ...x, qty: Math.max(1, qty),
       ...(priceOverride !== undefined ? { priceOverride } : {}) } : x)));
+    return true;
   }
   /** Ручная правка цены строки (попап «Ввод количества и цены»). undefined — вернуть цену со склада. */
   function setRowPrice(skuId: number, price: number | null | undefined) {
+    if (rowsRef.current.filter((r) => r.skuId === skuId).some((r) => !valuesEditable(r))) return;
     setRows((r) => r.map((x) => (x.skuId === skuId ? { ...x, priceOverride: price } : x)));
   }
   function toggleRow(row: PickerRow) {
+    if (!editable(row)) return;
     setRows((r) => r.map((x) => (x === row ? { ...x, picked: !x.picked } : x)));
   }
   function removeRow(row: PickerRow) {
+    if (!editable(row)) return;
     setRows((r) => r.filter((x) => x !== row));
   }
   /** Убирает только успешно отправленные снимки строк, включая отдельные строки одного SKU. */
   function removeCommittedRows(committedRows: PickerRow[]) {
-    setRows((r) => r.filter((x) => !committedRows.includes(x)));
+    const confirmed = new Set(committedRows.filter((r) => commands.current.get(r.clientKey)?.state === "confirmed")
+      .map((r) => r.clientKey));
+    setRows((r) => r.filter((x) => !confirmed.has(x.clientKey)));
+    for (const key of confirmed) commands.current.delete(key);
   }
-  function reset() {
+  const reset = useCallback(() => {
+    if ([...commands.current.values()].some((c) => c.scope === scopeRef.current.key
+      && (c.state !== "confirmed" || !!c.promise))) {
+      setSaveNotice(UNCONFIRMED_ITEMS);
+      return false;
+    }
     genRef.current++;
+    scopeRef.current = { ...scopeRef.current, version: scopeRef.current.version + 1 };
     setRows([]);
     setQuery("");
-  }
+    setSaveNotice(null);
+    setSubmittedPrices({});
+    for (const [key, command] of commands.current) {
+      if (command.scope === scopeRef.current.key) commands.current.delete(key);
+    }
+    return true;
+  }, []);
 
   /** Повторить прошлый заказ: подтянуть позиции последней сделки того же контрагента
    * (backend резолвит «последнюю» сам — GET /deals/{id}/repeat-last-order). Не дублирует
@@ -181,6 +276,7 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
       setRows((r) => [
         ...r,
         ...added.map((it) => ({
+          clientKey: crypto.randomUUID(),
           skuId: it.sku_id,
           code: it.code,
           title: it.title,
@@ -195,8 +291,9 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
   }
 
   // Цена строки клиенту: отредактированная вручную — приоритетнее цены со склада.
-  const agreedPriceOf = (r: PickerRow) => r.priceOverride !== undefined
-    ? r.priceOverride : r.unitPrice !== undefined ? r.unitPrice : stock[r.code]?.unitPrice ?? null;
+  const agreedPriceOf = (r: PickerRow) => Object.prototype.hasOwnProperty.call(submittedPrices, r.clientKey)
+    ? submittedPrices[r.clientKey] : r.priceOverride !== undefined
+      ? r.priceOverride : r.unitPrice !== undefined ? r.unitPrice : stock[r.code]?.unitPrice ?? null;
   const priceOf = (r: PickerRow) => agreedPriceOf(r) ?? 0;
 
   const pickedRows = rows.filter((r) => r.picked);
@@ -210,23 +307,67 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
 
   /** Согласованная цена сохраняется вместе с позицией; котировки — только история. */
   async function commitToDeal(dealId: string, counterparty: string): Promise<{ ok: number; total: number; successfulRows: PickerRow[] }> {
-    const results = await Promise.allSettled(pickedRows.map((r) => addDealItem(dealId, r.skuId, r.qty, agreedPriceOf(r))));
-    const successfulRows = pickedRows.filter((_, index) => {
+    const context = scopeRef.current;
+    const batch = rowsRef.current.filter((r) => r.picked);
+    const results = await Promise.allSettled(batch.map((row) => {
+      let command = commands.current.get(row.clientKey);
+      if (command && (command.dealId !== dealId || command.scope !== context.key)) return Promise.resolve(false);
+      if (!command) {
+        command = { key: crypto.randomUUID(), scope: context.key, dealId, row: { ...row },
+          price: agreedPriceOf(row), counterparty, state: "unknown", quoteStarted: false };
+        commands.current.set(row.clientKey, command);
+        const frozenPrice = command.price;
+        setSubmittedPrices((prices) => ({ ...prices, [row.clientKey]: frozenPrice }));
+      }
+      if (command.state === "confirmed") return Promise.resolve(true);
+      if (command.promise) return command.promise;
+      const captured = command;
+      captured.state = "in-flight";
+      captured.promise = (async () => {
+        try {
+          const ok = await addDealItem(captured.dealId, captured.row.skuId,
+            captured.row.qty, captured.price, captured.key);
+          captured.state = ok ? "confirmed" : "unknown";
+          if (ok && !captured.quoteStarted) {
+            captured.quoteStarted = true;
+            if (captured.price != null) {
+              try {
+                await createPriceQuote(captured.row.code, captured.counterparty, captured.price);
+              } catch {
+                // История цены не меняет подтверждённый результат сохранения позиции.
+              }
+            }
+          }
+          return ok;
+        } catch {
+          captured.state = "unknown";
+          return false;
+        } finally {
+          captured.promise = undefined;
+        }
+      })();
+      return captured.promise;
+    }));
+    const successfulRows = batch.filter((_, index) => {
       const result = results[index];
       return result.status === "fulfilled" && result.value;
     });
-    await Promise.allSettled(
-      successfulRows.map((r) => {
-        const p = agreedPriceOf(r);
-        return p != null ? createPriceQuote(r.code, counterparty, p) : Promise.resolve(true);
-      }),
-    );
+    if (scopeRef.current === context) setSaveNotice(successfulRows.length === batch.length ? null : UNCONFIRMED_ITEMS);
     // Вызывающая сторона решает, убрать ли успешные строки: остальные callers сохраняют свою корзину.
-    return { ok: successfulRows.length, total: pickedRows.length, successfulRows };
+    return { ok: successfulRows.length, total: batch.length, successfulRows };
   }
 
   return {
     skus,
+    contextKey: refetchKey,
+    pendingDiscountApprovals,
+    setDiscountApproval,
+    saveNotice,
+    hasUnconfirmed,
+    canClose,
+    canIssueInvoice,
+    contextToken: () => scopeRef.current,
+    isCurrentContext: (token: object) => scopeRef.current === token,
     catalogStatus,
     stock,
     warehouseStock,
@@ -301,6 +442,7 @@ export function ProductPicker({
 
   return (
     <div>
+      {state.saveNotice && <p role="alert" className="mb-3 text-sm text-amber-700">{state.saveNotice}</p>}
       {rows.length > 0 && (
         <div className="mb-2 space-y-1.5">
           {rows.map((r, rowIndex) => {
@@ -490,12 +632,15 @@ export function ProductPickerModal({
   const [toast, setToast] = useState<string | null>(null);
   const [onOrder, setOnOrder] = useState(false);
   const invoiceRequestKey = useRef<string | null>(null);
+  const action = useRef<object | null>(null);
 
   useEffect(() => {
     // Выбор относится только к открытой сделке.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setOnOrder(false);
     invoiceRequestKey.current = null;
+    action.current = null;
+    setBusy(false);
   }, [dealId]);
 
   function flash(msg: string) {
@@ -511,28 +656,48 @@ export function ProductPickerModal({
   }
 
   async function addToDeal() {
+    if (action.current) return;
     if (!picker.pickedRows.length) return flash("Отметьте хотя бы одну позицию");
+    const operation = {};
+    action.current = operation;
+    const token = picker.contextToken();
     setBusy(true);
-    const { ok, total } = await picker.commitToDeal(dealId, counterparty);
-    setBusy(false);
-    flash(`✅ Добавлено в сделку позиций: ${ok}/${total}`);
-    onCommitted?.();
+    try {
+      const { ok, total } = await picker.commitToDeal(dealId, counterparty);
+      if (!picker.isCurrentContext(token)) return;
+      flash(ok === total ? `✅ Добавлено в сделку позиций: ${ok}/${total}` : `⚠️ Подтверждено позиций: ${ok}/${total}. Повторите перенос.`);
+      if (ok === total) onCommitted?.();
+    } catch {
+      if (picker.isCurrentContext(token)) flash(UNCONFIRMED_ITEMS);
+    } finally {
+      if (action.current === operation) { action.current = null; setBusy(false); }
+    }
   }
 
   async function issueInvoice() {
+    if (action.current) return;
     if (!picker.pickedRows.length) return flash("Отметьте хотя бы одну позицию");
+    const operation = {};
+    action.current = operation;
     // Вкладку печати открываем СИНХРОННО (до await) — иначе popup-блокировщик съест окно.
     const win = window.open("about:blank", "_blank");
+    const token = picker.contextToken();
+    let navigated = false;
     setBusy(true);
     const requestKey = onOrder ? (invoiceRequestKey.current ??= crypto.randomUUID()) : null;
     try {
-      await picker.commitToDeal(dealId, counterparty); // позиции+котировки записаны ДО рендера
+      const saved = await picker.commitToDeal(dealId, counterparty);
+      if (!picker.isCurrentContext(token)) return;
+      if (saved.ok !== saved.total || !picker.canIssueInvoice(dealId)) {
+        flash(`⚠️ Подтверждено позиций: ${saved.ok}/${saved.total}. Счёт не создан. Повторите перенос.`);
+        return;
+      }
       const { ok, message, renderUrl } = requestKey
         ? await issueDocument(dealId, "invoice", { reserve_mode: "on_order", request_key: requestKey })
         : await issueDocument(dealId, "invoice");
       if (ok && invoiceRequestKey.current === requestKey) invoiceRequestKey.current = null;
-      if (win && ok && renderUrl) win.location.href = renderUrl;
-      else win?.close();
+      if (!picker.isCurrentContext(token)) return;
+      if (win && ok && renderUrl) { win.location.href = renderUrl; navigated = true; }
       flash(message);
       if (ok) {
         // Слайс 6 (A): успешный счёт ВСЕГДА назначает шаг «Проверить оплату» (+3 дн) — то же
@@ -543,9 +708,12 @@ export function ProductPickerModal({
         });
         onCommitted?.();
       }
+    } catch {
+      if (picker.isCurrentContext(token)) flash("Результат оформления счёта не подтверждён. Проверьте документы сделки перед повтором.");
     } finally {
       // страховка от залипшего busy/окна-пустышки, если issue-путь когда-нибудь бросит
-      setBusy(false);
+      if (!navigated) win?.close();
+      if (action.current === operation) { action.current = null; setBusy(false); }
     }
   }
 
@@ -555,7 +723,7 @@ export function ProductPickerModal({
       aria-modal
       aria-label="Подбор товара"
       className="fixed inset-0 z-[70] flex items-center justify-center bg-ink/45 p-4"
-      onClick={onClose}
+      onClick={() => { if (picker.canClose()) onClose(); }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -567,7 +735,7 @@ export function ProductPickerModal({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => { if (picker.canClose()) onClose(); }}
             aria-label="Закрыть"
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-faint hover:bg-sunken"
           >

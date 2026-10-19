@@ -53,3 +53,22 @@ async def test_invalid_item_quantity_never_creates_a_receipt(api, session, qty):
     })
     assert response.status_code == 422
     assert await session.scalar(select(func.count()).select_from(DealItemRequest)) == 0
+
+
+@pytest.mark.parametrize("price", [None, 0], ids=["null", "zero"])
+async def test_item_key_price_replay_and_conflict(api, session, price):
+    deal, sku = await seed(session)
+    body = {"sku_id": sku, "qty": "2.50", "unit_price": price, "request_key": str(uuid4())}
+    path = f"/sales/deals/{deal}/items"
+    first = await api.post(path, json=body)
+    assert first.status_code == 201, first.text
+    replay = await api.post(path, json=body)
+    assert replay.status_code == 201 and replay.json() == first.json()
+    conflict = await api.post(path, json={**body, "unit_price": 0 if price is None else None})
+    assert conflict.status_code == 409
+    assert await session.scalar(select(func.count()).select_from(DealItem)) == 1
+    assert await session.scalar(select(func.count()).select_from(DealItemRequest)) == 1
+    assert await session.scalar(select(func.count()).select_from(OutboxEvent).where(
+        OutboxEvent.event_type == "sales.item.changed")) == 1
+    row = await session.scalar(select(DealItem))
+    assert row.unit_price == price

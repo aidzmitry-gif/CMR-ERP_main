@@ -34,6 +34,31 @@ import type { Deal, Stage } from "@/lib/types";
 
 const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
+it("JZ17 drawer invoice cannot bypass an unknown picker transfer", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string) => ({
+    ok: true, status: 200,
+    json: async () => url.includes("/sales/skus")
+      ? [{ id: 7, code: "SYNTHETIC-7", title: "Synthetic SKU", unit: "шт" }]
+      : { margin_pct: null, priced_count: 0, total_count: 0, reason: null },
+  })));
+  try {
+    mock(api.addDealItem).mockResolvedValue(false);
+    const { onUpdateFields } = renderDrawer();
+    fireEvent.click(screen.getByRole("button", { name: "Товар" }));
+    fireEvent.click(await screen.findByText("Synthetic SKU"));
+    fireEvent.change(screen.getByLabelText("Цена за единицу"), { target: { value: "125" } });
+    fireEvent.click(screen.getByRole("button", { name: "ОК" }));
+    await act(async () => { fireEvent.click(screen.getAllByRole("button", { name: "Перенести в документ" })[0]); });
+    expect(screen.getByRole("alert")).toHaveTextContent("Подтверждено позиций: 0/1");
+    fireEvent.click(screen.getByRole("button", { name: "Счёт" }));
+    expect(api.issueDocument).not.toHaveBeenCalled();
+    expect(onUpdateFields).not.toHaveBeenCalled();
+    expect(screen.getByText(/Сначала перенесите все выбранные позиции/)).toBeInTheDocument();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 const deal: Deal = {
   id: "1",
   number: "CRM-1",
