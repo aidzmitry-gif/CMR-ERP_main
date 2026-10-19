@@ -34,6 +34,7 @@ import mail_stage  # noqa: E402
 import mottor_bridge  # noqa: E402
 import mottor_receipts  # noqa: E402
 import receipt_queue  # noqa: E402
+
 from tests import test_intake_receipts as receiver  # noqa: E402
 
 

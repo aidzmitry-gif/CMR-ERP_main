@@ -12,11 +12,11 @@ from sqlalchemy import select
 from modules.accounting import service
 from modules.accounting.expense_models import (
     ExpenseArticle,
+    ExpenseArticleAttribution,
     ExpenseBudget,
     ExpenseBudgetApproval,
     ExpenseBudgetLine,
     ExpenseCatalog,
-    ExpenseArticleAttribution,
     ExpenseCommandReceipt,
     ExpenseGroup,
 )
@@ -574,7 +574,6 @@ async def unmatched_actuals(session, org_id, year, month, basis, after_line_id=N
     """Read-only keyset register of the exact lines excluded by ``actuals``."""
     first, last = _month_bounds(year, month)
     current = await catalog(session, org_id)
-    articles = {row["id"] for row in current["articles"]}
     conditions = [Entry.organization_id == org_id, Entry.posting_date >= first, Entry.posting_date <= last,
                   Line.category == "expense", Line.currency == "BYN"]
     if basis == "cash":

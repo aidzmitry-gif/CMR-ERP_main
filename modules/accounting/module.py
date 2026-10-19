@@ -35,11 +35,14 @@ class AccountingModule(ModuleContract):
         # Document-driven stock issue belongs to accounting access. Reuse the
         # guarded shipment engine without granting access to the WMS package.
         from fastapi import APIRouter
-        from modules.wms.invoice_shipments import (
-            document_preview_route, document_create_route,
-            document_read_route, document_history_route,
-        )
+
         from modules.accounting.stock_issue_source import router as stock_issue_router
+        from modules.wms.invoice_shipments import (
+            document_create_route,
+            document_history_route,
+            document_preview_route,
+            document_read_route,
+        )
         core.include_router(stock_issue_router, prefix=self.api_prefix)
         shipment_router = APIRouter()
         prefix = "/organizations/{org}/invoices/{document}/document-shipments"

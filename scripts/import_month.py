@@ -38,9 +38,9 @@ import hashlib
 import json
 import os
 import re
+import stat
 import sys
 import time
-import stat
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -1668,9 +1668,10 @@ async def _resolve_crm_directory_links(
     Creation is opt-in and restricted to new deals with a validated local owner and
     an evidenced 1C counterparty. Reconciliation remains read-only.
     """
+    from sqlalchemy.exc import IntegrityError
+
     from core.domain.models import Counterparty
     from modules.sales.models import CrmClient, CrmClientContact, Deal
-    from sqlalchemy.exc import IntegrityError
 
     if create_missing_directory:
         master_ids = sorted({
@@ -4226,8 +4227,8 @@ async def _validate_existing_bitrix_timeline_comments(
     session, prepared: dict[str, object]
 ) -> None:
     """Reject stale source refs and destination edits before any load mutation."""
-    from modules.sales.models import CrmTimelineComment, Deal
     from modules.leads.models import Lead
+    from modules.sales.models import CrmTimelineComment, Deal
 
     expected = prepared["expected_semantics"]
     scope_owners = prepared["scope_owners"]
@@ -4258,8 +4259,8 @@ async def _validate_existing_bitrix_timeline_comments(
 async def _import_bitrix_timeline_comments(
     session, prepared: dict[str, object], stats: dict
 ) -> None:
-    from modules.sales.models import CrmTimelineComment, Deal
     from modules.leads.models import Lead
+    from modules.sales.models import CrmTimelineComment, Deal
 
     comments = prepared["comments"]
     if not comments:
@@ -4501,9 +4502,10 @@ async def _load_sales_prices(
 
 async def _eligible_bitrix_employee_ids(session, portal_ids: Iterable[str], *, lock: bool) -> dict[str, int]:
     """Map exact Bitrix account IDs to active, unique CRM employee identities."""
+    from fastapi import HTTPException
+
     from core.domain.models import User
     from core.services.crm_owners import resolve_crm_owner
-    from fastapi import HTTPException
 
     usernames = {
         f"bitrix:{portal_id}" for portal_id in portal_ids
@@ -4542,7 +4544,7 @@ async def load() -> None:
     )
     # Register procurement metadata for isolated SQLite loads.
     import modules.procurement.receipt_documents  # noqa: F401
-    from core.domain.models import Contact, Counterparty, CounterpartyAlias, Sku
+    from core.domain.models import Contact, Counterparty, CounterpartyAlias
     from modules.finance.models import Payment
     from modules.leads.models import Lead
     from modules.sales.models import CallLog, Deal
@@ -5259,7 +5261,6 @@ async def load_prices() -> None:
 async def load_onec() -> None:
     """Sku + StockItem.price из кэша 1С (без Bitrix). Идемпотентно."""
     cache_snapshot = _require_isolated_cache_snapshot()
-    from core.domain.models import Sku
 
     onec_sku_catalog = _prepare_onec_sku_catalog(
         _load_jsonl("onec_sku", cache_snapshot)
@@ -5308,8 +5309,16 @@ async def _destination_reconciliation(
     from modules.integrations.models import StockItem
     from modules.leads.models import Lead
     from modules.sales.models import (
-        Activity, CallLog, CrmTimelineAttachment, CrmTimelineComment, Deal, DealItem,
-        DealStageEvent, DealTask, DealTaskCrmLink, Stage,
+        Activity,
+        CallLog,
+        CrmTimelineAttachment,
+        CrmTimelineComment,
+        Deal,
+        DealItem,
+        DealStageEvent,
+        DealTask,
+        DealTaskCrmLink,
+        Stage,
     )
 
     async def count(model, *criteria) -> int:
