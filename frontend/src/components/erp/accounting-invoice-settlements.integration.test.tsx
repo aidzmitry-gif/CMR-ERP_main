@@ -5,10 +5,10 @@ import { AccountingView } from "./accounting-view";
 
 afterEach(() => vi.unstubAllGlobals());
 
-it("opens invoice settlements from the accountant home and resets the invoice on organization change", async () => {
+it("opens invoice settlements for the configured company and ignores a foreign organization hint", async () => {
   const fetchMock = vi.fn((url: string) => {
     let data: unknown;
-    if (url === "/api/accounting/organizations") data = [{ id: 7, name: "Компания A", unp: "111" }, { id: 8, name: "Компания B", unp: "222" }];
+    if (url === "/api/system/instance-organization") data = { configuration: "AIOS_SELLER_UNP", organization: { id: 7, name: "Компания A", unp: "111111111" } };
     else if (url.includes("/reports?")) data = { pending_documents: 0 };
     else if (url.includes("/accounts?") || url.endsWith("/policies")) data = [];
     else if (url === "/api/sales/organizations/7/invoices/77/settlements") data = { received: "0", refunded: "0", net_received: "0", cancellation_authorized: false, reconciliation_required: true, items: [] };
@@ -16,7 +16,7 @@ it("opens invoice settlements from the accountant home and resets the invoice on
     return Promise.resolve({ ok: true, status: 200, json: async () => data });
   });
   vi.stubGlobal("fetch", fetchMock);
-  render(<AccountingView />);
+  const view = render(<AccountingView />);
   await screen.findByText(/включительно: 0\./);
   fireEvent.click(screen.getByRole("button", { name: "Банк и платежи" }));
   fireEvent.click(screen.getByRole("button", { name: "Оплаты счетов" }));
@@ -24,9 +24,13 @@ it("opens invoice settlements from the accountant home and resets the invoice on
   fireEvent.click(screen.getByRole("button", { name: "Открыть расчёты счёта" }));
   await screen.findByLabelText("Итоги расчётов");
   expect(screen.getByText("Счёт ID 77 · юрлицо 7")).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Организация"), { target: { value: "8" } });
-  expect(screen.getByLabelText("ID счёта")).toHaveValue("");
-  expect(screen.queryByLabelText("Итоги расчётов")).not.toBeInTheDocument();
+  view.rerender(<AccountingView suggestedOrg="8" suggestedEntry="5" />);
+  expect(screen.getByRole("alert")).toHaveTextContent("Ссылка относится к другому юрлицу");
+  expect(screen.queryByLabelText("Организация")).not.toBeInTheDocument();
+  expect(screen.getByText("Компания A · УНП 111111111")).toBeInTheDocument();
+  expect(screen.getByLabelText("ID счёта")).toHaveValue("77");
+  expect(screen.getByLabelText("Итоги расчётов")).toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([url]) => /\/organizations\/8\/|\/entries\/5/.test(url))).toBe(false);
   expect(fetchMock.mock.calls.filter(([url]) => url.includes("/api/sales/"))).toHaveLength(1);
 });
 
@@ -36,7 +40,7 @@ it("locks organization and workspace navigation throughout an uncertain allocati
   vi.stubGlobal("fetch", vi.fn((url: string, options?: RequestInit) => {
     if (options?.method === "POST") return pending;
     let data: unknown = [];
-    if (url === "/api/accounting/organizations") data = [{ id: 7, name: "Компания A", unp: "111" }, { id: 8, name: "Компания B", unp: "222" }];
+    if (url === "/api/system/instance-organization") data = { configuration: "AIOS_SELLER_UNP", organization: { id: 7, name: "Компания A", unp: "111111111" } };
     else if (url.includes("/reports?")) data = { pending_documents: 0 };
     else if (url.endsWith("/settlements")) data = { received: "0", refunded: "0", net_received: "0", cancellation_authorized: false, reconciliation_required: true, items: [] };
     return Promise.resolve({ ok: true, status: 200, json: async () => data });
@@ -52,10 +56,10 @@ it("locks organization and workspace navigation throughout an uncertain allocati
     fireEvent.change(screen.getByLabelText(label), { target: { value } });
   }
   fireEvent.click(screen.getByRole("button", { name: "Подтвердить распределение" }));
-  expect(screen.getByLabelText("Организация")).toBeDisabled();
+  expect(screen.queryByLabelText("Организация")).not.toBeInTheDocument(); expect(screen.getByLabelText("Начало периода")).toBeDisabled(); expect(screen.getByLabelText("Конец периода")).toBeDisabled();
   expect(screen.getByRole("button", { name: "Рабочее место" })).toBeDisabled();
   await act(async () => rejectPost(new Error("Connection lost")));
-  expect(screen.getByLabelText("Организация")).toBeDisabled();
+  expect(screen.queryByLabelText("Организация")).not.toBeInTheDocument(); expect(screen.getByLabelText("Начало периода")).toBeDisabled(); expect(screen.getByLabelText("Конец периода")).toBeDisabled();
   expect(screen.getByRole("button", { name: "Рабочее место" })).toBeDisabled();
   expect(screen.getByLabelText("Ключ распределения")).toHaveValue("K1");
 });

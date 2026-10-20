@@ -10,7 +10,7 @@ function deferred() { let resolve!: (v: unknown) => void; const promise = new Pr
 function api(post: (url: string, body?: string) => unknown) {
   return vi.fn((url: string, init?: RequestInit) => {
     if (init?.method === "POST") return post(url, init.body as string);
-    if (url === "/api/accounting/organizations") return Promise.resolve(ok([{ id: 7, name: "A", unp: "111" }, { id: 8, name: "B", unp: "222" }]));
+    if (url === "/api/system/instance-organization") return Promise.resolve(ok({ configuration: "AIOS_SELLER_UNP", organization: { id: 7, name: "A", unp: "111111111" } }));
     if (url.includes("/reports?")) return Promise.resolve(ok({ pending_documents: 0 }));
     if (url.endsWith("/settlements")) return Promise.resolve(ok({ received: "0", refunded: "0", net_received: "0", cancellation_authorized: false, reconciliation_required: true, items: [] }));
     if (url.endsWith("/money-reconciliation")) return Promise.resolve(ok(review));
@@ -31,15 +31,15 @@ async function open() {
 it("uncertain reconciliation locks allocation, selection and accounting navigation until receipt", async () => {
   const pending = deferred(); let calls = 0; const f = api(() => ++calls === 1 ? pending.promise : Promise.resolve(ok(receipt))); vi.stubGlobal("fetch", f); await open();
   fireEvent.click(screen.getByRole("button", { name: "Подтвердить денежную историю" }));
-  expect(screen.getByLabelText("Организация")).toBeDisabled(); expect(screen.getByLabelText("ID счёта")).toBeDisabled(); expect(screen.getByRole("button", { name: "Рабочее место" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Подтвердить распределение" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Обновить расчёты" })).toBeDisabled();
+  expect(screen.queryByLabelText("Организация")).not.toBeInTheDocument(); expect(screen.getByLabelText("Начало периода")).toBeDisabled(); expect(screen.getByLabelText("Конец периода")).toBeDisabled(); expect(screen.getByLabelText("ID счёта")).toBeDisabled(); expect(screen.getByRole("button", { name: "Рабочее место" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Подтвердить распределение" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Обновить расчёты" })).toBeDisabled();
   await act(async () => pending.resolve({ ok: false, status: 503 })); await screen.findByRole("button", { name: "Повторить сверку с тем же ключом" });
-  expect(screen.getByLabelText("Организация")).toBeDisabled(); expect(screen.getByLabelText("Номер счёта для поиска")).toBeDisabled(); expect(screen.getByLabelText("Ключ распределения")).toBeDisabled();
-  fireEvent.click(screen.getByRole("button", { name: "Повторить сверку с тем же ключом" })); await screen.findByRole("button", { name: "Новая сверка" }); expect(screen.getByLabelText("Организация")).toBeEnabled(); expect(screen.getByRole("button", { name: "Подтвердить распределение" })).toBeEnabled();
+  expect(screen.queryByLabelText("Организация")).not.toBeInTheDocument(); expect(screen.getByLabelText("Начало периода")).toBeDisabled(); expect(screen.getByLabelText("Конец периода")).toBeDisabled(); expect(screen.getByLabelText("Номер счёта для поиска")).toBeDisabled(); expect(screen.getByLabelText("Ключ распределения")).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Повторить сверку с тем же ключом" })); await screen.findByRole("button", { name: "Новая сверка" }); expect(screen.queryByLabelText("Организация")).not.toBeInTheDocument(); expect(screen.getByLabelText("Начало периода")).toBeEnabled(); expect(screen.getByLabelText("Конец периода")).toBeEnabled(); expect(screen.getByRole("button", { name: "Подтвердить распределение" })).toBeEnabled();
 });
 it("uncertain allocation blocks already open reconciliation without its read cleanup unlocking navigation", async () => {
   const pending = deferred(); vi.stubGlobal("fetch", api(() => pending.promise)); await open(); fireEvent.click(screen.getByRole("button", { name: "Подтвердить распределение" }));
   expect(screen.getByRole("button", { name: "Подтвердить денежную историю" })).toBeDisabled(); await act(async () => pending.resolve({ ok: false, status: 503 }));
-  expect(screen.getByLabelText("Организация")).toBeDisabled(); expect(screen.getByRole("button", { name: "Обновить сверку" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Подтвердить денежную историю" })).toBeDisabled();
+  expect(screen.queryByLabelText("Организация")).not.toBeInTheDocument(); expect(screen.getByLabelText("Начало периода")).toBeDisabled(); expect(screen.getByLabelText("Конец периода")).toBeDisabled(); expect(screen.getByRole("button", { name: "Обновить сверку" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Подтвердить денежную историю" })).toBeDisabled();
 });
 it.each(["allocation", "reconciliation"])("same-tick competing mutations: %s acquires sole ownership", async (first) => {
   const pending = deferred(); const f = api(() => pending.promise); vi.stubGlobal("fetch", f); await open();
@@ -47,7 +47,7 @@ it.each(["allocation", "reconciliation"])("same-tick competing mutations: %s acq
   act(() => { fireEvent.click(first === "allocation" ? a : r); fireEvent.click(first === "allocation" ? r : a); });
   await act(async () => {});
   const posts = f.mock.calls.filter(([, init]) => init?.method === "POST"); expect(posts).toHaveLength(1); expect(posts[0][0]).toMatch(first === "allocation" ? /\/settlements$/ : /\/money-reconciliation$/);
-  await act(async () => pending.resolve({ ok: false, status: 503 })); expect(screen.getByLabelText("Организация")).toBeDisabled();
+  await act(async () => pending.resolve({ ok: false, status: 503 })); expect(screen.queryByLabelText("Организация")).not.toBeInTheDocument(); expect(screen.getByLabelText("Начало периода")).toBeDisabled(); expect(screen.getByLabelText("Конец периода")).toBeDisabled();
 });
 it("confirmed allocation refreshes money review and clears previous completeness checkbox", async () => {
   vi.stubGlobal("fetch", api(() => Promise.resolve(ok({ id: 6, direction: "receipt", amount: "10.00" })))); await open();

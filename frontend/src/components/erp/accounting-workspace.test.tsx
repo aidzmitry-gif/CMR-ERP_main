@@ -9,7 +9,7 @@ it("keeps the book mounted while confirmation is pending and refreshes the works
   const delayed = new Promise<void>((resolve) => { finish = resolve; });
   vi.stubGlobal("fetch", vi.fn(async (url: string, options?: RequestInit) => {
     if (options?.method === "POST") { await delayed; committed = true; }
-    const data = url.endsWith("/organizations") ? [{ id: 1, name: "Test", unp: "999999999" }]
+    const data = url === "/api/system/instance-organization" ? { configuration: "AIOS_SELLER_UNP", organization: { id: 1, name: "Test", unp: "999999999" } }
       : url.includes("/reports?") ? { pending_documents: committed ? 0 : 1 }
       : url.endsWith("/inbox") ? committed ? [] : [{ id: 1, event_key: "Pending source", month: "2026-09", payload: {} }]
       : url.endsWith("/catalog") ? { accounts: [] } : [];
@@ -21,7 +21,9 @@ it("keeps the book mounted while confirmation is pending and refreshes the works
   fireEvent.click(await screen.findByText("Pending source · 2026-09"));
   fireEvent.click(screen.getByText("Подтвердить пакет и повторить проведение"));
   expect(screen.getByRole("button", { name: "Рабочее место", exact: true })).toBeDisabled();
-  expect(screen.getByLabelText("Организация", { exact: true })).toBeDisabled();
+  expect(screen.queryByLabelText("Организация", { exact: true })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Начало периода")).toBeDisabled();
+  expect(screen.getByLabelText("Конец периода")).toBeDisabled();
   await act(async () => { finish(); await delayed; });
   await screen.findByText("Документ проверен и проведён.");
   fireEvent.click(screen.getByRole("button", { name: "Рабочее место", exact: true }));
