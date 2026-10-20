@@ -87,7 +87,7 @@ export function SpravSkuCatalog({
           Справочник ставок НДС недоступен; названия ставок неизвестны.
         </p>}
 
-        <form action={baseHref} method="get" className="mt-4 flex flex-wrap items-center gap-2">
+        <form key={JSON.stringify([baseHref, search, categoryId])} action={baseHref} method="get" className="mt-4 flex flex-wrap items-center gap-2">
           <label className="flex min-w-[260px] flex-1 items-center gap-2 rounded-xl bg-sunken px-3 py-2">
             <Search aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-faint" />
             <input
@@ -168,7 +168,9 @@ export function SpravSkuCatalog({
                       </Link>
                     </td>
                     <td className="max-w-[420px] px-4 py-2.5 text-ink" title={sku.title}>
-                      <span className="block break-words">{sku.title}</span>
+                      <Link href={`/erp/spravochniki/sku/${encodeURIComponent(sku.code)}`} className="block break-words text-accent hover:underline">
+                        {sku.title}
+                      </Link>
                     </td>
                     <td className="px-4 py-2.5 text-muted">{sku.unit ?? "—"}</td>
                     <td className="px-4 py-2.5 text-muted">
@@ -193,7 +195,7 @@ export function SpravSkuCatalog({
           </table>
         </div>
         <div className="border-t border-line px-5 py-3 text-[12px] text-muted">
-          Записи архивируются, не удаляются — на них могут ссылаться документы. Клик по коду
+          Записи архивируются, не удаляются — на них могут ссылаться документы. Клик по коду или наименованию
           открывает карточку номенклатуры (провенанс, ТН ВЭД, себестоимость, остатки).
         </div>
       </div>

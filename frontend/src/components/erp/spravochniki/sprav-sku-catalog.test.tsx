@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 // next/link → простая <a> в jsdom (роутер App Router в тесте недоступен).
@@ -49,6 +49,29 @@ function renderCatalog(props: Partial<typeof baseProps> = {}) {
 }
 
 describe("SpravSkuCatalog", () => {
+  it.each(["/erp/spravochniki/sku", "/crm/catalog"] as const)("[SKU-FILTER-RESET] clears stale controls and GET values after reset in %s", (baseHref) => {
+    const { container, rerender } = render(<SpravSkuCatalog {...baseProps} baseHref={baseHref} search="18650" categoryId={1} />);
+    fireEvent.change(screen.getByLabelText("Поиск номенклатуры"), { target: { value: "Несохранённый поиск" } });
+    fireEvent.change(screen.getByLabelText("Группа номенклатуры"), { target: { value: "2" } });
+
+    rerender(<SpravSkuCatalog {...baseProps} baseHref={baseHref} search="" categoryId={null} />);
+
+    expect(screen.getByLabelText("Поиск номенклатуры")).toHaveValue("");
+    expect(screen.getByLabelText("Группа номенклатуры")).toHaveValue("");
+    const values = new FormData(container.querySelector("form")!);
+    expect(values.get("search")).toBe("");
+    expect(values.get("category_subtree_id")).toBe("");
+    expect(screen.getByRole("status")).toHaveTextContent("Найдено 3 позиций · показаны 1–3");
+  });
+
+  it.each(["/erp/spravochniki/sku", "/crm/catalog"] as const)("[SKU-TITLE-LINK] opens the same encoded card from code and title in %s", (baseHref) => {
+    const item = { ...skus[0], code: "SKU / 20% ?#", title: "Товар со специальным кодом" };
+    render(<SpravSkuCatalog {...baseProps} baseHref={baseHref} skus={[item]} total={1} />);
+    const cardHref = "/erp/spravochniki/sku/SKU%20%2F%2020%25%20%3F%23";
+    expect(screen.getByRole("link", { name: item.code })).toHaveAttribute("href", cardHref);
+    expect(screen.getByRole("link", { name: item.title })).toHaveAttribute("href", cardHref);
+  });
+
   it("renders the server-filtered subtree result and current combined filter values", () => {
     const child: SkuRow = { ...skus[0], code: "CHILD", category_id: 4 };
     renderCatalog({
