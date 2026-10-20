@@ -4,6 +4,36 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
+import pytest_asyncio
+
+from core.domain.models import Counterparty
+
+
+@pytest_asyncio.fixture
+async def api(api, session):
+    """Positive deals select existing synthetic MDM parties by their exact names."""
+    for name in (
+        'Synthetic buyer',
+        'Synthetic zero',
+        'c',
+        'ООО R',
+        'ООО V',
+        'ООО X',
+        'ООО Y',
+        'ООО Z',
+        'ООО Без Истории',
+        'ООО Ждёт',
+        'ООО Журнал',
+        'ООО Параллель',
+        'ООО Повтор',
+        'ООО Срок',
+        'ООО Чат',
+        'Одноразовый',
+        'Постоянный',
+    ):
+        session.add(Counterparty(name=name))
+    await session.commit()
+    yield api
 
 
 async def _new_deal(api, number, **extra):
@@ -506,9 +536,8 @@ async def test_deal_task_source_ref_allows_manual_rows_and_rejects_duplicate_sou
 
 
 async def test_deal_task_fidelity_supports_unbound_tasks_and_ordered_crm_links(api, session):
-    from sqlalchemy import func, select
+    from sqlalchemy import Boolean, Text, func, select
     from sqlalchemy.exc import IntegrityError
-    from sqlalchemy import Boolean, Text
 
     from modules.sales.models import DealTask, DealTaskCrmLink
 

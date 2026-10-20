@@ -1,6 +1,20 @@
 """БД-тесты задач по сделке (SALES-41). SQLite в памяти."""
 
 import pytest
+import pytest_asyncio
+
+from core.domain.models import Counterparty
+
+
+@pytest_asyncio.fixture
+async def api(api, session):
+    """Positive deals select existing synthetic MDM parties by their exact names."""
+    for name in (
+        'c',
+    ):
+        session.add(Counterparty(name=name))
+    await session.commit()
+    yield api
 
 
 async def _new_deal(api, number, **extra):
@@ -62,6 +76,7 @@ async def test_task_overdue_flag(api):
 
 async def test_task_due_at_with_timezone_is_stored_as_utc_before_commit(api, session):
     from sqlalchemy import func, select
+
     from modules.sales.models import DealTask
 
     deal = await _new_deal(api, "TK-TZ")

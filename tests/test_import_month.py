@@ -1,8 +1,8 @@
 """Безопасный load-only путь для локального кэша импорта Bitrix24/1С."""
 from __future__ import annotations
 
-import importlib
 import hashlib
+import importlib
 import json
 import os
 import subprocess
@@ -438,7 +438,7 @@ def _make_cache(root: Path) -> None:
         root,
         "bx_contacts",
         [{"ID": "20", "NAME": "Test", "LAST_NAME": "Contact", "COMPANY_ID": "10",
-          "PHONE": [{"VALUE": "+375 29 123-45-67"}],
+          "PHONE": [{"VALUE": "+000 00 000-00-02"}],
           "EMAIL": [{"VALUE": "test@example.invalid"}]}],
     )
     _write_jsonl(root, "bx_requisites", [{"ENTITY_ID": "10", "RQ_INN": "100000002"}])
@@ -544,7 +544,7 @@ async def _seed_existing_deal_directory(
     """Add synthetic, already trusted CRM directory rows to a loaded pilot deal."""
     from decimal import Decimal
 
-    from sqlalchemy import func, select
+    from sqlalchemy import select
 
     from core.domain.models import CounterpartyAlias
     from modules.sales.models import CrmClient, CrmClientContact, Deal
@@ -594,7 +594,7 @@ async def _seed_existing_deal_directory(
         contact = CrmClientContact(
             crm_client_id=clients[0].id,
             full_name="Test Contact",
-            phone="+375291234567",
+            phone="+000000000002",
             email="test@example.invalid",
             contact_key="synthetic-contact-key",
             request_key="synthetic-contact-request",
@@ -4358,7 +4358,7 @@ async def test_existing_foreign_contact_without_client_is_held_and_reported(
         foreign_contact = CrmClientContact(
             crm_client_id=foreign_client.id,
             full_name="Synthetic foreign contact",
-            phone="+375291111111",
+            phone="+000000000001",
             email="foreign@example.invalid",
             contact_key="synthetic-foreign-contact",
             request_key="synthetic-foreign-contact-request",
@@ -4651,6 +4651,7 @@ async def test_direct_deal_call_uses_proven_company_and_employee_for_client_card
     capsys.readouterr()
 
     from sqlalchemy import select
+
     from modules.sales.models import CallLog, CrmClient, Deal
 
     db = module._isolated_database()
@@ -4697,6 +4698,7 @@ async def test_call_owner_uses_its_portal_user_and_reconcile_detects_owner_drift
     capsys.readouterr()
 
     from sqlalchemy import select
+
     from modules.sales.models import CallLog, Deal
 
     db = module._isolated_database()
@@ -4745,6 +4747,7 @@ async def test_call_owner_zero_sentinel_remains_unassigned_in_load_and_reconcile
     capsys.readouterr()
 
     from sqlalchemy import select
+
     from modules.sales.models import CallLog
 
     db = module._isolated_database()
@@ -4802,7 +4805,7 @@ async def test_existing_bitrix_call_semantic_change_blocks_replay_without_mutati
     calls = [json.loads(line) for line in (cache / "bx_calls.jsonl").read_text(
         encoding="utf-8"
     ).splitlines()]
-    calls[0] = {**calls[0], "PHONE_NUMBER": "+375291234567"}
+    calls[0] = {**calls[0], "PHONE_NUMBER": "+000000000002"}
     _write_jsonl(cache, "bx_calls", calls)
     with pytest.raises(ValueError, match="BITRIX_CALL_CONFLICT"):
         await module.load()
@@ -5457,7 +5460,7 @@ async def test_distinct_1c_refs_with_duplicate_unp_keep_stable_masters(
     await db.connect()
     async with db.session_factory() as session:
         aliases = (await session.execute(select(CounterpartyAlias))).scalars().all()
-        masters = (await session.execute(select(Counterparty))).scalars().all()
+        _masters = (await session.execute(select(Counterparty))).scalars().all()
         ref_to_master = {
             row.external_ref: row.counterparty_id for row in aliases if row.source == "1c"
         }
@@ -6017,7 +6020,7 @@ async def test_new_deal_links_to_confirmed_owner_master_and_contact_on_repeated_
     await module.load()
     first_output = capsys.readouterr()
     assert "Test Contact" not in first_output.out + first_output.err
-    assert "+375291234567" not in first_output.out + first_output.err
+    assert "+000000000002" not in first_output.out + first_output.err
     assert "test@example.invalid" not in first_output.out + first_output.err
 
     from sqlalchemy import func, select
@@ -6049,7 +6052,7 @@ async def test_new_deal_links_to_confirmed_owner_master_and_contact_on_repeated_
         assert client.name == "Test 1C Company"
         assert contact.crm_client_id == client.id
         assert (contact.full_name, contact.phone, contact.email) == (
-            "Test Contact", "+375291234567", "test@example.invalid"
+            "Test Contact", "+000000000002", "test@example.invalid"
         )
         ids = (deal.id, client.id, contact.id)
         assert (await session.execute(select(func.count()).select_from(CrmClient))).scalar_one() == 1
@@ -6335,7 +6338,7 @@ async def test_contact_channel_conflict_does_not_create_or_link_a_new_crm_contac
         session.add(CrmClientContact(
             crm_client_id=client.id,
             full_name="Test Contact",
-            phone="+375291234567",
+            phone="+000000000002",
             email="different@example.invalid",
             contact_key="conflicting-contact-key",
             request_key="conflicting-contact-request",

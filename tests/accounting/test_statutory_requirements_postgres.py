@@ -5,8 +5,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
-
+from tests.accounting.test_postgres import pg_book as pg_book
+from tests.accounting.test_postgres import pg_factory as pg_factory
 
 pytestmark = pytest.mark.integration
 

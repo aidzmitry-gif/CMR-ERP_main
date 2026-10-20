@@ -1,7 +1,6 @@
 """Add immutable per-organization chart catalogue adoption provenance."""
 from alembic import op
 
-
 revision = "0158"
 down_revision = "0157"
 branch_labels = None
