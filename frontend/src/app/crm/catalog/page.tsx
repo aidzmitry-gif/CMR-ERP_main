@@ -6,10 +6,12 @@ export default async function CrmCatalogPage({ searchParams }: {
 }) {
   return (
     <AppShell crumbs={["CRM", "Каталог-подбор"]}>
-      <p className="mx-6 mt-6 rounded-xl bg-surface p-4 text-sm text-muted">
-        Цены и остатки по складам здесь пока неизвестны. Для оформления счёта откройте сделку.
-      </p>
-      {await SkuCatalogContent({ searchParams, baseHref: "/crm/catalog" })}
+      <main className="w-full min-w-0 flex-1">
+        <p className="mx-6 mt-6 rounded-xl bg-surface p-4 text-sm text-muted">
+          Цены и остатки по складам здесь пока неизвестны. Для оформления счёта откройте сделку.
+        </p>
+        {await SkuCatalogContent({ searchParams, baseHref: "/crm/catalog" })}
+      </main>
     </AppShell>
   );
 }
