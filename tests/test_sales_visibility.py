@@ -430,6 +430,7 @@ async def test_calls_stream_uses_authenticated_employee_and_rejects_owner_overri
         owner=None,
         user=CurrentUser(username="call-stream-owner", roles=["sales"]),
         access=CrmAccess("own", employee_id),
+        session=session,
     )
     stream = stream_response.body_iterator
     try:
