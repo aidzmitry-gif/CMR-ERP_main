@@ -2,7 +2,7 @@
   "kind": "ERP_READY_PRIVATE_POOL3_V1",
   "status": "PREPARATION_ONLY_NO_RUNTIME_ACTIVATION",
   "sourceRootName": "erp-ready-001-ci-lint",
-  "head": "6e8f316862b968dd0efcd05b4e77f2e4415294e4",
+  "head": "c1092fcea63455ccd0a84e8715616afec3f6624e",
   "modulePins": {
     "finance": "59832b2f14a2ee02d8db266a67f8206616bdcd94",
     "hr": "f8a6e0142f1920b07ec56818f42d156a602ff9c3",
@@ -18,7 +18,7 @@
   "sourceSHA256": {
     "frontend/e2e/backend.py": "a7b1ecbdd876e19542783516cfedfd0f8071d9c310ff8e7a4057a6417b53fc45",
     "frontend/playwright.config.ts": "f255cf17a67f3f874ef4bcf6ed499a20bb80ae8623c39b2947a132575a45b319",
-    "frontend/src/app/api/[...path]/route.ts": "e847536bc79d9201a19501a26f237607f6b5bf4c82f33be5cb8f80effadc8839",
+    "frontend/src/app/api/[...path]/route.ts": "15767670ee9a36dd91be4f4a3faf1f32f4750a325966c41d497d0631c0ff8948",
     "frontend/src/app/api/auth/login/route.ts": "1289e9128a7b7d3fe903a7552bf054bfc35a80b3b74354ed93d2715517045802",
     "frontend/src/lib/api-proxy-headers.ts": "bb638c8fc831d126317796e42504f161b707d56d911cd67256b937e76f0270ee",
     "frontend/src/lib/role-server.ts": "03e9a68b83feed9643bb77877d75c4282d8e54e96803b68b89a17fadb67f7f38",
@@ -70,7 +70,7 @@
     "app_or_DB_launch_during_preparation"
   ],
   "canonicalSourceProvenance": {
-    "rootHead": "6e8f316862b968dd0efcd05b4e77f2e4415294e4",
+    "rootHead": "c1092fcea63455ccd0a84e8715616afec3f6624e",
     "modulePins": {
       "finance": "59832b2f14a2ee02d8db266a67f8206616bdcd94",
       "hr": "f8a6e0142f1920b07ec56818f42d156a602ff9c3",
@@ -84,10 +84,9 @@
       "wms": "444d84831324db50bc377d6cd5e3c0d7979644e0"
     },
     "checked": 25,
-    "rawWindowsMatches": 19,
-    "lineEndingOnlyDifferences": 6,
-    "sourceFilesRewritten": 0,
-    "proof": "G12LH-canonical25.json + G12LH-canonical-difference-shape.json"
+    "unchangedSourceFiles": 24,
+    "changedSourceFiles": 1,
+    "proof": "Single public-parent application commit; route-only diff; previous source24 hashes and module10 unchanged"
   },
   "driverBundlePath": "ops/erp-ready-pool"
 }

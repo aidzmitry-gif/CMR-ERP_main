@@ -20,7 +20,7 @@ jobs:
       CI: "true"
       ERP_POOL_DRIVER_ROOT: ${{ github.workspace }}/driver
       ERP_POOL_SOURCE_ROOT: ${{ github.workspace }}/erp-ready-001-ci-lint
-      ERP_POOL_EXPECTED_BUNDLE_SHA256: "5cfffcb88d2ef1eed454cf6836a2a4c624efa287645db23a9c523e54bf91319b"
+      ERP_POOL_EXPECTED_BUNDLE_SHA256: "5bd937fed97a7e1f094a4d36be3d08b6f16a6620dbe71817f51356d11ebe4dc1"
     steps:
       - name: Checkout diagnostic driver
         uses: actions/checkout@v5
@@ -30,7 +30,7 @@ jobs:
       - name: Checkout frozen application
         uses: actions/checkout@v5
         with:
-          ref: "6e8f316862b968dd0efcd05b4e77f2e4415294e4"
+          ref: "c1092fcea63455ccd0a84e8715616afec3f6624e"
           path: erp-ready-001-ci-lint
           submodules: recursive
           persist-credentials: false

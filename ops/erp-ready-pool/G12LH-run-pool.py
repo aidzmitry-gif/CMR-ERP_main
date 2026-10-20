@@ -186,7 +186,7 @@ def main():
     profile = json.loads(profile_path.read_text(encoding='utf-8'))
     assert profile['kind'] == 'ERP_READY_PRIVATE_POOL3_V1'
     assert root.name == profile['sourceRootName']
-    assert profile['head'] == '6e8f316862b968dd0efcd05b4e77f2e4415294e4'
+    assert profile['head'] == 'c1092fcea63455ccd0a84e8715616afec3f6624e'
     driver_root = Path(os.environ['ERP_POOL_DRIVER_ROOT']).resolve()
     assert driver_root.is_relative_to(Path(os.environ['GITHUB_WORKSPACE']).resolve())
     assert not root.is_relative_to(driver_root) and not driver_root.is_relative_to(root)
