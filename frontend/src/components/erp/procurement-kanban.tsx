@@ -3,9 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/input";
-
-type Organization = { id: number; name: string; unp: string };
+import { InstanceOrganizationGate } from "@/components/instance-organization-gate";
 type Identity = { organization_id: number; principal: string; can_manage: boolean };
 type RequestRow = {
   id: number;
@@ -144,24 +142,12 @@ function cardsFor(org: number, requests: RequestRow[], orders: OrderRow[], chain
 }
 
 export function ProcurementKanban({ suggestedOrg }: { suggestedOrg?: string }) {
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [organization, setOrganization] = useState("");
-  const [error, setError] = useState("");
-  useEffect(() => {
-    let active = true;
-    void api<Organization[]>("/api/procurement/receipt-organizations").then(rows => {
-      if (!active) return;
-      setOrganizations(rows);
-      const hint = organizationHint(suggestedOrg);
-      if (hint && rows.some(row => String(row.id) === hint)) setOrganization(hint);
-    }).catch(reason => { if (active) setError(errorText(reason)); });
-    return () => { active = false; };
-  }, [suggestedOrg]);
   return <section className="space-y-4 p-6">
-    <div className="space-y-1"><h1 className="text-xl font-semibold">Закупки · обзор и воронка</h1><p>Обзор и канбан показывают только документы выбранного юрлица. Этапы поставки и приёмки строятся из фактического статуса заказа и цепочки первичных документов.</p></div>
-    {error && <p role="alert">{error}</p>}
-    <Select aria-label="Юрлицо канбана закупок" value={organization} onChange={event => setOrganization(event.target.value)}><option value="">Выберите юрлицо</option>{organizations.map(row => <option key={row.id} value={row.id}>{row.name} · {row.unp}</option>)}</Select>
-    {organization && <CompanyKanban key={organization} org={Number(organization)} />}
+    <div className="space-y-1"><h1 className="text-xl font-semibold">Закупки · обзор и воронка</h1><p>Обзор и канбан показывают документы организации из настроек установки. Этапы поставки и приёмки строятся из фактического статуса заказа и цепочки первичных документов.</p></div>
+    <InstanceOrganizationGate>{organization => <>
+      {organizationHint(suggestedOrg) && organizationHint(suggestedOrg) !== String(organization.id) && <p role="alert">Ссылка относится к другому юрлицу. Открыты закупки организации из настроек установки.</p>}
+      <CompanyKanban org={organization.id} />
+    </>}</InstanceOrganizationGate>
   </section>;
 }
 

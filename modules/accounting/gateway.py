@@ -292,6 +292,14 @@ class AccountingService:
         await organization_role(session, organization_id, actor)
         return actor
 
+
+    async def finance_member(self, session, organization_id, user, *, write: bool) -> str:
+        """Authorize an internal finance consumer within the current book."""
+        actor, role = await current_member(session, organization_id, user, package="finance")
+        if write and role == "reader":
+            raise HTTPException(403, "Read-only finance access")
+        return actor
+
     async def document_shipment_member(self, session, organization_id, user):
         """Authorize document-driven stock issues under the book's write lock."""
         actor, role = await current_member(session, organization_id, user)

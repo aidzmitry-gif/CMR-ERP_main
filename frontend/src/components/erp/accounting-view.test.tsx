@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./expense-control", () => ({ ExpenseControl: ({org}: {org?: string}) => <section aria-label="Общий экран расходов">Расходы книги {org}</section> }));
-vi.mock("./accounting-controls", () => ({ AccountingControls: ({ onChanged, initialSection }: { onChanged: () => void; initialSection: string }) => <><span>Раздел контроля: {initialSection}</span><button onClick={onChanged}>Обновить список организаций</button></> }));
+vi.mock("./accounting-controls", () => ({ AccountingControls: ({ onChanged, initialSection }: { onChanged: () => void; initialSection: string }) => <><span>Раздел контроля: {initialSection}</span><button onClick={onChanged}>Обновить контроль книги</button></> }));
 
 import { AccountingView } from "./accounting-view";
 
@@ -37,6 +37,8 @@ const report = { organization_id: 1, status: "preliminary", pending_documents: 0
   movements: [{ entry_id: 5, source: "Поступление 1", date: "2026-09-01", account: "41", side: "debit", amount: "100.00" }],
   balance: { equity: "1000.00", difference: "0.00" }, pnl: { income: "180.00", expenses: "100.00", profit: "80.00" }, cashflow: { closing: "1080.00" } };
 const fetchMock = vi.fn();
+const defaultOrganization = { id: 1, name: "Тестовая компания", unp: "999999999" };
+let instanceOrganization = { ...defaultOrganization };
 const respond = (data: unknown, ok = true) => Promise.resolve({ ok, json: async () => data });
 const digest = "a".repeat(64);
 const registeredAsset = { id: 7, organization_id: 1, asset_key: "asset:equipment:001",
@@ -95,9 +97,11 @@ function normalizedManualPosting(posting: Record<string, unknown>): Record<strin
 
 beforeEach(() => {
   manualDraft = null;
+  instanceOrganization = { ...defaultOrganization };
   window.sessionStorage.clear();
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockImplementation((input: string, init?: RequestInit) => {
+    if (input === "/api/system/instance-organization") return respond({ configuration: "AIOS_SELLER_UNP", organization: instanceOrganization });
     if (input.endsWith("/organizations")) return respond([{ id: 1, name: "Тестовая компания", unp: "999999999" }, { id: 2, name: "Вторая компания", unp: "888888888" }]);
     if (input.includes("/accounts?")) return respond([{ id: 1, code: "41", title: "Товары", cash: false, required_dimensions: [] }, { id: 2, code: "60", title: "Поставщики", cash: false, required_dimensions: [] }]);
     if (input.endsWith("/policies")) return respond([{ id: 1, effective_from: "2020-01-01", reference: "Test", normative_verified: false }]);
@@ -140,6 +144,142 @@ beforeEach(() => {
 });
 afterEach(() => { window.sessionStorage.clear(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
+async function startManualSave() {
+  const view = render(<AccountingView />);
+  await screen.findByText(/включительно: 0\./);
+  openPage("Документы", "Ручная операция");
+  fillManualOperation();
+  fireEvent.click(screen.getByRole("button", { name: "Проверить проводки" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Сохранить", exact: true }));
+  await waitFor(() => expect(window.sessionStorage.getItem("accounting.manual-document-create.v1")).not.toBeNull());
+  return view;
+}
+
+async function pendingManualSave() {
+  const original = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation((url: string, init?: RequestInit) =>
+    url.endsWith("/manual-documents") && init?.method === "POST"
+      ? Promise.reject(new Error("Unconfirmed create response")) : original(url, init));
+  const view = await startManualSave();
+  expect(await screen.findByRole("alert")).toHaveTextContent("Unconfirmed create response");
+  const raw = window.sessionStorage.getItem("accounting.manual-document-create.v1")!;
+  return { view, raw, original };
+}
+
+describe("AccountingView installation and recovery boundary", () => {
+  it("does not mount or request a book before the configured context resolves", async () => {
+    const original = fetchMock.getMockImplementation()!;
+    let release!: (value: unknown) => void;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === "/api/system/instance-organization"
+      ? new Promise((resolve) => { release = resolve; }) : original(url, init));
+    render(<AccountingView suggestedOrg="2" />);
+    expect(screen.getByRole("status")).toHaveTextContent("Загрузка юрлица установки");
+    expect(fetchMock.mock.calls).toHaveLength(1);
+    await act(async () => release(await respond({ configuration: "AIOS_SELLER_UNP", organization: defaultOrganization })));
+    await screen.findByText(/включительно: 0\./);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/organizations/2/"))).toBe(false);
+  });
+
+  it("keeps book queries blocked when configured organization access is denied, including retry", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve({ ok: false, status: 403, json: async () => ({ detail: "No access" }) }));
+    render(<AccountingView />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Юрлицо установки недоступно");
+    fireEvent.click(screen.getByRole("button", { name: "Повторить загрузку юрлица" }));
+    await waitFor(() => expect(fetchMock.mock.calls).toHaveLength(2));
+    expect(fetchMock.mock.calls.every(([url]) => url === "/api/system/instance-organization")).toBe(true);
+  });
+
+  it("preserves a foreign pending command byte-for-byte and blocks creating or posting it", async () => {
+    const { view, raw } = await pendingManualSave();
+    const journal = JSON.parse(raw); journal.organization_id = "2";
+    const foreignRaw = JSON.stringify(journal);
+    view.unmount();
+    window.sessionStorage.setItem("accounting.manual-document-create.v1", foreignRaw);
+    fetchMock.mockClear();
+    const removal = vi.spyOn(Storage.prototype, "removeItem");
+    render(<AccountingView />);
+    expect(await screen.findByRole("alert", { name: "Создание справки заблокировано" })).toHaveTextContent("другому юрлицу");
+    await screen.findByText(/включительно: 0\./);
+    openPage("Документы", "Ручная операция");
+    expect(screen.getByRole("button", { name: "Новая справка", exact: true })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Повторить создание справки" })).not.toBeInTheDocument();
+    expect(window.sessionStorage.getItem("accounting.manual-document-create.v1")).toBe(foreignRaw);
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST" || init?.method === "DELETE")).toBe(false);
+    expect(removal).not.toHaveBeenCalled(); removal.mockRestore();
+  });
+
+  it("blocks retry if storage was replaced with another company's valid command", async () => {
+    const { raw } = await pendingManualSave();
+    const foreignRaw = JSON.stringify({ ...JSON.parse(raw), organization_id: "2" });
+    window.sessionStorage.setItem("accounting.manual-document-create.v1", foreignRaw);
+    fireEvent.click(screen.getByRole("button", { name: "Повторить создание справки" }));
+    expect(await screen.findByRole("alert", { name: "Создание справки заблокировано" })).toHaveTextContent("другому юрлицу");
+    expect(window.sessionStorage.getItem("accounting.manual-document-create.v1")).toBe(foreignRaw);
+    expect(fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/manual-documents") && init?.method === "POST")).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/organizations/2/"))).toBe(false);
+  });
+
+  it("does not clear the saved command when its successful create returns after unmount", async () => {
+    const original = fetchMock.getMockImplementation()!;
+    let release!: (value: unknown) => void;
+    let receipt!: Promise<unknown>;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url.endsWith("/manual-documents") && init?.method === "POST") {
+        receipt = original(url, init);
+        return new Promise((resolve) => { release = resolve; });
+      }
+      return original(url, init);
+    });
+    const view = await startManualSave();
+    const raw = window.sessionStorage.getItem("accounting.manual-document-create.v1");
+    view.unmount();
+    await act(async () => release(await receipt));
+    expect(window.sessionStorage.getItem("accounting.manual-document-create.v1")).toBe(raw);
+    expect(manualDraft?.status).toBe("draft");
+  });
+
+  it("does not clear a pending command when its exact retry succeeds after unmount", async () => {
+    const { view, raw, original } = await pendingManualSave();
+    let release!: (value: unknown) => void;
+    let receipt!: Promise<unknown>;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url.endsWith("/manual-documents") && init?.method === "POST") {
+        receipt = original(url, init);
+        return new Promise((resolve) => { release = resolve; });
+      }
+      return original(url, init);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Повторить создание справки" }));
+    await waitFor(() => expect(release).toBeDefined());
+    view.unmount();
+    await act(async () => release(await receipt));
+    expect(window.sessionStorage.getItem("accounting.manual-document-create.v1")).toBe(raw);
+    expect(manualDraft?.status).toBe("draft");
+  });
+
+  it.each(["2", "bad"])("ignores a pending entry after its URL book hint changes to %s", async (hint) => {
+    const original = fetchMock.getMockImplementation()!;
+    let release!: (value: unknown) => void;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url.endsWith("/entries/5")
+      ? new Promise((resolve) => { release = resolve; }) : original(url, init));
+    const { rerender } = render(<AccountingView suggestedOrg="1" suggestedEntry="5" />);
+    await waitFor(() => expect(release).toBeDefined());
+    rerender(<AccountingView suggestedOrg={hint} suggestedEntry="5" />);
+    await act(async () => release(await respond({ id: 5, source: "STALE ENTRY", lines: [] })));
+    expect(screen.queryByRole("region", { name: "Карточка проводки" })).not.toBeInTheDocument();
+    expect(screen.queryByText("STALE ENTRY")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/organizations/2/"))).toBe(false);
+  });
+
+  it("clears an already opened entry when the URL changes to another book", async () => {
+    const { rerender } = render(<AccountingView suggestedOrg="1" suggestedEntry="5" />);
+    expect(await screen.findByRole("region", { name: "Карточка проводки" })).toHaveTextContent("Контрольное поступление");
+    rerender(<AccountingView suggestedOrg="2" suggestedEntry="5" />);
+    expect(screen.queryByRole("region", { name: "Карточка проводки" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/organizations/2/"))).toBe(false);
+  });
+});
+
 describe("AccountingView", () => {
   it("directs ordinary sales through CRM shipment evidence and keeps manual sale separate", async () => {
     render(<AccountingView />);
@@ -176,14 +316,16 @@ describe("AccountingView", () => {
     expect(catalog.querySelector('a[href="/erp/finance?tab=pnl"]')).not.toBeNull();
     expect(catalog.querySelector('a[href="/erp/finance?tab=dds"]')).not.toBeNull();
     expect(catalog.querySelector('a[href="/erp/finance?tab=balance"]')).not.toBeNull();
-    expect(screen.getByText(/выберите юрлицо и период заново/)).toBeInTheDocument();
+    expect(screen.getByText(/юрлицо берётся из настроек установки/)).toBeInTheDocument();
   });
 
-  it("предвыбирает доступную книгу из org query-hint после загрузки", async () => {
+  it("uses the configured company instead of an accessible URL-hinted book", async () => {
     render(<AccountingView suggestedOrg="2" />);
-    await screen.findByRole("option", { name: "Вторая компания · 888888888" });
-    await waitFor(() => expect(screen.getByLabelText("Организация")).toHaveValue("2"));
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/organizations/2/reports?"))).toBe(true);
+    await screen.findByText(/включительно: 0\./);
+    expect(screen.queryByLabelText("Организация")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Ссылка относится к другому юрлицу");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/organizations/2/"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/organizations"))).toBe(false);
   });
 
   it("opens a requested posting in the authorized book without needing it in the current report period", async () => {
@@ -195,31 +337,30 @@ describe("AccountingView", () => {
 
   it("does not open a posting for an unavailable book", async () => {
     render(<AccountingView suggestedOrg="3" suggestedEntry="5" />);
-    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    await screen.findByText("Тестовая компания · УНП 999999999");
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/entries/5"))).toBe(false);
   });
 
   it("ignores malformed posting hints", async () => {
     render(<AccountingView suggestedOrg="1" suggestedEntry="5junk" />);
-    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    await screen.findByText("Тестовая компания · УНП 999999999");
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/entries/5"))).toBe(false);
   });
 
-  it("не возвращает query-hint после ручного выбора и обновления списка", async () => {
+  it("keeps the configured company when controls refresh despite a foreign URL hint", async () => {
     render(<AccountingView suggestedOrg="2" />);
-    await waitFor(() => expect(screen.getByLabelText("Организация")).toHaveValue("2"));
-    fireEvent.change(screen.getByLabelText("Организация"), { target: { value: "1" } });
-    await waitFor(() => expect(screen.getByLabelText("Организация")).toHaveValue("1"));
+    await screen.findByText(/включительно: 0\./);
     openPage("Закрытие месяца", "Управление книгой");
-    fireEvent.click(await screen.findByRole("button", { name: "Обновить список организаций" }));
-    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/organizations"))).toHaveLength(2));
-    expect(screen.getByLabelText("Организация")).toHaveValue("1");
+    fireEvent.click(await screen.findByRole("button", { name: "Обновить контроль книги" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/organizations/1/reports?"))).toHaveLength(2));
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/organizations/2/"))).toBe(false);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/system/instance-organization")).toHaveLength(1);
   });
 
   it.each(["0", "not-an-id", "9007199254740992", "3"])("игнорирует недопустимый или недоступный org hint %s", async (suggestedOrg) => {
     render(<AccountingView suggestedOrg={suggestedOrg} />);
-    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
-    await waitFor(() => expect(screen.getByLabelText("Организация")).toHaveValue("1"));
+    await screen.findByText("Тестовая компания · УНП 999999999");
+    expect(screen.queryByLabelText("Организация")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/organizations/3/reports?"))).toBe(false);
   });
 
@@ -294,7 +435,7 @@ describe("AccountingView", () => {
   });
   it("renders preliminary reports and opens a traceable entry", async () => {
     render(<AccountingView />);
-    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    await screen.findByText("Тестовая компания · УНП 999999999");
     await screen.findByText(/включительно: 0\./);
     openPage("Отчёты", "ОСВ и отчёты");
     expect(await screen.findByText("Оборотно-сальдовая ведомость")).toBeInTheDocument();
@@ -305,7 +446,7 @@ describe("AccountingView", () => {
   });
   it("saves a numbered manual document before explicit posting", async () => {
     render(<AccountingView />);
-    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    await screen.findByText("Тестовая компания · УНП 999999999");
     await screen.findByText(/включительно: 0\./);
     openPage("Отчёты", "ОСВ и отчёты");
     await screen.findByText("Оборотно-сальдовая ведомость");
@@ -855,17 +996,21 @@ describe("AccountingView", () => {
     expect(screen.getByLabelText("Поиск номенклатуры строки 1")).toBeInTheDocument();
     expect(screen.getByLabelText("Поиск склада строки 1")).toBeInTheDocument();
   });
-  it("clears the previous organization report on selection change", async () => {
-    render(<AccountingView />);
-    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+  it("clears the previous book report on a fresh configured instance", async () => {
+    const first = render(<AccountingView />);
+    await screen.findByText("Тестовая компания · УНП 999999999");
     await screen.findByText(/включительно: 0\./);
     openPage("Отчёты", "ОСВ и отчёты");
     await screen.findByText("Оборотно-сальдовая ведомость");
-    fireEvent.change(screen.getByLabelText("Организация"), { target: { value: "2" } });
+    first.unmount();
+    instanceOrganization = { id: 2, name: "Вторая компания", unp: "888888888" };
+    render(<AccountingView />);
+    await screen.findByText(/включительно: 0\./);
+    openPage("Отчёты", "ОСВ и отчёты");
     await waitFor(() => expect(screen.queryByText("№ 5 · Поступление 1")).not.toBeInTheDocument());
     expect(await screen.findByText("За выбранный период нет проводок.")).toBeInTheDocument();
   });
-  it("keeps the in-flight accounts response after reselecting the active organization", async () => {
+  it("keeps the in-flight accounts response after rerendering the same configured instance", async () => {
     const original = fetchMock.getMockImplementation()!;
     const pendingAccounts: Array<(value: unknown) => void> = [];
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
@@ -880,11 +1025,11 @@ describe("AccountingView", () => {
       return original(url, init);
     });
 
-    render(<AccountingView />);
-    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    const { rerender } = render(<AccountingView />);
+    await screen.findByText("Тестовая компания · УНП 999999999");
     await waitFor(() => expect(pendingAccounts).toHaveLength(1));
 
-    fireEvent.change(screen.getByLabelText("Организация"), { target: { value: "1" } });
+    rerender(<AccountingView />);
     await act(async () => pendingAccounts[0](respond([
       { id: 51, code: "51", title: "Расчётный счёт", cash: true, category: "asset", required_dimensions: [] },
       { id: 60, code: "60", title: "Расчёты с поставщиками", cash: false, category: "liability", required_dimensions: [] },
@@ -898,46 +1043,48 @@ describe("AccountingView", () => {
     expect(screen.getByRole("option", { name: "60 · Расчёты с поставщиками" })).toBeInTheDocument();
   });
   it("shows denied access without fabricated empty balances", async () => {
-    fetchMock.mockImplementation(() => respond({ detail: "No access" }, false));
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === "/api/system/instance-organization"
+      ? original(url, init) : respond({ detail: "No access" }, false));
     render(<AccountingView />);
     expect(await screen.findByRole("alert")).toHaveTextContent("No access");
     expect(screen.queryByText("Оборотно-сальдовая ведомость")).not.toBeInTheDocument();
   });
   it("shows a safe error when the accounting API returns no JSON", async () => {
-    fetchMock.mockImplementation(() => Promise.resolve({
-      ok: false,
-      json: async () => { throw new SyntaxError("Unexpected end of JSON input"); },
-    }));
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === "/api/system/instance-organization"
+      ? original(url, init) : Promise.resolve({ ok: false, json: async () => { throw new SyntaxError("Unexpected end of JSON input"); } }));
     render(<AccountingView />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Бухгалтерия временно недоступна. Повторите загрузку.");
     expect(screen.queryByText(/Unexpected end of JSON input/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Повторить список организаций" }));
-    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/organizations"))).toHaveLength(2));
+    fireEvent.click(screen.getByRole("button", { name: "Обновить", exact: true }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/organizations/1/reports?"))).toHaveLength(2));
   });
+
   it("opens the production accounting workspace from the accountant navigation", async () => {
     render(<AccountingView />);
-    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    await screen.findByText("Тестовая компания · УНП 999999999");
     openPage("Документы", "Производство");
     expect(await screen.findByRole("region", { name: "Источники затрат производства" })).toBeInTheDocument();
     expect(screen.getByText(/Затраты производства/)).toBeInTheDocument();
   });
   it("opens the separate verified payroll accrual workspace", async () => {
     render(<AccountingView />);
-    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    await screen.findByText("Тестовая компания · УНП 999999999");
     openPage("Зарплата", "Начисления зарплаты");
     expect(await screen.findByRole("region", { name: "Проверенные начисления зарплаты" })).toBeInTheDocument();
     expect(screen.getByText(/Это не расчёт зарплаты, удержаний, взносов или обязательной отчётности/)).toBeInTheDocument();
   });
   it("links the existing HR draft from payroll without presenting it as a posting", async () => {
     render(<AccountingView />);
-    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    await screen.findByText("Тестовая компания · УНП 999999999");
     openPage("Зарплата", "Черновая ведомость HR");
     expect(screen.getByRole("link", { name: "Открыть черновую ведомость HR" })).toHaveAttribute("href", "/erp/hr/payroll");
     expect(screen.getByText(/не создаёт бухгалтерские проводки/)).toBeInTheDocument();
   });
   it("opens the separate reviewed payroll statutory workspace", async () => {
     render(<AccountingView />);
-    await screen.findByRole("option", { name: "Тестовая компания · 999999999" });
+    await screen.findByText("Тестовая компания · УНП 999999999");
     openPage("Зарплата", "Удержания и взносы");
     expect(await screen.findByRole("region", { name: "Проверенные удержания и взносы" })).toBeInTheDocument();
     expect(screen.getByText(/Ставки и расчёт от оклада не угадываются/)).toBeInTheDocument();
@@ -946,12 +1093,16 @@ describe("AccountingView", () => {
 
 
 
-it("opens expense control with the selected accounting organization", async () => {
-  render(<AccountingView />);
-  await screen.findByRole("option", {name:"Тестовая компания · 999999999"});
+it("opens expense control with the configured accounting organization after a fresh mount", async () => {
+  const first = render(<AccountingView />);
+  await screen.findByText("Тестовая компания · УНП 999999999");
   fireEvent.click(screen.getByRole("button", {name:"Открыть: Контроль расходов"}));
   expect(screen.getByText("Расходы книги 1")).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Организация"), {target:{value:"2"}});
+  first.unmount();
+  instanceOrganization = { id: 2, name: "Вторая компания", unp: "888888888" };
+  render(<AccountingView />);
+  await screen.findByText(/включительно: 0\./);
+  fireEvent.click(screen.getByRole("button", {name:"Открыть: Контроль расходов"}));
   await screen.findByText("Расходы книги 2");
 });
 
@@ -1040,7 +1191,7 @@ it("selects an immutable production ownership snapshot for manual order analytic
   expect(JSON.parse(String(saved?.[1]?.body)).posting.lines[0].dimensions).toEqual(registeredProductionOrder);
 });
 
-it("ignores a pending production order lookup after changing organization", async () => {
+it("ignores a pending production order lookup after a fresh instance with another configured company", async () => {
   const original = fetchMock.getMockImplementation()!;
   const otherOrder = { ...registeredProductionOrder, order_id: "18", order_number: "ПР-18",
     order: "ПР-18", order_product: "Компрессор", order_stage_at_ownership: "assembly" };
@@ -1048,7 +1199,6 @@ it("ignores a pending production order lookup after changing organization", asyn
   const oldResponse = new Promise<{ ok: boolean; json: () => Promise<unknown> }>(
     (resolve) => { resolveOld = resolve; },
   );
-  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
   fetchMock.mockImplementation((url: string, init?: RequestInit) => {
     if (url.includes("/accounts?")) return respond([
       { id: 1, code: "41", title: "Товары", cash: false, required_dimensions: ["order"] },
@@ -1060,7 +1210,7 @@ it("ignores a pending production order lookup after changing organization", asyn
     });
     return original(url, init);
   });
-  render(<AccountingView />);
+  const first = render(<AccountingView />);
   await screen.findByText(/включительно: 0\./);
   openPage("Документы", "Ручная операция");
   fillManualOperation();
@@ -1072,8 +1222,14 @@ it("ignores a pending production order lookup after changing organization", asyn
   await waitFor(() => expect(fetchMock.mock.calls.some(([url]) =>
     String(url).includes("/organizations/1/manual-orders?q="))).toBe(true));
 
-  fireEvent.change(screen.getByLabelText("Организация"), { target: { value: "2" } });
-  await waitFor(() => expect(screen.getByLabelText("Организация")).toHaveValue("2"));
+  const beforeUnload = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(beforeUnload);
+  expect(beforeUnload.defaultPrevented).toBe(true);
+  first.unmount();
+  instanceOrganization = { id: 2, name: "Вторая компания", unp: "888888888" };
+  render(<AccountingView />);
+  await screen.findByText(/включительно: 0\./);
+  openPage("Документы", "Ручная операция");
   fillManualOperation();
   fireEvent.change(screen.getByLabelText("Счёт 1"), { target: { value: "41" } });
   fireEvent.change(screen.getByLabelText("Поиск производственного заказа строки 1"), {
@@ -1090,7 +1246,6 @@ it("ignores a pending production order lookup after changing organization", asyn
   expect(screen.queryByRole("button", {
     name: "Выбрать ПР-17 · Насос · 3 шт. · ID 17",
   })).not.toBeInTheDocument();
-  expect(confirm).toHaveBeenCalled();
 });
 
 it("selects an organization-owned fixed asset and sends its exact register snapshot", async () => {
@@ -1144,7 +1299,7 @@ it("fails closed when the fixed asset response belongs to another organization",
   expect(screen.getByLabelText("Основное средство строки 1")).toBeDisabled();
 });
 
-it("ignores an old fixed asset response after the organization changes", async () => {
+it("ignores an old fixed asset response after a fresh configured instance", async () => {
   const original = fetchMock.getMockImplementation()!;
   const asset2 = { ...registeredAsset, id: 8, organization_id: 2,
     asset_key: "asset:equipment:002", name: "Пресс", inventory_number: "ОС-002" };
@@ -1165,13 +1320,16 @@ it("ignores an old fixed asset response after the organization changes", async (
     });
     return original(url, init);
   });
-  render(<AccountingView />);
+  const first = render(<AccountingView />);
   await screen.findByText(/включительно: 0\./);
   openPage("Документы", "Ручная операция");
   await waitFor(() => expect(fetchMock.mock.calls.some(([url]) =>
     String(url).endsWith("/organizations/1/fixed-assets"))).toBe(true));
-  fireEvent.change(screen.getByLabelText("Организация"), { target: { value: "2" } });
-  await waitFor(() => expect(screen.getByLabelText("Организация")).toHaveValue("2"));
+  first.unmount();
+  instanceOrganization = { id: 2, name: "Вторая компания", unp: "888888888" };
+  render(<AccountingView />);
+  await screen.findByText(/включительно: 0\./);
+  openPage("Документы", "Ручная операция");
   fillManualOperation();
   await screen.findByRole("option", { name: "ОС-002 · Пресс · asset:equipment:002" });
 

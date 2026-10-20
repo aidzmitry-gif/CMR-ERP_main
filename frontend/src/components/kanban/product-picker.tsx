@@ -1,7 +1,7 @@
 "use client";
 
 import { Plus, Receipt, RefreshCw, Search, ShoppingCart, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   addDealItem,
@@ -11,6 +11,7 @@ import {
   issueDocument,
   updateDeal,
   type SkuOption,
+  type StockRow,
 } from "@/lib/api";
 // Чистая доменная логика подбора (агрегация остатков/срок/маржа) живёт в src/lib/stock.ts
 // с юнит-тестами (конвенция frontend/CLAUDE.md); здесь — только UI-обёртка.
@@ -30,6 +31,8 @@ const INVOICE_NEXT_STEP = "Проверить оплату счёта";
  */
 
 export interface PickerRow {
+  /** Идентичность строки корзины; сохраняется при правке и переключении отметки. */
+  selectionKey: string;
   skuId: number;
   code: string;
   title: string;
@@ -56,6 +59,7 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
   // Per-warehouse разбивка (не агрегат) — попап «Ввод количества и цены»
   // (CatalogPickerModal, catalog-picker-modal.tsx): Остаток/Резерв/Свободно по каждому складу.
   const [warehouseStock, setWarehouseStock] = useState<Record<string, SkuWarehouseStock>>({});
+  const [stockSnapshot, setStockSnapshot] = useState<StockRow[]>([]);
   const [rows, setRows] = useState<PickerRow[]>([]);
   const [query, setQuery] = useState("");
   // rowsRef — свежий снимок корзины для repeatLastOrder (дедуп по актуальным строкам);
@@ -64,6 +68,7 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
   const genRef = useRef(0);
+  const itemRequests = useRef(new Map<string, string>());
 
   // refetchKey (id открытой сделки/лида) в deps: остатки/цены перезагружаются и при прямой
   // смене контекста звонка (сделка→сделка без промежуточного закрытия), а не только по active.
@@ -72,6 +77,9 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
     let alive = true;
     setCatalogStatus("loading");
     setSkus([]);
+    setStockSnapshot([]);
+    setStock({});
+    setWarehouseStock({});
     void (async () => {
       try {
         const res = await fetch("/api/sales/skus?for_picker=1", { cache: "no-store" });
@@ -97,6 +105,7 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
     })();
     void fetchStock().then((stockRows) => {
       if (alive) {
+        setStockSnapshot(stockRows);
         const aggregated = aggregateStock(stockRows);
         setStock(Object.fromEntries(Object.entries(aggregated).map(([code, item]) => [code, {
           ...item,
@@ -125,7 +134,7 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
   function addSku(s: SkuOption) {
     setRows((r) => [
       ...r,
-      { skuId: s.id, code: s.code, title: s.title, unit: s.unit, qty: 1, picked: true },
+      { selectionKey: crypto.randomUUID(), skuId: s.id, code: s.code, title: s.title, unit: s.unit, qty: 1, picked: true },
     ]);
     setQuery("");
   }
@@ -138,7 +147,7 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
         return r.map((x) => (x === existing ? { ...x, qty: x.qty + qty, picked: true,
           ...(priceOverride !== undefined ? { priceOverride } : {}) } : x));
       }
-      return [...r, { skuId: s.id, code: s.code, title: s.title, unit: s.unit, qty, picked: true, priceOverride }];
+      return [...r, { selectionKey: crypto.randomUUID(), skuId: s.id, code: s.code, title: s.title, unit: s.unit, qty, picked: true, priceOverride }];
     });
   }
   function setRowQty(row: PickerRow, qty: number, priceOverride?: number | null) {
@@ -159,11 +168,11 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
   function removeCommittedRows(committedRows: PickerRow[]) {
     setRows((r) => r.filter((x) => !committedRows.includes(x)));
   }
-  function reset() {
+  const reset = useCallback(() => {
     genRef.current++;
     setRows([]);
     setQuery("");
-  }
+  }, []);
 
   /** Повторить прошлый заказ: подтянуть позиции последней сделки того же контрагента
    * (backend резолвит «последнюю» сам — GET /deals/{id}/repeat-last-order). Не дублирует
@@ -181,6 +190,7 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
       setRows((r) => [
         ...r,
         ...added.map((it) => ({
+          selectionKey: crypto.randomUUID(),
           skuId: it.sku_id,
           code: it.code,
           title: it.title,
@@ -210,7 +220,16 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
 
   /** Согласованная цена сохраняется вместе с позицией; котировки — только история. */
   async function commitToDeal(dealId: string, counterparty: string): Promise<{ ok: number; total: number; successfulRows: PickerRow[] }> {
-    const results = await Promise.allSettled(pickedRows.map((r) => addDealItem(dealId, r.skuId, r.qty, agreedPriceOf(r))));
+    const results = await Promise.allSettled(pickedRows.map((r) => {
+      const price = agreedPriceOf(r);
+      const fingerprint = JSON.stringify([r.selectionKey, dealId, r.skuId, r.qty, price]);
+      let key = itemRequests.current.get(fingerprint);
+      if (!key) {
+        key = crypto.randomUUID();
+        itemRequests.current.set(fingerprint, key);
+      }
+      return addDealItem(dealId, r.skuId, r.qty, price, key);
+    }));
     const successfulRows = pickedRows.filter((_, index) => {
       const result = results[index];
       return result.status === "fulfilled" && result.value;
@@ -230,6 +249,7 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
     catalogStatus,
     stock,
     warehouseStock,
+    stockSnapshot,
     rows,
     query,
     setQuery,

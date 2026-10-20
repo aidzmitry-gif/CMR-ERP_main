@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ShieldCheck, UserPlus } from "lucide-react";
+import { fetchInstanceOrganization, type InstanceOrganization } from "@/lib/instance-organization";
 
 interface SystemInfo {
   loaded_modules: string[];
@@ -18,12 +19,21 @@ const WORKSPACE_MODULES: Record<string, { label: string; href: string }> = {
 
 export function SettingsView() {
   const [sys, setSys] = useState<SystemInfo | null>(null);
+  const [organization, setOrganization] = useState<InstanceOrganization | null>(null);
+  const [organizationError, setOrganizationError] = useState("");
 
   useEffect(() => {
     void fetch("/api/system/modules", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then(setSys)
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void fetchInstanceOrganization().then((value) => { if (active) setOrganization(value); })
+      .catch((error: Error) => { if (active) setOrganizationError(error.message); });
+    return () => { active = false; };
   }, []);
 
   return (
@@ -47,6 +57,14 @@ export function SettingsView() {
           </Link>
         </div>
       </div>
+      <section aria-label="Юрлицо установки" className="mt-5 rounded-2xl bg-surface p-5 shadow-card">
+        <h2 className="font-semibold text-ink">Юрлицо установки</h2>
+        <p className="mt-2 text-sm text-muted">Организация задаётся один раз для этой установки ERP в настройках сервера. Другие компании работают на отдельных серверах.</p>
+        {organization && <p className="mt-2">{organization.name} · УНП {organization.unp}</p>}
+        {!organization && !organizationError && <p role="status">Загрузка юрлица установки…</p>}
+        {organizationError && <p role="alert" className="mt-2 text-red-700">{organizationError}</p>}
+        <p className="mt-2 text-sm text-muted">Изменение настройки выполняет администратор сервера через AIOS_SELLER_UNP. Исторические документы сохраняют свою организацию.</p>
+      </section>
       {!sys && <p className="mt-5 text-sm text-muted">Загрузка…</p>}
       {sys && (
         <>

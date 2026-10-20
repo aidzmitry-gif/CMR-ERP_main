@@ -37,7 +37,7 @@ async def test_onec_facade_implements_full_protocol(services):
 
 async def test_reference_mocks_do_not_extend_to_financial_facades_when_base_url_empty():
     """Dev mock remains for references, while financial values stay unknown."""
-    c = OneCClient(base_url="")
+    c = OneCClient(base_url="", allow_demo=True)
     assert await c.fetch_counterparties()
     assert await c.fetch_stock()
     assert await c.fetch_payments() == []

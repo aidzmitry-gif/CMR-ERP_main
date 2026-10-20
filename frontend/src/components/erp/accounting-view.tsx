@@ -1,6 +1,8 @@
 "use client";
 
 import { businessDate } from "@/lib/business-date";
+import { InstanceOrganizationGate } from "@/components/instance-organization-gate";
+import type { InstanceOrganization } from "@/lib/instance-organization";
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -49,7 +51,6 @@ import { AccountingReportCatalog, type ReportFavoriteState } from "./accounting-
 import { AccountingTradeSettlements } from "./accounting-trade-settlements";
 import { AccountingAccountActivity, type AccountMovement } from "./accounting-account-activity";
 
-type Organization = { id: number; name: string; unp: string };
 type Account = { id: number; code: string; title: string; cash: boolean; category: string; required_dimensions: string[]; currency_tracking: boolean; quantity_tracking: boolean };
 type Policy = { id: number; effective_from: string; reference: string; normative_verified: boolean; inventory_method?: "specific" | "fifo" | "weighted_average"; currency_revaluation?: { monetary_accounts: string[]; gain_account: string; loss_account: string; gain_dimensions: Record<string, string>; loss_dimensions: Record<string, string>; reference: string; settlement_allocation?: "proportional_carrying"; settlement_rate_date?: "posting_date" } | null };
 type JournalLine = CurrencyFields & { account: string; title?: string; side: "debit" | "credit"; amount: string; dimensions: Record<string, string>; cash_activity?: string };
@@ -342,12 +343,15 @@ function parseManualCreateJournal(raw: string): ManualCreateJournal | null {
   }
 }
 
-function readManualCreateRecovery(): ManualCreateStoredRecovery {
+function readManualCreateRecovery(expectedOrg: string): ManualCreateStoredRecovery {
   if (typeof window === "undefined") return { status: "none" };
   try {
     const raw = window.sessionStorage.getItem(manualCreateJournalStorageKey);
     if (raw === null) return { status: "none" };
     const journal = parseManualCreateJournal(raw);
+    if (journal && journal.organization_id !== expectedOrg) {
+      return { status: "blocked", reason: "Сохранённая команда относится к другому юрлицу. Повтор для юрлица установки запрещён; журнал сохранён для сверки." };
+    }
     return journal
       ? { status: "pending", journal, raw }
       : { status: "blocked", reason: "Журнал ожидающего создания повреждён. Запись сохранена; новую справку создавать нельзя." };
@@ -744,18 +748,23 @@ function FixedAssetDimensionPicker({ org, index, dimensions, assets, assetsOrg, 
 }
 
 export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?: string; suggestedEntry?: string }) {
+  return <InstanceOrganizationGate>{(organization) => <AccountingWorkspace organization={organization}
+    suggestedOrg={suggestedOrg} suggestedEntry={suggestedEntry} />}</InstanceOrganizationGate>;
+}
+
+function AccountingWorkspace({ organization, suggestedOrg, suggestedEntry }: {
+  organization: InstanceOrganization; suggestedOrg?: string; suggestedEntry?: string;
+}) {
   const today = businessDate();
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [organizationRefresh, setOrganizationRefresh] = useState(0);
-  const [organizationError, setOrganizationError] = useState("");
-  const [org, setOrg] = useState("");
+  const org = String(organization.id);
+  const hasEntryHint = organizationHint(suggestedOrg) === org && !!organizationHint(suggestedEntry);
   const [start, setStart] = useState(`${today.slice(0, 7)}-01`);
   const [end, setEnd] = useState(today);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [report, setReport] = useState<Report | null>(null);
   const [accountActivity, setAccountActivity] = useState<Trial | null>(null);
-  const [tab, setTab] = useState("home");
+  const [tab, setTab] = useState(hasEntryHint ? "reports" : "home");
   const [reportFavoriteState, setReportFavoriteState] = useState<ReportFavoriteState>({ ids: [], loaded: false });
   const [shipmentSource, setShipmentSource] = useState("");
   const [controlSection, setControlSection] = useState("setup");
@@ -765,6 +774,14 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
   const [busy, setBusy] = useState(false);
   const locked = busy || controlsBusy;
   const [detail, setDetail] = useState<EntryDetail | null>(null);
+  const hintKey = JSON.stringify([suggestedOrg, suggestedEntry]);
+  const [detailHintKey, setDetailHintKey] = useState(hintKey);
+  // A changed link resets only the viewed entry, keeping the unsaved document and command.
+  if (detailHintKey !== hintKey) {
+    setDetailHintKey(hintKey);
+    setDetail(null);
+    if (hasEntryHint) setTab("reports");
+  }
   const [preview, setPreview] = useState<Preview | null>(null);
   const [prepared, setPrepared] = useState<Posting | null>(null);
   const [manualDocument, setManualDocument] = useState<ManualDocument | null>(null);
@@ -790,8 +807,6 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
   const generation = useRef(0);
   const entryGeneration = useRef(0);
   const previewGeneration = useRef(0);
-  const appliedSuggestedOrg = useRef<string | undefined>(undefined);
-  const openedSuggestedEntry = useRef("");
   const manualListGeneration = useRef(0);
   const fixedAssetsGeneration = useRef(0);
   const saveCommand = useRef<{ fingerprint: string; key: string } | null>(null);
@@ -800,22 +815,9 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
   const confirmDiscard = useUnsavedDocumentGuard(tab === "entry" && manualDirty);
 
   useEffect(() => {
-    let active = true;
-    request<Organization[]>("/organizations").then((rows) => { if (active) { setOrganizationError(""); setOrganizations(rows); setOrg((current) => {
-      if (appliedSuggestedOrg.current !== suggestedOrg) {
-        appliedSuggestedOrg.current = suggestedOrg;
-        const hint = organizationHint(suggestedOrg);
-        if (hint && rows.some((row) => String(row.id) === hint)) return hint;
-      }
-      return rows.some((row) => String(row.id) === current) ? current : rows[0] ? String(rows[0].id) : "";
-    }); } }).catch((e: Error) => { if (active) setOrganizationError(e.message); });
-    return () => { active = false; };
-  }, [organizationRefresh, suggestedOrg]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setManualCreateRecovery(readManualCreateRecovery()), 0);
+    const timer = window.setTimeout(() => setManualCreateRecovery(readManualCreateRecovery(org)), 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [org]);
 
   const refresh = useCallback(async () => {
     const token = ++generation.current;
@@ -840,18 +842,15 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     return () => { generation.current += 1; };
   }, [org, start, end, operationDate]);
   useEffect(() => {
+    const entryToken = ++entryGeneration.current;
     const hint = organizationHint(suggestedOrg);
     const entry = organizationHint(suggestedEntry);
     if (!hint || org !== hint || !entry) return;
-    const key = `${hint}/${entry}`;
-    if (openedSuggestedEntry.current === key) return;
-    openedSuggestedEntry.current = key;
     const token = generation.current;
-    const entryToken = ++entryGeneration.current;
-    setTab("reports");
     void request<EntryDetail>(`/organizations/${org}/entries/${entry}`)
       .then((result) => { if (token === generation.current && entryToken === entryGeneration.current) setDetail(result); })
       .catch((reason: Error) => { if (token === generation.current && entryToken === entryGeneration.current) setError(reason.message); });
+    return () => { entryGeneration.current += 1; };
   }, [org, suggestedOrg, suggestedEntry]);
   useEffect(() => {
     const token = ++manualListGeneration.current;
@@ -960,7 +959,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
   async function saveManual(closeAfterSave = false) {
     if (!prepared || !preview || !org || (manualDocument && manualDocument.status !== "draft")) return;
     if (!manualDocument) {
-      const stored = readManualCreateRecovery();
+      const stored = readManualCreateRecovery(org);
       if (stored.status !== "none") {
         setManualCreateRecovery(stored);
         setError(stored.status === "pending"
@@ -985,7 +984,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
       try {
         const storage = window.sessionStorage;
         if (storage.getItem(manualCreateJournalStorageKey) !== null) {
-          const existing = readManualCreateRecovery();
+          const existing = readManualCreateRecovery(org);
           setManualCreateRecovery(existing);
           throw new Error(existing.status === "pending"
             ? "Есть незавершённая команда создания. Сначала восстановите её."
@@ -997,7 +996,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
         }
         setManualCreateRecovery({ status: "pending", journal, raw: journalRaw });
       } catch (reason) {
-        const inspected = readManualCreateRecovery();
+        const inspected = readManualCreateRecovery(org);
         setManualCreateRecovery(inspected.status === "none"
           ? { status: "blocked", reason: "Не удалось сохранить команду в журнале текущей вкладки. Запрос не отправлен." }
           : inspected);
@@ -1005,10 +1004,12 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
         return;
       }
     }
+    const commandToken = generation.current;
     setBusy(true); setError("");
     try {
       const path = `/organizations/${org}/manual-documents${manualDocument ? `/${manualDocument.id}` : ""}`;
       const result = await request<unknown>(path, manualDocument ? payload : requestBody, manualDocument ? "PUT" : undefined);
+      if (commandToken !== generation.current) return;
       if (manualDocument) {
         if (!isRecord(result) || String(result.organization_id) !== org || result.id !== manualDocument.id
           || result.version !== version + 1 || result.status !== "draft"
@@ -1035,30 +1036,35 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
         if (closeAfterSave) setTab("home");
       }
       try { await reloadManualDocuments(); } catch { /* saved receipt remains authoritative */ }
-    } catch (reason) { setError((reason as Error).message); }
-    finally { setBusy(false); }
+    } catch (reason) { if (commandToken === generation.current) setError((reason as Error).message); }
+    finally { if (commandToken === generation.current) setBusy(false); }
   }
 
   async function retryManualCreate() {
     if (manualCreateRecovery.status !== "pending") return;
     const { journal, raw } = manualCreateRecovery;
-    const current = readManualCreateRecovery();
+    if (journal.organization_id !== org) {
+      setManualCreateRecovery({ status: "blocked", reason: "Сохранённая команда относится к другому юрлицу. Журнал сохранён для сверки." });
+      return;
+    }
+    const current = readManualCreateRecovery(org);
     if (current.status !== "pending" || current.raw !== raw) {
       setManualCreateRecovery(current);
       setError("Журнал ожидающей команды изменился или недоступен. Запрос не отправлен.");
       return;
     }
+    const commandToken = generation.current;
     setBusy(true); setError("");
     try {
       const result = await request<unknown>(
         `/organizations/${journal.organization_id}/manual-documents`, journal.request_body,
       );
+      if (commandToken !== generation.current) return;
       if (!matchesManualCreateResult(result, journal)) {
         throw new Error("ERP вернула документ, не совпадающий с организацией, ключом, digest и точным снимком. Команда сохранена для сверки.");
       }
       clearExactManualCreateJournal(raw);
       setManualCreateRecovery({ status: "none" });
-      setOrg(journal.organization_id);
       setError("");
       saveCommand.current = null; postCommand.current = null;
       if (journal.close_after_save && result.version === 1 && result.status === "draft") {
@@ -1072,9 +1078,9 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
           : `${result.number} · текущее состояние загружено, версия ${result.version}.`);
       }
     } catch (reason) {
-      setError((reason as Error).message);
+      if (commandToken === generation.current) setError((reason as Error).message);
     } finally {
-      setBusy(false);
+      if (commandToken === generation.current) setBusy(false);
     }
   }
 
@@ -1156,19 +1162,17 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     section.pages.some((page) => page.id === tab) || section.hiddenTabs?.includes(tab)) ?? accountingSections[0];
 
   return <div className="min-w-0 w-full space-y-5 p-6 lg:pr-24 text-ink">
-    <header><h1 className="text-2xl font-semibold">Бухгалтерия</h1><p className="mt-1 text-sm text-muted">Проводки и регистры по каждому юридическому лицу. Суммы в BYN.</p></header>
-    {organizationError && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-300 bg-surface p-3 text-red-700"><span>{organizationError}</span><Button variant="secondary" onClick={() => { setOrganizationError(""); setOrganizationRefresh((value) => value + 1); }}>Повторить список организаций</Button></div>}
+    <header><h1 className="text-2xl font-semibold">Бухгалтерия</h1><p className="mt-1 text-sm text-muted">Проводки и регистры организации из настроек установки. Суммы в BYN.</p></header>
+    {organizationHint(suggestedOrg) && organizationHint(suggestedOrg) !== org && <p role="alert" className="text-red-700">Ссылка относится к другому юрлицу. Используется только юрлицо из настроек установки; проводка из ссылки не загружена.</p>}
     {error && <div role="alert" className="rounded-xl border border-red-300 bg-surface p-3 text-red-700">{error}</div>}
     {manualCreateRecovery.status === "pending" && <section role="status" aria-label="Восстановление создания справки" className="space-y-2 rounded-xl border border-amber-300 bg-surface p-3 text-sm"><p className="font-semibold">Результат создания справки неизвестен · организация {manualCreateRecovery.journal.organization_id}</p><p>Создание и сохранение новой справки заблокированы. Повтор отправит сохранённые ключ и тело команды (digest {manualCreateRecovery.journal.reviewed_digest}).</p><Button variant="secondary" disabled={locked} onClick={() => void retryManualCreate()}>Повторить создание справки</Button></section>}
     {manualCreateRecovery.status === "blocked" && <section role="alert" aria-label="Создание справки заблокировано" className="rounded-xl border border-red-300 bg-surface p-3 text-sm text-red-700">{manualCreateRecovery.reason} Журнал не очищен автоматически.</section>}
     {notice && <p role="status" className="text-money">{notice}</p>}
     <div className="flex flex-wrap gap-4 rounded-xl border border-line bg-surface p-4">
-      <label className="min-w-0 basis-64 flex-1 text-sm">Организация<Select className="min-w-0" aria-label="Организация" value={org} disabled={locked} onChange={(e) => { const next = e.target.value; if (next === org || !confirmDiscard()) return; generation.current += 1; setReport(null); setAccountActivity(null); setDetail(null); setPreview(null); setPrepared(null); setManualDocument(null); setManualDocuments(null); setManualDirty(false); setSource(""); setSourceVersion(1); setCorrectionOf(""); setExplanation(""); setNotice(""); setLines([{ account: "", side: "debit", amount: "", dimensions: {} }, { account: "", side: "credit", amount: "", dimensions: {} }]); setOrg(next); }}><option value="">Выберите организацию</option>{organizations.map((o) => <option key={o.id} value={o.id}>{o.name} · {o.unp}</option>)}</Select></label>
       <label className="text-sm">С<Input aria-label="Начало периода" type="date" value={start} disabled={locked} onChange={(e) => changeDate("start", e.target.value)} /></label>
       <label className="text-sm">По<Input aria-label="Конец периода" type="date" value={end} disabled={locked} onChange={(e) => changeDate("end", e.target.value)} /></label>
       <Button variant="secondary" disabled={locked || !org} onClick={() => void refresh()}>Обновить</Button>
     </div>
-    {!organizations.length && !organizationError && !error && <p className="rounded-xl border border-line p-5 text-muted">Нет доступных книг. Руководитель создаёт организацию и назначает доступ бухгалтеру.</p>}
     <nav aria-label="Разделы бухгалтерии" className="flex flex-wrap gap-2">{accountingSections.map((section) =>
       <Button key={section.id} disabled={locked} aria-pressed={currentSection.id === section.id} variant={currentSection.id === section.id ? "primary" : "secondary"} onClick={() => { if (section.pages[0].id !== tab && !confirmDiscard()) return; if (section.id === "closing") setControlSection("periods"); setTab(section.pages[0].id); }}>{section.label}</Button>
     )}</nav>
@@ -1178,7 +1182,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     {tab === "expenses" && <ExpenseControl org={org} onEntry={(id) => void openEntry(id)} />}
     {tab === "crm-sales" && <section aria-label="Продажи из CRM" className="space-y-3 rounded-xl border border-line bg-surface p-4"><h2 className="font-semibold">Продажа через сделку и отгрузку</h2><p>Счёт и резерв создаются в CRM, товар отгружается со склада по акту. Проводки выручки, НДС и себестоимости бухгалтер готовит по этому акту в очереди документов. Повторно вводить продажу здесь не нужно.</p><div className="flex flex-wrap gap-3"><Link className="text-accent underline" href="/crm/deals">Открыть сделки CRM</Link><Button variant="secondary" disabled={!org} onClick={() => { setControlSection("inbox"); setTab("controls"); }}>Отгрузки, ожидающие проводок</Button></div></section>}
     {tab === "home" && <AccountingHome selected={!!org} pending={report?.pending_documents ?? null} onOpen={openWorkspace} />}
-    {tab === "seller-profiles" && <AccountingSellerProfiles org={org} organization={organizations.find((row) => String(row.id) === org)} onBusyChange={setControlsBusy} />}
+    {tab === "seller-profiles" && <AccountingSellerProfiles org={org} organization={organization} onBusyChange={setControlsBusy} />}
     {tab === "invoice-settlements" && <AccountingInvoiceSettlements org={org} onBusyChange={setControlsBusy} />}
     {tab === "reconciliation" && <AccountingReconciliation key={org} org={org} start={start} end={end} />}
     {tab === "input-vat" && <AccountingInputVat org={org} start={start} end={end} onEntry={(id) => void openEntry(id)} />}
@@ -1187,7 +1191,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     {tab === "fx-revaluation" && <AccountingFxRevaluation org={org} month={operationDate.slice(0, 7)} date={operationDate} policy={policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]} disabled={locked} onEntry={(id) => void openEntry(id)} />}
     {tab === "fixed-assets" && <AccountingFixedAssets org={org} month={operationDate.slice(0, 7)} policyId={String(policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id || "")} onEntry={(id) => void openEntry(id)} disabled={locked} />}
     {tab === "repairs" && <AccountingRepairs org={org} month={operationDate.slice(0, 7)} policyId={String(policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id || "")} onEntry={(id) => void openEntry(id)} disabled={locked} />}
-    {tab === "production" && <AccountingProductionCostSources org={org} month={operationDate.slice(0, 7)} disabled={locked} onEntry={(id) => void openEntry(id)} onLock={setControlsBusy} onChanged={() => { setOrganizationRefresh((value) => value + 1); void refresh(); }} />}
+    {tab === "production" && <AccountingProductionCostSources org={org} month={operationDate.slice(0, 7)} disabled={locked} onEntry={(id) => void openEntry(id)} onLock={setControlsBusy} onChanged={() => void refresh()} />}
     {tab === "payroll-control" && <AccountingPayrollControl key={`${org}:${end.slice(0, 7)}`} org={org} month={end.slice(0, 7)} onEntry={(id) => void openEntry(id)} />}
     {tab === "payroll-hr-draft" && <section aria-label="Черновая ведомость HR" className="space-y-3 rounded-xl border border-line bg-surface p-4"><h2 className="text-lg font-semibold">Черновая ведомость HR</h2><p className="text-sm text-muted">В HR можно подготовить расчёт и распечатать листки сотрудников. Черновик пока не связан с выбранным здесь юрлицом и не создаёт бухгалтерские проводки. Для учёта начислений используйте проверенный импорт с основаниями.</p><Link className="text-accent underline" href="/erp/hr/payroll">Открыть черновую ведомость HR</Link></section>}
     {tab === "payroll-workpaper" && <AccountingPayrollWorkpaper key={`${org}:${end.slice(0, 7)}`} org={org} month={end.slice(0, 7)} disabled={locked} onBusyChange={setControlsBusy} onOpenRules={() => setTab("payroll-rules")} />}
@@ -1201,7 +1205,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     {tab === "bank" && <AccountingBank key={org} org={org} accounts={accounts} policyId={policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id} date={operationDate} onDate={(value) => changeDate("operation", value)} onPosted={() => void refresh()} />}
     {tab === "bank-import" && <AccountingBankImport key={org} org={org} accounts={accounts} policyId={policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id} date={operationDate} onDate={(value) => changeDate("operation", value)} onPosted={() => void refresh()} onEntry={(id) => void openEntry(id)} />}
     {tab === "shipment-preview" && <AccountingShipmentPreview key={`${org}/${shipmentSource}`} org={org} source={shipmentSource} accounts={accounts} date={operationDate} policyId={policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id} disabled={locked} onDate={(value) => changeDate("operation", value)} onPosted={async () => { setNotice("Отгрузка проведена."); await refresh(); }} />}
-    {tab === "controls" && <AccountingControls onEntry={id => void openEntry(id)} onShipment={(source) => { setShipmentSource(source); setTab("shipment-preview"); }} key={`${org}/${controlSection}`} org={org} initialSection={controlSection} onBusyChange={setControlsBusy} onChanged={() => { setOrganizationRefresh((v) => v + 1); void refresh(); }} />}
+    {tab === "controls" && <AccountingControls onEntry={id => void openEntry(id)} onShipment={(source) => { setShipmentSource(source); setTab("shipment-preview"); }} key={`${org}/${controlSection}`} org={org} initialSection={controlSection} onBusyChange={setControlsBusy} onChanged={() => void refresh()} />}
     {busy && <p role="status">Загрузка…</p>}
     {tab === "trade-settlements" && <AccountingTradeSettlements org={org} start={start} end={end} onEntry={(id) => void openEntry(id)} />}
     {tab === "reports" && <AccountingReportCatalog onOpen={setTab} reportReady={!!org && !!report} favoriteState={reportFavoriteState} setFavoriteState={setReportFavoriteState} />}
@@ -1211,7 +1215,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
         <Link className="text-accent underline" href="/erp/finance?tab=pnl">Прибыль и убытки</Link>
         <Link className="text-accent underline" href="/erp/finance?tab=dds">Движение денег</Link>
         <Link className="text-accent underline" href="/erp/finance?tab=balance">Баланс</Link>
-        <p className="w-full text-muted">Финансовые отчёты строятся по этой же бухгалтерской книге. На открывшейся странице выберите юрлицо и период заново.</p>
+        <p className="w-full text-muted">Финансовые отчёты строятся по этой же бухгалтерской книге. На открывшейся странице проверьте период; юрлицо берётся из настроек установки.</p>
       </nav>
       <Button variant="secondary" onClick={() => { try { downloadTrialBalance(report); } catch (e) { setError((e as Error).message); } }}>Скачать ОСВ CSV</Button>
       <p className="text-xs text-muted">CSV содержит показанный отчёт, валютные суммы и количества. При импорте в Excel задайте счетам текстовый формат, суммам — десятичную точку. Сальдо со знаком: плюс — дебет, минус — кредит. Строка report содержит параметры выгрузки; balance — остатки и обороты.</p>

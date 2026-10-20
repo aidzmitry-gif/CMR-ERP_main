@@ -850,11 +850,11 @@ describe("api client — телефония", () => {
   it("fetchCalls строит query только из непустых параметров", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => [{ id: 1, call_id: "c1", direction: "in", phone_e164: "+375291112233", owner: "Иванов", status: "ended", started_at: "2026-07-19T10:00" }],
+      json: async () => [{ id: 1, call_id: "c1", direction: "in", phone_e164: "SYNTHETIC-PHONE", owner: "Иванов", status: "ended", started_at: "2026-07-19T10:00" }],
     });
     vi.stubGlobal("fetch", fetchMock);
     const calls = await fetchCalls({ status: "ended", owner: "Иванов", date: "" });
-    expect(calls[0].phone_e164).toBe("+375291112233");
+    expect(calls[0].phone_e164).toBe("SYNTHETIC-PHONE");
     expect(fetchMock).toHaveBeenCalledWith("/api/sales/calls?status=ended&owner=%D0%98%D0%B2%D0%B0%D0%BD%D0%BE%D0%B2", { cache: "no-store" });
 
     fetchMock.mockResolvedValueOnce({ ok: true, json: async () => [] });
@@ -902,9 +902,9 @@ describe("api client — телефония", () => {
       body: JSON.stringify({ deal_id: 9 }),
     }));
 
-    expect(await triggerIncomingCall({ phone: "+375291112233" })).toBe(true);
+    expect(await triggerIncomingCall({ phone: "SYNTHETIC-PHONE" })).toBe(true);
     expect(fetchMock).toHaveBeenLastCalledWith("/api/sales/telephony/incoming", expect.objectContaining({
-      body: JSON.stringify({ phone: "+375291112233" }),
+      body: JSON.stringify({ phone: "SYNTHETIC-PHONE" }),
     }));
 
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net")));
@@ -1293,4 +1293,31 @@ it("причина отказа договора видна менеджеру, 
   expect(await createDocumentResult("1", "contract")).toEqual({ doc: null, error: "Подтвердите цену каждой позиции" });
   expect((await createDocumentResult("1", "contract")).error).toBe("Не удалось создать документ. Проверьте данные и состояние версии.");
   expect((await createDocumentResult("1", "contract")).error).not.toContain("internal");
+});
+
+
+describe("confirmed deal items read", () => {
+  const line = { id: 1, sku_id: 2, code: "SYN-2", title: "Учебная батарея", unit: "шт", qty: 3, unit_price: null, last_price: null, min_price: null };
+  it("distinguishes a confirmed empty list from failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => [] }));
+    expect(await fetchDealItems("1", { throwOnError: true })).toEqual([]);
+  });
+  it("retains null, omitted and confirmed zero prices", async () => {
+    const lines = [line, { ...line, id: 2, unit_price: undefined }, { ...line, id: 3, unit_price: 0 }];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => lines }));
+    expect(await fetchDealItems("1", true)).toEqual(lines);
+  });
+  it.each([true, { throwOnError: true }])("rejects failed read in strict mode %s while legacy callers keep empty fallback", async (options) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+    await expect(fetchDealItems("1", options)).rejects.toThrow();
+    expect(await fetchDealItems("1")).toEqual([]);
+  });
+  it("does not describe network failure as no items", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network")));
+    await expect(fetchDealItems("1", true)).rejects.toThrow();
+  });
+  it.each([{}, [{}], [{ ...line, qty: 0 }], [{ ...line, unit_price: -1 }], [{ ...line, unit_price: "2" }], [{ ...line, qty: NaN }]])("rejects malformed confirmed item data %#", async (payload) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => payload }));
+    await expect(fetchDealItems("1", true)).rejects.toThrow();
+  });
 });

@@ -4,8 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
-
-type Organization = { id: number; name: string; unp: string };
+import { InstanceOrganizationGate } from "@/components/instance-organization-gate";
 type Identity = { organization_id: number; principal: string; can_manage: boolean };
 type Source = { id: number; number: string; supplier: string; item?: string; stage?: string; status?: string; quantity?: string; planned_amount?: string; due_date?: string | null };
 type Page = { organization_id: number; items: Source[]; next_after_id: number | null };
@@ -63,26 +62,14 @@ const organizationHint = (value: string | undefined) =>
   value && /^[1-9]\d*$/.test(value) && Number(value) <= 2147483647 ? value : undefined;
 
 export function ProcurementRequestPlan({ suggestedOrg }: { suggestedOrg?: string }) {
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [org, setOrg] = useState("");
-  const [error, setError] = useState("");
-  useEffect(() => {
-    let live = true;
-    api<Organization[]>("/api/procurement/receipt-organizations").then(v => {
-      if (!live) return;
-      setOrganizations(v);
-      const hint = organizationHint(suggestedOrg);
-      if (hint && v.some(row => String(row.id) === hint)) setOrg(hint);
-    }).catch(e => { if (live) setError(message(e)); });
-    return () => { live = false; };
-  }, [suggestedOrg]);
   return <section className="space-y-4 p-6"><h1 className="text-xl font-semibold">План закупок</h1>
-    <p>Создание и изменение плана доступны главному бухгалтеру выбранного юрлица с доступом к закупкам.</p>
+    <p>Организация берётся из настроек установки. Создание и изменение плана доступны главному бухгалтеру этой организации с доступом к закупкам.</p>
     <p>Свяжите заявку с существующим заказом своего юрлица или создайте заказ из согласованной заявки в разделе заказов поставщикам.</p>
     <Link href="/erp/procurement/ownership" className="text-accent underline">Указать юрлицо старых документов и проверить связи</Link>
-    {error && <p role="alert">{error}</p>}
-    <Select aria-label="Юрлицо плана закупок" value={org} onChange={e => setOrg(e.target.value)}><option value="">Выберите юрлицо</option>{organizations.map(o => <option key={o.id} value={o.id}>{o.name} · {o.unp}</option>)}</Select>
-    {org && <CompanyPlan key={org} org={Number(org)} />}
+    <InstanceOrganizationGate>{organization => <>
+      {organizationHint(suggestedOrg) && organizationHint(suggestedOrg) !== String(organization.id) && <p role="alert">Ссылка относится к другому юрлицу. Открыт план организации из настроек установки.</p>}
+      <CompanyPlan org={organization.id} />
+    </>}</InstanceOrganizationGate>
   </section>;
 }
 

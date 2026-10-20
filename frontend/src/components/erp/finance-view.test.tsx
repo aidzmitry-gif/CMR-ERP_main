@@ -79,6 +79,7 @@ beforeEach(() => {
   fetchMock.mockImplementation((input: unknown) => Promise.resolve(respond(String(input))));
   // Безопасные значения по умолчанию для всех эндпоинтов (summary-таб стреляет на маунте).
   responders = {
+    "system/instance-organization": { configuration: "AIOS_SELLER_UNP", organization: { id: 7, name: "Учебная организация", unp: "111111111" } },
     "finance/summary": SUMMARY,
     "finance/payments": [],
     "finance/aging": { as_of: "2026-07-18", currency: "BYN", ar: { buckets: {}, total: "0.00" }, ap: { buckets: {}, total: "0.00" } },
@@ -101,6 +102,45 @@ afterEach(() => {
 const byn = (whole: string) => new RegExp(`${whole.replace(/\B(?=(\d{3})+(?!\d))/g, "\\s")}\\sBYN`);
 
 describe("FinanceView", () => {
+  it("сверка использует только юрлицо установки, без локального выбора и URL-подмены", async () => {
+    window.history.replaceState({}, "", "/erp/finance?organization_id=999");
+    try {
+      render(<FinanceView initialTab="reconcile" />);
+      await screen.findByText(/Сверка с 1С не настроена/);
+      expect(screen.getByText("Учебная организация · УНП 111111111")).toBeInTheDocument();
+      expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+      const requests = fetchMock.mock.calls.map(([url]) => String(url)).filter(url => url.includes("reconcile-1c"));
+      expect(requests).toEqual(["/api/finance/reconcile-1c?organization_id=7"]);
+    } finally { window.history.replaceState({}, "", "/"); }
+  });
+
+  it("при ошибке юрлица не запрашивает сверку и не показывает ложный пустой результат", async () => {
+    responders["system/instance-organization"] = "error";
+    render(<FinanceView initialTab="reconcile" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить юрлицо установки");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("reconcile-1c"))).toBe(false);
+    expect(screen.queryByText(/Сверка с 1С не настроена/)).not.toBeInTheDocument();
+  });
+
+  it("поздняя сверка закрытой вкладки не заменяет результат повторно открытой", async () => {
+    let resolveOld!: (value: ReturnType<typeof respond>) => void;
+    let calls = 0;
+    fetchMock.mockImplementation(input => String(input).includes("reconcile-1c") && ++calls === 1
+      ? new Promise(resolve => { resolveOld = resolve; }) : Promise.resolve(respond(String(input))));
+    render(<FinanceView initialTab="reconcile" />);
+    await waitFor(() => expect(resolveOld).toBeTypeOf("function"));
+    fireEvent.click(screen.getByRole("button", { name: "P&L" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сверка 1С" }));
+    await screen.findByText(/Сверка с 1С не настроена/);
+    await act(async () => resolveOld({ ok: true, status: 200, json: async () => ({
+      as_of: "2026-07-18", source: "1c", source_available: true,
+      matched: [{ ref: "STALE-RESULT", amount: "999.00", counterparty_ref: null }], only_in_erp: [], only_in_1c: [],
+    }) }));
+    expect(screen.queryByText("STALE-RESULT")).not.toBeInTheDocument();
+    expect(screen.getByText(/Сверка с 1С не настроена/)).toBeInTheDocument();
+    expect(calls).toBe(2);
+  });
+
   it("возврат к прежнему счёту создаёт новый запрос и не восстанавливает прежние суммы; поздний ответ другого счёта игнорируется", async () => {
     responders["finance/bank-accounts"] = [{ id: 2, code: "bank-2", title: "Банк 2", currency: "BYN", opening_balance: "0.00", is_active: true }];
     const calendar = { as_of: "2026-07-19", currency: "BYN", mode: "day", opening_balance: "5678.00", weeks: [],
@@ -316,8 +356,7 @@ describe("FinanceView", () => {
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "Баланс" }));
 
-    await screen.findByRole("option", { name: "Организация · 123" });
-    fireEvent.change(screen.getByLabelText("Организация баланса"), { target: { value: "7" } });
+    await screen.findByText("Учебная организация · УНП 111111111");
     fireEvent.change(screen.getByLabelText("Начало периода баланса"), { target: { value: "2026-09-01" } });
     fireEvent.change(screen.getByLabelText("Конец периода баланса"), { target: { value: "2026-09-30" } });
     fireEvent.click(screen.getByRole("button", { name: "Применить" }));
@@ -333,8 +372,7 @@ describe("FinanceView", () => {
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "P&L" }));
 
-    await screen.findByRole("option", { name: "Организация · 123" });
-    fireEvent.change(screen.getByLabelText("Организация P&L"), { target: { value: "7" } });
+    await screen.findByText("Учебная организация · УНП 111111111");
     fireEvent.change(screen.getByLabelText("Начало периода P&L"), { target: { value: "2026-09-01" } });
     fireEvent.change(screen.getByLabelText("Конец периода P&L"), { target: { value: "2026-09-30" } });
     fireEvent.click(screen.getByRole("button", { name: "Применить" }));
@@ -502,8 +540,7 @@ describe("FinanceView", () => {
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "ДДС" }));
 
-    await screen.findByRole("option", { name: "Организация · 123" });
-    fireEvent.change(screen.getByLabelText("Организация ДДС"), { target: { value: "7" } });
+    await screen.findByText("Учебная организация · УНП 111111111");
     fireEvent.change(screen.getByLabelText("Начало периода ДДС"), { target: { value: "2026-09-01" } });
     fireEvent.change(screen.getByLabelText("Конец периода ДДС"), { target: { value: "2026-09-30" } });
     fireEvent.click(screen.getByRole("button", { name: "Применить" }));
@@ -517,7 +554,7 @@ describe("FinanceView", () => {
       as_of: "2026-07-19",
       source: "1c",
       source_available: true,
-      matched: [{ ref: "П-1", amount: "100.00", counterparty_ref: "192766048" }],
+      matched: [{ ref: "П-1", amount: "100.00", counterparty_ref: "SYNTHETIC-COUNTERPARTY" }],
       only_in_erp: [{ ref: "П-2", amount: "50.00", counterparty_ref: null }],
       only_in_1c: [{ ref: null, amount: "75.00", counterparty_ref: null }],
       amount_mismatch: [{ ref: "П-3", erp_amount: "300.00", one_c_amount: "301.00", counterparty_ref: null }],
@@ -610,8 +647,7 @@ describe("FinanceView", () => {
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "P&L" }));
 
-    await screen.findByRole("option", { name: "Организация · 123" });
-    fireEvent.change(screen.getByLabelText("Организация P&L"), { target: { value: "7" } });
+    await screen.findByText("Учебная организация · УНП 111111111");
     fireEvent.change(screen.getByLabelText("Начало периода P&L"), { target: { value: "2026-09-01" } });
     fireEvent.change(screen.getByLabelText("Конец периода P&L"), { target: { value: "2026-09-30" } });
     fireEvent.click(screen.getByRole("button", { name: "Применить" }));
@@ -626,8 +662,7 @@ describe("FinanceView", () => {
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "Баланс" }));
 
-    await screen.findByRole("option", { name: "Организация · 123" });
-    fireEvent.change(screen.getByLabelText("Организация баланса"), { target: { value: "7" } });
+    await screen.findByText("Учебная организация · УНП 111111111");
     fireEvent.change(screen.getByLabelText("Начало периода баланса"), { target: { value: "2026-09-01" } });
     fireEvent.change(screen.getByLabelText("Конец периода баланса"), { target: { value: "2026-09-30" } });
     fireEvent.click(screen.getByRole("button", { name: "Применить" }));

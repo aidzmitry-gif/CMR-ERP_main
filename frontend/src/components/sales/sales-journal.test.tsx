@@ -55,35 +55,66 @@ function respondWith(rows: JournalRow[]) {
 
 beforeEach(() => {
   respondWith([paidRow, invoicedRow]);
-  global.fetch = vi.fn(() => fetchImpl()) as unknown as typeof fetch;
+  global.fetch = vi.fn((path: string) => path.endsWith("/instance-organization")
+    ? Promise.resolve(new Response(JSON.stringify({ configuration: "AIOS_SELLER_UNP", organization: { id: 1, name: "Учебная организация", unp: "111111111" } })))
+    : fetchImpl()) as unknown as typeof fetch;
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function renderCrm() {
+  render(<SalesJournal />);
+  fireEvent.click(screen.getByRole("button", { name: "Выигранные сделки CRM", exact: true }));
+}
+
 // дожидается, когда журнал перешёл из «Загрузка…» в готовое состояние
 async function renderReady() {
-  render(<SalesJournal />);
-  await screen.findByText("Реестр свершившихся продаж: сделка попадает сюда в момент «Выиграна».");
+  renderCrm();
+  await screen.findByText("Сделки со стадией «Выиграна». Их суммы и отметки ERP не подтверждают реализации или оплаты в 1С.");
   await waitFor(() => expect(screen.queryByText("Загрузка…")).not.toBeInTheDocument());
 }
 
 describe("SalesJournal", () => {
+  it("defaults to authorized realization documents, never fetching CRM totals", async () => {
+    global.fetch = vi.fn(async (path: string) => new Response(JSON.stringify(path.endsWith("/instance-organization")
+      ? { configuration: "AIOS_SELLER_UNP", organization: { id: 1, name: "Учебная организация", unp: "111111111" } }
+      : { organization_id: 1, source: "1c", page: 1, limit: 50, total: 0, pages: 1, items: [], kinds: [] })));
+    render(<SalesJournal />);
+    await screen.findByText("Документов по выбранным условиям нет.");
+    expect(screen.getByRole("button", { name: "Реализации 1С", exact: true })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("800 BYN")).not.toBeInTheDocument();
+    expect(global.fetch).not.toHaveBeenCalledWith("/api/sales/journal", expect.anything());
+    const calls = vi.mocked(global.fetch).mock.calls;
+    const query = new URL(String(calls.at(-1)![0]), "https://example.invalid").searchParams;
+    expect(query.get("kind")).toBe("Document_РеализацияТоваровУслуг");
+    expect(query.get("date_from")).toBe("2026-07-01");
+  });
+
+  it("does not label missing ERP invoices as unpaid sales or combine the source views", async () => {
+    respondWith([{ ...invoicedRow, payment: "none", invoice_number: null }]);
+    await renderReady();
+    expect(screen.getByText("счёт ERP не найден")).toBeInTheDocument();
+    expect(screen.getByText("без подтверждения оплаты в ERP").parentElement).toHaveTextContent("1");
+    expect(screen.queryByText("неоплаченных")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Показано/)).not.toBeInTheDocument();
+    expect(screen.getByText(/не подтверждают реализации или оплаты в 1С/)).toBeInTheDocument();
+  });
   it("показывает «Загрузка…» до ответа бэкенда и уходит с фетчем на /api/sales/journal", () => {
     // fetch «висит» — статус остаётся loading
     fetchImpl = () => new Promise(() => {});
-    render(<SalesJournal />);
+    renderCrm();
     expect(screen.getByText("Загрузка…")).toBeInTheDocument();
     expect(global.fetch).toHaveBeenCalledWith("/api/sales/journal", { cache: "no-store" });
   });
 
   it("при сбое бэкенда показывает сообщение об ошибке, а не пустой журнал", async () => {
     fetchImpl = () => Promise.resolve({ ok: false, status: 500 });
-    render(<SalesJournal />);
+    renderCrm();
     expect(await screen.findByText(/Журнал недоступен/)).toBeInTheDocument();
     // скорборд и лента не отрисованы
-    expect(screen.queryByText("продаж")).not.toBeInTheDocument();
+    expect(screen.queryByText("выигранных сделок")).not.toBeInTheDocument();
   });
 
   it("рендерит строки журнала, группу месяца и скорборд с реальными суммами", async () => {
@@ -98,9 +129,9 @@ describe("SalesJournal", () => {
     expect(screen.getByText("Июль 2026")).toBeInTheDocument();
 
     // скорборд: 2 продажи, сумма 800 BYN, прибыль 150 BYN по 1 из 2, 1 неоплаченная
-    expect(screen.getByText("продаж").parentElement).toHaveTextContent("2");
+    expect(screen.getByText("выигранных сделок").parentElement).toHaveTextContent("2");
     expect(screen.getByText(/по 1 из 2 оценённых/)).toBeInTheDocument();
-    expect(screen.getByText("неоплаченных").parentElement).toHaveTextContent("1");
+    expect(screen.getByText("без подтверждения оплаты в ERP").parentElement).toHaveTextContent("1");
     // сумма 500 + 300 = 800 BYN (лейбл «сумма»)
     expect(screen.getByText("сумма").parentElement).toHaveTextContent("800 BYN");
   });
@@ -124,7 +155,7 @@ describe("SalesJournal", () => {
     expect(screen.getByText("ООО Ромашка")).toBeInTheDocument();
     expect(screen.queryByText("ЗАО Берёза")).not.toBeInTheDocument();
     // скорборд пересчитался: осталась 1 продажа
-    expect(screen.getByText("продаж").parentElement).toHaveTextContent("1");
+    expect(screen.getByText("выигранных сделок").parentElement).toHaveTextContent("1");
   });
 
   it("поиск по названию/клиенту сужает ленту", async () => {
@@ -157,14 +188,14 @@ describe("SalesJournal", () => {
 
   it("пустой журнал показывает подсказку про первую сделку, а не «Ничего не найдено»", async () => {
     respondWith([]);
-    render(<SalesJournal />);
-    expect(await screen.findByText(/Продаж пока нет/)).toBeInTheDocument();
+    renderCrm();
+    expect(await screen.findByText(/Выигранных сделок CRM пока нет/)).toBeInTheDocument();
     expect(screen.queryByText("Ничего не найдено")).not.toBeInTheDocument();
   });
 
   it("карточка валовой прибыли показывает «—», когда в срезе нет оценённых сделок", async () => {
     respondWith([invoicedRow]); // единственная строка без gross_profit
-    render(<SalesJournal />);
+    renderCrm();
     const label = await screen.findByText(/по 0 из 1 оценённых/);
     // родитель-карточка содержит прочерк вместо суммы прибыли
     expect(within(label.parentElement as HTMLElement).getByText("—")).toBeInTheDocument();

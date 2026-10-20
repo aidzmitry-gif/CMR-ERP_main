@@ -11,6 +11,15 @@ from datetime import date
 from typing import Protocol
 
 
+class OneCSourceUnavailable(RuntimeError):
+    """Стабильная ошибка чтения без URL, реквизитов доступа или ответа провайдера."""
+
+    def __init__(self, code: str, message: str, status: int = 503) -> None:
+        super().__init__(message)
+        self.code = code
+        self.status = status
+
+
 class OneCGateway(Protocol):
     """Чтение из 1С и опциональная подтверждённая исходящая связь.
 
@@ -26,6 +35,8 @@ class OneCGateway(Protocol):
     причину отсутствующей внешней связи в событии.
     """
 
+    # Отсутствие/сбой источника справочников должен быть явной ошибкой, а не
+    # успешным пустым импортом. OneCSourceUnavailable пригодна для ответа API.
     async def fetch_counterparties(self) -> list[dict]: ...
 
     async def fetch_stock(self) -> list[dict]: ...

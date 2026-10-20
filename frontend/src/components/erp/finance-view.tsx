@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { InstanceOrganizationGate } from "@/components/instance-organization-gate";
 import { SourceTag } from "@/components/source-tag";
 import { formatByn } from "@/lib/format";
 import { FinanceLedgerBalance } from "./finance-ledger-balance";
@@ -958,7 +959,11 @@ const ReconcileSection = ({
 );
 
 function ReconcileTab() {
-  const { data, loading, error } = useFetch<ReconResp>("/api/finance/reconcile-1c");
+  return <InstanceOrganizationGate>{organization => <OrganizationReconcileTab key={organization.id} org={organization.id} />}</InstanceOrganizationGate>;
+}
+
+function OrganizationReconcileTab({ org }: { org: number }) {
+  const { data, loading, error } = useFetch<ReconResp>(`/api/finance/reconcile-1c?organization_id=${org}`);
   if (loading) return <State loading={true} error={false} what="сверка с 1С" />;
   if (error) return <State loading={false} error={true} what="сверка с 1С" />;
   if (!data) return null;

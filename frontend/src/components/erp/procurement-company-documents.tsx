@@ -4,11 +4,11 @@ import { Input, Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { statusLabel } from "@/lib/procurement-orders";
+import { InstanceOrganizationGate } from "@/components/instance-organization-gate";
 const stages: Record<string, string> = { need: "Потребность", sourcing: "Поиск поставщиков", nego: "Переговоры", analysis: "Анализ поставщика", approval: "Согласование", po: "Заказ / PO", supply: "Производство", qc: "Приёмка / QC", done: "Завершено" };
 
-type Company = { id: number; name: string; unp: string };
 type Row = { id: number; number: string; supplier: string; status?: string; stage?: string; item?: string; quantity?: string; planned_amount?: string; due_date?: string; eta_date?: string; freight_byn?: string; lines?: { id: number; sku: string; quantity: string; goods_value_byn: string }[] };
-type Page = { items: Row[]; next_after_id: number | null };
+type Page = { organization_id: number; items: Row[]; next_after_id: number | null };
 async function read<T>(url: string): Promise<T> {
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) throw new Error(response.status === 403 ? "Нет доступа к документам выбранного юрлица." : "Не удалось загрузить документы. Повторите запрос.");
@@ -20,7 +20,13 @@ function CompanyList({ org, kind }: { org: string; kind: string }) {
   const [after, setAfter] = useState(0), [page, setPage] = useState<Page | null>(null), [error, setError] = useState("");
   useEffect(() => {
     let active = true;
-    void read<Page>(`/api/procurement/organizations/${org}/owned-sources?kind=${kind}&after_id=${after}&q=${encodeURIComponent(search)}`).then((data) => { if (active) setPage(data); }).catch((e: Error) => { if (active) setError(e.message); });
+    void read<Page>(`/api/procurement/organizations/${org}/owned-sources?kind=${kind}&after_id=${after}&q=${encodeURIComponent(search)}`).then((data) => {
+      if (!data || data.organization_id !== Number(org) || !Array.isArray(data.items)
+        || (data.next_after_id !== null && (!Number.isInteger(data.next_after_id) || data.next_after_id <= after))) {
+        throw new Error("Сервис закупок вернул некорректную страницу документов или другое юрлицо.");
+      }
+      if (active) setPage(data);
+    }).catch((e: Error) => { if (active) setError(e.message); });
     return () => { active = false; };
   }, [org, kind, search, after, refresh]);
   return <section className="space-y-3"><div className="flex gap-3"><Input aria-label="Поиск документов юрлица" placeholder="Номер, поставщик или товар" value={query} maxLength={200} onChange={(e) => setQuery(e.target.value)} /><Button onClick={() => { setPage(null); setError(""); setAfter(0); setSearch(query); setRefresh((value) => value + 1); }}>Найти</Button></div>
@@ -31,7 +37,10 @@ function CompanyList({ org, kind }: { org: string; kind: string }) {
   </section>;
 }
 export function ProcurementCompanyDocuments() {
-  const [companies, setCompanies] = useState<Company[]>([]), [org, setOrg] = useState(""), [kind, setKind] = useState("order"), [error, setError] = useState("");
-  useEffect(() => { let active = true; void read<Company[]>("/api/procurement/receipt-organizations").then((data) => { if (active) setCompanies(data); }).catch((e: Error) => { if (active) setError(e.message); }); return () => { active = false; }; }, []);
-  return <main className="w-full space-y-4 overflow-auto p-6 lg:pr-24"><h1 className="text-2xl font-semibold">Документы закупок по юрлицу</h1><p>Текущие заявки и заказы с подтверждённым владельцем. Это оперативный список, суммы не являются бухгалтерскими расходами.</p><div className="flex flex-wrap gap-3"><label>Юрлицо документов<Select value={org} onChange={(e) => setOrg(e.target.value)}><option value="">Выберите юрлицо</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name} · {company.unp}</option>)}</Select></label><label>Вид документов<Select value={kind} onChange={(e) => setKind(e.target.value)}><option value="order">Заказы поставщикам</option><option value="request">Заявки плана закупок</option></Select></label></div>{error && <p role="alert">{error}</p>}{org && <CompanyList key={`${org}/${kind}`} org={org} kind={kind} />}<Link className="text-accent underline" href="/erp/procurement/ownership">Сопоставить документы с юрлицами и связать заявки с заказами</Link></main>;
+  return <InstanceOrganizationGate>{organization => <CompanyDocuments org={String(organization.id)} />}</InstanceOrganizationGate>;
+}
+
+function CompanyDocuments({ org }: { org: string }) {
+  const [kind, setKind] = useState("order");
+  return <main className="min-w-0 w-full space-y-4 p-6 lg:pr-24"><h1 className="text-2xl font-semibold">Документы закупок</h1><p>Текущие заявки и заказы организации из настроек установки с подтверждённым владельцем. Это оперативный список, суммы не являются бухгалтерскими расходами.</p><div className="flex flex-wrap gap-3"><label>Вид документов<Select value={kind} onChange={(e) => setKind(e.target.value)}><option value="order">Заказы поставщикам</option><option value="request">Заявки плана закупок</option></Select></label></div><CompanyList key={`${org}/${kind}`} org={org} kind={kind} /><Link className="text-accent underline" href="/erp/procurement/ownership">Сопоставить документы с юрлицами и связать заявки с заказами</Link></main>;
 }

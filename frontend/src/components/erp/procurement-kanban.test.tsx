@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { ProcurementKanban } from "@/components/erp/procurement-kanban";
 
-const json = (body: unknown, status = 200) => ({ ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(body) });
+const json = (body: unknown, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => body, text: async () => JSON.stringify(body) });
 const organizations = [{ id: 1, name: "Первая", unp: "111111111" }];
 const requests = [
   { id: 1, number: "REQ-001", supplier: "А", item: "Потребность", quantity: "1", planned_amount: "10.00", due_date: null, stage: "need" },
@@ -23,7 +23,7 @@ const orders = [
 
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-    if (url === "/api/procurement/receipt-organizations") return json(organizations);
+    if (url === "/api/system/instance-organization") return json({ configuration: "AIOS_SELLER_UNP", organization: organizations[0] });
     if (url.endsWith("request-plan-context")) return json({ organization_id: 1, principal: "tester", can_manage: false });
     if (url.includes("owned-sources?kind=request")) return json({ organization_id: 1, items: requests, next_after_id: null });
     if (url.includes("owned-sources?kind=order")) return json({ organization_id: 1, items: orders, next_after_id: null });
@@ -39,7 +39,6 @@ afterEach(() => vi.unstubAllGlobals());
 
 it("строит девять живых этапов из scoped заявок, заказов и первичных документов", async () => {
   render(<ProcurementKanban />);
-  fireEvent.change(await screen.findByLabelText("Юрлицо канбана закупок"), { target: { value: "1" } });
   await screen.findByText("REQ-001");
   await waitFor(() => expect(within(screen.getByLabelText("Колонка Завершено")).getByText("PO-013")).toBeInTheDocument());
 
@@ -60,4 +59,60 @@ it("строит девять живых этапов из scoped заявок, 
   expect(within(overview).getByText("Завершено").nextElementSibling).toHaveTextContent("1");
   expect(screen.getByText("Отменённых заказов вне канбана: 1. Их можно проверить в разделе заказов поставщикам.")).toBeInTheDocument();
   expect(vi.mocked(fetch).mock.calls.flat().join(" ")).not.toContain("/procurement/board");
+});
+
+it("не меняет компанию установки по чужому URL и не предлагает выбор компании", async () => {
+  render(<ProcurementKanban suggestedOrg="2" />);
+  await screen.findByText("REQ-001");
+  expect(screen.getByRole("alert")).toHaveTextContent("другому юрлицу");
+  expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/organizations/2/") || String(url).includes("receipt-organizations"))).toBe(false);
+});
+
+it("невалидный URL не мешает загрузке настроенной организации", async () => {
+  render(<ProcurementKanban suggestedOrg="invalid" />);
+  await screen.findByText("REQ-001");
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Открыть план закупок" })).toHaveAttribute("href", "/erp/procurement/planning?org=1");
+});
+
+it("не загружает закупки при ошибке настройки, повторяет только настройку и затем загружает данные", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (url, options) => String(url).includes("instance-organization") ? json({}, 503) as Response : original(url, options));
+  render(<ProcurementKanban />);
+  await screen.findByRole("alert");
+  expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual(["/api/system/instance-organization"]);
+  vi.mocked(fetch).mockImplementation(original);
+  fireEvent.click(screen.getByRole("button", { name: "Повторить загрузку юрлица" }));
+  await screen.findByText("REQ-001");
+});
+
+it("проверяет текущего сотрудника перед сменой стадии и запрещает запрос при изменении прав", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let contextCalls = 0;
+  vi.mocked(fetch).mockImplementation(async (url, options) => {
+    if (String(url).endsWith("request-plan-context")) return json({ organization_id: 1, principal: ++contextCalls === 1 ? "tester" : "other", can_manage: true }) as Response;
+    return original(url, options);
+  });
+  render(<ProcurementKanban />);
+  const next = await screen.findByRole("button", { name: "Далее: Поиск поставщика" });
+  await waitFor(() => expect(next).toBeEnabled());
+  fireEvent.click(next);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Права или пользователь изменились");
+  expect(vi.mocked(fetch).mock.calls.some(([, options]) => options?.method === "PATCH")).toBe(false);
+});
+
+it("дозагружает заявки своей компании без дубликатов и пересчитывает счётчики", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (url, options) => {
+    if (String(url).includes("owned-sources?kind=request")) return json({ organization_id: 1, items: String(url).includes("after_id=6") ? [requests[0], { ...requests[0], id: 7, number: "REQ-007" }] : requests, next_after_id: String(url).includes("after_id=6") ? null : 6 }) as Response;
+    return original(url, options);
+  });
+  render(<ProcurementKanban />);
+  const more = await screen.findByRole("button", { name: "Загрузить ещё заявки" });
+  await waitFor(() => expect(more).toBeEnabled());
+  fireEvent.click(more);
+  await screen.findByText("REQ-007");
+  expect(screen.getAllByText("REQ-001")).toHaveLength(1);
+  expect(within(screen.getByLabelText("Оперативный обзор закупок")).getByText("Заявки в работе").nextElementSibling).toHaveTextContent("6");
 });

@@ -537,7 +537,7 @@ describe("DealDrawerPreview — слайс 9: мягкий скидочный г
   it("плашка НЕ рендерится, когда сумма сделки на уровне минимума или выше", async () => {
     mock(api.fetchDealItems).mockResolvedValue([itemAtMin]);
     renderDrawer();
-    await waitFor(() => expect(api.fetchDealItems).toHaveBeenCalledWith("1"));
+    await waitFor(() => expect(api.fetchDealItems).toHaveBeenCalledWith("1", { throwOnError: true }));
     expect(screen.queryByText(/Сумма ниже минимума по прайсу/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Запросить одобрение РОП" })).toBeNull();
   });
@@ -545,7 +545,7 @@ describe("DealDrawerPreview — слайс 9: мягкий скидочный г
   it("плашка НЕ рендерится при пустых позициях сделки", async () => {
     mock(api.fetchDealItems).mockResolvedValue([]);
     renderDrawer();
-    await waitFor(() => expect(api.fetchDealItems).toHaveBeenCalledWith("1"));
+    await waitFor(() => expect(api.fetchDealItems).toHaveBeenCalledWith("1", { throwOnError: true }));
     expect(screen.queryByText(/Сумма ниже минимума по прайсу/)).toBeNull();
   });
 
@@ -1141,5 +1141,143 @@ describe("DealDrawerPreview — Группа 5: исход (Win/Lose)", () => {
     );
     expect(screen.queryByRole("button", { name: "Выиграна" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Отказ" })).toBeNull();
+  });
+});
+
+
+describe("DealDrawerPreview — confirmed transferred products", () => {
+  const first = { id: 101, code: "SYN-A", title: "Учебная тяговая батарея с длинным наименованием", unit: "шт" };
+  const second = { id: 102, code: "SYN-B", title: "Учебная батарея Б", unit: "шт" };
+  const line = { id: 201, sku_id: first.id, code: first.code, title: first.title, unit: first.unit, qty: 3, unit_price: 100, min_price: null, last_price: null };
+  const region = () => screen.getByRole("region", { name: "Товары сделки" });
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn(async (input) => String(input).includes("/skus")
+      ? { ok: true, status: 200, json: async () => [first, second] }
+      : { ok: false, status: 503 }));
+    mock(api.fetchStock).mockResolvedValue([]);
+  });
+  async function choose(item = first, qty = 3, price = 100) {
+    fireEvent.click(await screen.findByTitle(item.title));
+    fireEvent.change(screen.getByLabelText("Количество товара"), { target: { value: String(qty) } });
+    fireEvent.change(screen.getByLabelText("Цена за единицу"), { target: { value: String(price) } });
+    fireEvent.click(screen.getByRole("button", { name: "Добавить в подбор", exact: true }));
+  }
+  async function transfer() {
+    await act(async () => { fireEvent.click(screen.getAllByRole("button", { name: "Перенести в документ" })[0]); });
+  }
+  it("shows saved quantities, zero and unknown prices with an explicitly partial total", async () => {
+    mock(api.fetchDealItems).mockResolvedValue([line, { ...line, id: 202, title: "Учебный товар с нулевой ценой", qty: 1, unit_price: 0 }, { ...line, id: 203, title: "Учебный товар без цены", unit_price: null }]);
+    renderDrawer();
+    const table = await within(region()).findByRole("table", { name: "Товары в сделке" });
+    expect(table).toHaveTextContent(first.title); expect(table).toHaveTextContent("3");
+    expect(within(table).getAllByTitle("Цена не подтверждена")).toHaveLength(1);
+    expect(within(table).getAllByText("0 ₽")).toHaveLength(2);
+    expect(region()).toHaveTextContent("Подтверждённая часть: 300 ₽");
+    expect(region()).toHaveTextContent("Полная сумма неизвестна");
+    expect(api.fetchDealItems).toHaveBeenCalledWith("1", { throwOnError: true });
+  });
+  it("keeps a failed read distinct from empty and retries only GET", async () => {
+    mock(api.fetchDealItems).mockRejectedValueOnce(new Error("network")).mockResolvedValue([line]);
+    renderDrawer();
+    await within(region()).findByRole("alert");
+    expect(region()).not.toHaveTextContent("пока нет товаров");
+    fireEvent.click(within(region()).getByRole("button", { name: "Обновить товары" }));
+    await within(region()).findByRole("table");
+    expect(api.addDealItem).not.toHaveBeenCalled();
+  });
+  it("transfers two products and immediately reads them back into the drawer", async () => {
+    const saved: typeof line[] = [];
+    mock(api.fetchDealItems).mockImplementation(async () => [...saved]);
+    mock(api.addDealItem).mockImplementation(async (_dealId, skuId, qty, price) => {
+      const sku = skuId === first.id ? first : second;
+      saved.push({ ...line, id: 300 + saved.length, sku_id: sku.id, code: sku.code, title: sku.title, qty, unit_price: price }); return true;
+    });
+    renderDrawer(); await within(region()).findByText(/пока нет товаров/);
+    fireEvent.click(within(region()).getByRole("button", { name: "Добавить товары" }));
+    await choose(); await choose(second, 2, 200); await transfer();
+    expect(screen.queryByRole("dialog", { name: "Подбор товара", exact: true })).not.toBeInTheDocument();
+    const table = await within(region()).findByRole("table");
+    expect(table).toHaveTextContent(first.title); expect(table).toHaveTextContent(second.title);
+    expect(region()).toHaveTextContent("Итого по товарам: 700 ₽");
+    expect(api.addDealItem).toHaveBeenCalledTimes(2);
+  });
+  it("a partial transfer refreshes confirmed rows and retry posts only the failed row", async () => {
+    mock(api.fetchDealItems).mockResolvedValueOnce([]).mockResolvedValue([line]);
+    mock(api.addDealItem).mockResolvedValueOnce(true).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    renderDrawer(); await within(region()).findByText(/пока нет товаров/);
+    fireEvent.click(within(region()).getByRole("button", { name: "Добавить товары" }));
+    await choose(); await choose(second, 2, 200); await transfer();
+    expect(screen.getByText(/Перенесено позиций: 1\/2/)).toBeInTheDocument();
+    expect(await within(region()).findByRole("table")).toHaveTextContent(first.title);
+    await transfer();
+    expect(mock(api.addDealItem).mock.calls.map(call => call[1])).toEqual([first.id, second.id, second.id]);
+    expect(mock(api.addDealItem).mock.calls[2][4]).toBe(mock(api.addDealItem).mock.calls[1][4]);
+  });
+  it("failed readback after successful POST never repeats the write", async () => {
+    mock(api.fetchDealItems).mockResolvedValueOnce([]).mockRejectedValueOnce(new Error("readback down")).mockResolvedValue([line]);
+    renderDrawer(); await within(region()).findByText(/пока нет товаров/);
+    fireEvent.click(within(region()).getByRole("button", { name: "Добавить товары" })); await choose(); await transfer();
+    await within(region()).findByRole("alert");
+    expect(screen.queryByRole("dialog", { name: "Подбор товара", exact: true })).not.toBeInTheDocument();
+    fireEvent.click(within(region()).getByRole("button", { name: "Обновить товары" }));
+    await within(region()).findByRole("table"); expect(api.addDealItem).toHaveBeenCalledTimes(1);
+  });
+  it("ignores the initial slow GET after transfer has returned fresh items", async () => {
+    let finish!: (value: typeof line[]) => void;
+    mock(api.fetchDealItems).mockReturnValueOnce(new Promise(resolve => { finish = resolve; })).mockResolvedValue([line]);
+    renderDrawer(); fireEvent.click(within(region()).getByRole("button", { name: "Добавить товары" }));
+    await choose(); await transfer(); await within(region()).findByRole("table");
+    await act(async () => { finish([{ ...line, title: "Устаревший ответ" }]); });
+    expect(region()).toHaveTextContent(first.title); expect(region()).not.toHaveTextContent("Устаревший ответ");
+  });
+  it("ignores a late rejected initial GET after fresh transfer readback", async () => {
+    let reject!: (reason: Error) => void;
+    mock(api.fetchDealItems).mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail; })).mockResolvedValue([line]);
+    renderDrawer(); fireEvent.click(within(region()).getByRole("button", { name: "Добавить товары" }));
+    await choose(); await transfer(); await within(region()).findByRole("table");
+    await act(async () => { reject(new Error("old read rejected")); });
+    expect(region()).toHaveTextContent(first.title); expect(within(region()).queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("hides previous deal items and ignores its delayed response after switching deal", async () => {
+    let finish!: (value: typeof line[]) => void;
+    mock(api.fetchDealItems).mockReturnValueOnce(new Promise(resolve => { finish = resolve; })).mockResolvedValue([{ ...line, title: "Учебный товар второй сделки" }]);
+    const { rerender } = renderDrawer();
+    rerender(<DealDrawerPreview deal={{ ...deal, id: "2", number: "CRM-2" }} stages={stages} onClose={() => {}} onMoveStage={() => {}} onUpdateFields={() => {}} onAddTask={() => {}} onWin={() => {}} onLose={() => {}} now={null} />);
+    await within(region()).findByText("Учебный товар второй сделки");
+    await act(async () => { finish([line]); });
+    expect(region()).not.toHaveTextContent(first.title);
+  });
+  it.each(["A-B-A", "close-reopen-A"])("keeps the new picker session and basket after old completion: %s", async (flow) => {
+    let finish!: (value: boolean) => void;
+    mock(api.addDealItem).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const { rerender } = renderDrawer(); await within(region()).findByText(/пока нет товаров/);
+    fireEvent.click(within(region()).getByRole("button", { name: "Добавить товары" })); await choose();
+    fireEvent.click(screen.getAllByRole("button", { name: "Перенести в документ" })[0]);
+    if (flow === "A-B-A") {
+      for (const id of ["2", "1"]) rerender(<DealDrawerPreview deal={{ ...deal, id }} stages={stages} onClose={() => {}} onMoveStage={() => {}} onUpdateFields={() => {}} onAddTask={() => {}} onWin={() => {}} onLose={() => {}} now={null} />);
+    } else {
+      fireEvent.click(within(screen.getByRole("dialog", { name: "Подбор товара", exact: true })).getByRole("button", { name: "Закрыть", exact: true }));
+    }
+    fireEvent.click(within(region()).getByRole("button", { name: "Добавить товары" })); await choose(second, 5, 7);
+    await act(async () => { finish(true); });
+    const picker = screen.getByRole("dialog", { name: "Подбор товара", exact: true });
+    expect(picker.querySelector("aside")).toHaveTextContent(second.title);
+    expect(picker.querySelector("aside")).toHaveTextContent("35 ₽");
+    expect(api.addDealItem).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Товары перенесены в сделку. Список позиций обновляется отдельно.")).not.toBeInTheDocument();
+  });
+  it("an old transfer completion does not close the new deal picker or move its basket", async () => {
+    let finish!: (value: boolean) => void;
+    mock(api.addDealItem).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const { rerender } = renderDrawer(); await within(region()).findByText(/пока нет товаров/);
+    fireEvent.click(within(region()).getByRole("button", { name: "Добавить товары" })); await choose();
+    fireEvent.click(screen.getAllByRole("button", { name: "Перенести в документ" })[0]);
+    rerender(<DealDrawerPreview deal={{ ...deal, id: "2", number: "CRM-2" }} stages={stages} onClose={() => {}} onMoveStage={() => {}} onUpdateFields={() => {}} onAddTask={() => {}} onWin={() => {}} onLose={() => {}} now={null} />);
+    fireEvent.click(within(region()).getByRole("button", { name: "Добавить товары" }));
+    await screen.findByRole("dialog", { name: "Подбор товара", exact: true });
+    await act(async () => { finish(true); });
+    expect(screen.getByRole("dialog", { name: "Подбор товара", exact: true })).toBeInTheDocument();
+    expect(screen.getByText(/Подобрано:/).parentElement).toHaveTextContent("0");
+    expect(api.fetchDealItems).not.toHaveBeenLastCalledWith("1", { throwOnError: true });
   });
 });

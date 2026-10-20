@@ -24,7 +24,7 @@ import {
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChannelButtons } from "@/components/channels";
 import { PriorityBadge } from "@/components/priority-badge";
 import { CatalogPickerModal } from "@/components/kanban/catalog-picker-modal";
@@ -167,7 +167,16 @@ export function DealDrawerPreview({
   const [stepDraft, setStepDraft] = useState("");
   const [stepEditing, setStepEditing] = useState(false);
   const [taskDraft, setTaskDraft] = useState("");
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerSession, setPickerSession] = useState<number | null>(null);
+  const pickerEpoch = useRef(0);
+  const pickerOpen = pickerSession !== null;
+  const closePicker = useCallback(() => {
+    pickerEpoch.current++;
+    setPickerSession(null);
+  }, []);
+  function openPicker() {
+    setPickerSession(++pickerEpoch.current);
+  }
   const [docBusy, setDocBusy] = useState(false);
   const [onOrder, setOnOrder] = useState(false);
   const invoiceRequestKey = useRef<string | null>(null);
@@ -179,6 +188,8 @@ export function DealDrawerPreview({
   // + СВОЙ busy для кнопки «Запросить одобрение РОП» (НЕ docBusy — гейт мягкий, счёт/договор/
   // сообщение не должны блокироваться, пока летит этот запрос).
   const [dealItems, setDealItems] = useState<DealItemFull[]>([]);
+  const [itemsState, setItemsState] = useState<{ dealId: string; status: "loading" | "ready" | "error" } | null>(null);
+  const itemsRead = useRef(0);
   const [gateBusy, setGateBusy] = useState(false);
   // Цикл 15: факт-маржа сделки — для шапки скидочного гейта ниже (реальная маржа рядом с
   // прокси-гейтом по min_price). Тот же ленивый фетч + dealIdRef-гард, что и dealItems ниже.
@@ -197,11 +208,26 @@ export function DealDrawerPreview({
   const messageRequest = useRef<{ fingerprint: string; key: string; pending: boolean } | null>(null);
   // Справочник/остатки грузятся только пока модалка подбора реально открыта.
   const picker = useProductPicker(pickerOpen, deal?.id);
+  const resetPicker = picker.reset;
   // FIX-R6: «живой» id открытой сделки для async-колбэков документов (issueInvoice/
   // prepareContractFromTemplate/issueClientContract) — обновляется эффектом ниже, а не при
   // рендере (react-hooks/refs запрещает писать в ref во время рендера). Замыкание внутри
   // async-функции держит СТАРЫЙ dealId, поэтому сверяем именно с рефом, не с `deal?.id`.
   const dealIdRef = useRef<string | undefined>(deal?.id);
+  const refreshDealItems = useCallback((dealId: string) => {
+    const read = ++itemsRead.current;
+    return fetchDealItems(dealId, { throwOnError: true }).then((list) => {
+      if (dealIdRef.current !== dealId || itemsRead.current !== read) return;
+      setDealItems(list);
+      setItemsState({ dealId, status: "ready" });
+    }).catch(() => {
+      if (dealIdRef.current === dealId && itemsRead.current === read) setItemsState({ dealId, status: "error" });
+    });
+  }, []);
+  function reloadDealItems(dealId: string) {
+    setItemsState({ dealId, status: "loading" });
+    void refreshDealItems(dealId);
+  }
   // Сброс draft-редакторов при смене открытой сделки — «reset on key change», не каскад.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -211,19 +237,21 @@ export function DealDrawerPreview({
     setStepDraft(deal?.nextStep ?? "");
     setStepEditing(false);
     setTaskDraft("");
-    setPickerOpen(false);
+    closePicker();
+    resetPicker();
     setDocMsg(null);
     setOnOrder(false);
     invoiceRequestKey.current = null;
     setPackageUrl(null);
     setDocs([]); // не мигать документами предыдущей сделки, пока грузится свежий список
     setDealItems([]); // слайс 9: та же причина — не мигать позициями предыдущей сделки
+    setItemsState(null);
     setMargin(null); // цикл 15: та же причина — не мигать маржой предыдущей сделки
     setContractOpen(false); // не действовать на чужую сделку через оставшуюся открытой секцию
     setMsgOpen(false); // слайс 8: та же причина — не писать в чужую сделку открытой секцией
     setMsgChannel("whatsapp");
     setMsgText("");
-  }, [deal?.id]);
+  }, [deal?.id, resetPicker, closePicker]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Слайс 6 (B): ленивый фетч документов при открытии/смене сделки; игнорируем поздний
@@ -246,10 +274,10 @@ export function DealDrawerPreview({
   useEffect(() => {
     const dealId = deal?.id;
     if (!dealId) return;
-    void fetchDealItems(dealId).then((list) => {
-      if (dealIdRef.current === dealId) setDealItems(list);
-    });
-  }, [deal?.id]);
+    const reads = itemsRead;
+    void refreshDealItems(dealId);
+    return () => { reads.current++; };
+  }, [deal?.id, refreshDealItems]);
 
   // Цикл 15: ленивый фетч факт-маржи сделки при открытии/смене — тот же dealIdRef-гард,
   // что и выше (поздний ответ по сделке, которую уже сменили, не всыпется в стейт).
@@ -267,6 +295,7 @@ export function DealDrawerPreview({
   }, [deal?.id]);
 
   const open = deal != null;
+  const itemsStatus = itemsState?.dealId === deal?.id ? itemsState?.status : "loading";
 
   // Найти текущую стадию + следующую (для кнопки «→ Следующая стадия»).
   const currentStageIdx = deal
@@ -571,9 +600,7 @@ export function DealDrawerPreview({
     if (dealIdRef.current !== dealId) return;
     const ok = results.filter(Boolean).length;
     setDocMsg(`✅ Добавлено из прошлого заказа: ${ok}/${items.length}`);
-    void fetchDealItems(dealId).then((list) => {
-      if (dealIdRef.current === dealId) setDealItems(list);
-    });
+    reloadDealItems(dealId);
   }
 
   return (
@@ -869,6 +896,37 @@ export function DealDrawerPreview({
                 </dl>
               </div>
 
+              <section aria-label="Товары сделки" className="mt-4 rounded-xl border border-line p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <SectionLabel icon={<ShoppingCart size={12} />}>Товары сделки{itemsStatus === "ready" ? ` · ${dealItems.length}` : ""}</SectionLabel>
+                  <Button variant="secondary" size="sm" onClick={openPicker}>Добавить товары</Button>
+                </div>
+                {itemsStatus === "loading" && <p role="status" className="mt-2 text-[12px] text-muted">Загружаем товары сделки…</p>}
+                {itemsStatus === "error" && <div className="mt-2 text-[12px]">
+                  <p role="alert" className="text-danger">Не удалось подтвердить список товаров. Это не означает, что перенесённые позиции не сохранились.</p>
+                  <button type="button" className="mt-1 text-accent-ink underline" onClick={() => reloadDealItems(deal.id)}>Обновить товары</button>
+                </div>}
+                {itemsStatus === "ready" && (dealItems.length === 0
+                  ? <p className="mt-2 text-[12px] text-muted">В сделке пока нет товаров. Добавьте их через подбор.</p>
+                  : <>
+                    <table aria-label="Товары в сделке" className="mt-2 w-full table-fixed text-[12px]">
+                      <colgroup><col style={{ width: "43%" }} /><col style={{ width: "15%" }} /><col style={{ width: "21%" }} /><col style={{ width: "21%" }} /></colgroup>
+                      <thead className="text-left text-[10px] text-muted"><tr><th className="py-1">Наименование</th><th>Кол-во</th><th className="text-right">Цена</th><th className="text-right">Сумма</th></tr></thead>
+                      <tbody>{dealItems.map((item) => <tr key={item.id} className="border-t border-line align-top">
+                        <td className="break-words py-2 pr-2 font-medium">{item.title}</td>
+                        <td className="break-words py-2 pr-1 tabular-nums">{item.qty}<span className="block text-[10px] text-muted">{item.unit}</span></td>
+                        <td className="break-words py-2 pl-1 text-right tabular-nums">{item.unit_price == null ? <span title="Цена не подтверждена">—</span> : fmt(item.unit_price)}</td>
+                        <td className="break-words py-2 pl-1 text-right font-semibold tabular-nums">{item.unit_price == null ? <span title="Сумма неизвестна без цены">—</span> : fmt(item.qty * item.unit_price)}</td>
+                      </tr>)}</tbody>
+                    </table>
+                    <p className="mt-2 border-t border-line pt-2 text-right text-[12px] font-semibold">
+                      {dealItems.some(item => item.unit_price == null) ? "Подтверждённая часть: " : "Итого по товарам: "}
+                      {dealItems.every(item => item.unit_price == null) ? "сумма неизвестна" : fmt(dealItems.reduce((sum, item) => sum + (item.unit_price == null ? 0 : item.qty * item.unit_price), 0))}
+                      {dealItems.some(item => item.unit_price == null) && <span className="mt-1 block font-normal text-muted">Есть позиции без подтверждённой цены. Полная сумма неизвестна.</span>}
+                    </p>
+                  </>)}
+              </section>
+
               {/* ══════════ ГРУППА 3 — ДОКУМЕНТЫ (денежный поток) ══════════
                   Действия (Товар/Счёт/Договор) → раскрытие варианта договора под кнопкой →
                   результат последнего действия (docMsg) → статус последних счёта/договора + Пакет. */}
@@ -880,7 +938,7 @@ export function DealDrawerPreview({
                   <Button
                     variant="secondary"
                     size="sm"
-                    onClick={() => setPickerOpen(true)}
+                    onClick={openPicker}
                     icon={<ShoppingCart size={13} />}
                   >
                     Товар
@@ -1234,8 +1292,13 @@ export function DealDrawerPreview({
           dealId={deal.id}
           counterparty={deal.company}
           state={picker}
-          onClose={() => setPickerOpen(false)}
-          onCommitted={() => setPickerOpen(false)}
+          onClose={closePicker}
+          onItemsCommitted={(dealId) => { if (dealIdRef.current === dealId) reloadDealItems(dealId); }}
+          onCommitted={() => {
+            if (dealIdRef.current !== deal.id || pickerEpoch.current !== pickerSession) return;
+            closePicker();
+            setDocMsg("Товары перенесены в сделку. Список позиций обновляется отдельно.");
+          }}
         />
       )}
     </>

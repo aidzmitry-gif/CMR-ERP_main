@@ -1,6 +1,6 @@
 """Коннектор к 1С:КА (REST/OData).
 
-При пустом ``base_url`` — mock только для справочников и витрины товаров в dev/тестах.
+При пустом ``base_url`` источник недоступен; mock разрешается только явным ``allow_demo``.
 При заданном URL — OData GET (только чтение) для контрагентов и остатков/цен.
 Финансовые read-фасады не используют демонстрационные суммы: пока для них нет
 проверенного OData-маппинга, они отдают честное пустое значение. Исходящая запись
@@ -17,6 +17,7 @@ from uuid import UUID
 import httpx
 
 from core.services.mdm import CounterpartyWriteError
+from core.services.onec import OneCSourceUnavailable
 
 log = logging.getLogger("integrations.onec")
 
@@ -43,14 +44,18 @@ _MOCK_STOCK = [
 class OutboundDocumentUnavailable(RuntimeError):
     """Исходящая запись не имеет проверенного адаптера и не может считаться успешной."""
 
+
 class OneCClient:
     def __init__(
         self,
         base_url: str = "",
         username: str = "",
         password: str = "",
+        *,
+        allow_demo: bool = False,
     ) -> None:
-        self.base_url = (base_url or "").rstrip("/")
+        self.base_url = (base_url or "").strip().rstrip("/")
+        self.allow_demo = allow_demo
         self.username = username or ""
         self.password = password or ""
         # Basic-auth уходит открытым текстом по http:// (base64 тривиально снимается). Предупреждаем
@@ -96,7 +101,12 @@ class OneCClient:
         with self._client() as s:
             resp = s.get(url, params=q)
             resp.raise_for_status()
-            return list(resp.json().get("value") or [])
+            payload = resp.json()
+            if not isinstance(payload, dict) or not isinstance(payload.get("value"), list):
+                raise ValueError("Invalid 1C OData collection")
+            if any(not isinstance(row, dict) or not row for row in payload["value"]):
+                raise ValueError("Invalid 1C OData collection row")
+            return payload["value"]
 
     def _get_all(self, entity: str, params: dict | None = None, *, page_size: int = 500) -> list[dict]:
         """Постраничный OData GET ($skip/$top) — полный справочник, не только первая страница."""
@@ -220,23 +230,31 @@ class OneCClient:
 
     async def fetch_counterparties(self) -> list[dict]:
         if not self._live():
-            return list(_MOCK_COUNTERPARTIES)
+            if self.allow_demo:
+                return list(_MOCK_COUNTERPARTIES)
+            raise OneCSourceUnavailable("onec_unconfigured", "Подключение к 1С не настроено. Данные не загружены.")
         try:
             return await asyncio.to_thread(self._fetch_counterparties_sync)
         except CounterpartyWriteError:
             raise
         except Exception as exc:  # noqa: BLE001
-            log.warning("1C fetch_counterparties failed (%s) — empty", exc)
-            return []
+            log.warning("1C fetch_counterparties failed (%s)", type(exc).__name__)
+            raise OneCSourceUnavailable(
+                "onec_read_failed", "Не удалось прочитать контрагентов из 1С. Загрузка отменена.", 502
+            ) from exc
 
     async def fetch_stock(self) -> list[dict]:
         if not self._live():
-            return list(_MOCK_STOCK)
+            if self.allow_demo:
+                return list(_MOCK_STOCK)
+            raise OneCSourceUnavailable("onec_unconfigured", "Подключение к 1С не настроено. Данные не загружены.")
         try:
             return await asyncio.to_thread(self._fetch_stock_sync)
         except Exception as exc:  # noqa: BLE001
-            log.warning("1C fetch_stock failed (%s) — empty", exc)
-            return []
+            log.warning("1C fetch_stock failed (%s)", type(exc).__name__)
+            raise OneCSourceUnavailable(
+                "onec_read_failed", "Не удалось прочитать товары из 1С. Загрузка отменена.", 502
+            ) from exc
 
     async def fetch_payments(self) -> list[dict]:
         """Never substitute a finance source with demonstration payment rows."""

@@ -14,7 +14,7 @@
 - `module.py` — `IntegrationsModule`; в `register` монтирует роуты, объявляет permission
   `integrations.sync` и **кладёт в фасад ядра**: `services.onec = OneCClient(onec_base_url)`,
   `services.stock = StockService()`, `services.registry = RegistryClient()`.
-- `client.py` — `OneCClient` (реализует `OneCGateway`): чтение из 1С; пустой `onec_base_url` → mock-данные.
+- `client.py` — `OneCClient` (реализует `OneCGateway`): чтение из 1С; пустой `onec_base_url` → `OneCSourceUnavailable` (503). Demo доступно только при явном `allow_demo=True`; модуль разрешает его лишь в средах `dev/development/test`. Ошибка чтения → безопасный 502, без URL/секретов и подмены пустым успешным ответом.
 - `stock.py` — `StockService` (реализует `StockGateway`): остатки/резервы.
 - `registry.py` — `RegistryClient` (реализует `RegistryGateway`): поиск по УНП в ЕГР.
 - `service.py` — `sync_1c(session, event_bus, onec)`: контрагенты — через идемпотентный адаптер ядра `core.services.reference_import` (матч по УНП + alias-провенанс источника в golden record); SKU/остатки — upsert в shared kernel + `integrations.stock_item`; эмитит событие.
@@ -32,7 +32,8 @@
 - **Подписан на**: —
 
 ## Внешние интеграции
-- **1С (OneCGateway / OneCClient)**: `fetch_counterparties()`, `fetch_stock()`. `onec_base_url` пуст → mock-источник (для dev/прототипа). Sync пишет в shared-kernel `Counterparty`/`Sku` (по УНП/коду — идемпотентно) и в `integrations.stock_item`.
+- **1С (OneCGateway / OneCClient)**: `fetch_counterparties()`, `fetch_stock()`. Без подключения production-синхронизация закрыта; demo не используется при сбое настроенного источника даже в dev. Sync пишет в shared-kernel `Counterparty`/`Sku` (по УНП/коду — идемпотентно) и в `integrations.stock_item`. При недоступности источника роут откатывает всю загрузку, не публикует успешное событие и сохраняет прежние данные.
+- **Ограничение live stock-маппинга:** текущий адаптер номенклатуры ещё подставляет нули количества/цены и склад «Главный» без подтверждённого регистра остатков. Это не доказательство реальных остатков; требуется отдельное исправление перед принятием складской синхронизации/перехода с 1С. Защита demo это ограничение не устраняет.
 - **Остатки (StockGateway / StockService)**: остатки/резервы по SKU и складам (используют sales/wms через `core.services.stock`).
 - **Реестр ЕГР (RegistryGateway / RegistryClient)**: `lookup(unp)` — карточка контрагента по УНП (sales-28).
 

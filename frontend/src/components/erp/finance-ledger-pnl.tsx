@@ -2,12 +2,12 @@
 
 import { businessDate } from "@/lib/business-date";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
+import { InstanceOrganizationGate } from "@/components/instance-organization-gate";
 
-type Organization = { id: number; name: string; unp: string };
 type PnlMovement = {
   entry_id: number; source: string; date: string; account: string; title: string;
   line_id: number; currency: string; ledger_currency?: string; valuation_only?: boolean; side: "debit" | "credit"; amount: string;
@@ -67,9 +67,11 @@ function checkedEntry(value: unknown, entryId: number): EntryDetail {
 }
 
 export function FinanceLedgerPnl() {
+  return <InstanceOrganizationGate>{organization => <FinanceLedgerPnlReport org={String(organization.id)} />}</InstanceOrganizationGate>;
+}
+
+function FinanceLedgerPnlReport({ org }: { org: string }) {
   const initial = today();
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [org, setOrg] = useState("");
   const [start, setStart] = useState(`${initial.slice(0, 7)}-01`);
   const [end, setEnd] = useState(initial);
   const [applied, setApplied] = useState<Applied | null>(null);
@@ -82,19 +84,6 @@ export function FinanceLedgerPnl() {
   const request = useRef(0);
   const detailRequest = useRef(0);
 
-  useEffect(() => {
-    let active = true;
-    void fetch("/api/accounting/organizations", { cache: "no-store" })
-      .then(async (response) => {
-        const body: unknown = await response.json();
-        if (!response.ok) throw new Error(message(body, "Не удалось загрузить доступные организации."));
-        if (!Array.isArray(body)) throw new Error("Ответ организаций имеет неверный формат.");
-        return body as Organization[];
-      })
-      .then((rows) => { if (active) setOrganizations(rows); })
-      .catch((reason: Error) => { if (active) setError(reason.message); });
-    return () => { active = false; };
-  }, []);
 
   async function apply() {
     if (!org) { setError("Выберите организацию."); return; }
@@ -145,13 +134,12 @@ export function FinanceLedgerPnl() {
   return <section aria-label="Бухгалтерский P&L" className="space-y-4 rounded-xl border border-line bg-surface p-4">
     <div><h2 className="text-lg font-bold text-ink">Финансовый результат бухгалтерской книги</h2><p className="text-sm text-muted">Доходы и расходы по проведённым строкам учёта. Все суммы — BYN; валюта строки или позиции не является суммой операции. Не является операционной маржой или регламентированной отчётностью.</p></div>
     <div className="flex flex-wrap gap-3">
-      <label className="min-w-56 flex-1 text-sm">Организация<Select aria-label="Организация P&L" value={org} onChange={(event) => setOrg(event.target.value)}><option value="">Выберите организацию</option>{organizations.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.unp}</option>)}</Select></label>
+
       <label className="text-sm">С<Input aria-label="Начало периода P&L" type="date" value={start} onChange={(event) => setStart(event.target.value)} /></label>
       <label className="text-sm">По<Input aria-label="Конец периода P&L" type="date" value={end} onChange={(event) => setEnd(event.target.value)} /></label>
       <div className="self-end"><Button variant="secondary" aria-busy={loading} onClick={() => void apply()}>Применить</Button></div>
     </div>
     {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-    {!organizations.length && !error && <p className="text-sm text-muted">Нет доступных организаций.</p>}
     {report && applied && <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm text-muted">Применено: организация {applied.org}, {applied.start} — {applied.end}</p><Button size="sm" variant="secondary" onClick={downloadCsv}>Скачать CSV</Button></div>
       <p className={`rounded-lg p-3 text-sm ${report.status === "closed_periods" ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800"}`}>{report.status === "closed_periods" ? "Периоды закрыты; регламентированная отчётность не подтверждена." : "Предварительный отчёт; закрытие периодов и регламентированная отчётность не подтверждены."}</p>

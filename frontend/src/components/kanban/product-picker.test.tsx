@@ -316,7 +316,7 @@ describe("ProductPickerModal — интеграция: повтор заказа
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /Добавить в сделку/ }));
     });
-    expect(api.addDealItem).toHaveBeenCalledWith("d1", 1, 1, 150);
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", 1, 1, 150, expect.any(String));
     expect(api.createPriceQuote).toHaveBeenCalledWith("AKB-60", "ООО Ромашка", 150);
     expect(screen.getByText("✅ Добавлено в сделку позиций: 1/1")).toBeInTheDocument();
     expect(onCommitted).toHaveBeenCalledTimes(1);
@@ -356,7 +356,7 @@ describe("ProductPickerModal — интеграция: повтор заказа
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /Выставить счёт/ }));
     });
-    expect(api.addDealItem).toHaveBeenCalledWith("d1", 1, 1, 150);
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", 1, 1, 150, expect.any(String));
     expect(api.issueDocument).toHaveBeenCalledWith("d1", "invoice");
     expect(winStub.location.href).toBe("/r");
     expect(screen.getByText("Счёт создан")).toBeInTheDocument();
@@ -431,7 +431,7 @@ describe("useProductPicker — согласованная цена позици�
     await act(async () => {
       expect(await result.current.commitToDeal("d1", "Клиент")).toEqual({ ok: 1, total: 1, successfulRows: [result.current.pickedRows[0]] });
     });
-    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, price);
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, price, expect.any(String));
     expect(api.createPriceQuote).toHaveBeenCalledWith(skus[0].code, "Клиент", price);
   });
 
@@ -441,7 +441,7 @@ describe("useProductPicker — согласованная цена позици�
     await waitFor(() => expect(result.current.skus).toHaveLength(skus.length));
     act(() => result.current.addSku(skus[0]));
     await act(async () => { await result.current.commitToDeal("d1", "Клиент"); });
-    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, price ?? null);
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, price ?? null, expect.any(String));
     if (price == null) expect(api.createPriceQuote).not.toHaveBeenCalled();
     else expect(api.createPriceQuote).toHaveBeenCalledWith(skus[0].code, "Клиент", 0);
   });
@@ -452,7 +452,7 @@ describe("useProductPicker — согласованная цена позици�
     fireEvent.click(await screen.findByText(skus[0].title));
     expect(screen.getByText(/Цена не подтверждена/)).toBeInTheDocument();
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Добавить в сделку/ })); });
-    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, null);
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, null, expect.any(String));
     expect(api.createPriceQuote).not.toHaveBeenCalled();
   });
 
@@ -465,7 +465,7 @@ describe("useProductPicker — согласованная цена позици�
     await waitFor(() => expect(result.current.skus).toHaveLength(skus.length));
     await act(async () => { await result.current.repeatLastOrder("d1"); });
     await act(async () => { await result.current.commitToDeal("d1", "Клиент"); });
-    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 2, unit_price);
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 2, unit_price, expect.any(String));
   });
 
   it("ошибка истории котировок не заменяет подтверждение сохранённой цены строки", async () => {
@@ -476,7 +476,7 @@ describe("useProductPicker — согласованная цена позици�
     await act(async () => {
       expect(await result.current.commitToDeal("d1", "Клиент")).toEqual({ ok: 1, total: 1, successfulRows: [result.current.pickedRows[0]] });
     });
-    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, 150);
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", skus[0].id, 1, 150, expect.any(String));
   });
 
   it("при отказе строки не создаёт историю цены и сохраняет подбор", async () => {
@@ -528,5 +528,60 @@ describe("useProductPicker — согласованная цена позици�
     expect(result.current.agreedPriceOf(second)).toBe(200);
     await act(async () => { await result.current.commitToDeal("d1", "Клиент"); });
     expect(mock(api.addDealItem).mock.calls.map((args) => args[3])).toEqual([100, 200, 200]);
+  });
+});
+
+
+describe("useProductPicker — item command retry identity", () => {
+  it("reuses exact key and body after lost response, including unpick and re-pick", async () => {
+    const { result } = renderHook(() => useProductPicker(true, "d1"));
+    await waitFor(() => expect(result.current.skus).toHaveLength(skus.length));
+    act(() => result.current.addSku(skus[0]));
+    mock(api.addDealItem).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    await act(async () => { await result.current.commitToDeal("d1", "Учебный клиент"); });
+    act(() => result.current.toggleRow(result.current.rows[0]));
+    act(() => result.current.toggleRow(result.current.rows[0]));
+    await act(async () => { await result.current.commitToDeal("d1", "Учебный клиент"); });
+    const [first, retry] = mock(api.addDealItem).mock.calls;
+    expect(first[4]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(retry).toEqual(first);
+  });
+  it("gives distinct same-SKU order rows distinct commands", async () => {
+    mock(api.fetchLastOrder).mockResolvedValue([100, 200].map((unit_price, i) => ({ id: i + 1, sku_id: 1, code: "AKB-60", title: "Учебный товар", unit: "шт", qty: 1, unit_price })));
+    const { result } = renderHook(() => useProductPicker(true));
+    await act(async () => { await result.current.repeatLastOrder("d1"); });
+    await act(async () => { await result.current.commitToDeal("d1", "Учебный клиент"); });
+    const [first, second] = mock(api.addDealItem).mock.calls;
+    expect(first.slice(0, 4)).toEqual(["d1", 1, 1, 100]);
+    expect(second.slice(0, 4)).toEqual(["d1", 1, 1, 200]);
+    expect(first[4]).not.toBe(second[4]);
+  });
+  it("binds keys to exact deal, quantity and price, retaining the original command when restored", async () => {
+    const { result } = renderHook(() => useProductPicker(true));
+    await waitFor(() => expect(result.current.skus).toHaveLength(skus.length));
+    act(() => result.current.addSkuWithQty(skus[0], 1, 100));
+    for (const [dealId, qty, price] of [["d1", 1, 100], ["d1", 2, 100], ["d1", 1, 0], ["d2", 1, 100], ["d1", 1, 100]] as const) {
+      act(() => result.current.setRowQty(result.current.rows[0], qty, price));
+      await act(async () => { await result.current.commitToDeal(dealId, "Учебный клиент"); });
+    }
+    const keys = mock(api.addDealItem).mock.calls.map(call => call[4]);
+    expect(new Set(keys.slice(0, 4)).size).toBe(4); expect(keys[4]).toBe(keys[0]);
+  });
+  it("keeps a rejected row's command for a narrow retry", async () => {
+    const { result } = renderHook(() => useProductPicker(true));
+    await waitFor(() => expect(result.current.skus).toHaveLength(skus.length));
+    act(() => result.current.addSku(skus[0]));
+    mock(api.addDealItem).mockRejectedValueOnce(new Error("lost")).mockResolvedValueOnce(true);
+    await act(async () => { expect((await result.current.commitToDeal("d1", "Учебный клиент")).ok).toBe(0); });
+    await act(async () => { expect((await result.current.commitToDeal("d1", "Учебный клиент")).ok).toBe(1); });
+    expect(mock(api.addDealItem).mock.calls[1]).toEqual(mock(api.addDealItem).mock.calls[0]);
+  });
+  it("a deliberate new selection after reset has a new row identity", async () => {
+    const { result } = renderHook(() => useProductPicker(true));
+    await waitFor(() => expect(result.current.skus).toHaveLength(skus.length));
+    act(() => result.current.addSku(skus[0]));
+    const old = result.current.rows[0].selectionKey;
+    act(() => result.current.reset()); act(() => result.current.addSku(skus[0]));
+    expect(result.current.rows[0].selectionKey).not.toBe(old);
   });
 });

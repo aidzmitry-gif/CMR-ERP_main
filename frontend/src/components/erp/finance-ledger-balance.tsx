@@ -2,12 +2,12 @@
 
 import { businessDate } from "@/lib/business-date";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
+import { InstanceOrganizationGate } from "@/components/instance-organization-gate";
 
-type Organization = { id: number; name: string; unp: string };
 type Applied = { org: string; start: string; end: string };
 type Category = "asset" | "liability" | "equity" | "income" | "expense";
 type PeriodBucket = "opening" | "movement";
@@ -94,9 +94,11 @@ function checkedEntry(value: unknown, expectedId: number): EntryDetail {
 }
 
 export function FinanceLedgerBalance() {
+  return <InstanceOrganizationGate>{organization => <FinanceLedgerBalanceReport org={String(organization.id)} />}</InstanceOrganizationGate>;
+}
+
+function FinanceLedgerBalanceReport({ org }: { org: string }) {
   const now = today();
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [org, setOrg] = useState("");
   const [start, setStart] = useState(`${now.slice(0, 7)}-01`);
   const [end, setEnd] = useState(now);
   const [applied, setApplied] = useState<Applied | null>(null);
@@ -107,15 +109,6 @@ export function FinanceLedgerBalance() {
   const request = useRef(0);
   const detailRequest = useRef(0);
 
-  useEffect(() => {
-    let active = true;
-    void fetch("/api/accounting/organizations", { cache: "no-store" }).then(async response => {
-      const body: unknown = await response.json();
-      if (!response.ok || !Array.isArray(body)) throw new Error(errorText(body, "Не удалось загрузить доступные организации."));
-      return body as Organization[];
-    }).then(rows => { if (active) setOrganizations(rows); }).catch((reason: Error) => { if (active) setError(reason.message); });
-    return () => { active = false; };
-  }, []);
 
   async function apply() {
     if (!org) { setError("Выберите организацию."); return; }
@@ -166,13 +159,12 @@ export function FinanceLedgerBalance() {
   return <section aria-label="Баланс бухгалтерской книги" className="space-y-4 rounded-xl border border-line bg-surface p-4">
     <div><h2 className="text-lg font-bold text-ink">Баланс бухгалтерской книги</h2><p className="text-sm text-muted">Накопительные остатки по проведённым строкам до конца выбранного периода. Все суммы — BYN; валюта позиции показывается отдельно только для переоценки.</p></div>
     <div className="flex flex-wrap gap-3">
-      <label className="min-w-56 flex-1 text-sm">Организация<Select aria-label="Организация баланса" value={org} onChange={event => setOrg(event.target.value)}><option value="">Выберите организацию</option>{organizations.map(item => <option key={item.id} value={item.id}>{item.name} · {item.unp}</option>)}</Select></label>
+
       <label className="text-sm">С<Input aria-label="Начало периода баланса" type="date" value={start} onChange={event => setStart(event.target.value)} /></label>
       <label className="text-sm">По<Input aria-label="Конец периода баланса" type="date" value={end} onChange={event => setEnd(event.target.value)} /></label>
       <div className="self-end"><Button variant="secondary" onClick={() => void apply()}>Применить</Button></div>
     </div>
     {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-    {!organizations.length && !error && <p className="text-sm text-muted">Нет доступных организаций.</p>}
     {report && applied && balance && <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm text-muted">Применено: организация {applied.org}, {applied.start} — {applied.end}</p><Button size="sm" variant="secondary" onClick={downloadCsv}>Скачать CSV</Button></div>
       <p className={`rounded-lg p-3 text-sm ${report.status === "closed_periods" ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800"}`}>{report.status === "closed_periods" ? "Периоды закрыты; регламентированная отчётность не подтверждена." : "Предварительный отчёт; закрытие периодов и регламентированная отчётность не подтверждены."}</p>

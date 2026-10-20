@@ -5,7 +5,8 @@ import { documentStatusLabels as states } from "@/lib/document-status-labels";
 
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
-import { fetchRegisterOrganizations, registerId, type RegisterOrganization } from "@/lib/document-register-api";
+import { registerId } from "@/lib/document-register-api";
+import { fetchInstanceOrganization, type InstanceOrganization } from "@/lib/instance-organization";
 import { fetchClientDocument, fetchClientDocuments, fetchClientOriginal, type ClientDocument, type ClientDocumentPage } from "@/lib/client-document-register-api";
 import { ShipmentDocumentsRegister } from "@/components/erp/shipment-documents-register";
 
@@ -15,26 +16,24 @@ export function ClientDocumentRegister({ clientId }: { clientId: string }) {
   return <ClientSelection key={clientId} clientId={clientId} />;
 }
 function ClientSelection({ clientId }: { clientId: string }) {
-  const [org, setOrg] = useState("");
-  const [organizations, setOrganizations] = useState<RegisterOrganization[] | null>(null);
+  const [organization, setOrganization] = useState<InstanceOrganization | null>(null);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!registerId(clientId)) return;
     let active = true;
-    void fetchRegisterOrganizations().then((value) => { if (active) setOrganizations(value); })
+    void fetchInstanceOrganization().then((value) => { if (active) setOrganization(value); })
       .catch((e: Error) => { if (active) setError(e.message); });
     return () => { active = false; };
   }, [clientId, attempt]);
-  return <section aria-label="Документы клиента по юрлицу" className="space-y-3 rounded-xl border border-line bg-surface p-4">
-    <h2 className="font-semibold">Документы клиента по юрлицу</h2>
+  return <section aria-label="Документы клиента" className="space-y-3 rounded-xl border border-line bg-surface p-4">
+    <h2 className="font-semibold">Документы клиента</h2>
     {!registerId(clientId) ? <p role="alert">Некорректный ID клиента.</p> : <>
       <p className="text-sm">Точный клиент MDM ID {clientId}. Включаются только сделки с подтверждённой принадлежностью этому ID.</p>
-      <label className="block text-sm">Юрлицо документов клиента<Select aria-label="Юрлицо документов клиента" disabled={!organizations} value={org} onChange={(e) => setOrg(e.target.value)}><option value="">Выберите юрлицо</option>{organizations?.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.unp}</option>)}</Select></label>
-      {!organizations && !error && <p role="status">Загрузка доступных юрлиц…</p>}
-      {organizations?.length === 0 && <p>Нет доступных юрлиц.</p>}
-      {error && <><p role="alert" className="text-red-700">{error}</p><Button variant="secondary" onClick={() => { setError(""); setAttempt((n) => n + 1); }}>Повторить список юрлиц</Button></>}
-      {registerId(org) && <ClientFilters key={org} org={org} clientId={clientId} />}
+      {organization && <p className="text-sm">{organization.name} · УНП {organization.unp}</p>}
+      {!organization && !error && <p role="status">Загрузка юрлица установки…</p>}
+      {error && <><p role="alert" className="text-red-700">{error}</p><a className="text-accent underline" href="/erp/settings">Настройки организации</a><Button variant="secondary" onClick={() => { setOrganization(null); setError(""); setAttempt((n) => n + 1); }}>Повторить загрузку юрлица</Button></>}
+      {organization && <ClientFilters key={organization.id} org={String(organization.id)} clientId={clientId} />}
     </>}
   </section>;
 }

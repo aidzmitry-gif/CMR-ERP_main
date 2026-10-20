@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { CreateCrmClient } from "@/components/create-crm-client";
+import { SpravCounterpartyEditor } from "@/components/erp/spravochniki/sprav-counterparty-editor";
 import { useEffect, useState, type FormEvent } from "react";
 import { DIRECTORY_PAGE_SIZE, loadDirectory, responsibleManagerText, type DirectoryKind, type DirectoryResult } from "@/lib/crm-directory";
 
 export function CrmDirectory({ kind }: { kind: DirectoryKind }) {
   const [draft, setDraft] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState<{ kind: "client" } | { kind: "registry"; unp: string } | null>(null);
   const [query, setQuery] = useState({ q: "", offset: 0, revision: 0 });
   const [loaded, setLoaded] = useState<{ key: string; result: DirectoryResult } | null>(null);
   const key = JSON.stringify([kind, query]);
@@ -39,11 +40,20 @@ export function CrmDirectory({ kind }: { kind: DirectoryKind }) {
         <h1 className="text-xl font-semibold text-ink">{title}</h1>
         <p className="mt-1 text-sm text-muted">Показаны доступные вам записи. Нажмите на название компании, чтобы открыть её карточку.</p>
       </div>
-      {!isContacts && (creating ? <CreateCrmClient onCancel={() => setCreating(false)} onCreated={(name) => {
-        setCreating(false);
+      {!isContacts && (creating?.kind === "registry" ? <div className="min-w-0 space-y-3">
+        <p className="text-sm text-muted">Создаётся карточка контрагента в справочнике. Она появится в списке клиентов CRM. Введите УНП, получите сведения МНС и отметьте реквизиты для сохранения.</p>
+        <SpravCounterpartyEditor mode="create" embedded initialUnp={creating.unp} onCancel={() => setCreating(null)} />
+      </div> : creating?.kind === "client" ? <CreateCrmClient onCancel={() => setCreating(null)} onCreated={(name) => {
+        setCreating(null);
         setDraft(name);
         setQuery((previous) => ({ q: name, offset: 0, revision: previous.revision + 1 }));
-      }} /> : <button type="button" onClick={() => setCreating(true)} className="rounded-lg bg-accent px-4 py-2 text-sm text-white">Новый клиент</button>)}
+      }} /> : <div className="space-y-2">
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setCreating({ kind: "client" })} className="rounded-lg bg-accent px-4 py-2 text-sm text-white">Новый клиент</button>
+          <button type="button" onClick={() => setCreating({ kind: "registry", unp: /^[0-9]{9}$/.test(draft.trim()) ? draft.trim() : "" })} className="rounded-lg border border-accent px-4 py-2 text-sm text-accent">Создать по УНП</button>
+        </div>
+        <p className="text-sm text-muted">По УНП можно получить наименование, юридический адрес и статус из МНС. Реквизиты проверяются перед сохранением.</p>
+      </div>)}
       <form onSubmit={search} className="flex flex-wrap items-end gap-2">
         <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm text-muted">
           {isContacts ? "Имя, компания, телефон или email" : "Название или УНП"}

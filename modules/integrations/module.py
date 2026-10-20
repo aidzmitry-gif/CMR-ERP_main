@@ -31,6 +31,7 @@ class IntegrationsModule(ModuleContract):
             cfg.onec_base_url,
             getattr(cfg, "onec_user", "") or "",
             getattr(cfg, "onec_password", "") or "",
+            allow_demo=getattr(cfg, "environment", "prod").lower() in {"dev", "development", "test"},
         )
         # Цена/себес для маржи/КП: только когда 1С сконфигурирована (иначе dev-mock/демо).
         if cfg.onec_base_url:

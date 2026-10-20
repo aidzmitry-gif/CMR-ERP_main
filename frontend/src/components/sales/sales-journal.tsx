@@ -3,6 +3,8 @@
 import { Banknote, ClipboardList, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { formatByn } from "@/lib/format";
+import { OrganizationRegistry } from "@/components/docs/docs-registry";
+import { InstanceOrganizationGate } from "@/components/instance-organization-gate";
 import {
   EMPTY_JOURNAL_FILTERS,
   filterJournal,
@@ -33,7 +35,7 @@ const PAYMENT_CLS: Record<PaymentStatus, string> = {
 const PAYMENT_LABEL: Record<PaymentStatus, string> = {
   paid: "оплачен",
   invoiced: "счёт выставлен",
-  none: "нет счёта",
+  none: "счёт ERP не найден",
 };
 
 const SHIPMENT_CLS: Record<ShipmentStatus, string> = {
@@ -57,6 +59,19 @@ function quickRange(days: number): { from: string; to: string } {
 }
 
 export function SalesJournal() {
+  const [view, setView] = useState<"1c" | "crm">("1c");
+  return <main className="min-w-0 flex-1 overflow-auto p-4 sm:p-6">
+    <div className="mx-auto min-w-0 max-w-[1220px] space-y-4">
+      <h1 className="flex items-center gap-2 text-xl font-bold text-ink"><ClipboardList size={20} className="text-accent" /> Журнал продаж</h1>
+      <div role="group" aria-label="Представление продаж" className="flex flex-wrap gap-3">
+        {([["1c", "Реализации 1С"], ["crm", "Выигранные сделки CRM"]] as const).map(([value, label]) => <button type="button" key={value} aria-pressed={view === value} className={`${CHIP_CLS} ${view === value ? "border-accent text-accent-ink" : ""}`} onClick={() => setView(value)}>{label}</button>)}
+      </div>
+      {view === "1c" ? <InstanceOrganizationGate>{organization => <OrganizationRegistry key={organization.id} org={String(organization.id)} realizationOnly />}</InstanceOrganizationGate> : <WonDealsJournal />}
+    </div>
+  </main>;
+}
+
+function WonDealsJournal() {
   const [status, setStatus] = useState<Status>("loading");
   const [rows, setRows] = useState<JournalRow[]>([]);
   const [filters, setFilters] = useState<JournalFilters>(EMPTY_JOURNAL_FILTERS);
@@ -116,15 +131,13 @@ export function SalesJournal() {
   );
 
   return (
-    <main className="flex-1 overflow-auto p-6">
+    <section aria-label="Выигранные сделки CRM">
       <div className="mx-auto max-w-[1220px] space-y-4">
         {/* Заголовок */}
         <div>
-          <h1 className="flex items-center gap-2 text-xl font-bold text-ink">
-            <ClipboardList size={20} className="text-accent" /> Журнал продаж
-          </h1>
+          <h2 className="text-lg font-bold text-ink">Выигранные сделки CRM</h2>
           <p className="mt-1 max-w-3xl text-sm text-muted">
-            Реестр свершившихся продаж: сделка попадает сюда в момент «Выиграна».
+            Сделки со стадией «Выиграна». Их суммы и отметки ERP не подтверждают реализации или оплаты в 1С.
           </p>
         </div>
 
@@ -146,7 +159,7 @@ export function SalesJournal() {
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <div className="rounded-2xl border border-line bg-surface p-4 shadow-card">
                 <div className="text-xl font-bold tabular-nums text-ink">{stats.count}</div>
-                <div className="mt-1 text-[11.5px] text-muted">продаж</div>
+                <div className="mt-1 text-[11.5px] text-muted">выигранных сделок</div>
               </div>
               <div className="rounded-2xl border border-line bg-surface p-4 shadow-card">
                 <div className="text-xl font-bold tabular-nums text-money">
@@ -175,7 +188,7 @@ export function SalesJournal() {
                 <div className="flex items-center gap-1.5 text-xl font-bold tabular-nums text-amber-600 dark:text-amber-300">
                   <Banknote size={16} /> {stats.unpaidCount}
                 </div>
-                <div className="mt-1 text-[11.5px] text-muted">неоплаченных</div>
+                <div className="mt-1 text-[11.5px] text-muted">без подтверждения оплаты в ERP</div>
               </div>
             </div>
 
@@ -262,7 +275,7 @@ export function SalesJournal() {
                   onChange={(e) => patchFilter("unpaidOnly", e.target.checked)}
                   className="accent-amber-500"
                 />
-                только неоплаченные
+                без подтверждения оплаты ERP
               </label>
 
               <button
@@ -280,7 +293,7 @@ export function SalesJournal() {
               <div className="rounded-2xl border border-line bg-surface p-10 text-center text-sm shadow-card">
                 {rows.length === 0 ? (
                   <span className="text-faint">
-                    Продаж пока нет — журнал заполнится, когда выиграете первую сделку
+                    Выигранных сделок CRM пока нет. Реализации из 1С смотрите на соседней вкладке.
                   </span>
                 ) : (
                   <div className="space-y-2">
@@ -322,7 +335,7 @@ export function SalesJournal() {
           </>
         )}
       </div>
-    </main>
+    </section>
   );
 }
 

@@ -594,12 +594,23 @@ export async function createPriceQuote(
 }
 
 /** Позиции номенклатуры сделки (с ценами клиенту). */
-export async function fetchDealItems(dealId: string): Promise<DealItemFull[]> {
+export async function fetchDealItems(dealId: string, options: boolean | { throwOnError: boolean } = false): Promise<DealItemFull[]> {
+  const strict = typeof options === "boolean" ? options : options.throwOnError;
   try {
     const res = await fetch(`/api/sales/deals/${dealId}/items`, { cache: "no-store" });
-    if (!res.ok) return [];
-    return (await res.json()) as DealItemFull[];
-  } catch {
+    if (!res.ok) throw new Error(String(res.status));
+    const items: unknown = await res.json();
+    if (!Array.isArray(items)) throw new Error("Invalid deal items response");
+    if (strict && items.some((item) => !item || typeof item !== "object"
+      || !Number.isInteger(item.id) || item.id <= 0 || !Number.isInteger(item.sku_id) || item.sku_id <= 0
+      || typeof item.title !== "string" || !item.title.trim() || typeof item.code !== "string" || typeof item.unit !== "string"
+      || typeof item.qty !== "number" || !Number.isFinite(item.qty) || item.qty <= 0
+      || (item.unit_price != null && (typeof item.unit_price !== "number" || !Number.isFinite(item.unit_price) || item.unit_price < 0)))) {
+      throw new Error("Invalid deal item values");
+    }
+    return items as DealItemFull[];
+  } catch (error) {
+    if (strict) throw error instanceof Error ? error : new Error("Не удалось загрузить товары сделки.");
     return [];
   }
 }
