@@ -1,4 +1,4 @@
-name: ERP-READY catalogue QA
+name: ERP-READY pool lifecycle diagnosis
 
 on:
   push:
@@ -10,16 +10,28 @@ permissions:
 
 jobs:
   e2e:
-    name: Catalogue rendered UI (3 + setup)
+    name: Pool lifecycle (3 isolated synthetic scenarios)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: erp-ready-001-ci-lint
     env:
       CI: "true"
-      E2E_BACKEND_PORT: "18471"
-      E2E_FRONTEND_PORT: "18472"
+      ERP_POOL_DRIVER_ROOT: ${{ github.workspace }}/driver
+      ERP_POOL_SOURCE_ROOT: ${{ github.workspace }}/erp-ready-001-ci-lint
+      ERP_POOL_EXPECTED_BUNDLE_SHA256: "b41655b9990be1fcbd8df83b31d48567796f8aada18cae0dbc6db08840741e5b"
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout diagnostic driver
+        uses: actions/checkout@v5
         with:
+          path: driver
+          persist-credentials: false
+      - name: Checkout frozen application
+        uses: actions/checkout@v5
+        with:
+          ref: "6e8f316862b968dd0efcd05b4e77f2e4415294e4"
+          path: erp-ready-001-ci-lint
           submodules: recursive
           persist-credentials: false
       - uses: actions/setup-python@v6
@@ -32,19 +44,28 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "20"
-      - name: Install frontend dependencies
-        working-directory: frontend
+      - name: Install frozen frontend dependencies
+        working-directory: erp-ready-001-ci-lint/frontend
         run: npm ci
       - name: Install Chromium
-        working-directory: frontend
+        working-directory: erp-ready-001-ci-lint/frontend
         run: npx --no-install playwright install --with-deps chromium
-      - name: Verify rendered catalogue scenarios
-        run: python scripts/check_reference_catalog_ui.py
+      - name: Diagnose real HTTP and Next connection lifetimes
+        run: |
+          python - <<'PYCODE'
+          import os
+          import shutil
+          from pathlib import Path
+          source = Path(os.environ["ERP_POOL_DRIVER_ROOT"]) / "ops/erp-ready-pool"
+          target = Path(os.environ["RUNNER_TEMP"]) / "erp-ready-pool"
+          shutil.copytree(source, target)
+          PYCODE
+          python "$RUNNER_TEMP/erp-ready-pool/G12LH-run-pool.py"
       - name: Numerical result only
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: erp-ready-catalogue-summary
-          path: ${{ runner.temp }}/erp-ready-catalogue-summary.json
+          name: erp-ready-pool-summary
+          path: ${{ runner.temp }}/erp-ready-pool-summary.json
           if-no-files-found: error
           retention-days: 7

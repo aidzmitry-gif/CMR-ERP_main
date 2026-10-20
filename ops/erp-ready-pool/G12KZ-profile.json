@@ -1,0 +1,93 @@
+{
+  "kind": "ERP_READY_PRIVATE_POOL3_V1",
+  "status": "PREPARATION_ONLY_NO_RUNTIME_ACTIVATION",
+  "sourceRootName": "erp-ready-001-ci-lint",
+  "head": "6e8f316862b968dd0efcd05b4e77f2e4415294e4",
+  "modulePins": {
+    "finance": "59832b2f14a2ee02d8db266a67f8206616bdcd94",
+    "hr": "f8a6e0142f1920b07ec56818f42d156a602ff9c3",
+    "leads": "9a304f771ba74369ded199168e0e1da3ad6348d2",
+    "logistics": "6923d2e021980ef2546f382364d38dc34a0fef29",
+    "marketing": "d4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282",
+    "procurement": "f29ea84bd13342ae572e8c4499031d2f053d3d47",
+    "production": "be7d7e198bf09cc41c642d22125db401da5adc48",
+    "sales": "e949028b40ec59fc8a01b40fcd13424b82fbaae2",
+    "service": "3d33800c44865cd7a7373b29192c5d59d3c4bec8",
+    "wms": "444d84831324db50bc377d6cd5e3c0d7979644e0"
+  },
+  "sourceSHA256": {
+    "frontend/e2e/backend.py": "a7b1ecbdd876e19542783516cfedfd0f8071d9c310ff8e7a4057a6417b53fc45",
+    "frontend/playwright.config.ts": "f255cf17a67f3f874ef4bcf6ed499a20bb80ae8623c39b2947a132575a45b319",
+    "frontend/src/app/api/[...path]/route.ts": "e847536bc79d9201a19501a26f237607f6b5bf4c82f33be5cb8f80effadc8839",
+    "frontend/src/app/api/auth/login/route.ts": "1289e9128a7b7d3fe903a7552bf054bfc35a80b3b74354ed93d2715517045802",
+    "frontend/src/lib/api-proxy-headers.ts": "bb638c8fc831d126317796e42504f161b707d56d911cd67256b937e76f0270ee",
+    "frontend/src/lib/role-server.ts": "03e9a68b83feed9643bb77877d75c4282d8e54e96803b68b89a17fadb67f7f38",
+    "frontend/src/lib/auth-session-server.ts": "f5e6ecff74b0d725c6b7fe0f576d407035d9d22922c0471b4c6a0b63f90dd10d",
+    "frontend/src/lib/auth-mode.ts": "9bcad75ae792a439e5db82cb50d42f27e4280c3eafe14cc84f08f0a5470a443d",
+    "frontend/package.json": "738dd786cbd85052d05f365451504fa8345a306c8769906a00b25016a93b0eda",
+    "frontend/package-lock.json": "06346becd5f38c81e385a8633e7f49760a94af56c841be2f74052a2cb398e0cd",
+    "core/services/db.py": "9d821623815a41947db61cf3f32048135237b49b67cbd69117b4f03486e23500",
+    "core/services/crm_access.py": "530bfc924e9838f86058b9d81ee9d02e71d114c1bb673ae657863fe577ed4713",
+    "core/services/auth.py": "158f66802ef5af0e6337e97a45eac2de3f722d691df90c2f83b6f0b2fba2c89c",
+    "core/runtime/deps.py": "b73217d72ccb9c3f011c5a331c0279fabf89a278bdc0ed9214d77d476e513636",
+    "core/runtime/app.py": "8a8f2a821f050d7f0c36ea592814bbcde253fd26ef66cb5fd2fabca9ccd8bd38",
+    "core/runtime/system_routes.py": "b50827e60f6babcbed7a2f8c10eb08ae4b144c95e1c54dd3d54bd394495a5c9f",
+    "config/settings.py": "5712caeda80cc397bfd995141f29cc5c248835718c0dc0075796fc0c43b167a4",
+    "config/access.py": "15050fe945f248c8ee3899fd72dee3233a92346908d2e998c758737ba148fd01",
+    "modules/sales/routes.py": "dc201fa5067039946e8dc400ed8de13187ead33c439f5dfbd69e7363f6bcf083",
+    "modules/sales/access.py": "69a3458dbac3ffa6e95e22c756106adf2118e07ffe5f120e363a2292269615c7",
+    "modules/sales/calls.py": "f3db8735b6330506fd3ae728a3fd88ccac2246f210c14efc9bd1279837e4a196",
+    "modules/sales/models.py": "19de0381028040aaad425c4ca68c53f78a45fc5aeb08507987727e7ff77eff48",
+    "requirements.txt": "119d8759052167b8bdd56aa5b6b01f2704c73816bb2e5e62b7a60a84d96ee4cc",
+    "requirements-dev.txt": "8f929f0992643b9814e6a4f820bf6d13658ecee6e744b8fbef906fd20bb694b0",
+    "scripts/check_reference_catalog_ui.py": "88a38a7a9d22626e4d562bf63c1bcd9e2ab44a7e6d1df8df4cfe7dc60e39a1cb"
+  },
+  "fragmentSHA256": "d6b2d75a902f18b82d72ced0899ab93ac3a8cee25e8470757b655ee6903a98f2",
+  "backendPort": 18473,
+  "frontendPort": 18474,
+  "expectedPoolClassId": 1,
+  "expectedPoolSize": 5,
+  "expectedPoolMaxOverflow": 10,
+  "observedPackageVersions": null,
+  "runtimeEquivalence": "UNKNOWN_UNTIL_MEASURED_AND_COMPARED",
+  "cases": [
+    "KV_POOL_01_fresh_director_marker_and_db_counts",
+    "KV_POOL_02_HTTP_sales_SSE_abort_cleanup",
+    "KV_POOL_03_Next_proxy_SSE_context_teardown_cleanup"
+  ],
+  "runtimeActivationGates": [
+    "CURRENT_MAIN_CI_TERMINAL_DIAGNOSIS",
+    "INDEPENDENT_ASTRA_PREFLIGHT",
+    "REVIEWED_EXISTING_CONTROLLER_KERNEL_ADAPTATION",
+    "OWNED_DB_PORTS_SOURCE_MODULE_CLEANUP_RECEIPTS"
+  ],
+  "forbidden": [
+    "production_requests",
+    "auth_bypass",
+    "larger_pool",
+    "timeouts_raised",
+    "raw_headers_cookies_tokens_bodies",
+    "app_or_DB_launch_during_preparation"
+  ],
+  "canonicalSourceProvenance": {
+    "rootHead": "6e8f316862b968dd0efcd05b4e77f2e4415294e4",
+    "modulePins": {
+      "finance": "59832b2f14a2ee02d8db266a67f8206616bdcd94",
+      "hr": "f8a6e0142f1920b07ec56818f42d156a602ff9c3",
+      "leads": "9a304f771ba74369ded199168e0e1da3ad6348d2",
+      "logistics": "6923d2e021980ef2546f382364d38dc34a0fef29",
+      "marketing": "d4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282",
+      "procurement": "f29ea84bd13342ae572e8c4499031d2f053d3d47",
+      "production": "be7d7e198bf09cc41c642d22125db401da5adc48",
+      "sales": "e949028b40ec59fc8a01b40fcd13424b82fbaae2",
+      "service": "3d33800c44865cd7a7373b29192c5d59d3c4bec8",
+      "wms": "444d84831324db50bc377d6cd5e3c0d7979644e0"
+    },
+    "checked": 25,
+    "rawWindowsMatches": 19,
+    "lineEndingOnlyDifferences": 6,
+    "sourceFilesRewritten": 0,
+    "proof": "G12LH-canonical25.json + G12LH-canonical-difference-shape.json"
+  },
+  "driverBundlePath": "ops/erp-ready-pool"
+}

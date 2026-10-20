@@ -1,0 +1,12 @@
+{
+  "kind": "ERP_READY_POOL3_BUNDLE_V1",
+  "files": {
+    "G12KZ-backend.py": "bb9239f0c86bb63197ae0f1167e6078df979c8bb1516e88a308e6311583304a8",
+    "G12KZ-observer-fragment.py": "d6b2d75a902f18b82d72ced0899ab93ac3a8cee25e8470757b655ee6903a98f2",
+    "G12KZ-playwright.config.cjs": "ca6bbe35e8174d21a875c1ade7c61c4bf24ab3175686412126c36ae8a7c2a5c1",
+    "G12KZ-pool.spec.cjs": "9e75668c7ec59da0d7079eb72d605fb1c629ec1f7e0b11bbe5eae8c30bf02536",
+    "G12KZ-profile.json": "80d6c147a243daf83e6dadd7573f18e4436020373cdddb0e0f316f5006b29ebb",
+    "G12LH-run-pool.py": "5540cb510262fc89306c0dbd3c3cd26f16eb0c944fec7b3a2b1924eeeea3a17e",
+    "G12LJ-kernel.py": "7bc3074c5dde9be423819938ccbff6d41f81a6edf566760657de3e5ec771e8f8"
+  }
+}
