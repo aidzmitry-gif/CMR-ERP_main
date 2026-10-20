@@ -32,7 +32,7 @@ async function proxy(req: NextRequest, segments: string[]): Promise<Response> {
   const headers = buildBackendProxyHeaders(req.headers, { devRole: role, devUsername: await currentDevUsername(), accessToken: accessToken ?? undefined });
 
   const attachmentDownload = req.method === "GET" && isTimelineAttachmentDownload(segments);
-  const init: RequestInit = { method: req.method, headers, cache: "no-store" };
+  const init: RequestInit = { method: req.method, headers, cache: "no-store", signal: req.signal };
   if (attachmentDownload) {
     // This route serves full downloads only; do not request a partial body that
     // would need Content-Range/If-Range semantics in the browser response.
