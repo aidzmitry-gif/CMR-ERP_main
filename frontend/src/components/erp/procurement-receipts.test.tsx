@@ -1028,7 +1028,7 @@ it.each(["organization", "document"])("keeps the form and durable command when a
       return { ok: true, json: async () => ({ ...row, organization_id: part === "organization" ? 8 : 7, version: 2,
         revisions: [...row.revisions, { version: 2, request_key: command.key, actor: "buyer", created_at: "2026-09-25", document: returnedDocument }] }) };
     }
-    return { ok: true, json: async () => url.includes("purchase-ownership") ? [] : url.includes("supplier-contracts") ? emptyContracts(url) : [row] };
+    return { ok: true, json: async () => url.includes("receipt-warehouse-options") ? emptyWarehouses(url) : url.includes("purchase-ownership") ? [] : url.includes("supplier-contracts") ? emptyContracts(url) : [row] };
   }));
   render(<ProcurementReceiptDrafts org="7" />);
   fireEvent.click(await screen.findByRole("button", { name: /INV-OLD/ }));
@@ -1053,7 +1053,7 @@ it("restores an unknown receipt edit after reload and retries the exact durable 
       return { ok: true, json: async () => ({ ...row, organization_id: 7, version: 2,
         revisions: [...row.revisions, { version: 2, request_key: command.key, actor: "buyer", created_at: "2026-09-25", document: command.document }] }) };
     }
-    return { ok: true, json: async () => url.includes("purchase-ownership") ? [] : url.includes("supplier-contracts") ? emptyContracts(url) : [row] };
+    return { ok: true, json: async () => url.includes("receipt-warehouse-options") ? emptyWarehouses(url) : url.includes("purchase-ownership") ? [] : url.includes("supplier-contracts") ? emptyContracts(url) : [row] };
   });
   vi.stubGlobal("fetch", fetcher);
   const first = render(<ProcurementReceiptDrafts org="7" />);
@@ -1069,7 +1069,9 @@ it("restores an unknown receipt edit after reload and retries the exact durable 
   expect(await screen.findByText("Восстановлена неподтверждённая попытка сохранения. Повтор использует тот же ключ и те же реквизиты.")).toBeInTheDocument();
   expect(screen.queryByText("Загрузка накладной из ссылки…")).not.toBeInTheDocument();
   expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("INV-RELOAD");
-  fireEvent.click(screen.getByRole("button", { name: "Повторить подтверждение той же редакции" }));
+  const retry = screen.getByRole("button", { name: "Повторить подтверждение той же редакции" });
+  await waitFor(() => expect(retry).toBeEnabled());
+  fireEvent.click(retry);
   expect(await screen.findByText("Накладная № 41: сохранена версия 2, форма закрыта.")).toBeInTheDocument();
   expect(commands).toHaveLength(2);
   expect(commands[1]).toBe(commands[0]);
@@ -1086,7 +1088,7 @@ it.each([
     revisions: [{ version: 1, actor: "buyer", created_at: "2026-09-24", document }] };
   sessionStorage.setItem("procurement-receipt-save:v1:7", journal);
   const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () =>
-    url.includes("purchase-ownership") ? [] : url.includes("supplier-contracts") ? emptyContracts(url) : [row] }));
+    url.includes("receipt-warehouse-options") ? emptyWarehouses(url) : url.includes("purchase-ownership") ? [] : url.includes("supplier-contracts") ? emptyContracts(url) : [row] }));
   vi.stubGlobal("fetch", fetcher);
 
   render(<ProcurementReceiptDrafts org="7" initialReceipt="41" />);
@@ -1104,7 +1106,7 @@ it("does not turn a restored edit into a create when its source receipt is absen
     closeAfterSave: true, document: durableReceiptDocument("INV-MISSING") });
   sessionStorage.setItem("procurement-receipt-save:v1:7", journal);
   const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () =>
-    url.includes("supplier-contracts") ? emptyContracts(url) : [] }));
+    url.includes("receipt-warehouse-options") ? emptyWarehouses(url) : url.includes("supplier-contracts") ? emptyContracts(url) : [] }));
   vi.stubGlobal("fetch", fetcher);
 
   render(<ProcurementReceiptDrafts org="7" />);
@@ -1126,7 +1128,7 @@ it("blocks posting and warehouse intake until a restored edit gets its exact sav
     revisions: [{ version: 2, request_key: "receipt-awaiting-ack", actor: "buyer", created_at: "2026-09-25", document }] };
   sessionStorage.setItem("procurement-receipt-save:v1:7", journal);
   vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, json: async () =>
-    url.includes("purchase-ownership") ? [] : url.includes("supplier-contracts") ? emptyContracts(url) : [row] })));
+    url.includes("receipt-warehouse-options") ? emptyWarehouses(url) : url.includes("purchase-ownership") ? [] : url.includes("supplier-contracts") ? emptyContracts(url) : [row] })));
 
   render(<ProcurementReceiptDrafts org="7" policyId={1} date="2026-09-25" />);
   expect(await screen.findByText("Сначала подтвердите исход сохранения этой редакции. Проведение и складская приёмка заблокированы.")).toBeInTheDocument();
@@ -1147,7 +1149,7 @@ it.each([
     ? { ok: true, json: async () => ({ ...row, id: returnedId, version: returnedVersion,
       revisions: returnedVersion === 1 ? row.revisions : [...row.revisions,
         { version: 2, actor: "buyer", created_at: "2026-09-24", document: original }] }) }
-    : { ok: true, json: async () => _url.includes("purchase-ownership") ? [] : _url.includes("supplier-contracts") ? emptyContracts(_url) : [row] }));
+    : { ok: true, json: async () => _url.includes("receipt-warehouse-options") ? emptyWarehouses(_url) : _url.includes("purchase-ownership") ? [] : _url.includes("supplier-contracts") ? emptyContracts(_url) : [row] }));
   render(<ProcurementReceiptDrafts org="7" />);
   fireEvent.click(await screen.findByRole("button", { name: /INV-OLD/ }));
   fireEvent.change(screen.getByLabelText("Номер первичной накладной"), { target: { value: "INV-EDIT" } });

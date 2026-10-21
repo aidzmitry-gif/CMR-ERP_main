@@ -59,15 +59,16 @@ function Fields({ org, effectiveDate, onChange, enabled, onEnabledChange }: Fiel
   function reloadAccounts() { setAccounts(null); setError(""); setRetry(n => n + 1); }
   const resultAccount = accounts?.find(a => a.code === result);
   const retainedAccount = accounts?.find(a => a.code === retained);
-  const selection = useMemo<ClosingSelection>(() => {
+  const value = useMemo<FinancialClosing | null>(() => {
     const codes = [...monthly, result, retained];
     const valid = accounts && monthly.length >= 1 && monthly.length <= 200 && new Set(codes).size === codes.length &&
       monthly.every(code => accounts.some(a => a.code === code && eligible(a, ["income", "expense"]))) &&
       resultAccount && eligible(resultAccount, ["income"]) && retainedAccount && eligible(retainedAccount, ["equity"]) &&
       validDimensions(resultAccount, resultDimensions) && validDimensions(retainedAccount, retainedDimensions) &&
       /^(?:[1-9]|1[0-2])$/.test(month) && (treatment === "include" || treatment === "exclude") && reference.trim().length > 0 && reference.length <= 1000;
-    return { scope, enabled, value: valid ? { monthly_accounts: monthly, result_account: result, retained_earnings_account: retained, year_end_month: Number(month), result_dimensions: resultDimensions, retained_dimensions: retainedDimensions, opening_balance_treatment: treatment as "include" | "exclude", reference } : null };
-  }, [scope, enabled, accounts, monthly, result, retained, resultAccount, retainedAccount, resultDimensions, retainedDimensions, month, treatment, reference]);
+    return valid ? { monthly_accounts: monthly, result_account: result, retained_earnings_account: retained, year_end_month: Number(month), result_dimensions: resultDimensions, retained_dimensions: retainedDimensions, opening_balance_treatment: treatment as "include" | "exclude", reference } : null;
+  }, [accounts, monthly, result, retained, resultAccount, retainedAccount, resultDimensions, retainedDimensions, month, treatment, reference]);
+  const selection = useMemo<ClosingSelection>(() => ({ scope, enabled, value }), [scope, enabled, value]);
   useLayoutEffect(() => { onChange(selection); }, [selection, onChange]);
   function analytics(account: Account | undefined, target: string, values: Record<string, string>, change: (v: Record<string, string>) => void) {
     if (!account) return null;
