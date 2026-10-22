@@ -106,8 +106,8 @@ function stubFetch(data: unknown, ok = true) {
 
 describe("registry lookup — строгий контракт ГРП МНС", () => {
   const data = {
-    unp: "100582333", name: "МНС", address: "Минск", status: "Действующий",
-    source: "mns_grp", source_url: "https://grp.nalog.gov.by/api/grp-public/data?unp=100582333",
+    unp: "190000007", name: "МНС", address: "Минск", status: "Действующий",
+    source: "mns_grp", source_url: "https://grp.nalog.gov.by/api/grp-public/data?unp=190000007",
     fetched_at: "2026-09-08T12:00:00Z",
   };
 
@@ -119,11 +119,11 @@ describe("registry lookup — строгий контракт ГРП МНС", ()
 
   it("проверяет совпадение УНП и сохраняет метаданные", async () => {
     const fetchMock = response(data);
-    expect(await lookupCounterpartyResult(" 100582333 ")).toEqual({ status: "found", data });
-    expect(fetchMock).toHaveBeenCalledWith("/api/integrations/egr/100582333", { cache: "no-store" });
+    expect(await lookupCounterpartyResult(" 190000007 ")).toEqual({ status: "found", data });
+    expect(fetchMock).toHaveBeenCalledWith("/api/integrations/egr/190000007", { cache: "no-store" });
   });
 
-  it.each(["", "123", "x100582333", "100582333x", "１００５８２３３３", "١٠٠٥٨٢٣٣٣"])("не отправляет невалидный УНП %s", async (unp) => {
+  it.each(["", "123", "x190000007", "190000007x", "１９００００００７", "١٩٠٠٠٠٠٠٧"])("не отправляет невалидный УНП %s", async (unp) => {
     const fetchMock = response(data);
     expect(await lookupCounterpartyResult(unp)).toMatchObject({ status: "bad_input" });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -137,40 +137,40 @@ describe("registry lookup — строгий контракт ГРП МНС", ()
     [500, undefined, "upstream_error"],
   ])("HTTP %s %s возвращает отдельный статус %s", async (status, code, expected) => {
     response({ detail: { code } }, status as number);
-    expect(await lookupCounterpartyResult("100582333")).toMatchObject({ status: expected });
+    expect(await lookupCounterpartyResult("190000007")).toMatchObject({ status: expected });
   });
 
   it("ограничивает Retry-After и не повторяет запрос", async () => {
     const fetchMock = response({}, 429, { "Retry-After": "999999" });
-    expect(await lookupCounterpartyResult("100582333")).toMatchObject({ status: "rate_limited", retryAfter: 300 });
+    expect(await lookupCounterpartyResult("190000007")).toMatchObject({ status: "rate_limited", retryAfter: 300 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("транспортная ошибка не означает not_found", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
-    expect(await lookupCounterpartyResult("100582333")).toMatchObject({ status: "network_error" });
-    expect(await lookupCounterparty("100582333")).toBeNull();
+    expect(await lookupCounterpartyResult("190000007")).toMatchObject({ status: "network_error" });
+    expect(await lookupCounterparty("190000007")).toBeNull();
   });
 
   it.each([
-    null, [], {}, { ...data, unp: "191234567" }, { ...data, name: "" }, { ...data, address: null },
+    null, [], {}, { ...data, unp: "190000008" }, { ...data, name: "" }, { ...data, address: null },
     { ...data, source: "egr" }, { ...data, fetched_at: "invalid" },
     { ...data, fetched_at: "2026-09-08T12:00:00" }, { ...data, source_url: null },
     { ...data, source: "demo" },
   ])("не принимает неполный или чужой ответ %#", async (body) => {
     response(body);
-    expect(await lookupCounterpartyResult("100582333")).toMatchObject({ status: "invalid_upstream" });
+    expect(await lookupCounterpartyResult("190000007")).toMatchObject({ status: "invalid_upstream" });
   });
 
   it("невалидный JSON не маскируется транспортной ошибкой", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html>error</html>")));
-    expect(await lookupCounterpartyResult("100582333")).toMatchObject({ status: "invalid_upstream" });
+    expect(await lookupCounterpartyResult("190000007")).toMatchObject({ status: "invalid_upstream" });
   });
 
   it("demo сохраняет честный источник, без URL официального реестра", async () => {
     const demo = { ...data, source: "demo", source_url: null };
     response(demo);
-    expect(await lookupCounterpartyResult("100582333")).toEqual({ status: "found", data: demo });
+    expect(await lookupCounterpartyResult("190000007")).toEqual({ status: "found", data: demo });
   });
 });
 
@@ -482,9 +482,9 @@ describe("api client — документы/сообщения/согласов�
     expect((await fetchDealItems("1"))[0].qty).toBe(2);
     stubFetch({}, true);
     expect(await addDealItem("1", 1, 2)).toBe(true);
-    stubFetch({ unp: "191234567", name: "ООО", address: "Минск", status: "Действующий",
+    stubFetch({ unp: "190000008", name: "ООО", address: "Минск", status: "Действующий",
       source: "demo", source_url: null, fetched_at: "2026-09-08T12:00:00Z" });
-    expect((await lookupCounterparty("191234567"))?.name).toBe("ООО");
+    expect((await lookupCounterparty("190000008"))?.name).toBe("ООО");
     stubFetch([{ id: 1, event_type: "sales.deal.created", created_at: "x", processed: false }]);
     expect((await fetchEvents())[0].event_type).toBe("sales.deal.created");
     stubFetch([]);
@@ -792,6 +792,30 @@ describe("api client — склад/цена/позиции/задачи/при�
     expect(row.cost).toBe(150);
     stubFetch({}, false);
     expect(await fetchStock()).toEqual([]);
+  });
+
+  it.each([401, 403, 503])("fetchStock keeps HTTP %s unknown without integration fallback", async (status) => {
+    const fetcher = vi.fn().mockResolvedValue({ ok: false, status });
+    vi.stubGlobal("fetch", fetcher);
+    expect(await fetchStock()).toEqual([]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledWith("/api/sales/picker-stock", { cache: "no-store" });
+  });
+
+  it.each([null, {}, "invalid"])("fetchStock rejects a non-array snapshot %j", async (body) => {
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => body });
+    vi.stubGlobal("fetch", fetcher);
+    expect(await fetchStock()).toEqual([]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledWith("/api/sales/picker-stock", { cache: "no-store" });
+  });
+
+  it("fetchStock keeps network failure unknown without retrying another route", async () => {
+    const fetcher = vi.fn().mockRejectedValue(new Error("offline"));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await fetchStock()).toEqual([]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledWith("/api/sales/picker-stock", { cache: "no-store" });
   });
 
   it("createPriceQuote шлёт корректное тело на /api/sales/prices", async () => {

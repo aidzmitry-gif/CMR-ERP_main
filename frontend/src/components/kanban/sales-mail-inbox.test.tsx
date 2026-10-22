@@ -1,7 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "@/lib/api";
-import * as crmDirectory from "@/lib/crm-directory";
 import * as salesMail from "@/lib/sales-mail-api";
 import { SalesMailInbox } from "./sales-mail-inbox";
 
@@ -9,12 +8,11 @@ vi.mock("@/lib/sales-mail-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/sales-mail-api")>("@/lib/sales-mail-api");
   return { ...actual, fetchInboxPage: vi.fn(), fetchInboxDetail: vi.fn(), fetchSalesDeals: vi.fn(), assignInboxEmail: vi.fn() };
 });
-vi.mock("@/lib/api", () => ({ createDeal: vi.fn(), linkCrmClientToCounterparty: vi.fn() }));
-vi.mock("@/lib/crm-directory", () => ({ loadDirectory: vi.fn() }));
+vi.mock("@/lib/api", () => ({ createDeal: vi.fn(), linkCrmClientToCounterparty: vi.fn(), fetchBuyerOptions: vi.fn() }));
 
 const item = {
   receipt_id: "receipt-1", direction: "incoming" as const, deal_id: null, owner_id: null, owner: null,
-  sender: "client@example.test", to: ["order@microchips.by"], cc: [], subject: "Нужен счёт",
+  sender: "client@example.test", to: ["orders@example.test"], cc: [], subject: "Нужен счёт",
   received_at: "2026-09-09T01:00:00Z", message_date: null, message_id: "<incoming@example.test>",
   routing_status: "unmatched", routing_reason: "unknown_chain", attachments: [],
 };
@@ -25,6 +23,7 @@ const deal = { id: 42, number: "CRM-42", title: "Запрос документо
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(api.fetchBuyerOptions).mockResolvedValue({ status: "ok", rows: [], total: 0 });
   vi.mocked(salesMail.fetchInboxPage).mockResolvedValue({ items: [item], next_offset: null });
   vi.mocked(salesMail.fetchInboxDetail).mockResolvedValue(detail);
   vi.mocked(salesMail.fetchSalesDeals).mockResolvedValue([deal]);
@@ -64,8 +63,8 @@ describe("SalesMailInbox", () => {
 
   it("сохраняет ID новой сделки и повторяет assignment без повторного create", async () => {
     vi.mocked(api.createDeal).mockResolvedValue({ id: "42" } as never);
-    vi.mocked(crmDirectory.loadDirectory).mockResolvedValue({ status: "ok", rows: [
-      { id: 41, name: "ООО Клиент", unp: "123456789", is_active: true, deal_id: null },
+    vi.mocked(api.fetchBuyerOptions).mockResolvedValue({ status: "ok", rows: [
+      { id: 41, name: "ООО Клиент", unp: "123456789" },
     ], total: 1 });
     vi.mocked(api.linkCrmClientToCounterparty).mockResolvedValue({
       id: 72, name: "ООО Клиент", owner_id: 34, counterparty_id: 41,
@@ -91,7 +90,7 @@ describe("SalesMailInbox", () => {
     expect(screen.queryByRole("button", { name: "Создать", exact: true })).toBeNull();
     expect(api.createDeal).toHaveBeenCalledTimes(1);
     expect(api.linkCrmClientToCounterparty).toHaveBeenCalledWith(41, expect.any(String), undefined);
-    expect(api.createDeal).toHaveBeenCalledWith(expect.objectContaining({ crm_client_id: 72, counterparty: "ООО Клиент" }));
+    expect(api.createDeal).toHaveBeenCalledWith(expect.objectContaining({ crm_client_id: 72, counterparty_id: 41, owner_id: 34, counterparty: "ООО Клиент" }));
     fireEvent.click(screen.getByRole("button", { name: /Вторая заявка/ }));
     await screen.findByText("Вторая заявка");
     fireEvent.click(screen.getByRole("button", { name: /Нужен счёт/ }));

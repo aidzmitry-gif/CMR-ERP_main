@@ -149,7 +149,7 @@ export async function seedInvoiceFacts(chief: Page, dealId: number, buyer: Buyer
   const seeded = JSON.parse(execFileSync(seedExecutable, seedArgs, {
     cwd: resolve(process.cwd(), ".."), input: JSON.stringify({ deal_id: dealId, actor,
       organization_id: org.id, buyer_id: buyer.id }),
-    env: { ...process.env, AIOS_E2E_SEED: "1" }, encoding: "utf8",
+    env: { ...process.env, AIOS_E2E_SEED: "1", AIOS_SELLER_UNP: sellerUnp }, encoding: "utf8",
   })) as Seeded;
   expect(seeded).toMatchObject({ organization: org.id, buyer: buyer.id, sku: `E2E-INV-${dealId}` });
   const versions = await chief.request.get(`/api/accounting/organizations/${org.id}/seller-profiles`);

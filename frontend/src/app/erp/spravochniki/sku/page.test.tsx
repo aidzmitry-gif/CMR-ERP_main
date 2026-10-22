@@ -33,7 +33,6 @@ vi.mock("next/link", () => ({
 }));
 
 import SkuCatalogPage from "./page";
-import CrmCatalogPage from "@/app/crm/catalog/page";
 import { CATALOG_ROW_LIMIT } from "@/lib/reference-data";
 
 const authHeaders = {
@@ -67,7 +66,6 @@ beforeEach(() => {
 
 describe.each([
   ["ERP", SkuCatalogPage, "/erp/spravochniki/sku"],
-  ["CRM", CrmCatalogPage, "/crm/catalog"],
 ] as const)("%s catalog page", (_name, Page, baseHref) => {
   async function renderPage(params: Record<string, string | string[] | undefined> = {}) {
     return render(await Page({ searchParams: Promise.resolve(params) }));
@@ -91,7 +89,6 @@ describe.each([
     expect(container.querySelector("form")).toHaveAttribute("action", baseHref);
     expect(screen.queryByRole("button", { name: /Перенести в счёт|Подобрать/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/АКБ 6СТ-190|В пути, шт|Минск \(центр/)).not.toBeInTheDocument();
-    if (_name === "CRM") expect(screen.getByText(/Цены и остатки по складам здесь пока неизвестны/)).toBeInTheDocument();
   });
 
   it("[PAGE-403] renders an unavailable source after an authenticated 403", async () => {

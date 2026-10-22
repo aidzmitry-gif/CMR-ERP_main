@@ -623,9 +623,10 @@ export interface StockRow {
 /** Остатки и цены по складам (для подбора товара со склада в окне звонка). */
 export async function fetchStock(): Promise<StockRow[]> {
   try {
-    const res = await fetch("/api/integrations/1c/stock", { cache: "no-store" });
+    const res = await fetch("/api/sales/picker-stock", { cache: "no-store" });
     if (!res.ok) return [];
-    return (await res.json()) as StockRow[];
+    const rows: unknown = await res.json();
+    return Array.isArray(rows) ? rows as StockRow[] : [];
   } catch {
     return [];
   }

@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/api", async (original) => ({
@@ -6,11 +7,12 @@ vi.mock("@/lib/api", async (original) => ({
   fetchStock: vi.fn(), fetchDealItems: vi.fn(), addDealItem: vi.fn(),
   createPriceQuote: vi.fn(), requestApproval: vi.fn(),
 }));
+vi.mock("@/components/app-shell", () => ({ AppShell: ({ children }: { children: ReactNode }) => <div data-testid="catalog-shell">{children}</div> }));
 const { currencyFormat } = vi.hoisted(() => ({ currencyFormat: vi.fn() }));
 vi.mock("@/components/kanban/currency-context", () => ({ useCurrency: () => ({ fmt: currencyFormat }) }));
 
 import * as api from "@/lib/api";
-import { CrmProductCatalog } from "./crm-product-catalog";
+import CrmCatalogPage from "@/app/crm/catalog/page";
 
 const skus = [
   { id: 17, code: "BATTERY-A", title: "Учебная батарея А", unit: "шт" },
@@ -68,21 +70,22 @@ async function pick(index = 0, qty = 3) {
 function transfer() { fireEvent.click(screen.getAllByRole("button", { name: "Перенести в документ", exact: true })[0]); }
 
 it("shows real Sales products without auto-selecting a deal or requesting ERP references", async () => {
-  render(<CrmProductCatalog />);
+  render(<CrmCatalogPage />);
   expect(await screen.findByText(skus[0].title)).toBeInTheDocument();
+  expect(screen.getByTestId("catalog-shell")).toBeInTheDocument();
   expect(screen.getByLabelText("Сделка для подбора")).toHaveValue("");
   expect(screen.getByRole("button", { name: "Подобрать товары" })).toBeDisabled();
   expect(screen.queryByRole("link", { name: /дерево категорий/ })).not.toBeInTheDocument();
   expect(fetcher.mock.calls.every(([url]) => url.startsWith("/api/sales/"))).toBe(true);
 });
 it("finds a product by its actual code", async () => {
-  render(<CrmProductCatalog />); await screen.findByText(skus[0].title);
+  render(<CrmCatalogPage />); await screen.findByText(skus[0].title);
   fireEvent.change(screen.getByLabelText("Поиск товара"), { target: { value: "battery-b" } });
   expect(screen.getByText(skus[1].title)).toBeInTheDocument();
   expect(screen.queryByText(skus[0].title)).not.toBeInTheDocument();
 });
 it("finds by name and restores the list when search is cleared", async () => {
-  render(<CrmProductCatalog />); await screen.findByText(skus[0].title);
+  render(<CrmCatalogPage />); await screen.findByText(skus[0].title);
   fireEvent.change(screen.getByLabelText("Поиск товара"), { target: { value: "батарея А" } });
   expect(screen.queryByText(skus[1].title)).not.toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Поиск товара"), { target: { value: "" } });
@@ -90,46 +93,46 @@ it("finds by name and restores the list when search is cleared", async () => {
 });
 it("paginates and resets to the first page for a new search", async () => {
   catalog = Array.from({ length: 51 }, (_, i) => ({ id: i + 1, code: `S-${i}`, title: `Учебный товар ${i}`, unit: "шт" }));
-  render(<CrmProductCatalog />); await screen.findByText("Учебный товар 0");
+  render(<CrmCatalogPage />); await screen.findByText("Учебный товар 0");
   fireEvent.click(screen.getByRole("button", { name: "Далее" }));
   expect(screen.getByText("Учебный товар 50")).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Поиск товара"), { target: { value: "товар 0" } });
   expect(screen.getByText("Учебный товар 0")).toBeInTheDocument();
 });
 it("distinguishes a confirmed empty catalogue", async () => {
-  catalog = []; render(<CrmProductCatalog />);
+  catalog = []; render(<CrmCatalogPage />);
   expect(await screen.findByText("В каталоге пока нет товаров.")).toBeInTheDocument();
   expect(screen.getByText("Найдено товаров: 0")).toBeInTheDocument();
 });
 it("distinguishes no search matches from an empty source", async () => {
-  render(<CrmProductCatalog />); await screen.findByText(skus[0].title);
+  render(<CrmCatalogPage />); await screen.findByText(skus[0].title);
   fireEvent.change(screen.getByLabelText("Поиск товара"), { target: { value: "missing" } });
   expect(screen.getByText("По вашему запросу товары не найдены.")).toBeInTheDocument();
   expect(screen.queryByText("В каталоге пока нет товаров.")).not.toBeInTheDocument();
 });
 it.each([401, 403, 503, "network"] as const)("does not claim zero products after %s", async (value) => {
-  failure = value; render(<CrmProductCatalog />);
+  failure = value; render(<CrmCatalogPage />);
   expect(await screen.findByRole("alert")).toHaveTextContent(value === 401 || value === 403 ? "Каталог продаж недоступен" : "Количество товаров неизвестно");
   expect(screen.queryByText("Найдено товаров: 0")).not.toBeInTheDocument();
 });
 it("rejects malformed catalogue data instead of rendering partial rows", async () => {
-  catalog = [skus[0], { ...skus[1], id: null }]; render(<CrmProductCatalog />);
+  catalog = [skus[0], { ...skus[1], id: null }]; render(<CrmCatalogPage />);
   expect(await screen.findByRole("alert")).toHaveTextContent("Количество товаров неизвестно");
   expect(screen.queryByText(skus[0].title)).not.toBeInTheDocument();
 });
 it("does not allow selection when accessible deals failed to load", async () => {
-  dealsFail = true; render(<CrmProductCatalog />);
+  dealsFail = true; render(<CrmCatalogPage />);
   expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить доступные сделки");
   expect(screen.getByRole("button", { name: "Подобрать товары" })).toBeDisabled();
 });
 it("does not invent a deal for an empty accessible list", async () => {
-  availableDeals = []; render(<CrmProductCatalog />);
+  availableDeals = []; render(<CrmCatalogPage />);
   expect(await screen.findByRole("link", { name: "Открыть сделки" })).toHaveAttribute("href", "/crm/deals");
   expect(screen.getByRole("button", { name: "Подобрать товары" })).toBeDisabled();
 });
 it("opens the existing picker for an explicit deal and clears its basket before another deal", async () => {
   failure = 503;
-  render(<CrmProductCatalog />); await selectDeal(); failure = null; await openPicker(); await pick();
+  render(<CrmCatalogPage />); await selectDeal(); failure = null; await openPicker(); await pick();
   expect(screen.getByLabelText("Сделка для подбора")).toBeDisabled();
   expect(screen.getByRole("button", { name: "Повторить загрузку" })).toBeDisabled();
   fireEvent.click(within(screen.getByRole("dialog", { name: "Подбор товара", exact: true })).getByRole("button", { name: "Отмена", exact: true }));
@@ -139,7 +142,7 @@ it("opens the existing picker for an explicit deal and clears its basket before 
 });
 it("transfers the exact SKU and quantity to the selected deal and shows its readback", async () => {
   currencyFormat.mockImplementation((v: number) => `${(v / 2).toFixed(2)} EUR`);
-  render(<CrmProductCatalog />); await selectDeal(); await openPicker(); await pick(); transfer();
+  render(<CrmCatalogPage />); await selectDeal(); await openPicker(); await pick(); transfer();
   expect(await screen.findByText("Товары выбранной сделки")).toBeInTheDocument();
   expect(api.addDealItem).toHaveBeenCalledWith("101", 17, 3, 25, expect.any(String));
   expect(api.fetchDealItems).toHaveBeenCalledWith("101", { throwOnError: true });
@@ -149,7 +152,7 @@ it("transfers the exact SKU and quantity to the selected deal and shows its read
 });
 it("keeps the basket and original deal when the server refuses transfer", async () => {
   vi.mocked(api.addDealItem).mockResolvedValue(false);
-  render(<CrmProductCatalog />); await selectDeal(); await openPicker(); await pick(); transfer();
+  render(<CrmCatalogPage />); await selectDeal(); await openPicker(); await pick(); transfer();
   expect(await screen.findByText(/Не удалось перенести остальные позиции/)).toBeInTheDocument();
   expect(screen.getByRole("dialog", { name: "Подбор товара", exact: true })).toBeInTheDocument();
   expect(screen.getByLabelText("Сделка для подбора")).toHaveValue("101");
@@ -158,21 +161,21 @@ it("keeps the basket and original deal when the server refuses transfer", async 
 it("ignores an old readback even after switching A to B and back to A", async () => {
   let resolve!: (rows: api.DealItemFull[]) => void;
   vi.mocked(api.fetchDealItems).mockImplementation(() => new Promise((done) => { resolve = done; }));
-  render(<CrmProductCatalog />); await selectDeal(); await openPicker(); await pick(); transfer();
+  render(<CrmCatalogPage />); await selectDeal(); await openPicker(); await pick(); transfer();
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "Подбор товара", exact: true })).not.toBeInTheDocument());
   await selectDeal("102"); await selectDeal("101");
   await act(async () => { resolve([savedItem]); });
   expect(screen.queryByText("Товары выбранной сделки")).not.toBeInTheDocument();
 });
 it("retries a failed load without selecting a stale deal", async () => {
-  failure = 503; render(<CrmProductCatalog />); await screen.findByRole("alert"); failure = null;
+  failure = 503; render(<CrmCatalogPage />); await screen.findByRole("alert"); failure = null;
   fireEvent.click(screen.getByRole("button", { name: "Повторить загрузку" }));
   expect(await screen.findByText(skus[0].title)).toBeInTheDocument();
   expect(screen.getByLabelText("Сделка для подбора")).toHaveValue("");
 });
 it("retries only failed rows after a partial transfer", async () => {
   vi.mocked(api.addDealItem).mockResolvedValueOnce(true).mockResolvedValueOnce(false).mockResolvedValue(true);
-  render(<CrmProductCatalog />); await selectDeal(); await openPicker(); await pick(); await pick(1, 2); transfer();
+  render(<CrmCatalogPage />); await selectDeal(); await openPicker(); await pick(); await pick(1, 2); transfer();
   await screen.findByText(/Перенесено позиций: 1\/2/); transfer();
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "Подбор товара", exact: true })).not.toBeInTheDocument());
   expect(vi.mocked(api.addDealItem).mock.calls.map((args) => args.slice(0, 3))).toEqual([["101", 17, 3], ["101", 18, 2], ["101", 18, 2]]);

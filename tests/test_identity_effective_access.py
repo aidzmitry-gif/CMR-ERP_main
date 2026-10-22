@@ -195,6 +195,7 @@ async def test_managed_crm_identity_is_restricted_without_changing_legacy_role_m
 @pytest.mark.parametrize("role,restricted", [("sales", True), ("sales_manager", False), ("sales_cli", True), ("sales_head", True)])
 async def test_own_crm_can_pick_real_sku_with_existing_role_boundaries(session, monkeypatch, role, restricted):
     from core.domain.models import Sku
+    from modules.integrations.models import StockItem
     from modules.sales.models import Deal, DealItem
 
     user = User(username="synthetic-catalog-seller", full_name="Synthetic seller",
@@ -207,7 +208,13 @@ async def test_own_crm_can_pick_real_sku_with_existing_role_boundaries(session, 
                counterparty="Synthetic buyer", owner_id=401)
     foreign = Deal(number="SYNTHETIC-CATALOG-FOREIGN", title="Synthetic foreign deal",
                    counterparty="Synthetic foreign buyer", owner_id=402)
-    session.add_all([user, sku, own, foreign])
+    stocks = [
+        StockItem(sku_code=sku.code, warehouse="SYNTHETIC-NORTH", qty_available=12,
+                  qty_reserved=5, qty_forecast=2, price=150, cost=100),
+        StockItem(sku_code=sku.code, warehouse="SYNTHETIC-SOUTH", qty_available=4,
+                  qty_reserved=1, qty_forecast=0, price=165, cost=110),
+    ]
+    session.add_all([user, sku, own, foreign, *stocks])
     await session.commit()
     claimed = CurrentUser(user.username, [role, "director"], user.keycloak_user_id)
     effective = await resolve_effective_oidc_user(claimed, session)
@@ -216,6 +223,20 @@ async def test_own_crm_can_pick_real_sku_with_existing_role_boundaries(session, 
         products = await api.get("/sales/skus?for_picker=1")
         assert products.status_code == 200, products.text
         assert products.json() == [{"id": sku.id, "code": sku.code, "title": sku.title, "unit": sku.unit}]
+        stock = await api.get("/sales/picker-stock")
+        assert stock.status_code == 200, stock.text
+        rows = stock.json()
+        assert len(rows) == 2
+        assert {row["warehouse"]: row for row in rows} == {
+            "SYNTHETIC-NORTH": {"sku_code": sku.code, "warehouse": "SYNTHETIC-NORTH",
+                                "qty_available": 12, "qty_reserved": 5, "qty_forecast": 2,
+                                "price": 150, "cost": None if restricted else 100},
+            "SYNTHETIC-SOUTH": {"sku_code": sku.code, "warehouse": "SYNTHETIC-SOUTH",
+                                "qty_available": 4, "qty_reserved": 1, "qty_forecast": 0,
+                                "price": 165, "cost": None if restricted else 110},
+        }
+        if restricted:
+            assert (await api.get("/integrations/1c/stock")).status_code == 403
         listing = await api.get("/sales/deals")
         assert listing.status_code == 200
         assert [row["id"] for row in listing.json()] == [own.id]
@@ -256,6 +277,20 @@ async def test_identity_lookup_failure_is_explicit_and_contains_no_database_deta
         await resolve_effective_oidc_user(CurrentUser("user", ["sales"], "kc-user"), session)
 
     assert str(exc_info.value) == "effective_identity_lookup_failed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,role", [(None, GUEST), ("suspended", "sales"), ("active", "hr")])
+async def test_picker_stock_rejects_missing_suspended_and_non_sales_identity(session, monkeypatch, status, role):
+    username, subject = "synthetic-stock-denied", "synthetic-stock-denied-subject"
+    if status is not None:
+        session.add(User(username=username, full_name="Synthetic denied user", keycloak_user_id=subject,
+                         status=status, role=role))
+        await session.commit()
+    async with await _effective_access_client(session, monkeypatch, CurrentUser(username, [role], subject)) as api:
+        response = await api.get("/sales/picker-stock")
+        assert response.status_code == 403
+        assert set(response.json()) == {"detail"}
 
 
 async def _effective_access_client(session, monkeypatch, claimed: CurrentUser):

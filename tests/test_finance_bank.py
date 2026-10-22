@@ -15,7 +15,8 @@ from modules.finance.allocation import sum_allocations
 from modules.finance.bank_ingest import sync_incoming
 from modules.finance.models import BankTransaction, Payment, PaymentAllocation
 from modules.finance.official_fx import BankAmountInvalid, bank_source_amount
-from tests.test_finance import finance_api, finance_org  # noqa: F401 — explicit synthetic fixtures
+from tests.test_finance import finance_api as finance_api
+from tests.test_finance import finance_org as finance_org
 
 
 class FakeBank:

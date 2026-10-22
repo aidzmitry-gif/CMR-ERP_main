@@ -19,6 +19,7 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/lib/api", () => ({
   createDeal: vi.fn(),
+  fetchBuyerOptions: vi.fn().mockResolvedValue({ status: "ok", rows: [], total: 0 }),
   getKpis: vi.fn().mockResolvedValue([]),
   logActivity: vi.fn().mockResolvedValue(true),
   updateDealStage: vi.fn().mockResolvedValue(true),
@@ -177,10 +178,13 @@ describe("DealsWorkspace (канбан)", () => {
     expect(screen.queryByRole("button", { name: "Сбросить фильтры" })).toBeNull();
   });
 
-  it("кнопка «Создать сделку» открывает модалку", () => {
+  it("кнопка «Создать сделку» открывает модалку", async () => {
     render(<DealsWorkspace initialStages={stages} initialKpis={[]} />);
     fireEvent.click(screen.getByRole("button", { name: /Создать сделку/ }));
     expect(screen.getByText("Новая сделка")).toBeInTheDocument();
+    expect(await screen.findByText("Нет доступных контрагентов. Уточните поиск.")).toBeInTheDocument();
+    expect(api.fetchBuyerOptions).toHaveBeenCalled();
+    expect(api.createDeal).not.toHaveBeenCalled();
   });
 
   it("переключение в режим списка показывает таблицу сделок", () => {

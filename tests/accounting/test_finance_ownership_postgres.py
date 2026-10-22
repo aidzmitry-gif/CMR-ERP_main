@@ -20,7 +20,8 @@ from modules.accounting.models import SourceBinding
 from modules.finance.models import BankTransaction, Payment, PaymentAllocation
 from modules.finance.routes import match_bank_transaction
 from modules.finance.schemas import BankManualMatch
-from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401 — owned native fixtures
+from tests.accounting.test_postgres import pg_book as pg_book
+from tests.accounting.test_postgres import pg_factory as pg_factory
 
 pytestmark = [pytest.mark.integration,
               pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)]
