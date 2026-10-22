@@ -132,11 +132,11 @@ describe("CatalogPickerModal — compact warehouse table", () => {
     render(<Harness />); await screen.findByText(sku.title);
     fireEvent.click(screen.getByText("Столбцы"));
     fireEvent.click(screen.getByRole("button", { name: "Выше: Цены" }));
-    for (const name of ["Цены", "Остаток"]) fireEvent.click(screen.getByLabelText(name, { exact: true }));
+    for (const name of ["Цены", "Остаток"]) fireEvent.click(screen.getByRole("checkbox", { name, exact: true }));
     expect(within(screen.getByRole("table")).queryByRole("columnheader", { name: "Цены" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Наименование", { exact: true })).toBeDisabled();
-    expect(screen.getByLabelText("В подбор", { exact: true })).toBeDisabled();
-    for (const name of ["Цены", "Остаток"]) fireEvent.click(screen.getByLabelText(name, { exact: true }));
+    expect(screen.getByRole("checkbox", { name: "Наименование", exact: true })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "В подбор", exact: true })).toBeDisabled();
+    for (const name of ["Цены", "Остаток"]) fireEvent.click(screen.getByRole("checkbox", { name, exact: true }));
     expect(within(screen.getByRole("table")).getAllByRole("columnheader").map(th => th.textContent)).toEqual(["Наименование", "Склад", "Остаток", "Резерв", "Цены", "Свободно", "В подбор"]);
   });
 
@@ -206,14 +206,24 @@ describe("CatalogPickerModal — compact warehouse table", () => {
   it("resizes by keyboard, persists only layout and restores after reopening", async () => {
     const first = render(<Harness />);
     await screen.findByText(sku.title);
+    const expectColumnNames = () => {
+      const table = screen.getByRole("table", { name: "Товары по складам" });
+      for (const name of ["Наименование", "Склад", "Остаток", "Резерв", "Свободно", "Цены", "В подбор"]) {
+        expect(within(table).getByRole("columnheader", { name, exact: true })).toBeInTheDocument();
+      }
+    };
+    expectColumnNames();
     fireEvent.keyDown(screen.getByRole("separator", { name: "Ширина: Наименование" }), { key: "ArrowRight" });
     expect(screen.getByRole("separator", { name: "Ширина: Наименование" })).toHaveAttribute("aria-valuenow", "290");
+    expectColumnNames();
     expect(localStorage.setItem).toHaveBeenCalledWith(PICKER_COLUMNS_KEY, expect.not.stringContaining(sku.title));
     first.unmount(); render(<Harness />);
     expect(screen.getByRole("separator", { name: "Ширина: Наименование" })).toHaveAttribute("aria-valuenow", "290");
+    expectColumnNames();
     fireEvent.click(screen.getByText("Столбцы"));
     fireEvent.click(screen.getByRole("button", { name: "Сбросить столбцы" }));
     expect(screen.getByRole("separator", { name: "Ширина: Наименование" })).toHaveAttribute("aria-valuenow", "280");
+    expectColumnNames();
   });
 
   it("changes width by drag and stops listening after pointer release", async () => {

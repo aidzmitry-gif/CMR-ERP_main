@@ -360,7 +360,7 @@ export function CatalogPickerModal({
               <colgroup>{visibleColumns.map((c) => <col key={c.id} style={{ width: columnSettings.columns[c.id].width }} />)}</colgroup>
               <thead className="sticky top-0 z-[1] bg-sunken text-left text-[10px] font-bold uppercase tracking-wide text-muted">
                 <tr>
-                  {visibleColumns.map((c) => <th key={c.id} scope="col" className="relative px-2 py-2">
+                  {visibleColumns.map((c) => <th key={c.id} scope="col" aria-label={c.label} className="relative px-2 py-2">
                     {c.label}
                     <span role="separator" aria-label={`Ширина: ${c.label}`} aria-orientation="vertical"
                       aria-valuemin={c.min} aria-valuemax={c.max} aria-valuenow={columnSettings.columns[c.id].width}

@@ -20,8 +20,9 @@ for (const scenario of [
     });
 
     // Each CRM case owns its ordinary synthetic buyer/deal; no spec-order dependency.
+    const attemptKey = `${testInfo.retry}-${Date.now()}`;
     const selectionDeal = scenario.route === "/crm/catalog"
-      ? await createDealFromBuyer(page, await createBuyer(page, "E2E catalogue buyer"), `E2E-CATALOG-${Date.now()}`)
+      ? await createDealFromBuyer(page, await createBuyer(page, `E2E catalogue buyer ${attemptKey}`), `E2E-CATALOG-${attemptKey}`)
       : null;
     const itemsBefore = selectionDeal ? await page.request.get(`/api/sales/deals/${selectionDeal.id}/items`) : null;
     if (itemsBefore) expect(itemsBefore.ok()).toBe(true);
