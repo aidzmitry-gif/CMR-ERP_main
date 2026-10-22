@@ -11,6 +11,7 @@ import {
   issueDocument,
   updateDeal,
   type SkuOption,
+  type StockRow,
 } from "@/lib/api";
 // Чистая доменная логика подбора (агрегация остатков/срок/маржа) живёт в src/lib/stock.ts
 // с юнит-тестами (конвенция frontend/CLAUDE.md); здесь — только UI-обёртка.
@@ -52,6 +53,7 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
   const [skus, setSkus] = useState<SkuOption[]>([]);
   /** loading → ready | auth (401/403) | error. Пустой [] больше не маскируем под «Загрузка…». */
   const [catalogStatus, setCatalogStatus] = useState<"loading" | "ready" | "auth" | "error">("loading");
+  const [stockSnapshot, setStockSnapshot] = useState<StockRow[]>([]);
   const [stock, setStock] = useState<Record<string, SkuStock & { unitPrice?: number | null }>>({});
   // Per-warehouse разбивка (не агрегат) — попап «Ввод количества и цены»
   // (CatalogPickerModal, catalog-picker-modal.tsx): Остаток/Резерв/Свободно по каждому складу.
@@ -71,6 +73,7 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
     if (!active) return;
     let alive = true;
     setCatalogStatus("loading");
+    setStockSnapshot([]);
     setSkus([]);
     void (async () => {
       try {
@@ -95,8 +98,10 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
         }
       }
     })();
-    void fetchStock().then((stockRows) => {
+    void fetchStock().then((response) => {
       if (alive) {
+        const stockRows = Array.isArray(response) ? response : [];
+        setStockSnapshot(stockRows);
         const aggregated = aggregateStock(stockRows);
         setStock(Object.fromEntries(Object.entries(aggregated).map(([code, item]) => [code, {
           ...item,
@@ -226,6 +231,7 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
   }
 
   return {
+    stockSnapshot,
     skus,
     catalogStatus,
     stock,

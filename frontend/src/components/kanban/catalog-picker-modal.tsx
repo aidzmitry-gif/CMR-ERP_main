@@ -5,9 +5,11 @@ import { RefreshCw, Search, ShoppingCart, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { requestApproval, type SkuOption } from "@/lib/api";
-import { marginOf, srokOf, type SkuStock, type SkuWarehouseStock } from "@/lib/stock";
+import { marginOf, type SkuStock } from "@/lib/stock";
 import { useCurrency } from "./currency-context";
 import { catalogEmptyMessage, type PickerRow, type ProductPickerState } from "./product-picker";
+import { orderedPickerColumns, compactSkuCode, pickerWarehouseViews, type PickerWarehouseView } from "@/lib/catalog-picker-table";
+import { PickerColumnsControl, usePickerColumns } from "./catalog-picker-columns";
 
 /**
  * Компактная модалка подбора товара (порт sales-catalog-picker-compact.html —
@@ -41,6 +43,7 @@ export function CatalogPickerModal({
   counterparty = "",
   onClose,
   onCommitted,
+  onItemsCommitted,
   state,
   errorMessage,
   saving = false,
@@ -54,6 +57,8 @@ export function CatalogPickerModal({
   counterparty?: string;
   onClose: () => void;
   onCommitted?: () => void;
+  /** Отдельный readback для подтверждённых строк, даже при частичном переносе/ошибке согласования. */
+  onItemsCommitted?: (dealId: string) => void;
   /** Общий стейт подбора — переиспользуем из вызывающей стороны (окно звонка уже держит
    *  свой `useProductPicker`; drawer создаёт новый). Не дублируем fetch внутри модалки. */
   state: ProductPickerState;
@@ -61,13 +66,17 @@ export function CatalogPickerModal({
   saving?: boolean;
 }) {
   const picker = state;
-  const { skus, catalogStatus, stock, warehouseStock, rows, addSkuWithQty, removeRow } =
+  const { skus, catalogStatus, stock, rows, addSkuWithQty, removeRow } =
     picker;
   const { fmt } = useCurrency();
+  const columnSettings = usePickerColumns();
+  const visibleColumns = orderedPickerColumns(columnSettings.columns).filter((c) => columnSettings.columns[c.id].visible);
+  const warehouseViews = useMemo(() => pickerWarehouseViews(picker.stockSnapshot ?? []), [picker.stockSnapshot]);
 
   const [query, setQuery] = useState("");
   const [exact, setExact] = useState(false);
   const [inStockOnly, setInStockOnly] = useState(false);
+  const [pageSelection, setPageSelection] = useState({ key: "", index: 0 });
   const [committing, setBusy] = useState(false);
   const busy = committing || saving;
   const [toast, setToast] = useState<string | null>(null);
@@ -119,6 +128,9 @@ export function CatalogPickerModal({
       })
       .filter(({ st }) => !inStockOnly || (st?.free ?? 0) > 0);
   }, [skus, stock, q, exact, inStockOnly]);
+  const filterKey = JSON.stringify([q, exact, inStockOnly]);
+  const page = pageSelection.key === filterKey ? Math.min(pageSelection.index, Math.max(0, Math.ceil(filtered.length / 100) - 1)) : 0;
+  const pageRows = filtered.slice(page * 100, (page + 1) * 100);
 
   // группировка — без category в SKU группировать некуда, единая секция «Все товары»
   const groupLabel = "Все товары";
@@ -182,6 +194,7 @@ export function CatalogPickerModal({
         ? await picker.commitToDeal(dealId, counterparty)
         : { ok: 0, total: 0, successfulRows: [] };
       picker.removeCommittedRows(successfulRows);
+      if (ok > 0) onItemsCommitted?.(dealId);
       if (ok !== total) {
         setTransferError(`Перенесено позиций: ${ok}/${total}. Не удалось перенести остальные позиции; они оставлены для повторной попытки.`);
         return;
@@ -213,17 +226,17 @@ export function CatalogPickerModal({
   }, [rows]);
 
   function onSearchKey(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (!filtered.length) return;
+    if (!pageRows.length) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setKbdIndex((i) => Math.min(filtered.length - 1, i + 1));
+      setKbdIndex((i) => Math.min(pageRows.length - 1, i + 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setKbdIndex((i) => Math.max(0, i - 1));
     } else if (e.key === "Enter") {
-      if (kbdIndex >= 0 && filtered[kbdIndex]) {
+      if (kbdIndex >= 0 && pageRows[kbdIndex]) {
         e.preventDefault();
-        setPopoverSku(filtered[kbdIndex].sku);
+        setPopoverSku(pageRows[kbdIndex].sku);
       }
     }
   }
@@ -255,11 +268,11 @@ export function CatalogPickerModal({
       aria-busy={busy}
       inert={busy}
       className="fixed inset-0 z-[70] flex items-center justify-center bg-ink/45 p-4"
-      onClick={onClose}
+      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex h-[86vh] max-h-[660px] w-[1180px] max-w-[96vw] flex-col overflow-hidden rounded-2xl bg-surface shadow-pop"
+        className="flex h-[90vh] max-h-[900px] w-[1600px] max-w-[96vw] flex-col overflow-hidden rounded-2xl bg-surface shadow-pop"
       >
         {/* header */}
         <header className="flex items-center gap-3 border-b border-line px-4 py-2.5">
@@ -267,7 +280,7 @@ export function CatalogPickerModal({
             <div className="truncate text-[14px] font-bold text-ink">
               🛒 Подбор товара · {counterparty || "Контрагент не указан"}
             </div>
-            <div className="text-[11px] text-faint">открывается поверх сделки — без перехода на другой экран</div>
+            <div className="text-[11px] text-faint">Выберите товары и количество → добавьте в подбор → перенесите в документ</div>
           </div>
           <div className="flex-1" />
           <Button variant="primary" size="sm" onClick={transfer} disabled={busy || (!pickedCount && !pendingApproval)} icon={<ShoppingCart size={13} />}>
@@ -330,42 +343,40 @@ export function CatalogPickerModal({
             <RefreshCw size={11} className="mr-1 inline" /> Прошлый заказ
           </button>
           {/* «🧰 Комплект ТО» — нет данных о комплектах в API, честно не рендерим (не выдумываем) */}
+          <PickerColumnsControl {...columnSettings} />
+          <span className="text-[11px] text-muted">{filtered.length ? page * 100 + 1 : 0}–{Math.min((page + 1) * 100, filtered.length)} из {filtered.length}</span>
+          <button type="button" aria-label="Предыдущие товары" disabled={page === 0} className="px-1 disabled:opacity-40"
+            onClick={() => { setPageSelection({ key: filterKey, index: page - 1 }); setKbdIndex(-1); }}>←</button>
+          <button type="button" aria-label="Следующие товары" disabled={(page + 1) * 100 >= filtered.length} className="px-1 disabled:opacity-40"
+            onClick={() => { setPageSelection({ key: filterKey, index: page + 1 }); setKbdIndex(-1); }}>→</button>
           <span className="ml-auto whitespace-nowrap text-[11px] text-faint">↑↓ · Enter — подобрать</span>
         </div>
 
         {/* body: left tree (honest-empty) + right table */}
         <div className="flex min-h-0 flex-1">
-          <aside className="w-[190px] shrink-0 overflow-auto border-r border-line bg-surface p-2">
-            <div className="px-2 pb-1.5 pt-1 text-[10.5px] font-bold uppercase tracking-wide text-faint">Разделы</div>
-            <div className="flex items-center gap-1.5 rounded-lg bg-accent/10 px-2 py-1.5 text-[12.5px] font-semibold text-accent-ink">
-              {groupLabel}
-              <span className="ml-auto rounded bg-surface px-1.5 text-[10.5px] font-semibold text-faint">
-                {skus.length}
-              </span>
-            </div>
-            <p className="mt-3 px-2 text-[10.5px] leading-snug text-faint">
-              Дерево категорий и параметры (Напряжение/Ёмкость) появятся, когда номенклатура
-              будет отдавать группу/атрибуты — сейчас в API их нет.
-            </p>
-          </aside>
-
           <div className="min-w-0 flex-1 overflow-auto">
-            <table className="w-full text-[12.5px]">
+            <table aria-label="Товары по складам" className="table-fixed text-[12.5px]"
+              style={{ width: visibleColumns.reduce((sum, c) => sum + columnSettings.columns[c.id].width, 0) }}>
+              <colgroup>{visibleColumns.map((c) => <col key={c.id} style={{ width: columnSettings.columns[c.id].width }} />)}</colgroup>
               <thead className="sticky top-0 z-[1] bg-sunken text-left text-[10px] font-bold uppercase tracking-wide text-muted">
                 <tr>
-                  <th className="px-2.5 py-2">Наименование</th>
-                  <th className="px-2 py-2">Артикул</th>
-                  <th className="px-2 py-2 text-right">Цена</th>
-                  <th className="px-2 py-2 text-right">Своб.</th>
-                  <th className="px-2 py-2">Доступно</th>
-                  <th className="px-2 py-2 text-center">Маржа</th>
-                  <th className="px-2 py-2 text-center">Кол-во</th>
+                  {visibleColumns.map((c) => <th key={c.id} scope="col" aria-label={c.label} className="relative px-2 py-2">
+                    {c.label}
+                    <span role="separator" aria-label={`Ширина: ${c.label}`} aria-orientation="vertical"
+                      aria-valuemin={c.min} aria-valuemax={c.max} aria-valuenow={columnSettings.columns[c.id].width}
+                      tabIndex={0} onPointerDown={(e) => columnSettings.startResize(c.id, e)}
+                      onKeyDown={(e) => {
+                        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+                          e.preventDefault(); columnSettings.resize(c.id, columnSettings.columns[c.id].width + (e.key === "ArrowRight" ? 10 : -10));
+                        }
+                      }} className="absolute bottom-0 right-0 top-0 w-2 cursor-col-resize touch-none border-r border-line hover:bg-accent/20 focus:bg-accent/20" />
+                  </th>)}
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-9 text-center text-faint">
+                    <td colSpan={visibleColumns.length} className="px-4 py-9 text-center text-faint">
                       {catalogEmptyMessage(catalogStatus, skus.length > 0)}
                       {catalogStatus === "auth" && (
                         <div className="mt-3">
@@ -380,18 +391,14 @@ export function CatalogPickerModal({
                 {filtered.length > 0 && (
                   <>
                     <tr>
-                      <td colSpan={7} className="px-2.5 pb-0.5 pt-2 text-[10.5px] font-bold uppercase tracking-wide text-faint">
-                        {groupLabel}
+                      <td colSpan={visibleColumns.length} className="px-2.5 pb-0.5 pt-2 text-[10.5px] font-bold uppercase tracking-wide text-faint">
+                        {groupLabel} · {filtered.length}. Остаток — всего; свободно — за вычетом резерва. — = нет подтверждённых данных.
                       </td>
                     </tr>
-                    {filtered.map(({ sku, st }, i) => {
+                    {pageRows.map(({ sku }, i) => {
                       const row = rowBySkuId.get(sku.id);
-                      const sk = srokOf(st);
-                      // Цена клиенту: отредактированная в попапе — приоритетнее цены со склада;
-                      // маржа считается ОТ НЕЁ ЖЕ (иначе бейдж соврёт зелёным при уже данной скидке).
-                      const effPrice = row ? picker.agreedPriceOf(row) : stock[sku.code]?.unitPrice ?? null;
-                      const m = st && effPrice != null ? marginOf({ ...st, price: effPrice }) : null;
-                      const low = (st?.free ?? 0) > 0 && (st?.free ?? 0) <= 5;
+                      const warehouses = warehouseViews[sku.code] ?? [];
+                      const dataRows = warehouses.length ? warehouses : [{ warehouse: "—", on: null, reserved: null, free: null, prices: [] }];
                       return (
                         <tr
                           key={sku.id}
@@ -403,47 +410,8 @@ export function CatalogPickerModal({
                             kbdIndex === i && "bg-accent/10",
                           )}
                         >
-                          <td className="px-2.5 py-1.5 font-semibold text-ink">{highlight(sku.title)}</td>
-                          <td className="px-2 py-1.5 whitespace-nowrap text-[11px] text-muted">{sku.code}</td>
-                          <td className="px-2 py-1.5 text-right font-bold text-ink">
-                            {effPrice != null ? fmt(effPrice) : "Не подтверждена"}
-                            {row?.priceOverride != null && (
-                              <span className="ml-1 text-[10px] font-semibold text-accent-ink" title="Цена отредактирована вручную">
-                                ✎
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-2 py-1.5 text-right">
-                            <span className={clsx("font-bold", low ? "text-danger" : "text-money")}>
-                              {st?.free ?? 0}
-                              {low ? " ⚠" : ""}
-                            </span>
-                          </td>
-                          <td className="px-2 py-1.5 whitespace-nowrap text-muted">
-                            <span className={sk.cls}>{sk.label}</span>
-                            {st?.forecast ? <span className="ml-1 font-semibold text-amber-600">🚚+{st.forecast}</span> : null}
-                          </td>
-                          <td className="px-2 py-1.5 text-center">
-                            {m ? (
-                              <span
-                                className={clsx(
-                                  "rounded px-1.5 py-0.5 text-[11px] font-bold",
-                                  m.pct >= 25
-                                    ? "bg-money-soft text-money"
-                                    : m.pct >= MIN_MARGIN_FLOOR_PCT
-                                      ? "bg-amber-50 text-amber-600 dark:bg-amber-500/10"
-                                      : "bg-red-50 text-danger dark:bg-red-500/10",
-                                )}
-                              >
-                                GP {Math.round(m.pct)}%
-                              </span>
-                            ) : (
-                              <span className="rounded bg-sunken px-1.5 py-0.5 text-[11px] font-semibold text-faint">
-                                маржа —
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-2 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
+                          {visibleColumns.map((c) => c.id === "quantity" ? (
+                          <td key={c.id} className="px-2 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
                             {row ? (
                               <div className="inline-flex items-center gap-1">
                                 <button
@@ -477,6 +445,23 @@ export function CatalogPickerModal({
                               </button>
                             )}
                           </td>
+                          ) : (
+                            <td key={c.id} className="overflow-hidden px-2 py-1.5 align-top text-ink">
+                              {c.id === "title" ? <div className="whitespace-normal break-words font-semibold" title={sku.title}>
+                                {highlight(sku.title)}<span className="ml-1 text-[10px] font-normal text-muted">{sku.unit}</span>
+                                {row?.priceOverride != null && <div className="mt-1 text-[11px] font-semibold text-accent-ink">Цена в подборе: {fmt(row.priceOverride)} ✎</div>}
+                              </div> : c.id === "code" ? <span title={sku.code} className="block truncate font-mono text-[11px] text-muted">{compactSkuCode(sku.code)}</span>
+                                : <>
+                                  {dataRows.map((wh) => <div key={wh.warehouse}
+                                    style={{ minHeight: Math.max(1, wh.prices.length) * 20 + 4 }}
+                                    className="tabular-nums" title={wh.warehouse === "—" ? "Нет подтверждённых данных по складам" : wh.warehouse}>
+                                    {c.id === "warehouse" ? <span className="block truncate text-muted">{wh.warehouse}</span>
+                                      : c.id === "price" ? wh.prices.length ? wh.prices.map((price) => <div key={price} className="whitespace-nowrap font-semibold">{fmt(price)}</div>) : <span title="Цена не подтверждена">—</span>
+                                      : (c.id === "on" || c.id === "reserved" || c.id === "free") && (wh[c.id] == null ? <span title="Количество неизвестно">—</span> : <span className={c.id === "free" ? "font-bold text-money" : ""}>{wh[c.id]}</span>)}
+                                  </div>)}
+                                </>}
+                            </td>
+                          ))}
                         </tr>
                       );
                     })}
@@ -487,7 +472,7 @@ export function CatalogPickerModal({
           </div>
 
           {/* Корзина — что подобрано; тут же правим (кол-во / убрать / исключить из счёта) без ухода из окна */}
-          <aside className="flex w-[272px] shrink-0 flex-col border-l border-line bg-surface">
+          <aside className="flex w-[220px] max-w-[30vw] shrink-0 flex-col border-l border-line bg-surface">
             <div className="flex items-center gap-2 border-b border-line px-3 py-2">
               <ShoppingCart size={13} className="text-muted" />
               <span className="text-[11px] font-bold uppercase tracking-wide text-faint">Корзина</span>
@@ -632,7 +617,7 @@ export function CatalogPickerModal({
         <QtyPricePopover
           sku={popoverSku}
           st={stock[popoverSku.code]}
-          whSt={warehouseStock[popoverSku.code]}
+          warehouseRows={warehouseViews[popoverSku.code]}
           existingQty={popover?.row?.qty}
           basePrice={stock[popoverSku.code]?.unitPrice ?? null}
           existingPrice={popover?.row ? picker.agreedPriceOf(popover.row) : undefined}
@@ -662,7 +647,7 @@ export function CatalogPickerModal({
 function QtyPricePopover({
   sku,
   st,
-  whSt,
+  warehouseRows,
   existingQty,
   existingPrice,
   basePrice,
@@ -671,7 +656,7 @@ function QtyPricePopover({
 }: {
   sku: SkuOption;
   st?: SkuStock;
-  whSt?: SkuWarehouseStock;
+  warehouseRows?: PickerWarehouseView[];
   existingQty?: number;
   /** Уже отредактированная ранее цена строки (PickerRow.priceOverride) — при повторном
    *  открытии попапа показываем ЕЁ, а не сбрасываем на цену со склада. */
@@ -704,8 +689,11 @@ function QtyPricePopover({
   }
 
   return (
-    <div className="fixed inset-0 z-[80]" onClick={onCancel}>
+    <div className="fixed inset-0 z-[80]" onClick={(event) => event.stopPropagation()}>
       <div
+        role="dialog"
+        aria-modal
+        aria-label={`Количество и цена: ${sku.title}`}
         onClick={(e) => e.stopPropagation()}
         className="absolute left-1/2 top-1/2 w-[388px] max-w-[94vw] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-line-strong bg-surface p-3.5 shadow-pop"
       >
@@ -731,7 +719,7 @@ function QtyPricePopover({
           <span className="text-[11.5px] text-muted">{sku.unit}</span>
         </div>
 
-        {whSt && whSt.rows.length > 0 ? (
+        {warehouseRows && warehouseRows.length > 0 ? (
           <table className="mt-2.5 w-full border-collapse text-[11.5px]">
             <thead>
               <tr>
@@ -742,18 +730,19 @@ function QtyPricePopover({
               </tr>
             </thead>
             <tbody>
-              {whSt.rows.map((r) => (
+              {warehouseRows.map((r) => (
                 <tr key={r.warehouse}>
                   <td className="border-b border-line px-1.5 py-1">{r.warehouse}</td>
-                  <td className="border-b border-line px-1.5 py-1 text-right font-semibold text-amber-600">{r.reserved || "—"}</td>
-                  <td className="border-b border-line px-1.5 py-1 text-right font-bold text-money">{r.free}</td>
+                  <td className="border-b border-line px-1.5 py-1 text-right font-semibold text-amber-600">{r.reserved ?? "—"}</td>
+                  <td className="border-b border-line px-1.5 py-1 text-right font-bold text-money">{r.free ?? "—"}</td>
                   <td className="border-b border-line px-1.5 py-1 text-right">
                     <button
                       type="button"
-                      onClick={() => setQty(r.free || 1)}
+                      disabled={r.free == null || r.free <= 0}
+                      onClick={() => { if (r.free != null && r.free > 0) setQty(r.free); }}
                       className="rounded border border-line bg-surface px-1.5 font-bold text-accent-ink hover:bg-accent/10"
                     >
-                      {Math.min(qty, r.free)} →
+                      {r.free == null ? "—" : Math.min(qty, r.free)} →
                     </button>
                   </td>
                 </tr>
@@ -828,7 +817,7 @@ function QtyPricePopover({
             disabled={!priceValid}
             className="rounded-lg bg-accent px-3.5 py-2 text-[12.5px] font-bold text-white hover:bg-accent-ink disabled:opacity-60"
           >
-            ОК
+            {existingQty == null ? "Добавить в подбор" : "Сохранить в подборе"}
           </button>
         </div>
       </div>

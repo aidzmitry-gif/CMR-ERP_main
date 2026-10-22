@@ -530,3 +530,42 @@ describe("useProductPicker — согласованная цена позици�
     expect(mock(api.addDealItem).mock.calls.map((args) => args[3])).toEqual([100, 200, 200]);
   });
 });
+
+
+describe("useProductPicker — подтверждённые строки складской таблицы", () => {
+  it("очищает складские строки сразу при смене контекста до нового ответа", async () => {
+    const { result, rerender } = renderHook(({ id }) => useProductPicker(true, id), { initialProps: { id: "d1" } });
+    await waitFor(() => expect(result.current.stockSnapshot).toEqual(stockRows));
+    let finish!: (rows: api.StockRow[]) => void;
+    mock(api.fetchStock).mockImplementationOnce(() => new Promise<api.StockRow[]>((resolve) => { finish = resolve; }));
+    rerender({ id: "d2" });
+    await waitFor(() => expect(api.fetchStock).toHaveBeenCalledTimes(2));
+    expect(result.current.stockSnapshot).toEqual([]);
+    await act(async () => { finish([]); });
+    expect(result.current.stockSnapshot).toEqual([]);
+  });
+
+  it("поздний ответ прежнего контекста не заменяет новые остатки и цены", async () => {
+    let finishOld!: (rows: api.StockRow[]) => void;
+    const fresh = [{ ...stockRows[0], warehouse: "Synthetic fresh warehouse", price: 42 }];
+    mock(api.fetchStock)
+      .mockImplementationOnce(() => new Promise<api.StockRow[]>((resolve) => { finishOld = resolve; }))
+      .mockResolvedValueOnce(fresh);
+    const { result, rerender } = renderHook(({ id }) => useProductPicker(true, id), { initialProps: { id: "d1" } });
+    rerender({ id: "d2" });
+    await waitFor(() => expect(result.current.stockSnapshot).toEqual(fresh));
+    await act(async () => { finishOld(stockRows); });
+    expect(result.current.stockSnapshot).toEqual(fresh);
+    expect(result.current.stock[fresh[0].sku_code].unitPrice).toBe(42);
+  });
+
+  it("неверный формат складского ответа оставляет данные неизвестными", async () => {
+    mock(api.fetchStock).mockResolvedValue({ rows: stockRows });
+    const { result } = renderHook(() => useProductPicker(true, "d1"));
+    await waitFor(() => expect(result.current.catalogStatus).toBe("ready"));
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.stockSnapshot).toEqual([]);
+    expect(result.current.stock).toEqual({});
+    expect(result.current.warehouseStock).toEqual({});
+  });
+});
