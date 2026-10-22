@@ -55,3 +55,51 @@ it("canonical hash matches independent Python vector and ignores key ordering", 
 
 it("exact decimal input is not float-rounded", () => { expect(decimalInput("999999999999.99", 2)).toBe("999999999999.99"); expect(decimalInput("1", 4)).toBe("1.0000"); for (const value of ["-1", "1e2", "NaN", "0.001", "1000000000000.00"]) expect(() => decimalInput(value, 2)).toThrow(); });
 it("rejects malformed frozen commands before HTTP", async () => { const c = { ...command(), payload: { ...command().payload, qty: 1 } }; expect(validCommand(c)).toBe(false); await expect(sendEdit(scope, c, "execute")).rejects.toThrow(); expect(f).not.toHaveBeenCalled(); });
+
+
+async function landedReceipt(kind = "received-status") {
+  const atomic = kind === "atomic-save";
+  const empty = kind === "empty-status";
+  const c: EditCommand = { ...command(), action: atomic ? "save" : "status",
+    payload: atomic ? { status: { status: "received" } } : { status: empty ? "ordered" : "received" } };
+  const receivedAt = "2026-10-01T12:00:00";
+  const payload = { sku_code: "A", organization_id: 2, purchase_order_id: 7,
+    stage: "actual", currency: "BYN", entity_ref: "purchase_order:7", shipment_id: "SYNTHETIC",
+    unit_landed_cost_byn: "0.5050", qty: "2.00", total_landed_byn: "1.01",
+    fx_rate: null, fx_date: null, fx_rate_basis: null,
+    calculation: { version: 1, received_at: receivedAt, freight_byn: "0.00", duty_pct: null,
+      lines: [{ id: 1, sku_code: "A", qty: "2.00", goods_value_byn: "1.01", weight: "0.000", volume: "0.0000" },
+        // Valid historical snapshots can include lines ignored by the allocation.
+        { id: 2, sku_code: "", qty: "0.00", goods_value_byn: "0.00", weight: "0.000", volume: "0.0000" },
+        { id: 3, sku_code: "OLD", qty: "-1.00", goods_value_byn: "-1.00", weight: "-1.000", volume: "0.0000" }] } };
+  const status = { from: empty ? "draft" : "customs", to: empty ? "ordered" : "received",
+    received_at: empty ? null : receivedAt, event_ids: empty ? [10] : [10, 11],
+    landed: empty ? [] : [{ event_id: 11, payload }] };
+  const r = { ...await receipt(c), effect: atomic ? { status } : status };
+  return { c, r, status };
+}
+
+it.each(["empty-status", "received-status", "atomic-save"])("accepts verified landed receipt %s", async kind => {
+  const { c, r } = await landedReceipt(kind);
+  f.mockResolvedValue(ok(r));
+  for (const mode of ["execute", "reconcile"] as const) expect(await sendEdit(scope, c, mode)).toEqual(r);
+  expect(f).toHaveBeenCalledTimes(2);
+  expect(f.mock.calls[0][1].body).toBe(f.mock.calls[1][1].body);
+});
+
+it.each(["foreign-org", "wrong-po", "unknown-event", "duplicate-event", "duplicate-sku", "wrong-currency", "malformed-calculation", "extra-key"])("rejects malformed landed receipt %s without closing pending", async fault => {
+  const { c, r, status } = await landedReceipt();
+  const item = status.landed[0];
+  if (fault === "foreign-org") item.payload.organization_id = 9;
+  if (fault === "wrong-po") item.payload.purchase_order_id = 8;
+  if (fault === "unknown-event") item.event_id = 999;
+  if (fault === "duplicate-event") status.landed.push(structuredClone(item));
+  if (fault === "duplicate-sku") { status.event_ids.push(12); status.landed.push({ ...structuredClone(item), event_id: 12 }); }
+  if (fault === "wrong-currency") item.payload.currency = "USD";
+  if (fault === "malformed-calculation") Object.assign(item.payload.calculation.lines[0], { qty: "NaN" });
+  if (fault === "extra-key") Object.assign(item.payload, { unexpected: true });
+  f.mockResolvedValue(ok(r));
+  for (const mode of ["execute", "reconcile"] as const) await expect(sendEdit(scope, c, mode)).rejects.toBeInstanceOf(MutationUnknown);
+  expect(f).toHaveBeenCalledTimes(2); // one request per explicit action; never auto-retry
+  expect(f.mock.calls[0][1].body).toBe(f.mock.calls[1][1].body);
+});

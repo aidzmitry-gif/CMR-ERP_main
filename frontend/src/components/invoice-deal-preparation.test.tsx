@@ -23,7 +23,7 @@ function fixture({ assigned = false, bound = false } = {}) {
   });
   vi.stubGlobal("fetch", fetcher); return fetcher;
 }
-function view(org = "7", dealId = "1", onReady = vi.fn()) { return <InvoiceDealPreparation org={org} dealId={dealId} onReady={onReady} onSelectOrg={vi.fn()} />; }
+function view(org = "7", dealId = "1", onReady = vi.fn()) { return <InvoiceDealPreparation org={org} dealId={dealId} onReady={onReady} />; }
 async function read() { fireEvent.click(await screen.findByText("Проверить принадлежность")); }
 async function inspect() { await read(); await screen.findByRole("alert"); fireEvent.click(screen.getByText("Подтвердить новую принадлежность")); }
 async function claim() {
@@ -89,7 +89,9 @@ it("unknown ownership survives reopen; later 409 retains exact command until suc
 it("pending ownership blocks another org after reopen", async () => {
   const f = fixture(); render(view()); await inspect(); await screen.findByLabelText("Основание принадлежности организации"); f.mockRejectedValueOnce(new Error("lost")); await claim();
   await screen.findByText("Повторить исходное подтверждение организации"); cleanup(); f.mockClear(); render(view("8"));
-  await screen.findByText("Вернуться к организации #7"); expect(f).not.toHaveBeenCalled();
+  expect(await screen.findByRole("alert")).toHaveTextContent("другой организации #7"); expect(f).not.toHaveBeenCalled();
+  expect(screen.queryByText(/Вернуться к организации/)).toBeNull();
+  expect(loadOwnership("1")?.org).toBe("7");
   expect(screen.queryByText("Проверить принадлежность")).toBeNull();
 });
 it.each(["org", "deal", "close"])("ignores late ownership preview after %s changes", async kind => {

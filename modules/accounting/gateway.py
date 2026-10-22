@@ -300,6 +300,36 @@ class AccountingService:
             raise HTTPException(403, "Read-only finance access")
         return actor
 
+
+    async def finance_bank_transaction_ids(self, session, organization_id, user):
+        from modules.accounting.models import SourceBinding
+
+        if type(organization_id) is not int or organization_id <= 0:
+            raise HTTPException(422, "A positive integer organization_id is required")
+        await self.finance_member(session, organization_id, user, write=False)
+        return list((await session.execute(select(SourceBinding.source_id).where(
+            SourceBinding.organization_id == organization_id,
+            SourceBinding.source_type == "finance_bank_transaction",
+            SourceBinding.ownership == "own",
+        ).order_by(SourceBinding.source_id))).scalars().all())
+
+
+    async def lock_finance_bank_transaction(self, session, organization_id, user, transaction_id):
+        from modules.accounting.models import SourceBinding
+
+        if type(organization_id) is not int or organization_id <= 0:
+            raise HTTPException(422, "A positive integer organization_id is required")
+        if type(transaction_id) is not int or transaction_id <= 0:
+            raise HTTPException(422, "A positive integer transaction_id is required")
+        await self.finance_member(session, organization_id, user, write=True)
+        binding = (await session.execute(select(SourceBinding).where(
+            SourceBinding.organization_id == organization_id,
+            SourceBinding.source_type == "finance_bank_transaction",
+            SourceBinding.source_id == transaction_id,
+        ).with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
+        if binding is None or binding.ownership != "own":
+            raise HTTPException(404, "Зачисление не найдено")
+
     async def document_shipment_member(self, session, organization_id, user):
         """Authorize document-driven stock issues under the book's write lock."""
         actor, role = await current_member(session, organization_id, user)

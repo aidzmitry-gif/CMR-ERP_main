@@ -26,8 +26,16 @@ from tests.test_invoice_issuance import command, create, erp_money_flow, seed
 from tests.test_invoice_physical_shipments import endpoint, request
 
 
-async def prepared(api, session):
+async def prepared(api, session, *, wms_enabled=False):
     ids, base = await seed(api, session)
+    if wms_enabled:
+        from modules.wms.models import WarehouseDirectory
+
+        warehouse = await session.scalar(select(WarehouseDirectory).where(
+            WarehouseDirectory.organization_id == ids["org"], WarehouseDirectory.name == "W"))
+        assert warehouse is not None and warehouse.created_by == "issuer"
+        warehouse.wms_enabled = True
+        await session.commit()
     data, _ = await command(api, ids, base)
     response = await create(api, ids, data)
     assert response.status_code == 201, response.text
@@ -67,7 +75,7 @@ async def test_cancellation_preview_combines_exact_evidence_without_business_cha
 
 
 async def test_cancellation_preview_retains_partial_physical_shipment_as_blocker(api, session):
-    org, facts = await prepared(api, session)
+    org, facts = await prepared(api, session, wms_enabled=True)
     body = await request(api, org, facts)
     issued = await api.post(endpoint(org), json=body)
     assert issued.status_code == 201, issued.text
@@ -168,7 +176,7 @@ async def test_fulfillment_review_requires_each_named_source_coverage(api, sessi
 
 
 async def test_fulfillment_review_historical_replay_does_not_authorize_after_shipment(api, session):
-    org, facts = await prepared(api, session)
+    org, facts = await prepared(api, session, wms_enabled=True)
     path, data = await review_request(api, org, facts)
     confirmed = await api.post(path, json=data)
     assert confirmed.status_code == 201, confirmed.text

@@ -1217,3 +1217,90 @@ async def test_keycloak_client_rejects_existing_user_without_mutating_roles_or_e
             )
 
     assert [request.method for request in seen] == ["POST", "POST"]
+
+
+async def _synthetic_login_aliases(session, *, canonical=False):
+    employee = Employee(full_name="Synthetic alias employee", department="Продажи", status="active")
+    session.add(employee)
+    await session.flush()
+    primary = User(username="synthetic-primary", email="primary@example.invalid", full_name=employee.full_name,
+                   employee_id=employee.id, department="Продажи", role="sales", status="active",
+                   keycloak_user_id="synthetic-primary-subject", deal_visibility="all")
+    alias = User(username="synthetic-alias", email="alias@example.invalid", full_name=employee.full_name,
+                 employee_id=employee.id, role="director", status="active",
+                 keycloak_user_id="synthetic-alias-subject", deal_visibility="own")
+    session.add_all([primary, alias])
+    await session.flush()
+    if canonical:
+        session.add(IdentityInvitationRequest(
+            idempotency_key="synthetic-canonical-001", employee_id=employee.id, user_id=primary.id,
+            username=primary.username, email=primary.email, department="Продажи", role="sales",
+            actor="synthetic-operator", status="sent", keycloak_user_id=primary.keycloak_user_id,
+        ))
+    await session.commit()
+    return employee, primary, alias
+
+
+
+@pytest.mark.parametrize("endpoint", ["preflight", "invite"])
+async def test_ambiguous_aliases_never_create_third_account_or_invitation(session, identity_api, endpoint):
+    api, gateway = identity_api
+    employee, _, _ = await _synthetic_login_aliases(session)
+    # Use an unused login/email: foreign-login conflicts must not mask this guard.
+    response = await api.post(f"/system/users/{endpoint}",
+                              headers={"Idempotency-Key": "synthetic-third-login-001"}, json={
+        "employee_id": employee.id, "username": "synthetic-third", "email": "third@example.invalid",
+        "department": "Продажи", "role": "sales",
+    })
+    assert response.status_code == 409, response.text
+    assert "сверка" in response.json()["detail"]
+    assert gateway.calls == []
+    users = (await session.execute(select(User).where(User.employee_id == employee.id))).scalars().all()
+    assert len(users) == 2
+    assert (await session.execute(select(IdentityInvitationRequest))).scalars().all() == []
+    assert (await session.execute(select(AuditLog))).scalars().all() == []
+
+
+
+@pytest.mark.parametrize("canonical", [False, True])
+async def test_preflight_preserves_single_legacy_and_canonical_alias_account(session, identity_api, canonical):
+    api, gateway = identity_api
+    employee, primary, alias = await _synthetic_login_aliases(session, canonical=canonical)
+    if not canonical:
+        await session.delete(alias)
+        await session.commit()
+    primary.department = None
+    primary.role = "onboarding"
+    primary.status = "onboarding"
+    primary.expected_department = "Продажи"
+    primary.expected_role = "sales"
+    await session.commit()
+    response = await api.post("/system/users/preflight", json={
+        "employee_id": employee.id, "username": primary.username, "email": primary.email,
+        "department": "Продажи", "role": "sales",
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["ready"] is False
+    assert gateway.calls == []
+
+
+
+async def test_canonical_visibility_change_does_not_change_alias_scope_or_role(session, identity_api):
+    api, gateway = identity_api
+    employee, primary, alias = await _synthetic_login_aliases(session, canonical=True)
+    alias.deal_visibility = "all"
+    await session.commit()
+    listed = await api.get("/system/users/crm-staff")
+    assert listed.status_code == 200, listed.text
+    rows = [row for row in listed.json() if row["employee_id"] == employee.id]
+    assert len(rows) == 1 and rows[0]["username"] == primary.username
+    response = await api.post(f"/system/users/{employee.id}/crm-visibility",
+                              headers={"Idempotency-Key": "synthetic-visibility-001"}, json={
+        "expected_current_visibility": "all", "deal_visibility": "own",
+    })
+    assert response.status_code == 200, response.text
+    await session.refresh(primary)
+    await session.refresh(alias)
+    assert primary.deal_visibility == "own" and primary.role == "sales"
+    assert alias.deal_visibility == "all" and alias.role == "director"
+    assert gateway.calls == []

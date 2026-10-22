@@ -1,14 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { InstanceOrganizationGate } from "@/components/instance-organization-gate";
 import { SourceTag } from "@/components/source-tag";
+import { InstanceOrganizationGate } from "@/components/instance-organization-gate";
 import { formatByn } from "@/lib/format";
 import { FinanceLedgerBalance } from "./finance-ledger-balance";
 import { FinanceLedgerCashflow } from "./finance-ledger-cashflow";
-import { FinanceLedgerGroup } from "./finance-ledger-group";
 import { FinanceLedgerPnl } from "./finance-ledger-pnl";
 
 // ──────────────────────────── Контракты ответов /finance/* ────────────────────────────
@@ -61,6 +60,7 @@ interface Payment {
   counterparty_ref: string | null;
   outstanding: string | null;
   is_overdue: boolean | null;
+  source_controlled?: boolean;
 }
 
 interface AgingSide {
@@ -175,9 +175,11 @@ function StatusBadge({ status, overdue }: { status: string; overdue?: boolean | 
   };
   const label: Record<string, string> = {
     planned: "план",
+    recorded: "себестоимость учтена",
     pending: "ожидает",
     partial: "частично",
     superseded: "счёт заменён",
+    cancelled: "счёт отменён",
     paid: "оплачен",
     overdue: "просрочен",
   };
@@ -219,12 +221,30 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "cashflow", label: "Cash-flow" },
   { id: "calendar", label: "Календарь" },
   { id: "margin", label: "Маржа" },
-  { id: "group", label: "Обзор группы" },
   { id: "pnl", label: "P&L" },
   { id: "dds", label: "ДДС" },
   { id: "balance", label: "Баланс" },
   { id: "reconcile", label: "Сверка 1С" },
 ];
+
+const FinanceOrganizationContext = createContext<number | null>(null);
+
+function financePath(path: string, organizationId: number | null): string | null {
+  if (!Number.isSafeInteger(organizationId) || (organizationId ?? 0) <= 0) return null;
+  const [pathname, query = ""] = path.split("?");
+  const params = new URLSearchParams(query);
+  params.set("organization_id", String(organizationId));
+  return `${pathname}?${params.toString()}`;
+}
+
+function FinanceOrganizationPanel({ children }: { children: ReactNode }) {
+  return <InstanceOrganizationGate>{organization => (
+      <FinanceOrganizationContext.Provider key={organization.id} value={organization.id}>
+        <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">Операционные записи выбранной организации. Полнота источников пока не подтверждена; итоговые факты учёта проверяйте в отчётах бухгалтерской книги.</p>
+        {children}
+      </FinanceOrganizationContext.Provider>
+    )}</InstanceOrganizationGate>;
+}
 
 // ──────────────────────────── Главный экран ────────────────────────────
 
@@ -267,17 +287,18 @@ export function FinanceView({ initialTab }: { initialTab?: string } = {}) {
       </div>
 
       <div className="mt-4">
+        {!["pnl", "dds", "balance", "margin", "reconcile"].includes(tab) && <FinanceOrganizationPanel>
         {tab === "summary" && <SummaryTab />}
         {tab === "payments" && <PaymentsTab />}
         {tab === "aging" && <AgingTab />}
         {tab === "cashflow" && <CashflowTab />}
         {tab === "calendar" && <CalendarTab />}
+        </FinanceOrganizationPanel>}
         {tab === "margin" && <MarginTab />}
-        {tab === "group" && <FinanceLedgerGroup />}
+        {tab === "reconcile" && <ReconcileTab />}
         {tab === "pnl" && <FinanceLedgerPnl />}
         {tab === "dds" && <FinanceLedgerCashflow />}
         {tab === "balance" && <FinanceLedgerBalance />}
-        {tab === "reconcile" && <ReconcileTab />}
       </div>
     </main>
   );
@@ -285,23 +306,34 @@ export function FinanceView({ initialTab }: { initialTab?: string } = {}) {
 
 // ──────────────────────────── Хук для GET-таба ────────────────────────────
 
-function useFetch<T>(path: string): { data: T | null; loading: boolean; error: boolean } {
-  const request = useMemo(() => ({ path }), [path]);
-  const [result, setResult] = useState<{ request: { path: string }; data: T | null; error: boolean } | null>(null);
+function useFetch<T>(rawPath: string, scoped = false): { data: T | null; loading: boolean; error: boolean; reason?: string } {
+  const organizationId = useContext(FinanceOrganizationContext);
+  const path = scoped ? financePath(rawPath, organizationId) : rawPath;
+  const request = useMemo(() => ({ path, organizationId }), [path, organizationId]);
+  const [result, setResult] = useState<{ request: typeof request; data: T | null; error: boolean; reason?: string } | null>(null);
   useEffect(() => {
     let alive = true;
+    if (!request.path) return;
     fetch(request.path, { cache: "no-store" })
-      .then((r) => (r.ok ? (r.json() as Promise<T>) : Promise.reject()))
-      .then((d) => {
-        if (alive) setResult({ request, data: d, error: false });
+      .then(async response => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(typeof data?.detail === "string" ? data.detail : "Финансовые данные недоступны");
+        if (scoped) {
+          const records = Array.isArray(data) ? data : [data];
+          if (records.some(row => !row || row.organization_id !== request.organizationId)) {
+            throw new Error("Ответ финансового модуля относится к другой организации или не содержит её идентификатор");
+          }
+        }
+        return data as T;
       })
-      .catch(() => alive && setResult({ request, data: null, error: true }));
-    return () => {
-      alive = false;
-    };
-  }, [request]);
+      .then(data => { if (alive) setResult({ request, data, error: false }); })
+      .catch(error => { if (alive) setResult({ request, data: null, error: true,
+        reason: error instanceof Error ? error.message : "Финансовые данные недоступны" }); });
+    return () => { alive = false; };
+  }, [request, scoped]);
+  if (!path) return { data: null, loading: false, error: false };
   if (result?.request !== request) return { data: null, loading: true, error: false };
-  return { data: result.data, loading: false, error: result.error };
+  return { data: result.data, loading: false, error: result.error, reason: result.reason };
 }
 
 function State({ loading, error, empty, what }: { loading: boolean; error: boolean; empty?: boolean; what: string }) {
@@ -324,8 +356,8 @@ function State({ loading, error, empty, what }: { loading: boolean; error: boole
 // ──────────────────────────── Tab 1: Summary (касса + маржа + затраты + платежи) ────────────────────────────
 
 function SummaryTab() {
-  const summary = useFetch<FinanceSummary>("/api/finance/summary");
-  const payments = useFetch<Payment[]>("/api/finance/payments");
+  const summary = useFetch<FinanceSummary>("/api/finance/summary", true);
+  const payments = useFetch<Payment[]>("/api/finance/payments", true);
   const stateBar = (
     <State
       loading={summary.loading}
@@ -419,7 +451,9 @@ function SummaryTab() {
             )}
             {ps.map((p) => (
               <tr key={p.id} className="border-b border-line last:border-0 hover:bg-sunken">
-                <td className="px-4 py-2.5 text-ink">{p.ref}</td>
+                <td className="px-4 py-2.5 text-ink">{p.ref}
+                  {p.source_controlled && <span className="block text-xs text-muted">{p.kind === "landed" ? "По подтверждённому расчёту закупки; не оплата" : "По исходному счёту"}</span>}
+                </td>
                 <td className="px-4 py-2.5 text-muted">{KIND_LABEL[p.kind] ?? p.kind}</td>
                 <td className="px-4 py-2.5">
                   <StatusBadge status={p.status} overdue={p.is_overdue} />
@@ -442,15 +476,16 @@ function SummaryTab() {
 // ──────────────────────────── Tab 2: Payments (детально + allocations) ────────────────────────────
 
 function PaymentsTab() {
+  const organizationId = useContext(FinanceOrganizationContext);
   const [bump, setBump] = useState(0);
-  const { data, loading, error } = useFetch<Payment[]>(`/api/finance/payments?_=${bump}`);
+  const { data, loading, error } = useFetch<Payment[]>(`/api/finance/payments?_=${bump}`, true);
   const [allocFor, setAllocFor] = useState<Payment | null>(null);
   const [allocAmt, setAllocAmt] = useState("");
   const [posting, setPosting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
 
   const onAllocate = useCallback(async () => {
-    if (!allocFor) return;
+    if (!allocFor || organizationId === null) return;
     const amt = Number(allocAmt);
     if (!amt || amt <= 0) {
       setPostError("Сумма должна быть > 0");
@@ -459,7 +494,7 @@ function PaymentsTab() {
     setPosting(true);
     setPostError(null);
     try {
-      const r = await fetch(`/api/finance/payments/${allocFor.id}/allocations`, {
+      const r = await fetch(financePath(`/api/finance/payments/${allocFor.id}/allocations`, organizationId)!, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ amount: amt }),
@@ -473,7 +508,7 @@ function PaymentsTab() {
     } finally {
       setPosting(false);
     }
-  }, [allocFor, allocAmt]);
+  }, [allocFor, allocAmt, organizationId]);
 
   const bar = <State loading={loading} error={error} empty={!loading && !error && (data?.length ?? 0) === 0} what="платежи" />;
   if (loading || error || (data?.length ?? 0) === 0) return bar;
@@ -495,7 +530,9 @@ function PaymentsTab() {
           <tbody>
             {(data ?? []).map((p) => (
               <tr key={p.id} className="border-b border-line last:border-0 hover:bg-sunken">
-                <td className="px-4 py-2.5 text-ink">{p.ref}</td>
+                <td className="px-4 py-2.5 text-ink">{p.ref}
+                  {p.source_controlled && <span className="block text-xs text-muted">{p.kind === "landed" ? "По подтверждённому расчёту закупки; не оплата" : "По исходному счёту"}</span>}
+                </td>
                 <td className="px-4 py-2.5 text-muted">{KIND_LABEL[p.kind] ?? p.kind}</td>
                 <td className="px-4 py-2.5 text-muted">{p.due_date ?? "—"}</td>
                 <td className="px-4 py-2.5">
@@ -511,6 +548,9 @@ function PaymentsTab() {
                   {p.kind === "receivable" && p.status !== "paid" && (
                     <button
                       type="button"
+                      disabled={p.status === "cancelled" || p.status === "superseded"}
+                      title={p.status === "cancelled" ? "Счёт отменён; оплаты сохранены на исходном документе"
+                        : p.status === "superseded" ? "Счёт заменён; используйте действующий счёт" : undefined}
                       className="rounded-md bg-ink/10 px-2 py-1 text-xs font-medium text-ink hover:bg-ink/20"
                       onClick={() => {
                         setAllocFor(p);
@@ -518,7 +558,7 @@ function PaymentsTab() {
                         setPostError(null);
                       }}
                     >
-                      Зафиксировать поступление
+                      {p.status === "cancelled" ? "Счёт отменён" : p.status === "superseded" ? "Счёт заменён" : "Зафиксировать поступление"}
                     </button>
                   )}
                 </td>
@@ -598,7 +638,7 @@ function AgingSideTable({ title, side }: { title: string; side: AgingSide }) {
 }
 
 function AgingTab() {
-  const { data, loading, error } = useFetch<AgingResp>("/api/finance/aging");
+  const { data, loading, error } = useFetch<AgingResp>("/api/finance/aging", true);
   const bar = (
     <State
       loading={loading}
@@ -629,7 +669,7 @@ function AgingTab() {
 // ──────────────────────────── Tab 4: Cash-flow ────────────────────────────
 
 function CashflowTab() {
-  const { data, loading, error } = useFetch<CashflowResp>("/api/finance/cashflow-forecast?weeks=8");
+  const { data, loading, error } = useFetch<CashflowResp>("/api/finance/cashflow-forecast?weeks=8", true);
   const bar = <State loading={loading} error={error} empty={!loading && !error && data?.weeks.every((w) => parseFloat(w.inflow) === 0 && parseFloat(w.outflow) === 0)} what="прогноз кэш-фло" />;
   if (loading || error || !data) return bar;
   const max = Math.max(
@@ -1020,7 +1060,7 @@ function CalendarTab() {
   const [days, setDays] = useState(30);
   const [bump, setBump] = useState(0);
   const accounts = useFetch<BankAccount[]>(
-    `/api/finance/bank-accounts?active_only=true&_=${bump}`,
+    `/api/finance/bank-accounts?active_only=true&_=${bump}`, true,
   );
   const qs = new URLSearchParams({
     mode: "day",
@@ -1028,7 +1068,7 @@ function CalendarTab() {
     _: String(bump),
   });
   if (accountId) qs.set("account_id", accountId);
-  const calendar = useFetch<CashflowResp>(`/api/finance/cashflow-forecast?${qs.toString()}`);
+  const calendar = useFetch<CashflowResp>(`/api/finance/cashflow-forecast?${qs.toString()}`, true);
 
   const accs = accounts.data ?? [];
   const buckets = calendar.data?.buckets ?? [];
@@ -1044,7 +1084,7 @@ function CalendarTab() {
             onChange={(e) => setAccountId(e.target.value)}
             className="min-w-[14rem] rounded-md border border-line bg-sunken px-2 py-1 text-sm text-ink"
           >
-            <option value="">Все счета (общий кэш)</option>
+            <option value="">Все счета выбранной организации</option>
             {accs.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.code} · {a.title} ({a.currency})
@@ -1153,6 +1193,7 @@ function CalendarTab() {
 }
 
 function BankAccountForm({ onCreated }: { onCreated?: () => void }) {
+  const organizationId = useContext(FinanceOrganizationContext);
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
   const [title, setTitle] = useState("");
@@ -1162,6 +1203,7 @@ function BankAccountForm({ onCreated }: { onCreated?: () => void }) {
   const [error, setError] = useState<string | null>(null);
 
   const submit = useCallback(async () => {
+    if (organizationId === null) return;
     if (!code.trim() || !title.trim()) {
       setError("Код и название обязательны");
       return;
@@ -1178,10 +1220,11 @@ function BankAccountForm({ onCreated }: { onCreated?: () => void }) {
     setPosting(true);
     setError(null);
     try {
-      const r = await fetch("/api/finance/bank-accounts", {
+      const r = await fetch(financePath("/api/finance/bank-accounts", organizationId)!, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          organization_id: organizationId,
           code: code.trim(),
           title: title.trim(),
           currency,
@@ -1199,7 +1242,7 @@ function BankAccountForm({ onCreated }: { onCreated?: () => void }) {
     } finally {
       setPosting(false);
     }
-  }, [code, title, currency, opening, onCreated]);
+  }, [code, title, currency, opening, onCreated, organizationId]);
 
   if (!open) {
     return (

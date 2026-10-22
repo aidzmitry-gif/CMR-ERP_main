@@ -1,22 +1,20 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/api", () => ({ fetchCrmStaff: vi.fn(), linkCrmClientToCounterparty: vi.fn() }));
-vi.mock("@/lib/crm-directory", () => ({ loadDirectory: vi.fn() }));
+vi.mock("@/lib/api", () => ({ fetchCrmStaff: vi.fn(), fetchBuyerOptions: vi.fn(), linkCrmClientToCounterparty: vi.fn() }));
 
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
-import { fetchCrmStaff, linkCrmClientToCounterparty } from "@/lib/api";
-import { loadDirectory } from "@/lib/crm-directory";
+import { fetchCrmStaff, fetchBuyerOptions, linkCrmClientToCounterparty } from "@/lib/api";
 import type { Stage } from "@/lib/types";
 
 const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 const stages: Stage[] = [{ id: "new", title: "Новая заявка", color: "#000", count: 0, sum: 0, deals: [] }];
-const master = { id: 41, name: "1C buyer", unp: "123456789", is_active: true, deal_id: 8 };
+const master = { id: 41, name: "1C buyer", unp: "123456789" };
 const linked = { id: 72, name: "Canonical buyer", owner_id: 34, counterparty_id: 41 };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mock(loadDirectory).mockResolvedValue({ status: "ok", rows: [master], total: 1 });
+  mock(fetchBuyerOptions).mockResolvedValue({ status: "ok", rows: [master], total: 1 });
   mock(linkCrmClientToCounterparty).mockResolvedValue(linked);
   mock(fetchCrmStaff).mockResolvedValue([]);
 });
@@ -43,9 +41,9 @@ describe("CreateDealModal directory link", () => {
 
   it("keeps an existing numeric CRM client without directory lookup", async () => {
     const onCreate = vi.fn().mockResolvedValue(true);
-    render(<CreateDealModal client={{ id: 12, name: "CRM buyer", owner_id: 34 }} stages={stages}
+    render(<CreateDealModal client={{ id: 12, name: "CRM buyer", owner_id: 34, counterparty_id: 41 }} stages={stages}
       defaultStage="new" onClose={vi.fn()} onCreate={onCreate} />);
-    expect(loadDirectory).not.toHaveBeenCalled();
+    expect(fetchBuyerOptions).not.toHaveBeenCalled();
     expect(screen.getByDisplayValue("CRM buyer")).toBeDisabled();
     fillDeal();
     fireEvent.click(screen.getByRole("button", { name: "Создать" }));
@@ -57,9 +55,8 @@ describe("CreateDealModal directory link", () => {
 
   it("selects a visible MDM ID and submits the server-confirmed CRM client ID", async () => {
     const onCreate = vi.fn().mockResolvedValue(true);
-    mock(loadDirectory).mockResolvedValue({ status: "ok", rows: [master,
-      { id: 99, name: "CRM-only", unp: null, is_active: true, deal_id: null, source: "crm" },
-      { id: 100, name: "Archived", unp: null, is_active: false, deal_id: null }], total: 3 });
+    // The basic endpoint excludes CRM relationships and archived master records.
+    mock(fetchBuyerOptions).mockResolvedValue({ status: "ok", rows: [master], total: 1 });
     render(<CreateDealModal stages={stages} defaultStage="new" onClose={vi.fn()} onCreate={onCreate} />);
     const choice = await screen.findByRole("button", { name: /1C buyer.*ID 41/ });
     expect(screen.queryByText("CRM-only")).not.toBeInTheDocument();
@@ -86,12 +83,12 @@ describe("CreateDealModal directory link", () => {
     expect(linkCrmClientToCounterparty).not.toHaveBeenCalled();
     expect(onCreate).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Найти" }));
-    await waitFor(() => expect(loadDirectory).toHaveBeenCalledWith("clients", "Other", 0, expect.any(AbortSignal)));
+    await waitFor(() => expect(fetchBuyerOptions).toHaveBeenCalledWith("Other", 0, expect.any(AbortSignal)));
   });
 
   it("ignores a pending old directory response after the query text changes", async () => {
     let resolve!: (value: unknown) => void;
-    mock(loadDirectory).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    mock(fetchBuyerOptions).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
     render(<CreateDealModal stages={stages} defaultStage="new" onClose={vi.fn()} onCreate={vi.fn()} />);
     fireEvent.change(screen.getByPlaceholderText("Название или УНП"), { target: { value: "Other" } });
     await act(async () => resolve({ status: "ok", rows: [master], total: 1 }));
@@ -129,5 +126,120 @@ describe("CreateDealModal directory link", () => {
     fireEvent.click(screen.getByRole("button", { name: "Создать" }));
     await waitFor(() => expect(linkCrmClientToCounterparty).toHaveBeenCalledWith(41, expect.any(String), 17));
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ crm_client_id: 72, owner_id: 17 }));
+  });
+});
+
+
+describe("basic buyer discovery for the original CRM client", () => {
+  it("parses the real basic response and encodes query and pagination", async () => {
+    const { fetchBuyerOptions: actual } = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+    const fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ rows: [master], total: 3 }) });
+    vi.stubGlobal("fetch", fetch);
+    const signal = new AbortController().signal;
+    expect(await actual("Buyer & 123", 2, signal)).toEqual({ status: "ok", rows: [master], total: 3 });
+    expect(fetch).toHaveBeenCalledWith("/api/sales/buyer-options?q=Buyer+%26+123&limit=50&offset=2", { signal });
+  });
+
+  it("rejects malformed pages, identities and unexpected sensitive fields", async () => {
+    const { fetchBuyerOptions: actual } = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+    for (const page of [null, { rows: [], total: -1 }, { rows: {}, total: 0 },
+      { rows: [{ ...master, contacts: [] }], total: 1 }, { rows: [{ ...master, id: "41" }], total: 1 },
+      { rows: [{ ...master, name: " " }], total: 1 }, { rows: [master, master], total: 2 },
+      { rows: [master], total: 0 }, { rows: [{ ...master, unp: 123 }], total: 1 }]) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => page }));
+      expect(await actual("", 0)).toEqual({ status: "error" });
+    }
+  });
+
+  it("distinguishes HTTP and network failures from a genuine empty result", async () => {
+    const { fetchBuyerOptions: actual } = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+    const fetch = vi.fn().mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce({ ok: false, status: 401 }).mockResolvedValueOnce({ ok: false, status: 403 })
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ rows: [], total: 0 }) });
+    vi.stubGlobal("fetch", fetch);
+    for (const status of ["error", "unauthorized", "forbidden", "error"]) {
+      expect(await actual("", 0)).toEqual({ status });
+    }
+    expect(await actual("", 0)).toEqual({ status: "ok", rows: [], total: 0 });
+  });
+
+  it("binds the selected ID to the original unbound client without creating another client", async () => {
+    const onCreate = vi.fn().mockResolvedValue(true);
+    render(<CreateDealModal client={{ id: 12, name: "Working buyer", owner_id: 34, counterparty_id: null }}
+      stages={stages} defaultStage="new" onClose={vi.fn()} onCreate={onCreate} />);
+    fillDeal();
+    fireEvent.click(await screen.findByRole("button", { name: /1C buyer.*ID 41/ }));
+    expect(screen.getByDisplayValue("Working buyer")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      crm_client_id: 12, counterparty_id: 41, owner_id: 34, counterparty: "Working buyer",
+    })));
+    expect(linkCrmClientToCounterparty).not.toHaveBeenCalled();
+  });
+
+  it("clears the selected first buyer on new query while preserving the CRM working name", async () => {
+    const onCreate = vi.fn().mockResolvedValue(true);
+    render(<CreateDealModal client={{ id: 12, name: "Working buyer", owner_id: 34 }}
+      stages={stages} defaultStage="new" onClose={vi.fn()} onCreate={onCreate} />);
+    fillDeal();
+    fireEvent.click(await screen.findByRole("button", { name: /1C buyer.*ID 41/ }));
+    fireEvent.change(screen.getByPlaceholderText("Название или УНП"), { target: { value: "New query" } });
+    expect(screen.getByDisplayValue("Working buyer")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    await screen.findByText("Выберите контрагента из доступного справочника.");
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(linkCrmClientToCounterparty).not.toHaveBeenCalled();
+  });
+
+  it("retries a failed basic search through the same endpoint", async () => {
+    mock(fetchBuyerOptions).mockResolvedValueOnce({ status: "error" }).mockResolvedValueOnce({ status: "ok", rows: [master], total: 1 });
+    render(<CreateDealModal stages={stages} defaultStage="new" onClose={vi.fn()} onCreate={vi.fn()} />);
+    await screen.findByText("Справочник недоступен. Повторите поиск.");
+    fireEvent.click(screen.getByRole("button", { name: "Найти" }));
+    await screen.findByRole("button", { name: /1C buyer.*ID 41/ });
+    expect(fetchBuyerOptions).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries the first deal against the same client and buyer without a second CRM POST", async () => {
+    const onCreate = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    render(<CreateDealModal client={{ id: 12, name: "Working buyer", owner_id: 34 }}
+      stages={stages} defaultStage="new" onClose={vi.fn()} onCreate={onCreate} />);
+    fillDeal();
+    fireEvent.click(await screen.findByRole("button", { name: /1C buyer.*ID 41/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    await screen.findByText(/Не удалось создать сделку \(возможно/);
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(2));
+    expect(onCreate.mock.calls[0][0]).toEqual(onCreate.mock.calls[1][0]);
+    expect(linkCrmClientToCounterparty).not.toHaveBeenCalled();
+  });
+
+  it("ignores late relationship replies after context change, ABA and unmount", async () => {
+    for (const transition of ["different", "aba", "unmount"]) {
+      mock(linkCrmClientToCounterparty).mockClear();
+      let resolve!: (value: unknown) => void;
+      mock(linkCrmClientToCounterparty).mockReturnValueOnce(new Promise(done => { resolve = done; }));
+      const onCreate = vi.fn().mockResolvedValue(true);
+      const props = { stages, defaultStage: "new", onClose: vi.fn(), onCreate };
+      const view = render(<CreateDealModal {...props} />);
+      fillDeal();
+      fireEvent.click(await screen.findByRole("button", { name: /1C buyer.*ID 41/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+      await waitFor(() => expect(linkCrmClientToCounterparty).toHaveBeenCalledTimes(1));
+      if (transition === "unmount") view.unmount();
+      else {
+        view.rerender(<CreateDealModal {...props}
+          client={{ id: 19, name: "Other context", owner_id: 34, counterparty_id: 41 }} />);
+        if (transition === "aba") view.rerender(<CreateDealModal {...props} />);
+      }
+      await act(async () => resolve(linked));
+      expect(onCreate).not.toHaveBeenCalled();
+      if (transition !== "unmount") {
+        expect(screen.getByPlaceholderText("CRM-2024-0200")).toHaveValue("");
+        if (transition === "different") expect(screen.getByDisplayValue("Other context")).toBeDisabled();
+        view.unmount();
+      }
+    }
   });
 });

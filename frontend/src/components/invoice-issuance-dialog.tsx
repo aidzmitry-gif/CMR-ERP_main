@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { InvoiceDealPreparation } from "./invoice-deal-preparation";
-import { fetchRegisterOrganizations, type RegisterOrganization } from "@/lib/document-register-api";
+import { fetchInstanceOrganization, type InstanceOrganization } from "@/lib/instance-organization";
 import { useUnsavedDocumentGuard } from "@/lib/use-unsaved-document-guard";
 import { allocationError, clearPending, exact, invoiceItems, InvoiceError, issueInvoice, loadPending, prepareCommand, previewInvoice, savePending, units,
   type Allocation, type InvoiceInput, type InvoiceItem, type InvoicePreview, type InvoiceResult, type PendingInvoice } from "@/lib/invoice-issuance-api";
@@ -30,10 +30,11 @@ export function InvoiceIssuanceDialog({ dealId, documentId, initialMode = "stock
 }
 
 function InvoiceDialogForScope({ dealId, documentId, initialMode = "stock", onClose }: Props) {
-  const [organizations, setOrganizations] = useState<RegisterOrganization[]>([]);
+  const [organization, setOrganization] = useState<InstanceOrganization | null>(null);
   const [items, setItems] = useState<InvoiceItem[]>([]);
-  const [org, setOrg] = useState("");
+  const org = organization ? String(organization.id) : "";
   const [preparedOrg, setPreparedOrg] = useState("");
+  const [preparationEdited, setPreparationEdited] = useState(false);
   const [mode, setMode] = useState<"stock" | "on_order">(initialMode);
   const [currency, setCurrency] = useState("");
   const [documentDate, setDocumentDate] = useState("");
@@ -54,7 +55,7 @@ function InvoiceDialogForScope({ dealId, documentId, initialMode = "stock", onCl
   const submitting = useRef(false);
   const capturedInput = useRef<InvoiceInput | null>(null);
   const root = useRef<HTMLDivElement>(null);
-  const hasUnsavedInput = loaded && !pending && !completed && (org !== "" || mode !== initialMode || currency !== ""
+  const hasUnsavedInput = loaded && !pending && !completed && (preparedOrg !== "" || preparationEdited || mode !== initialMode || currency !== ""
     || documentDate !== "" || validUntil !== "" || pricingEvidence !== "" || evidence !== ""
     || Object.values(pricing).some(value => value.price !== "" || value.rate !== ""));
   const confirmClose = useUnsavedDocumentGuard(hasUnsavedInput);
@@ -65,12 +66,15 @@ function InvoiceDialogForScope({ dealId, documentId, initialMode = "stock", onCl
 
   useEffect(() => {
     let active = true;
-    Promise.all([fetchRegisterOrganizations(), invoiceItems(dealId)]).then(([orgs, lines]) => {
+    void (async () => {
+      const context = await fetchInstanceOrganization();
       if (!active) return;
       const saved = loadPending(dealId);
-      if (saved && !orgs.some(o => o.id === saved.command.organization_id)) throw new InvoiceError("Нет доступа к юрлицу сохранённого запроса.", 403);
-      setOrganizations(orgs); setItems(lines); setPending(saved); setLoaded(true); setError("");
-    }).catch(e => { if (active) { setLoaded(false); setError(e instanceof Error ? e.message : "Ошибка загрузки"); } });
+      if (saved && saved.command.organization_id !== context.id) throw new InvoiceError("Юрлицо сохранённого запроса не совпадает с юрлицом установки. Запрос сохранён; проверьте настройки и исходный выпуск.");
+      const lines = saved ? [] : await invoiceItems(dealId);
+      if (!active) return;
+      setOrganization(context); setItems(lines); setPending(saved); setLoaded(true); setError("");
+    })().catch(e => { if (active) { setLoaded(false); setError(e instanceof Error ? e.message : "Ошибка загрузки"); } });
     root.current?.focus();
     return () => { active = false; generation.current += 1; };
   }, [dealId, attempt]);
@@ -79,7 +83,7 @@ function InvoiceDialogForScope({ dealId, documentId, initialMode = "stock", onCl
     generation.current += 1; capturedInput.current = null; setPreview(null); setAllocations([]); setConfirmed(false); setError("");
   }
   function input(): InvoiceInput {
-    if (!organizations.some(o => o.id === Number(org))) throw new InvoiceError("Выберите юрлицо.");
+    if (!organization) throw new InvoiceError("Юрлицо установки не подтверждено.");
     if (preparedOrg !== org) throw new InvoiceError("Подтвердите организацию и покупателя сделки.");
     if (!/^[A-Z]{3}$/.test(currency)) throw new InvoiceError("Укажите код валюты из трёх заглавных букв.");
     const date = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v)) && new Date(v).toISOString().slice(0, 10) === v;
@@ -157,10 +161,9 @@ function InvoiceDialogForScope({ dealId, documentId, initialMode = "stock", onCl
       </section>}
       {loaded && !completed && !pending && items.length === 0 && <p role="status">В сделке нет товарных строк. Выпуск счёта только на услуги пока не поддерживается.</p>}
       {loaded && !completed && !pending && items.length > 0 && <>
-        <label className="block">Юрлицо<select aria-label="Юрлицо" disabled={busy} className={field} value={org} onChange={e => { setOrg(e.target.value); setPreparedOrg(""); invalidate(); }}><option value="">Выберите юрлицо</option>{organizations.map(o => <option key={o.id} value={o.id}>{o.name} · {o.unp} · #{o.id}</option>)}</select></label>
-        {org && <InvoiceDealPreparation org={org} dealId={dealId}
-          onSelectOrg={value => { setOrg(value); setPreparedOrg(""); invalidate(); }}
-          onReady={ready => { setPreparedOrg(ready ? org : ""); if (!ready) invalidate(); }} />}
+        {organization && <section aria-label="Юрлицо установки" className="rounded border border-line p-3 text-sm"><p>{organization.name} · УНП {organization.unp} · #{organization.id}</p><a className="underline" href="/erp/settings">Настройки организации</a></section>}
+        {org && <div onChangeCapture={() => setPreparationEdited(true)}><InvoiceDealPreparation org={org} dealId={dealId}
+          onReady={ready => { setPreparedOrg(ready ? org : ""); if (!ready) invalidate(); }} /></div>}
         <fieldset disabled={busy} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <label>Режим выпуска<select aria-label="Режим выпуска" className={field} value={mode} onChange={e => { setMode(e.target.value as "stock" | "on_order"); invalidate(); }}><option value="stock">Со склада — с резервом</option><option value="on_order">Под заказ — без резерва</option></select></label>
           <label>Валюта<input aria-label="Валюта" className={field} maxLength={3} placeholder="Код валюты" value={currency} onChange={e => { setCurrency(e.target.value.toUpperCase()); invalidate(); }} /></label>

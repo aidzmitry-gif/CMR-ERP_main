@@ -9,8 +9,9 @@ from sqlalchemy import select
 from core.domain.models import AuditLog, OutboxEvent
 from core.services import nbrb
 from core.services.eventbus import EventContext, OutboxEventBus
-from modules.finance.events import on_freight_cost, on_landed_cost
+from modules.finance.events import on_freight_cost
 from modules.finance.models import Payment
+from tests.test_finance import finance_org as finance_org  # noqa: F401
 
 DAY = date(2026, 9, 1)
 
@@ -104,11 +105,22 @@ async def test_missing_event_date_does_not_silently_drop(session):
     assert not (await session.execute(select(Payment))).scalars().all()
 
 
-async def test_byn_landed_is_never_converted_twice(session):
-    await on_landed_cost({"total_landed_byn": "100", "currency": "USD"},
-                         EventContext(session, SimpleNamespace()))
-    payment = (await session.execute(select(Payment))).scalar_one()
-    assert payment.amount == 100 and payment.currency == "BYN"
+async def test_byn_landed_is_never_converted_twice(api, session, monkeypatch):
+    from modules.finance import events
+    from tests.test_finance import (
+        assert_recorded_landed,
+        deliver_landed,
+        landed_runtime,
+        received_landed,
+    )
+
+    runtime = landed_runtime(api, session)
+    item = await received_landed(runtime, lines=[("BYN", "1", "100")])
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("Verified BYN was converted twice")
+    monkeypatch.setattr(events, "event_amount", forbidden)
+    await deliver_landed(session, runtime, item)
+    assert_recorded_landed((await session.scalars(select(Payment))).one(), item, "100")
 
 
 async def test_cross_module_api(api, session):
@@ -209,15 +221,15 @@ async def test_manual_foreign_allocation(api, session):
     assert result.json()["amount"] == "312.34"
 
 
-async def test_foreign_opening_balance_is_byn_in_cashflow(session):
+async def test_foreign_opening_balance_is_byn_in_cashflow(session, finance_org):
     from modules.finance.cashflow import _opening_balance
     from modules.finance.models import BankAccount
 
     await seed(session)
-    account = BankAccount(code="FX", title="FX", currency="USD", opening_balance=100, opening_at=DAY)
+    account = BankAccount(organization_id=finance_org, code="FX", title="FX", currency="USD", opening_balance=100, opening_at=DAY)
     session.add(account)
     await session.flush()
-    assert await _opening_balance(session, account.id) == Decimal("312.34")
+    assert await _opening_balance(session, account.id, organization_id=finance_org) == Decimal("312.34")
 
 
 async def test_refresh_continues_after_one_currency_failure(session, monkeypatch):

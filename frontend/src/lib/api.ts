@@ -424,6 +424,7 @@ export async function fetchDealDetail(
 
 export interface DealInput {
   crm_client_id?: number;
+  counterparty_id?: number;
   number: string;
   title: string;
   counterparty: string;
@@ -434,6 +435,39 @@ export interface DealInput {
   /** Канонический владелец сделки. Передавать можно только ID из CRM-реестра. */
   owner_id?: number | null;
   next_step?: string;
+}
+
+export type BuyerOption = { id: number; name: string; unp: string | null };
+export type BuyerOptionsResult = { status: "ok"; rows: BuyerOption[]; total: number }
+  | { status: "error" | "unauthorized" | "forbidden" };
+
+export async function fetchBuyerOptions(query: string, offset: number, signal?: AbortSignal): Promise<BuyerOptionsResult> {
+  try {
+    const params = new URLSearchParams({ q: query, limit: "50", offset: String(offset) });
+    const response = await fetch(`/api/sales/buyer-options?${params}`, { signal });
+    if (response.status === 401) return { status: "unauthorized" };
+    if (response.status === 403) return { status: "forbidden" };
+    if (!response.ok) return { status: "error" };
+    const value: unknown = await response.json();
+    if (!value || typeof value !== "object") return { status: "error" };
+    const page = value as Record<string, unknown>;
+    if (!Array.isArray(page.rows) || page.rows.length > 50 || !Number.isSafeInteger(page.total)
+      || (page.total as number) < page.rows.length) return { status: "error" };
+    const rows: BuyerOption[] = [];
+    const ids = new Set<number>();
+    for (const raw of page.rows) {
+      if (!raw || typeof raw !== "object") return { status: "error" };
+      const row = raw as Record<string, unknown>;
+      if (Object.keys(row).length !== 3 || !Number.isSafeInteger(row.id) || (row.id as number) <= 0
+        || ids.has(row.id as number) || typeof row.name !== "string" || !row.name.trim()
+        || (row.unp !== null && typeof row.unp !== "string")) return { status: "error" };
+      ids.add(row.id as number);
+      rows.push({ id: row.id as number, name: row.name, unp: row.unp as string | null });
+    }
+    return { status: "ok", rows, total: page.total as number };
+  } catch {
+    return { status: "error" };
+  }
 }
 
 export type LinkedCrmClient = {
@@ -536,6 +570,31 @@ export interface DealItemFull {
   min_price: number | null;
   /** Отпечаток текущих количества и цены для защиты от параллельного изменения. */
   edit_token?: string;
+}
+
+export class SalesCatalogError extends Error {
+  constructor(public readonly status: number | null, message: string) {
+    super(message);
+  }
+}
+
+/** Только товары продаж; ошибка никогда не превращается в подтверждённый пустой каталог. */
+export async function fetchSalesSkusStrict(): Promise<SkuOption[]> {
+  const response = await fetch("/api/sales/skus?for_picker=1", { cache: "no-store" });
+  if (!response.ok) throw new SalesCatalogError(response.status, "Каталог товаров недоступен.");
+  const value: unknown = await response.json();
+  const ids = new Set<number>(), codes = new Set<string>();
+  if (!Array.isArray(value)) throw new SalesCatalogError(null, "Некорректный ответ каталога товаров.");
+  return value.map((item: unknown) => {
+    const row = item as Partial<SkuOption> | null;
+    if (!row || typeof row !== "object" || !Number.isSafeInteger(row.id) || Number(row.id) <= 0
+      || typeof row.code !== "string" || !row.code.trim() || typeof row.title !== "string" || !row.title.trim()
+      || typeof row.unit !== "string" || !row.unit.trim() || ids.has(row.id!) || codes.has(row.code)) {
+      throw new SalesCatalogError(null, "Некорректный ответ каталога товаров.");
+    }
+    ids.add(row.id!); codes.add(row.code);
+    return { id: row.id!, code: row.code, title: row.title, unit: row.unit };
+  });
 }
 
 /** Справочник номенклатуры для подбора (клиент, через /api). */

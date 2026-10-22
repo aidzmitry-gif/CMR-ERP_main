@@ -3,13 +3,13 @@ from sqlalchemy import func, select
 
 from core.domain.models import OutboxEvent
 from modules.sales.models import Message
-from tests.test_crm_client_contacts import FOREIGN, OWN, setup_client
+from tests.test_crm_client_contacts import FOREIGN, OWN, selected_buyer_id, setup_client
 
 
 async def test_history_replay_conflict_and_foreign_scope(api, session):
     client_id = await setup_client(api, session)
     deal = (await api.post('/sales/deals', headers=OWN, json={
-        'number':'REPLAY-HISTORY','title':'Replay','counterparty':'ignored','crm_client_id':client_id})).json()
+        'number':'REPLAY-HISTORY','title':'Replay','counterparty':'ignored','crm_client_id':client_id, 'counterparty_id': await selected_buyer_id(session, client_id)})).json()
     path = f"/sales/deals/{deal['id']}/messages"
     data = {'channel':'phone','text':'Confirmed next step','author':'Manager','request_key':'history-001'}
     first = await api.post(path, headers=OWN, json=data)
@@ -30,7 +30,7 @@ async def test_history_replay_conflict_and_foreign_scope(api, session):
 async def test_legacy_history_without_key_remains_distinct(api, session):
     client_id = await setup_client(api, session)
     deal = (await api.post('/sales/deals', headers=OWN, json={
-        'number':'LEGACY-HISTORY','title':'Legacy','counterparty':'ignored','crm_client_id':client_id})).json()
+        'number':'LEGACY-HISTORY','title':'Legacy','counterparty':'ignored','crm_client_id':client_id, 'counterparty_id': await selected_buyer_id(session, client_id)})).json()
     path = f"/sales/deals/{deal['id']}/messages"
     a = await api.post(path, headers=OWN, json={'text':'Legacy entry'})
     b = await api.post(path, headers=OWN, json={'text':'Legacy entry'})

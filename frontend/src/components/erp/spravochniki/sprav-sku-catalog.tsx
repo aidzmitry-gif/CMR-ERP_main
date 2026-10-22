@@ -22,6 +22,7 @@ interface Props {
   vatRates: VatRateRow[];
   vatUnavailable: boolean;
   unavailable?: boolean;
+  forbidden?: boolean;
 }
 
 function pageHref(baseHref: SkuCatalogBaseHref, search: string, categoryId: number | null, offset: number): string {
@@ -45,6 +46,7 @@ export function SpravSkuCatalog({
   vatRates,
   vatUnavailable,
   unavailable = false,
+  forbidden = false,
 }: Props) {
   const catNames = categoryNameMap(groups);
   const vatTitles = new Map(vatRates.map((v) => [v.code, v]));
@@ -54,6 +56,11 @@ export function SpravSkuCatalog({
   const hasNext = offset + skus.length < total;
   const hasPrevious = offset > 0;
   const isOutOfRange = total > 0 && skus.length === 0 && offset >= total;
+
+  if (forbidden) return <section className="p-6">
+    <h2 className="font-bold">Номенклатура (SKU)</h2>
+    <p role="alert">Общий справочник номенклатуры недоступен с вашим рабочим доступом.</p>
+  </section>;
 
   if (unavailable) return <section className="p-6">
     <h2 className="font-bold">Номенклатура (SKU)</h2>
@@ -264,8 +271,12 @@ async function renderCatalog(filters: CatalogFilters, baseHref: SkuCatalogBaseHr
       categorySubtreeId: filters.categoryId,
       offset: filters.offset,
     }, role, authHeaders)
-      .then((page) => ({ page, unavailable: false as const }))
-      .catch(() => ({ page: null, unavailable: true as const })),
+      .then((page) => ({ page, unavailable: false as const, forbidden: false }))
+      .catch((error: unknown) => ({
+        page: null,
+        unavailable: true as const,
+        forbidden: error instanceof Error && error.message === "403",
+      })),
     fetchNomenclatureGroups({ roles: role, strict: true }, authHeaders)
       .then((rows) => ({ rows, unavailable: false as const }))
       .catch(() => ({ rows: [], unavailable: true as const })),
@@ -287,6 +298,7 @@ async function renderCatalog(filters: CatalogFilters, baseHref: SkuCatalogBaseHr
       vatRates={vatResult.rows}
       vatUnavailable={vatResult.unavailable}
       unavailable={skuResult.unavailable}
+      forbidden={skuResult.forbidden}
     />
   );
 }

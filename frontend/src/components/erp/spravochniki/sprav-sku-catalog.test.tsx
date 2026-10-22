@@ -11,7 +11,7 @@ vi.mock("next/link", () => ({
 vi.mock("@/lib/auth-headers-server", () => ({ backendAuthHeaders: vi.fn() }));
 vi.mock("@/lib/role-server", () => ({ currentRole: vi.fn() }));
 
-import { SpravSkuCatalog } from "@/components/erp/spravochniki/sprav-sku-catalog";
+import { SkuCatalogContent, SpravSkuCatalog } from "@/components/erp/spravochniki/sprav-sku-catalog";
 import type { NomenclatureGroup, SkuRow, VatRateRow } from "@/lib/reference-data";
 import { CATALOG_ROW_LIMIT } from "@/lib/reference-data";
 
@@ -49,6 +49,38 @@ function renderCatalog(props: Partial<typeof baseProps> = {}) {
 }
 
 describe("SpravSkuCatalog", () => {
+  it.each(
+    (["/erp/spravochniki/sku", "/crm/catalog"] as const).flatMap((baseHref) =>
+      ([403, 503, "network"] as const).map((failure) => ({ baseHref, failure }))),
+  )("distinguishes $failure from access denial in SSR $baseHref without showing cached goods", async ({ baseHref, failure }) => {
+    const fetchMock = failure === "network"
+      ? vi.fn().mockRejectedValue(new TypeError("fetch failed"))
+      : vi.fn().mockImplementation(async () => new Response("{}", { status: failure }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(await SkuCatalogContent({
+        baseHref,
+        searchParams: Promise.resolve({ search: "A %_ B", offset: "250" }),
+      }));
+      expect(fetchMock).toHaveBeenCalled();
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
+      expect(screen.queryByText(skus[0].title)).not.toBeInTheDocument();
+      expect(screen.queryByText("Нет данных")).not.toBeInTheDocument();
+      if (failure === 403) {
+        expect(screen.getByRole("alert")).toHaveTextContent("Общий справочник номенклатуры недоступен с вашим рабочим доступом");
+        expect(screen.queryByRole("link", { name: "Повторить загрузку" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("link", { name: "Сбросить фильтры" })).not.toBeInTheDocument();
+      } else {
+        expect(screen.getByRole("alert")).toHaveTextContent("Список товаров неизвестен");
+        expect(screen.getByRole("link", { name: "Повторить загрузку" })).toHaveAttribute(
+          "href", `${baseHref}?search=A+%25_+B&offset=250`,
+        );
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it.each(["/erp/spravochniki/sku", "/crm/catalog"] as const)("[SKU-FILTER-RESET] clears stale controls and GET values after reset in %s", (baseHref) => {
     const { container, rerender } = render(<SpravSkuCatalog {...baseProps} baseHref={baseHref} search="18650" categoryId={1} />);
     fireEvent.change(screen.getByLabelText("Поиск номенклатуры"), { target: { value: "Несохранённый поиск" } });

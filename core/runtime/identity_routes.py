@@ -10,9 +10,10 @@ from typing import Literal, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import and_, exists, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from config.access import (
     ACCESS_MATRIX,
@@ -58,6 +59,24 @@ _USERNAME_RE = re.compile(r"[^a-z0-9._-]+")
 _IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{11,127}$")
 CRM_DEPARTMENT = "Продажи"
 CRM_STAFF_ROLES: tuple[str, ...] = ("sales_head", "sales", "sales_cli")
+
+
+def _primary_employee_account():
+    """An employee's unique invitation binds its primary administrative account.
+
+    Additional verified logins keep their own roles and visibility. Legacy
+    single accounts without an invitation continue to work unchanged.
+    """
+    invite = aliased(IdentityInvitationRequest)
+    canonical = select(invite.id).where(
+        invite.employee_id == User.employee_id, invite.user_id.is_not(None),
+    ).correlate(User)
+    other = aliased(User)
+    legacy_count = select(func.count(other.id)).where(
+        other.employee_id == User.employee_id,
+    ).correlate(User).scalar_subquery()
+    return or_(exists(canonical.where(invite.user_id == User.id)),
+               and_(~exists(canonical), legacy_count == 1))
 
 
 def _check_crm_invitation_scope(actor: CurrentUser, payload: InviteEmployeeIn) -> None:
@@ -369,9 +388,16 @@ async def _resolve_invitation(
         .scalars()
         .all()
     )
-    current = next((user for user in matches if user.employee_id == employee.id), None)
+    current = (await session.execute(select(User).where(
+        User.employee_id == employee.id, _primary_employee_account(),
+    ))).scalar_one_or_none()
     if any(user.employee_id != employee.id for user in matches):
         raise HTTPException(status_code=409, detail="Логин или email уже занят")
+    if current is None and any(user.employee_id == employee.id for user in matches):
+        raise HTTPException(
+            status_code=409,
+            detail="У сотрудника несколько учётных записей без основной; требуется сверка, новое приглашение не отправлено",
+        )
     if current is not None and not _same_user_payload(current, payload, username):
         raise HTTPException(
             status_code=409,
@@ -543,7 +569,7 @@ async def _record_crm_role_change_failure(
     """Не маскировать неопределённый внешний эффект локальным успехом."""
 
     user = (
-        await session.execute(select(User).where(User.employee_id == employee_id).with_for_update())
+        await session.execute(select(User).where(User.employee_id == employee_id, _primary_employee_account()).with_for_update())
     ).scalar_one_or_none()
     # The application auth guard treats this durable status as fail-closed.  Do
     # not restore `active`: a timeout can mean Keycloak already changed roles.
@@ -602,7 +628,7 @@ async def list_crm_staff(
     rows = (
         await session.execute(
             select(Employee, User)
-            .outerjoin(User, User.employee_id == Employee.id)
+            .outerjoin(User, and_(User.employee_id == Employee.id, _primary_employee_account()))
             .where(Employee.department == CRM_DEPARTMENT)
             .order_by(Employee.full_name, Employee.id)
         )
@@ -639,7 +665,7 @@ async def create_crm_staff(
     if existing is not None:
         # Повтор UI не создаёт вторую кадровую карточку и не меняет первую.
         user = (
-            await session.execute(select(User).where(User.employee_id == existing.id))
+            await session.execute(select(User).where(User.employee_id == existing.id, _primary_employee_account()))
         ).scalar_one_or_none()
         return _crm_staff_out(existing, user, created=False)
 
@@ -692,7 +718,7 @@ async def change_crm_role(
         raise HTTPException(status_code=409, detail="Выбрана текущая CRM-роль; изменение не выполнено")
     idempotency_key = _idempotency_key(request)
     user = (
-        await session.execute(select(User).where(User.employee_id == employee_id).with_for_update())
+        await session.execute(select(User).where(User.employee_id == employee_id, _primary_employee_account()).with_for_update())
     ).scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=404, detail="Связанный CRM-пользователь не найден")
@@ -892,7 +918,7 @@ async def change_crm_visibility(
         raise HTTPException(status_code=403, detail="Смена видимости CRM доступна только руководителю доступа")
     idempotency_key = _idempotency_key(request)
     user = (
-        await session.execute(select(User).where(User.employee_id == employee_id).with_for_update())
+        await session.execute(select(User).where(User.employee_id == employee_id, _primary_employee_account()).with_for_update())
     ).scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=404, detail="Связанный CRM-пользователь не найден")
@@ -996,7 +1022,7 @@ async def change_crm_access(
     if not is_super(actor.roles):
         raise HTTPException(status_code=403, detail="Изменять доступ может только руководитель доступа")
     key = _idempotency_key(request)
-    user = (await session.execute(select(User).where(User.employee_id == employee_id).with_for_update())).scalar_one_or_none()
+    user = (await session.execute(select(User).where(User.employee_id == employee_id, _primary_employee_account()).with_for_update())).scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=404, detail="Связанный CRM-пользователь не найден")
     if user.username == actor.username or (actor.keycloak_user_id and user.keycloak_user_id == actor.keycloak_user_id):
@@ -1054,7 +1080,7 @@ async def change_crm_access(
         changed = await identity.set_user_enabled(user_id=subject, enabled=payload.enabled, expected_role=role)
         if changed.user_id != subject or changed.enabled is not payload.enabled or changed.role != role:
             raise KeycloakAdminError("keycloak_access_verify_mismatch")
-        user = (await session.execute(select(User).where(User.employee_id == employee_id).with_for_update()
+        user = (await session.execute(select(User).where(User.employee_id == employee_id, _primary_employee_account()).with_for_update()
                                       .execution_options(populate_existing=True))).scalar_one_or_none()
         employee = (await session.execute(select(Employee).where(Employee.id == employee_id).with_for_update()
                                           .execution_options(populate_existing=True))).scalar_one_or_none()
@@ -1071,7 +1097,7 @@ async def change_crm_access(
         await session.commit()
     except Exception as exc:
         await session.rollback()
-        failed_user = (await session.execute(select(User).where(User.employee_id == employee_id).with_for_update()
+        failed_user = (await session.execute(select(User).where(User.employee_id == employee_id, _primary_employee_account()).with_for_update()
                                              .execution_options(populate_existing=True))).scalar_one_or_none()
         if failed_user is not None and failed_user.status == "access_changing":
             failed_user.status = "access_change_failed"
@@ -1387,7 +1413,7 @@ async def activate_employee(
 
     idempotency_key = _idempotency_key(request)
     user = (
-        await session.execute(select(User).where(User.employee_id == employee_id).with_for_update())
+        await session.execute(select(User).where(User.employee_id == employee_id, _primary_employee_account()).with_for_update())
     ).scalar_one_or_none()
     if user is None or user.employee_id is None:
         raise HTTPException(status_code=404, detail="Onboarding-пользователь не найден")

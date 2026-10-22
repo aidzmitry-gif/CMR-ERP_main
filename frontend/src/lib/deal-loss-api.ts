@@ -3,8 +3,9 @@ export type LossState = "pending" | "finalized" | "withdrawn";
 export type LossScope = { deal: number; org: number; principal: string };
 export type LossContext = { deal_id: number; principal: string; organization_id: number | null;
   organization: { id: number; name: string; unp: string } | null; mapping_required: boolean;
-  funnel: string; stage: string; lost_stage: string | null; pending_request_id: string | null;
-  latest_request_id: string | null; latest_request_state: LossState | null };
+  funnel: string; stage: string; lost_stage: string | null; lost_stages: string[]; pending_request_id: string | null;
+  latest_request_id: string | null; latest_request_state: LossState | null;
+  loss_reasons?: { code: string; title: string }[] };
 export type InvoiceIdentity = { id: number; deal_id: number; kind: "invoice"; version: number;
   content_sha256: string | null; supersedes_id: number | null; superseded_by_id: number | null };
 export type LossSnapshot = { funnel: string; stage: string; lost_stage: string | null; invoices: InvoiceIdentity[] };
@@ -69,11 +70,21 @@ export async function fetchLossContext(deal: string | number): Promise<LossConte
   const v = await request(`/api/sales/deals/${deal}/loss-context`);
   if (!obj(v) || v.deal_id !== Number(deal) || !str(v.principal) || !nilId(v.organization_id)
     || typeof v.mapping_required !== "boolean" || !str(v.funnel) || !str(v.stage)
-    || !(v.lost_stage === null || str(v.lost_stage)) || !nilUuid(v.pending_request_id) || !nilUuid(v.latest_request_id)
+    || !(v.lost_stage === null || str(v.lost_stage))
+    || !Array.isArray(v.lost_stages) || !v.lost_stages.every(str)
+    || new Set(v.lost_stages).size !== v.lost_stages.length
+    || (v.lost_stage === null ? v.lost_stages.length !== 0 : !v.lost_stages.includes(v.lost_stage))
+    || !nilUuid(v.pending_request_id) || !nilUuid(v.latest_request_id)
     || !(v.latest_request_state === null || state(v.latest_request_state))) invalid();
   if (v.mapping_required ? v.organization_id !== null || v.organization !== null
     : !obj(v.organization) || !id(v.organization_id) || v.organization.id !== v.organization_id
       || !str(v.organization.name) || typeof v.organization.unp !== "string") invalid();
+  if (Object.hasOwn(v, "loss_reasons")) {
+    const reasons = v.loss_reasons;
+    if (!Array.isArray(reasons) || !reasons.every(r => obj(r) && str(r.code) && r.code === r.code.trim()
+      && r.code.length <= 128 && str(r.title))
+      || new Set(reasons.map(r => r.code)).size !== reasons.length) invalid();
+  }
   return v as unknown as LossContext;
 }
 export async function requireScope(scope: LossScope) {
@@ -237,8 +248,5 @@ export async function recoverLoss(journal: Journal): Promise<{ journal: Journal;
 /** Check exact current funnel semantics before any board mutation. */
 export async function lossGate(deal: string, target: string): Promise<boolean> {
   const ctx = await fetchLossContext(deal);
-  if (ctx.pending_request_id || ctx.lost_stage === target) return true;
-  const rows = await request("/api/sales/stages");
-  if (!Array.isArray(rows) || !rows.every(r => obj(r) && str(r.code) && str(r.funnel) && str(r.kind) && typeof r.is_active === "boolean")) invalid();
-  return rows.some(r => r.funnel === ctx.funnel && r.code === target && r.is_active && r.kind === "lost");
+  return Boolean(ctx.pending_request_id) || ctx.lost_stages.includes(target);
 }

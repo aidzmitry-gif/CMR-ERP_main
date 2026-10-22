@@ -1,9 +1,8 @@
 "use client";
 
 import { Search, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { fetchCrmStaff, linkCrmClientToCounterparty, type CrmStaffMember, type DealInput } from "@/lib/api";
-import { loadDirectory, type ClientRow } from "@/lib/crm-directory";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { fetchCrmStaff, fetchBuyerOptions, linkCrmClientToCounterparty, type BuyerOption, type CrmStaffMember, type DealInput } from "@/lib/api";
 import type { Stage } from "@/lib/types";
 
 const PRIORITIES = ["Высокий", "Средний", "Низкий"];
@@ -32,8 +31,16 @@ export function CreateDealModal({
   onCreate: (input: DealInput) => Promise<boolean>;
   /** Только admin/director/commercial: право подтверждает сервер, UI лишь не показывает реестр остальным. */
   canAssignOwner?: boolean;
-  client?: { id: number; name: string; owner_id: number };
+  client?: { id: number; name: string; owner_id: number; counterparty_id?: number | null };
 }) {
+  const needsBuyer = !client || client.counterparty_id == null;
+  const contextKey = `${client?.id ?? "new"}:${client?.counterparty_id ?? "unbound"}:${client?.owner_id ?? "self"}`;
+  const currentContext = useRef(0);
+  useLayoutEffect(() => {
+    currentContext.current += 1;
+    return () => { currentContext.current += 1; };
+  }, [contextKey]);
+  const previousContext = useRef(contextKey);
   const [form, setForm] = useState<DealInput>({
     number: "",
     counterparty: client?.name ?? "",
@@ -51,35 +58,52 @@ export function CreateDealModal({
   const [directoryQuery, setDirectoryQuery] = useState("");
   const [directoryOffset, setDirectoryOffset] = useState(0);
   const [directoryRevision, setDirectoryRevision] = useState(0);
-  const [directoryRows, setDirectoryRows] = useState<ClientRow[]>([]);
+  const [directoryRows, setDirectoryRows] = useState<BuyerOption[]>([]);
   const [directoryNextOffset, setDirectoryNextOffset] = useState(0);
   const [directoryTotal, setDirectoryTotal] = useState(0);
   const [directoryStatus, setDirectoryStatus] = useState<"idle" | "loading" | "ok" | "error" | "unauthorized" | "forbidden">("loading");
-  const [selected, setSelected] = useState<ClientRow | null>(null);
+  const [selected, setSelected] = useState<BuyerOption | null>(null);
   const directoryRequestId = useRef(0);
   const requestKey = useRef<string | null>(null);
   const [owners, setOwners] = useState<CrmStaffMember[] | null>(null);
 
   useEffect(() => {
-    if (client) return;
+    if (!needsBuyer) return;
     const controller = new AbortController();
     const requestId = directoryRequestId.current;
     let live = true;
-    void loadDirectory("clients", directoryQuery, directoryOffset, controller.signal).then((result) => {
+    void fetchBuyerOptions(directoryQuery, directoryOffset, controller.signal).then((result) => {
       if (!live || requestId !== directoryRequestId.current) return;
       if (result.status !== "ok") {
         setDirectoryStatus(result.status);
         return;
       }
-      const visible = result.rows.filter((row): row is ClientRow =>
-        "name" in row && row.source !== "crm" && row.is_active);
-      setDirectoryRows((previous) => directoryOffset === 0 ? visible : [...previous, ...visible]);
+      setDirectoryRows((previous) => directoryOffset === 0 ? result.rows : [...previous, ...result.rows]);
       setDirectoryNextOffset(directoryOffset + result.rows.length);
       setDirectoryTotal(result.total);
       setDirectoryStatus("ok");
     });
     return () => { live = false; controller.abort(); };
-  }, [client, directoryQuery, directoryOffset, directoryRevision]);
+  }, [contextKey, needsBuyer, directoryQuery, directoryOffset, directoryRevision]);
+
+  useEffect(() => {
+    if (previousContext.current === contextKey) return;
+    previousContext.current = contextKey;
+    directoryRequestId.current += 1;
+    setSelected(null);
+    setDirectoryText("");
+    setDirectoryQuery("");
+    setDirectoryOffset(0);
+    setDirectoryRows([]);
+    setDirectoryStatus("loading");
+    setDirectoryRevision(value => value + 1);
+    setSaving(false);
+    setError(null);
+    requestKey.current = null;
+    setForm({ number: "", title: "", counterparty: client?.name ?? "", amount: 0,
+      priority: "Средний", stage: defaultStage, owner: "", next_step: "",
+      ...(client ? { crm_client_id: client.id, owner_id: client.owner_id } : {}) });
+  }, [contextKey, client, defaultStage]);
 
   useEffect(() => {
     if (!canAssignOwner) return;
@@ -97,7 +121,7 @@ export function CreateDealModal({
   function searchDirectory() {
     directoryRequestId.current += 1;
     setSelected(null);
-    set("counterparty", "");
+    set("counterparty", client?.name ?? "");
     requestKey.current = null;
     setDirectoryRows([]);
     setDirectoryStatus("loading");
@@ -109,7 +133,7 @@ export function CreateDealModal({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (saving) return;
-    if (!client && !selected) {
+    if (needsBuyer && !selected) {
       setError("Выберите контрагента из доступного справочника.");
       return;
     }
@@ -117,26 +141,30 @@ export function CreateDealModal({
       setError("Выберите ответственного.");
       return;
     }
+    const submittedContext = currentContext.current;
     setSaving(true);
     setError(null);
     try {
-      let input = form;
+      let input = { ...form, ...(selected ? { counterparty_id: selected.id } : {}) };
       if (!client && selected) {
         requestKey.current ??= crypto.randomUUID();
         const linked = await linkCrmClientToCounterparty(
           selected.id, requestKey.current, form.owner_id ?? undefined,
         );
+        if (currentContext.current !== submittedContext) return;
         if (!linked) {
           setError("Контрагент недоступен или не удалось создать связь с CRM. Обновите справочник и повторите.");
           return;
         }
-        input = { ...form, counterparty: linked.name, crm_client_id: linked.id, owner_id: linked.owner_id };
+        input = { ...form, counterparty: linked.name, crm_client_id: linked.id, owner_id: linked.owner_id, counterparty_id: selected.id };
       }
-      if (!await onCreate(input)) setError("Не удалось создать сделку (возможно, номер уже занят).");
+      if (currentContext.current !== submittedContext) return;
+      const created = await onCreate(input);
+      if (currentContext.current === submittedContext && !created) setError("Не удалось создать сделку (возможно, номер уже занят).");
     } catch {
-      setError("Не удалось создать сделку. Повторите попытку.");
+      if (currentContext.current === submittedContext) setError("Не удалось создать сделку. Повторите попытку.");
     } finally {
-      setSaving(false);
+      if (currentContext.current === submittedContext) setSaving(false);
     }
   }
 
@@ -161,14 +189,14 @@ export function CreateDealModal({
           <Field label="Номер">
             <input required value={form.number} onChange={(e) => set("number", e.target.value)} placeholder="CRM-2024-0200" className={INPUT} />
           </Field>
-          {!client && <div className="space-y-2">
+          {needsBuyer && <div className="space-y-2">
             <Field label="Контрагент из справочника">
               <div className="flex gap-2">
                 <input value={directoryText} maxLength={120} onChange={(e) => {
                   directoryRequestId.current += 1;
                   setDirectoryText(e.target.value);
                   setSelected(null);
-                  set("counterparty", "");
+                  set("counterparty", client?.name ?? "");
                   setDirectoryRows([]);
                   setDirectoryStatus("idle");
                   requestKey.current = null;
@@ -187,7 +215,7 @@ export function CreateDealModal({
               <ul aria-label="Доступные контрагенты" className="max-h-40 overflow-y-auto rounded-lg border border-line">
                 {directoryRows.map((row) => <li key={row.id}>
                   <button type="button" aria-pressed={selected?.id === row.id}
-                    onClick={() => { setSelected(row); set("counterparty", row.name); requestKey.current = null; setError(null); }}
+                    onClick={() => { setSelected(row); if (!client) set("counterparty", row.name); requestKey.current = null; setError(null); }}
                     className="w-full border-b border-line px-3 py-2 text-left text-sm hover:bg-sunken aria-pressed:bg-accent-soft">
                     <span className="font-medium">{row.name}</span>
                     <span className="ml-2 text-xs text-muted">{row.unp ?? "без УНП"} · ID {row.id}</span>

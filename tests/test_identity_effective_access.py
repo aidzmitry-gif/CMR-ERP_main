@@ -160,7 +160,11 @@ async def test_unlinked_director_keeps_verified_claims(session):
 @pytest.mark.asyncio
 async def test_managed_crm_identity_is_restricted_without_changing_legacy_role_matrix(session, monkeypatch):
     from config.access import ACCESS_MATRIX
+    from core.domain.models import Counterparty
 
+    buyer = Counterparty(name="Synthetic client", unp="123456789",
+                         requisites={"legal_address": "Synthetic test address"})
+    session.add(buyer)
     session.add(User(username="managed-crm", full_name="Synthetic CRM", keycloak_user_id="kc-managed-crm",
                      role="sales_head", status="active", expected_department="Продажи", expected_role="sales_head"))
     await session.commit()
@@ -175,14 +179,63 @@ async def test_managed_crm_identity_is_restricted_without_changing_legacy_role_m
         assert access.json()["matrix"] == {"sales_head": ["home", "crm"]}
         deals = await api.get("/sales/deals")
         assert deals.status_code == 200, deals.text
-        created = await api.post("/sales/deals", json={"number": "SYNTHETIC-CRM-ONLY-1", "title": "Synthetic deal", "counterparty": "Synthetic client"})
+        created = await api.post("/sales/deals", json={"number": "SYNTHETIC-CRM-ONLY-1", "title": "Synthetic deal", "counterparty": buyer.name, "counterparty_id": buyer.id})
         assert created.status_code == 201, created.text
+        assert created.json()["counterparty_id"] == buyer.id
+        assert created.json()["counterparty"] == buyer.name
         updated = await api.patch(f"/sales/deals/{created.json()['id']}", json={"title": "Updated synthetic deal"})
         assert updated.status_code == 200, updated.text
         for path in ["/hr/employees", "/finance", "/marketing", "/knowledge", "/system/users/crm-staff", "/system/reference/skus"]:
             assert (await api.get(path)).status_code == 403
         assert (await api.delete("/sales/deal-items/1")).status_code == 403
         assert (await api.post("/sales/stages", json={})).status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role,restricted", [("sales", True), ("sales_manager", False), ("sales_cli", True), ("sales_head", True)])
+async def test_own_crm_can_pick_real_sku_with_existing_role_boundaries(session, monkeypatch, role, restricted):
+    from core.domain.models import Sku
+    from modules.sales.models import Deal, DealItem
+
+    user = User(username="synthetic-catalog-seller", full_name="Synthetic seller",
+                keycloak_user_id="kc-synthetic-catalog", role=role, status="active",
+                employee_id=401, deal_visibility="own",
+                expected_department="Продажи", expected_role=role)
+    sku = Sku(code="SYNTHETIC-CATALOG-SKU", title="Synthetic battery", unit="шт",
+              attributes={"internal_fixture_note": "not part of the seller DTO"})
+    own = Deal(number="SYNTHETIC-CATALOG-OWN", title="Synthetic own deal",
+               counterparty="Synthetic buyer", owner_id=401)
+    foreign = Deal(number="SYNTHETIC-CATALOG-FOREIGN", title="Synthetic foreign deal",
+                   counterparty="Synthetic foreign buyer", owner_id=402)
+    session.add_all([user, sku, own, foreign])
+    await session.commit()
+    claimed = CurrentUser(user.username, [role, "director"], user.keycloak_user_id)
+    effective = await resolve_effective_oidc_user(claimed, session)
+    assert effective.roles == [role] and effective.crm_restricted is restricted
+    async with await _effective_access_client(session, monkeypatch, claimed) as api:
+        products = await api.get("/sales/skus?for_picker=1")
+        assert products.status_code == 200, products.text
+        assert products.json() == [{"id": sku.id, "code": sku.code, "title": sku.title, "unit": sku.unit}]
+        listing = await api.get("/sales/deals")
+        assert listing.status_code == 200
+        assert [row["id"] for row in listing.json()] == [own.id]
+        if restricted:
+            for path in ["/system/reference/skus", "/system/references/quality"]:
+                assert (await api.get(path)).status_code == 403
+        assert (await api.get("/system/mdm/counterparty/1")).status_code == 403
+        for path in [f"/sales/deals/{foreign.id}", f"/sales/deals/{foreign.id}/items"]:
+            assert (await api.get(path)).status_code == 404
+        payload = {"sku_id": sku.id, "qty": 3, "unit_price": 25,
+                   "request_key": "00000000-0000-4000-8000-000000000401"}
+        rejected = await api.post(f"/sales/deals/{foreign.id}/items", json=payload)
+        assert rejected.status_code == 404, rejected.text
+        created = await api.post(f"/sales/deals/{own.id}/items", json=payload)
+        assert created.status_code == 201, created.text
+        rows = await api.get(f"/sales/deals/{own.id}/items")
+        assert rows.status_code == 200 and len(rows.json()) == 1
+        assert rows.json()[0]["sku_id"] == sku.id
+        assert rows.json()[0]["qty"] == 3 and rows.json()[0]["unit_price"] == 25
+        assert await session.scalar(select(DealItem.id).where(DealItem.deal_id == foreign.id)) is None
 
 
 @pytest.mark.asyncio
@@ -337,3 +390,30 @@ async def test_own_visibility_blocks_neighbor_deal_surfaces_with_same_signed_tok
         user.deal_visibility = "all"
         await session.commit()
         assert (await client.get("/leads/__scope_probe__/missing")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_alias_subjects_keep_separate_roles_scope_and_shared_revocation(session):
+    accounts = [
+        User(username="synthetic-alias-a", full_name="Synthetic employee", employee_id=9901,
+             keycloak_user_id="synthetic-subject-a", role="director", status="active", deal_visibility="all"),
+        User(username="synthetic-alias-b", full_name="Synthetic employee", employee_id=9901,
+             keycloak_user_id="synthetic-subject-b", role="sales", status="active", deal_visibility="own"),
+    ]
+    session.add_all(accounts)
+    await session.commit()
+    cutoff = datetime(2026, 7, 1, 12)
+    issued = int(cutoff.replace(tzinfo=UTC).timestamp())
+    for account in accounts:
+        principal = CurrentUser(account.username, [account.role], account.keycloak_user_id, issued_at=issued)
+        resolved = await resolve_effective_oidc_user(principal, session)
+        assert resolved.roles == [account.role]
+        assert resolved.deal_visibility == account.deal_visibility
+    session.add(AuditLog(actor="synthetic-director", action="identity.user.crm_access_requested",
+                         entity_ref="employee:9901", ts=cutoff, detail={"enabled": False}))
+    await session.commit()
+    for account in accounts:
+        stale = CurrentUser(account.username, [account.role], account.keycloak_user_id, issued_at=issued)
+        assert (await resolve_effective_oidc_user(stale, session)).roles == [GUEST]
+        fresh = CurrentUser(account.username, [account.role], account.keycloak_user_id, issued_at=issued + 1)
+        assert (await resolve_effective_oidc_user(fresh, session)).roles == [account.role]

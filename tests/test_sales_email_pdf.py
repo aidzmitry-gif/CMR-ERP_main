@@ -5,6 +5,7 @@ import pytest
 from PIL import Image
 from pypdf import PdfReader
 
+from modules.sales.documents import render_erp_invoice
 from modules.sales.mail_pdf import pdf, render_original
 
 SOURCE = """<!doctype html><html lang="ru"><meta charset="utf-8"><style>
@@ -61,3 +62,33 @@ async def test_actual_pdf_preserves_embedded_raster_image(image_format, mime_typ
 def test_pdf_rejects_external_resources_active_content_and_links(markup):
     with pytest.raises(Exception):
         render_original("<html>" + markup + "</html>")
+
+
+async def test_actual_erp_invoice_pdf_preserves_long_requisites_and_all_columns(tmp_path):
+    title = 'Аккумулятор контрольный с длинным наименованием для печати и проверки переноса'
+    prepared = {
+        'seller': {'name': 'Контрольный продавец', 'unp': '190000007', 'address': 'Адрес продавца',
+                   'bank': 'Контрольный банк', 'bik': 'TESTBIK', 'account': 'TESTACCOUNT',
+                   'phone': '', 'email': None, 'director': 'Руководитель'},
+        'buyer': {'name': 'Контрольный покупатель', 'unp': '500000007',
+                  'requisites': {'legal_address': 'Длинный адрес покупателя ' * 8,
+                                 'bank': {'bik': 'BUYERBIK'}, 'Показатель': 0}},
+        'lines': [dict(line_no=i, sku_code=f'CONTROL-{i:02d}-' + '1' * 40, name=title, qty='2.00',
+                       unit='шт', price='100.00', vat_rate='20.00', net='200.00', tax='40.00', total='240.00')
+                  for i in range(1, 19)],
+        'document_date': '2026-07-01', 'valid_until': '2026-07-06', 'amount': '4320.00', 'currency': 'BYN',
+        'reserve_mode': 'on_order', 'payment_terms': '', 'delivery_terms': '', 'pricing_evidence': 'Контроль',
+    }
+    content = await pdf(render_erp_invoice('КОНТРОЛЬ-002', prepared))
+    (tmp_path / 'erp-invoice-layout.pdf').write_bytes(content)
+    reader = PdfReader(BytesIO(content))
+    text = '\n'.join(page.extract_text() for page in reader.pages)
+    compact = ''.join(text.split())
+    assert all(page.mediabox.width > page.mediabox.height for page in reader.pages)
+    for value in ['КОНТРОЛЬ-002', '190000007', '500000007', 'Юридический адрес', 'BUYERBIK',
+                  title, '4320.00 BYN', 'Количество', 'Цена нетто', 'НДС %', 'Всего']:
+        assert ''.join(value.split()) in compact
+    for i in range(1, 19):
+        assert f'CONTROL-{i:02d}-' + '1' * 40 in compact
+    assert 'legal_address' not in text and '{"' not in text and ', ,' not in text
+    assert 'Условия оплаты:' not in text and 'Условия поставки:' not in text

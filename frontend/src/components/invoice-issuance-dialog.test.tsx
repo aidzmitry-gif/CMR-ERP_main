@@ -5,12 +5,14 @@ import { command, preview, response, result } from "@/test/invoice-issuance-fixt
 import { loadPending, savePending } from "@/lib/invoice-issuance-api";
 import { ownershipCommand, saveOwnership } from "@/lib/deal-ownership-api";
 
+const instance = { configuration: "AIOS_SELLER_UNP", organization: { id: 7, name: "Организация установки", unp: "190000007" } };
 const items = [{ id: 11, code: "SKU", title: "Товар", qty: 2 }];
 function mockApi({ failIssue = false, failLoad = false, free = "2.00" as string | null, empty = false, onOrder = false } = {}) {
   let lost = failIssue;
   const issued = onOrder ? { ...result, reservation_digest: null, document: { ...result.document, reserve_mode: "on_order", reserve_status: "unreserved" } } : result;
   const fetch = vi.fn(async (url: string, init?: RequestInit) => {
     if (failLoad) return response({}, 403);
+    if (url === "/api/system/instance-organization") return response(instance);
     if (url.includes("document-register/organizations")) return response([{ id: 7, name: "Юрлицо", unp: "123" }]);
     if (url.endsWith("/items")) return response(empty ? [] : items);
     if (url.endsWith("/ownership-preview")) return response({ assigned: true, snapshot: { deal_id: Number(url.split("/")[6]), number: "D", counterparty: "Buyer", owner_id: null, documents: [] } });
@@ -32,8 +34,8 @@ function mockApi({ failIssue = false, failLoad = false, free = "2.00" as string 
   vi.stubGlobal("fetch", fetch); return fetch;
 }
 async function fill(mode = "stock") {
-  await screen.findByLabelText("Юрлицо");
-  for (const [label, value] of [["Юрлицо", "7"], ["Валюта", "BYN"], ["Дата счёта", "2026-09-10"], ["Действителен до", "2026-09-15"], ["Цена строки 11", "100.00"], ["Ставка строки 11", "0.00"], ["Основание цен и ставок", "Согласовано явно"]]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  await screen.findByLabelText("Валюта");
+  for (const [label, value] of [["Валюта", "BYN"], ["Дата счёта", "2026-09-10"], ["Действителен до", "2026-09-15"], ["Цена строки 11", "100.00"], ["Ставка строки 11", "0.00"], ["Основание цен и ставок", "Согласовано явно"]]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
   await prepare();
   fireEvent.change(screen.getByLabelText("Режим выпуска"), { target: { value: mode } });
   fireEvent.click(screen.getByText("Получить предпросмотр"));
@@ -67,16 +69,18 @@ describe("invoice dialog", () => {
     expect(close).toHaveBeenCalledWith(null);
     expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
-  it("requires explicit org, dates, price and VAT with no 20% default", async () => {
+  it("uses configured org and requires explicit dates, price and VAT with no 20% default", async () => {
     mockApi(); render(<InvoiceIssuanceDialog dealId="1" onClose={vi.fn()} />);
-    expect(await screen.findByLabelText("Юрлицо")).toHaveValue("");
+    await screen.findByLabelText("Валюта");
+    expect(screen.getByRole("region", { name: "Юрлицо установки" })).toHaveTextContent("Организация установки · УНП 190000007 · #7");
+    expect(screen.queryByLabelText("Юрлицо", { selector: "select" })).toBeNull();
     expect(screen.getByLabelText("Ставка строки 11")).toHaveValue("");
     expect(screen.getByLabelText("Дата счёта")).toHaveValue("");
     expect(screen.getByText("Получить предпросмотр")).toBeDisabled();
   });
   it("shows 403 and does not report an empty deal", async () => {
     mockApi({ failLoad: true }); render(<InvoiceIssuanceDialog dealId="1" onClose={vi.fn()} />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("403");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Юрлицо установки недоступно");
     expect(screen.queryByText(/В сделке нет товарных/)).toBeNull();
   });
   it("states service-only scope without sending issue", async () => {
@@ -150,7 +154,7 @@ describe("invoice dialog", () => {
     fireEvent.click(await screen.findByText("Повторить исходный запрос"));
     await screen.findByRole("link", { name: "Открыть оригинал" });
     expect(fetch.mock.calls.some(([url, init]) => url === pending.endpoint && init?.body === pending.body)).toBe(true);
-    expect(fetch.mock.calls.some(([url]) => url.includes("/99/issue"))).toBe(false);
+    expect(fetch.mock.calls.some(([url]) => url.includes("/99/issue") || url.endsWith("/items"))).toBe(false);
     expect(fetch.mock.calls.some(([url]) => url.includes("ownership") || url.includes("client-binding") || url.includes("/document-register?"))).toBe(false);
   });
   it("blocks preview for an unbound converted deal without hidden ownership or invoice writes", async () => {
@@ -158,7 +162,7 @@ describe("invoice dialog", () => {
     fetch.mockImplementation((url, init) => url.includes("/document-register?") ? Promise.resolve(response({}, 404)) : url.endsWith("/ownership-preview")
       ? Promise.resolve(response({ assigned: false, snapshot: { deal_id: 1, number: "CRM-LEAD-1", counterparty: "Buyer", owner_id: null, documents: [] } })) : implementation(url, init));
     render(<InvoiceIssuanceDialog dealId="1" onClose={vi.fn()} />);
-    fireEvent.change(await screen.findByLabelText("Юрлицо"), { target: { value: "7" } });
+    await screen.findByLabelText("Валюта");
     expect(screen.getByText("Получить предпросмотр")).toBeDisabled();
     fireEvent.click(await screen.findByText("Проверить принадлежность"));
     await screen.findByRole("alert");
@@ -173,15 +177,17 @@ describe("invoice dialog", () => {
     const implementation = fetch.getMockImplementation()!;
     fetch.mockImplementation((url, init) => url.endsWith("/invoice-preview") ? new Promise(r => { resolve = r; }) as ReturnType<typeof implementation> : implementation(url, init));
     const view = render(<InvoiceIssuanceDialog dealId="1" onClose={vi.fn()} />);
-    await screen.findByLabelText("Юрлицо");
-    for (const [label, value] of [["Юрлицо", "7"], ["Валюта", "BYN"], ["Дата счёта", "2026-09-10"], ["Действителен до", "2026-09-15"], ["Цена строки 11", "100"], ["Ставка строки 11", "0"], ["Основание цен и ставок", "Согласовано явно"]]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    await screen.findByLabelText("Валюта");
+    for (const [label, value] of [["Валюта", "BYN"], ["Дата счёта", "2026-09-10"], ["Действителен до", "2026-09-15"], ["Цена строки 11", "100"], ["Ставка строки 11", "0"], ["Основание цен и ставок", "Согласовано явно"]]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
     await prepare();
     fireEvent.click(screen.getByText("Получить предпросмотр"));
     await waitFor(() => expect(resolve).toBeDefined());
     view.rerender(<InvoiceIssuanceDialog dealId="2" onClose={vi.fn()} />);
     await act(async () => resolve(response(preview())));
     expect(screen.queryByText("Проверьте реквизиты и суммы")).toBeNull();
-    expect(await screen.findByLabelText("Юрлицо")).toHaveValue("");
+    await screen.findByLabelText("Валюта");
+    expect(screen.getByRole("region", { name: "Юрлицо установки" })).toHaveTextContent("Организация установки · УНП 190000007 · #7");
+    expect(screen.queryByLabelText("Юрлицо", { selector: "select" })).toBeNull();
   });
 });
 
@@ -209,4 +215,102 @@ it("on-order reload retry preserves mode and sends no stock claim", async () => 
   const writes = fetch.mock.calls.filter(([url, init]) => url.endsWith("/documents") && init?.method === "POST");
   expect(writes).toHaveLength(2);
   expect(writes[0][1]!.body).toBe(writes[1][1]!.body);
+});
+
+
+describe("configured invoice company", () => {
+  it("retries unavailable company before loading any deal data", async () => {
+    const fetch = mockApi(), implementation = fetch.getMockImplementation()!;
+    let unavailable = true;
+    fetch.mockImplementation((url, init) => url === "/api/system/instance-organization" && unavailable ? Promise.resolve(response({}, 503)) : implementation(url, init));
+    render(<InvoiceIssuanceDialog dealId="1" onClose={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("не настроено или сервис недоступен");
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(["/api/system/instance-organization"]);
+    unavailable = false;
+    fireEvent.click(screen.getByText("Повторить загрузку"));
+    await screen.findByLabelText("Валюта");
+    expect(screen.getByRole("region", { name: "Юрлицо установки" })).toHaveTextContent("#7");
+    expect(fetch.mock.calls.some(([url, init]) => url.includes("document-register/organizations") || init?.method === "POST")).toBe(false);
+  });
+  it("rejects malformed company without reading items or falling back to an accessible list", async () => {
+    const fetch = mockApi(); fetch.mockResolvedValue(response({ ...instance, organization: { ...instance.organization, id: "7" } }));
+    render(<InvoiceIssuanceDialog dealId="1" onClose={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("некорректное юрлицо");
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(["/api/system/instance-organization"]);
+    expect(screen.queryByLabelText("Валюта")).toBeNull();
+  });
+  it.each(["button", "escape"])("configured company alone allows pristine close by %s", async action => {
+    mockApi(); const close = vi.fn(), confirm = vi.fn().mockReturnValue(false); vi.stubGlobal("confirm", confirm);
+    render(<InvoiceIssuanceDialog dealId="1" onClose={close} />);
+    await screen.findByLabelText("Валюта");
+    if (action === "button") fireEvent.click(screen.getByRole("button", { name: "Закрыть" }));
+    else fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(close).toHaveBeenCalledWith(null); expect(confirm).not.toHaveBeenCalled();
+  });
+  it("a pure preparation read leaves the form pristine", async () => {
+    const fetch = mockApi(), close = vi.fn(), confirm = vi.fn().mockReturnValue(false); vi.stubGlobal("confirm", confirm);
+    render(<InvoiceIssuanceDialog dealId="1" onClose={close} />);
+    fireEvent.click(await screen.findByText("Проверить принадлежность"));
+    await screen.findByText("Продолжить к счёту");
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть" }));
+    expect(close).toHaveBeenCalledWith(null); expect(confirm).not.toHaveBeenCalled();
+    expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+  it("protects actual child preparation input when closing", async () => {
+    const fetch = mockApi(), implementation = fetch.getMockImplementation()!;
+    fetch.mockImplementation((url, init) => url.includes("/document-register?") ? Promise.resolve(response({}, 404)) : url.endsWith("/ownership-preview")
+      ? Promise.resolve(response({ assigned: false, snapshot: { deal_id: 1, number: "D", counterparty: "Buyer", owner_id: null, documents: [] } })) : implementation(url, init));
+    const close = vi.fn(), confirm = vi.fn().mockReturnValue(false); vi.stubGlobal("confirm", confirm);
+    render(<InvoiceIssuanceDialog dealId="1" onClose={close} />);
+    fireEvent.click(await screen.findByText("Проверить принадлежность")); await screen.findByRole("alert");
+    fireEvent.click(screen.getByText("Подтвердить новую принадлежность"));
+    fireEvent.change(await screen.findByLabelText("Основание принадлежности организации"), { target: { value: "Synthetic ownership proof" } });
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть" }));
+    expect(confirm).toHaveBeenCalledOnce(); expect(close).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Основание принадлежности организации")).toHaveValue("Synthetic ownership proof");
+    expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+  it("preserves and blocks a foreign invoice command before item reads", async () => {
+    const pending = command(); pending.command.organization_id = 8; pending.body = JSON.stringify({ kind: "invoice", ...pending.command }); savePending(pending);
+    const before = JSON.stringify(sessionStorage), fetch = mockApi();
+    render(<InvoiceIssuanceDialog dealId="1" onClose={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("не совпадает с юрлицом установки");
+    expect(JSON.stringify(sessionStorage)).toBe(before);
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(["/api/system/instance-organization"]);
+    expect(screen.queryByText("Повторить исходный запрос")).toBeNull();
+  });
+  it("preserves foreign ownership without offering to switch company or claim again", async () => {
+    saveOwnership(ownershipCommand("8", "1", { deal_id: 1, number: "D", counterparty: "Buyer", owner_id: null, documents: [] }, "Synthetic prior confirmation"));
+    const before = JSON.stringify(sessionStorage), fetch = mockApi();
+    render(<InvoiceIssuanceDialog dealId="1" onClose={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("другой организации #8");
+    expect(JSON.stringify(sessionStorage)).toBe(before);
+    expect(screen.queryByText(/Вернуться к организации/)).toBeNull();
+    expect(screen.getByText("Получить предпросмотр")).toBeDisabled();
+    expect(fetch.mock.calls.some(([url, init]) => url.includes("ownership") || init?.method === "POST")).toBe(false);
+  });
+  it("does not read deal data after a late company response to a closed modal", async () => {
+    const fetch = mockApi(); let resolve!: (value: ReturnType<typeof response>) => void;
+    fetch.mockImplementation(() => new Promise(done => { resolve = done; }));
+    const close = vi.fn(), view = render(<InvoiceIssuanceDialog dealId="1" onClose={close} />);
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть" })); expect(close).toHaveBeenCalledWith(null); view.unmount();
+    await act(async () => resolve(response(instance)));
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(["/api/system/instance-organization"]);
+  });
+  it("ignores old company responses across A to B to A scopes", async () => {
+    const fetch = mockApi(), implementation = fetch.getMockImplementation()!;
+    const resolvers: ((value: ReturnType<typeof response>) => void)[] = [];
+    fetch.mockImplementation((url, init) => url === "/api/system/instance-organization" ? new Promise(done => resolvers.push(done)) : implementation(url, init));
+    const view = render(<InvoiceIssuanceDialog dealId="1" onClose={vi.fn()} />);
+    view.rerender(<InvoiceIssuanceDialog dealId="2" onClose={vi.fn()} />);
+    view.rerender(<InvoiceIssuanceDialog dealId="1" onClose={vi.fn()} />);
+    expect(resolvers).toHaveLength(3);
+    await act(async () => { resolvers[0](response(instance)); resolvers[1](response(instance)); });
+    expect(fetch.mock.calls).toHaveLength(3); expect(screen.queryByLabelText("Валюта")).toBeNull();
+    await act(async () => resolvers[2](response(instance)));
+    await screen.findByLabelText("Валюта");
+    expect(fetch.mock.calls.filter(([url]) => url.endsWith("/items")).map(([url]) => url)).toEqual(["/api/sales/deals/1/items"]);
+    expect(screen.getByLabelText("Валюта")).toHaveValue("");
+    expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
 });

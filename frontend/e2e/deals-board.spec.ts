@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { createBuyer, createDealThroughUI } from "./fixtures";
 
 // E2E: доска сделок /crm/deals — drag-and-drop, фильтры, переключение воронки.
 // Все три теста самодостаточны на пустой CI-базе (создают своё состояние или проверяют UI-состояние).
@@ -6,27 +7,16 @@ import { expect, test } from "@playwright/test";
 
 test.describe("deals board", () => {
   test("drag-and-drop: смена стадии перетаскиванием", async ({ page }) => {
-    await page.goto("/crm/deals");
+    const number = `DND-${Date.now()}`;
+    const buyer = await createBuyer(page, `E2E DnD buyer ${number}`);
+    const deal = await createDealThroughUI(page, buyer, number);
     // Ждём отрисовки канбана (SSR — колонки приходят сразу, SSE не блокирует)
     const newDropzone = page.locator('[data-testid="stage-column-new"]');
     await expect(newDropzone).toBeVisible();
     // Колонка SSR-видима раньше, чем React подключит onClick; ждём границу гидрации.
     await expect(page.getByTestId("deals-client-ready")).toBeVisible();
 
-    // Own test record only: filtering keeps it at the top without touching other deals.
-    await page.getByRole("button", { name: /Создать сделку/ }).click();
-    const form = page.locator("form.shadow-pop");
-    await expect(form).toBeVisible();
-    const number = `DND-${Date.now()}`;
-    await form.getByPlaceholder("CRM-2024-0200").fill(number);
-    await form.getByPlaceholder("ООО ...").fill(number);
-    await form.getByPlaceholder("Поставка ...").fill("DnD тест");
-    const created = page.waitForResponse((r) => r.url().endsWith("/api/sales/deals") && r.request().method() === "POST");
-    await form.getByRole("button", { name: "Создать" }).click();
-    const response = await created;
-    expect(response.status()).toBe(201);
-    const deal = await response.json();
-    await expect(form).not.toBeVisible();
+    // Own confirmed MDM record only; filtering leaves other deals untouched.
     await page.getByPlaceholder("Поиск сделок...").fill(number);
 
     // ПЕРВАЯ карточка в new — у верха колонки; qual-дропзона тоже видна в этом viewport.

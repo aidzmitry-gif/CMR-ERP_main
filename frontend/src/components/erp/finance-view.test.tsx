@@ -16,7 +16,11 @@ function respond(url: string): { ok: boolean; status: number; json: () => Promis
     if (url.includes(k)) {
       const r = responders[k];
       if (r === "error") return { ok: false, status: 500, json: () => Promise.resolve(null) };
-      return { ok: true, status: 200, json: () => Promise.resolve(r) };
+      // Scoped operational API rows carry the configured installation owner.
+      const scoped = /\/api\/finance\/(summary|payments|aging|cashflow-forecast|bank-accounts)(?:[/?]|$)/.test(url);
+      const record = (value: unknown) => value && typeof value === "object" ? { organization_id: 7, ...value } : value;
+      const data = scoped ? (Array.isArray(r) ? r.map(record) : record(r)) : r;
+      return { ok: true, status: 200, json: () => Promise.resolve(data) };
     }
   }
   return { ok: true, status: 200, json: () => Promise.resolve(null) };
@@ -669,4 +673,19 @@ describe("FinanceView", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить баланс бухгалтерской книги");
   });
+});
+
+
+it("rejects another organization's operational totals instead of showing them", async () => {
+  responders["finance/summary"] = { ...SUMMARY, organization_id: 8 };
+  render(<FinanceView />);
+  expect(await screen.findByText(/Нет связи с финансовым модулем/)).toBeInTheDocument();
+  expect(screen.queryByText(byn("50000"))).not.toBeInTheDocument();
+});
+
+it("has no multi-company group tab and ignores the old group initial tab", async () => {
+  render(<FinanceView initialTab="group" />);
+  await screen.findByText("Касса (ДДС-lite)");
+  expect(screen.queryByRole("button", { name: "Обзор группы" })).not.toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/group"))).toBe(false);
 });

@@ -1,11 +1,11 @@
 """Own task assignments and explicit patch fields must not bypass scope."""
-from tests.test_crm_client_contacts import FOREIGN, OWN, setup_client
+from tests.test_crm_client_contacts import FOREIGN, OWN, selected_buyer_id, setup_client
 
 
 async def test_own_task_assignment_status_and_foreign_updates(api, session):
     client_id = await setup_client(api, session)
     deal = (await api.post('/sales/deals',headers=OWN,json={
-        'number':'TASK-GUARDS','title':'Task','counterparty':'ignored','crm_client_id':client_id})).json()
+        'number':'TASK-GUARDS','title':'Task','counterparty':'ignored','crm_client_id':client_id, 'counterparty_id': await selected_buyer_id(session, client_id)})).json()
     path=f"/sales/deals/{deal['id']}/tasks"
     assert (await api.post(path,headers=OWN,json={'title':'Forbidden','assignee_id':652})).status_code == 403
     created=await api.post(path,headers=OWN,json={'title':'My follow-up'})

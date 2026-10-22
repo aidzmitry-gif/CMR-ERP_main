@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { documentStatusLabels, reservationStatusLabels } from "@/lib/document-status-labels";
 import type { LossReason } from "@/lib/types";
-import { fetchLossReasons } from "@/lib/api";
 import { beginLossCommand, dispatchLoss, fetchLossContext, fetchLossPreview, fetchLossProgress,
   readLossJournal, recoverLoss, requireScope, scopeOf, type Journal, type LossContext, type LossPreview,
   type LossRecord, type LossResolution, type LossAttempt, type RequestBody, type ResolveBody } from "@/lib/deal-loss-api";
@@ -41,8 +40,10 @@ export function LoseDealModal({ dealId, dealLabel, reasons: suppliedReasons, onC
   const [preview, setPreview] = useState<LossPreview | null>(null);
   const [record, setRecord] = useState<LossRecord | null>(null);
   const [journal, setJournal] = useState<Journal>({ raw: null, attempt: null });
-  const [reasons, setReasons] = useState<LossReason[]>(suppliedReasons ?? []);
+  const scopedReasons = ctx?.loss_reasons;
+  const reasons = scopedReasons ?? suppliedReasons ?? [];
   const [reason, setReason] = useState("");
+  const reasonAllowed = scopedReasons !== undefined && scopedReasons.some(row => row.code === reason.trim());
   const [comment, setComment] = useState("");
   const [empty, setEmpty] = useState(false);
   const [evidence, setEvidence] = useState("");
@@ -54,11 +55,18 @@ export function LoseDealModal({ dealId, dealLabel, reasons: suppliedReasons, onC
   const callbacks = useRef({ onFinalized, onPending });
   useEffect(() => { callbacks.current = { onFinalized, onPending }; }, [onFinalized, onPending]);
 
+  async function checkedScope(scope: ReturnType<typeof scopeOf>, token: number) {
+    try { return await requireScope(scope); }
+    catch (error) { if (epoch.current === token) { setCtx(null); setReason(""); setRecord(null); setPreview(null); } throw error; }
+  }
   async function load(token: number, completed = false) {
-    const current = await fetchLossContext(dealId);
+    let current: LossContext;
+    try { current = await fetchLossContext(dealId); }
+    catch (error) { if (epoch.current === token) { setCtx(null); setReason(""); setRecord(null); setPreview(null); } throw error; }
     if (epoch.current !== token) return;
     // Clear prior principal data before reading the new principal's journal.
     setCtx(current); setRecord(null); setPreview(null); setJournal({ raw: null, attempt: null });
+    setReason(selected => current.loss_reasons?.some(row => row.code === selected) ? selected : "");
     if (current.mapping_required) return;
     const scope = scopeOf(current);
     const saved = await readLossJournal(scope);
@@ -66,13 +74,14 @@ export function LoseDealModal({ dealId, dealLabel, reasons: suppliedReasons, onC
     const active = requestId ? await fetchLossProgress(scope, requestId) : null;
     const nextPreview = !active ? await fetchLossPreview(scope) : null;
     let refreshed: LossContext;
-    try { refreshed = await requireScope(scope); }
+    try { refreshed = await checkedScope(scope, token); }
     catch (error) {
       if (epoch.current === token) { setCtx(null); setRecord(null); setPreview(null); setJournal({ raw: null, attempt: null }); }
       throw error;
     }
     if (epoch.current !== token) return;
     setCtx(refreshed); setJournal(saved); setRecord(active); setPreview(nextPreview);
+    setReason(selected => refreshed.loss_reasons?.some(row => row.code === selected) ? selected : "");
     callbacks.current.onPending?.(active?.state === "pending" ? active.request_id : null);
     if (completed && active?.state === "finalized" && active.resolution
       && refreshed.stage === active.resolution.snapshot.to_stage && refreshed.latest_request_id === active.request_id
@@ -88,7 +97,6 @@ export function LoseDealModal({ dealId, dealLabel, reasons: suppliedReasons, onC
     void load(token).catch(e => { if (alive) setError(message(e)); }).finally(() => {
       if (alive) { locked.current = false; setBusy(false); }
     });
-    if (!suppliedReasons) void fetchLossReasons().then(rows => { if (alive) setReasons(rows); });
     return () => { alive = false; epoch.current = token + 1; };
     // A new deal gets an entirely new operation epoch, including A -> B -> A.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -113,8 +121,13 @@ export function LoseDealModal({ dealId, dealLabel, reasons: suppliedReasons, onC
     void run(async token => {
       if (!ctx) return;
       const scope = scopeOf(ctx);
-      await requireScope(scope);
+      const current = await checkedScope(scope, token);
       if (epoch.current !== token) return;
+      if (kind === "request" && (current.loss_reasons === undefined
+        || !current.loss_reasons.some(row => row.code === reason.trim()))) {
+        setCtx(current); setReason("");
+        throw new Error("Причина отказа больше не доступна. Выберите активную причину после обновления сведений.");
+      }
       const requestKey = crypto.randomUUID();
       let body: RequestBody | ResolveBody;
       let requestId: string;
@@ -145,10 +158,10 @@ export function LoseDealModal({ dealId, dealLabel, reasons: suppliedReasons, onC
     void run(async token => {
       if (!ctx) return;
       const scope = scopeOf(ctx);
-      const current = await requireScope(scope);
+      const current = await checkedScope(scope, token);
       if (current.pending_request_id) { await load(token); return; }
       const next = await fetchLossPreview(scope);
-      if (epoch.current === token) { setRecord(null); setPreview(next); setReason(""); setComment(""); setEmpty(false); setEvidence(""); }
+      if (epoch.current === token) { setCtx(current); setRecord(null); setPreview(next); setReason(""); setComment(""); setEmpty(false); setEvidence(""); }
     });
   }
   const unresolved = !!journal.attempt && ["pending", "uncertain"].includes(journal.attempt.outcome);
@@ -201,12 +214,13 @@ export function LoseDealModal({ dealId, dealLabel, reasons: suppliedReasons, onC
         <p className="text-xs">Автор запроса: {record.actor}. {record.resolution && `Квитанция: ${record.resolution.resolution_id}.`}</p>
       </div>}
       {ctx && !ctx.mapping_required && !record && preview && !unresolved && <div className="space-y-3">
-        <label className="block">Причина отказа{reasons.length ? <select className={INPUT} aria-label="Причина отказа" value={reason} onChange={e => setReason(e.target.value)} disabled={busy}>
-          <option value="">Выберите причину</option>{reasons.map(r => <option key={r.code} value={r.code}>{r.title}</option>)}</select>
-          : <input className={INPUT} aria-label="Причина отказа" placeholder="Код причины отказа" maxLength={128} value={reason} onChange={e => setReason(e.target.value)} disabled={busy} />}</label>
+        {scopedReasons?.length ? <label className="block">Причина отказа<select className={INPUT} aria-label="Причина отказа" value={reason} onChange={e => setReason(e.target.value)} disabled={busy}>
+          <option value="">Выберите причину</option>{scopedReasons.map(r => <option key={r.code} value={r.code}>{r.title}</option>)}</select></label>
+          : <p role="alert">{scopedReasons === undefined ? "Причины отказа не получены. Обновите сведения перед новым запросом."
+            : "Нет активных причин отказа. Попросите администратора настроить справочник и обновите сведения."}</p>}
         <textarea className={INPUT} aria-label="Комментарий к отказу" placeholder="Комментарий (необязательно)" maxLength={2000} value={comment} onChange={e => setComment(e.target.value)} disabled={busy} />
         {preview.snapshot.invoices.length === 0 && <label className="block"><input type="checkbox" checked={empty} onChange={e => setEmpty(e.target.checked)} disabled={busy} /> Закрыть сейчас, если счетов нет</label>}
-        <button className={BUTTON} disabled={busy || !reason.trim() || !preview.snapshot.lost_stage} onClick={() => send("request")}>Запросить отказ</button>
+        <button className={BUTTON} disabled={busy || !reason.trim() || !reasonAllowed || !preview.snapshot.lost_stage} onClick={() => send("request")}>Запросить отказ</button>
       </div>}
       {record?.state === "pending" && !unresolved && <div className="space-y-3">
         <p>Сделка остаётся на исходной стадии до подтверждённого завершения отказа. Выпуск и отгрузка новых счетов приостановлены.</p>

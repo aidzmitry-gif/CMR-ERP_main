@@ -223,6 +223,30 @@ function consistentPlan(e: Record<string, unknown>) {
   for (const m of [...ms].reverse()) { if (m.planned_date !== cursor.toISOString().slice(0, 10)) return false; cursor = new Date(cursor.getTime() - Number(m.duration_days) * 86400000); if (Number.isNaN(cursor.getTime())) return false; days += Number(m.duration_days); }
   return days === e.total_days && cursor.toISOString().slice(0, 10) === e.start_date;
 }
+function validLanded(v: unknown, scope: Identity, orderId: number, receivedAt: unknown): v is { event_id: number; payload: Record<string, unknown> } {
+  if (!keys(v, ["event_id", "payload"]) || !id(v.event_id)) return false;
+  const p = v.payload;
+  if (!keys(p, ["sku_code", "organization_id", "unit_landed_cost_byn", "qty", "total_landed_byn", "shipment_id", "stage", "purchase_order_id", "currency", "calculation", "fx_rate", "fx_date", "fx_rate_basis", "entity_ref"])) return false;
+  if (p.organization_id !== scope.organization_id || p.purchase_order_id !== orderId
+    || p.stage !== "actual" || p.currency !== "BYN" || p.entity_ref !== `purchase_order:${orderId}`
+    || typeof p.sku_code !== "string" || !p.sku_code.trim()
+    || typeof p.shipment_id !== "string" || !p.shipment_id
+    || p.fx_rate !== null || p.fx_date !== null || p.fx_rate_basis !== null) return false;
+  if (![p.unit_landed_cost_byn, p.qty, p.total_landed_byn].every(money)
+    || Number(p.unit_landed_cost_byn) < 0 || Number(p.qty) <= 0
+    || Number(p.total_landed_byn) < 0 || Number(p.total_landed_byn) >= 1e12) return false;
+  const calc = p.calculation;
+  if (!keys(calc, ["version", "received_at", "lines", "freight_byn", "duty_pct"])
+    || calc.version !== 1 || typeof receivedAt !== "string" || !Number.isFinite(Date.parse(receivedAt))
+    || calc.received_at !== receivedAt || !money(calc.freight_byn) || Number(calc.freight_byn) < 0
+    || (calc.duty_pct !== null && (!money(calc.duty_pct) || Number(calc.duty_pct) < 0))
+    || !Array.isArray(calc.lines) || !calc.lines.length) return false;
+  if (!calc.lines.every(line => keys(line, ["id", "sku_code", "qty", "goods_value_byn", "weight", "volume"])
+    && id(line.id) && typeof line.sku_code === "string"
+    && [line.qty, line.goods_value_byn, line.weight, line.volume].every(money))) return false;
+  const lines = calc.lines as Record<string, unknown>[];
+  return new Set(lines.map(line => line.id)).size === lines.length && lines.some(line => line.sku_code === p.sku_code);
+}
 function validEffect(c: EditCommand, e: Record<string, unknown>, scope: Identity): boolean {
   if (c.action === "save") return keys(e, Object.keys(c.payload)) && Object.entries(c.payload).every(([step, payload]) =>
     !!e[step] && typeof e[step] === "object" && !Array.isArray(e[step])
@@ -234,7 +258,22 @@ function validEffect(c: EditCommand, e: Record<string, unknown>, scope: Identity
     return c.action === "delete_line" ? l.id === c.payload.line_id : canonical(Object.fromEntries(Object.entries(l).filter(([k]) => k !== "id"))) === canonical(Object.fromEntries(Object.entries(c.payload).filter(([k]) => !["sku_id", "sku_title", "sku_unit"].includes(k))));
   }
   if (c.action === "header") return keys(e, ["before", "after"]) && keys(e.before, Object.keys(c.payload)) && canonical(e.after) === canonical(c.payload) && Object.entries(e.before).every(([k, x]) => k === "freight_byn" ? money(x) : k === "supplier" ? typeof x === "string" : k === "supplier_id" ? x === null || Number.isInteger(x) : x === null || calendar(x));
-  if (c.action === "status") return keys(e, ["from", "to", "received_at", "event_ids"]) && typeof e.from === "string" && statuses.includes(e.from) && e.to === c.payload.status && (e.received_at === null || (typeof e.received_at === "string" && /^\d{4}-\d{2}-\d{2}T/.test(e.received_at))) && Array.isArray(e.event_ids) && e.event_ids.every(id) && new Set(e.event_ids).size === e.event_ids.length && (e.event_ids.length > 0) === (e.from !== e.to);
+  if (c.action === "status") {
+    const oldKeys = ["from", "to", "received_at", "event_ids"];
+    if (!(keys(e, oldKeys) || keys(e, [...oldKeys, "landed"])) || typeof e.from !== "string"
+      || !statuses.includes(e.from) || e.to !== c.payload.status
+      || !(e.received_at === null || (typeof e.received_at === "string" && /^\d{4}-\d{2}-\d{2}T/.test(e.received_at)))
+      || !Array.isArray(e.event_ids) || !e.event_ids.every(id) || new Set(e.event_ids).size !== e.event_ids.length
+      || (e.event_ids.length > 0) !== (e.from !== e.to)) return false;
+    if (!("landed" in e)) return true;
+    if (!Array.isArray(e.landed) || !e.landed.every(item => validLanded(item, scope, c.order_id, e.received_at))) return false;
+    const items = e.landed as { event_id: number; payload: Record<string, unknown> }[];
+    const eventIds = e.event_ids as number[];
+    return items.every(item => eventIds.includes(item.event_id))
+      && new Set(items.map(item => item.event_id)).size === items.length
+      && new Set(items.map(item => item.payload.sku_code)).size === items.length
+      && (!items.length || (e.to === "received" && e.from !== "received"));
+  }
   if (c.action === "plan") return keys(e, ["organization_id", "order_id", "principal", "transport_method_code", "target_arrival_date", "start_date", "total_days", "milestones", "customer_requirements_status", "required_by", "required_arrival", "slack_days", "at_risk", "at_risk_deals", "schedule_start_in_past"]) && validPlan(e as unknown as Plan, scope.organization_id, c.order_id) && e.principal === scope.principal && e.target_arrival_date === c.payload.target_arrival_date && e.transport_method_code === c.payload.transport_method_code && consistentPlan(e) && (e.milestones as Record<string, unknown>[]).every(m => keys(m, ["stage", "title", "seq", "duration_days", "planned_date", "actual_date"]) && Number.isInteger(m.seq) && Number.isInteger(m.duration_days) && (m.planned_date === null || calendar(m.planned_date)) && (m.actual_date === null || calendar(m.actual_date)));
   return false;
 }

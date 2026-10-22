@@ -1,15 +1,16 @@
 import { expect, test } from "@playwright/test";
+import { configuredOrganization } from "./fixtures";
 
 test("CSV проверяется и сохраняется без повторных операций", async ({ page }, testInfo) => {
   const stamp = Date.now();
-  const created = await page.request.post("/api/accounting/organizations", {
-    data: { name: `E2E bank CSV ${stamp}`, unp: String(stamp).slice(-9) },
-  });
-  expect(created.ok(), await created.text()).toBeTruthy();
-  const org = await created.json();
+  const org = await configuredOrganization(page);
   await page.goto("/erp/accounting");
-  await page.getByLabel("Организация", { exact: true }).selectOption(String(org.id));
-  await page.getByRole("button", { name: "Импорт выписки", exact: true }).click();
+  await expect(page.getByText(`${org.name} · УНП ${org.unp}`, { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Организация", { exact: true })).toHaveCount(0);
+  await page.getByRole("navigation", { name: "Разделы бухгалтерии", exact: true })
+    .getByRole("button", { name: "Банк и платежи", exact: true }).click();
+  await page.getByRole("navigation", { name: "Страницы раздела Банк и платежи", exact: true })
+    .getByRole("button", { name: "Импорт выписки", exact: true }).click();
   await page.getByText("Загрузить выписку CSV", { exact: true }).click();
   await page.getByLabel("Банк для CSV", { exact: true }).fill("Synthetic CSV bank");
   await page.getByLabel("Наш банковский счёт для CSV", { exact: true }).fill(`TEST-${stamp}`);

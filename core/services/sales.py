@@ -17,7 +17,9 @@ class SalesSourceGateway(Protocol):
         Caller authorizes the actor and holds the discovered organization lock
         before invoking this internal facade; caller owns commit/rollback.
         `historical_claim` permits attribution of terminal history only, never
-        new fulfillment. Neither result grants user access or proves stock.
+        new fulfillment. `cancellation` additionally permits a verified ERP
+        on-order original without a reservation; it never grants fulfillment.
+        Neither result grants user access or proves stock.
         """
         ...
 
@@ -35,5 +37,27 @@ class SalesSourceGateway(Protocol):
         Internal outbox use only; this is not a user-facing authorization grant.
         The caller owns the transaction, holds the discovered organization lock,
         and must compare event facts and the locked owner to the discovery result.
+        """
+        ...
+
+    async def invoice_financial_source(
+        self, session: Any, document_id: int, *, organization_id: int,
+        expected_version: int, expected_content_sha256: str,
+    ) -> dict:
+        """Return locked exact invoice/receipt facts for a receivable projection.
+
+        Caller holds the explicit organization lock and owns the transaction.
+        Includes current terminal/replacement state; supports stock/on_order.
+        No user grant, reservation requirement, shipment proof or cash fact.
+        """
+        ...
+
+    async def invoice_financial_lifecycle(
+        self, session: Any, document_id: int, *, organization_id: int,
+        expected_version: int, expected_content_sha256: str,
+    ) -> dict:
+        """Exact original plus verified cancellation and one predecessor only.
+
+        Internal event caller holds the organization lock; no cash assertion.
         """
         ...

@@ -2,7 +2,7 @@
 from sqlalchemy import func, select
 
 from core.domain.models import Contact, Counterparty, User
-from modules.sales.models import CrmClientContact
+from modules.sales.models import CrmClient, CrmClientContact
 
 OWN = {"X-User": "crm-contact-owner", "X-User-Roles": "sales"}
 FOREIGN = {"X-User": "crm-contact-foreign", "X-User-Roles": "sales"}
@@ -17,6 +17,17 @@ async def setup_client(api, session):
     response = await api.post('/sales/clients', headers=OWN, json={'name':'Contact buyer', 'request_key':'client-key'})
     assert response.status_code == 201, response.text
     return response.json()['id']
+
+
+async def selected_buyer_id(session, client_id):
+    """Prepare a real selectable test buyer; never bind the client directly."""
+    client = await session.get(CrmClient, client_id)
+    if client.counterparty_id is not None:
+        return client.counterparty_id
+    buyer = Counterparty(name=f"Legal {client.name}", unp=client.unp)
+    session.add(buyer)
+    await session.commit()
+    return buyer.id
 
 
 async def test_contact_before_deal_replay_scope_and_numeric_link(api, session):
@@ -38,7 +49,7 @@ async def test_contact_before_deal_replay_scope_and_numeric_link(api, session):
     assert directory['total'] == 1 and directory['rows'][0]['crm_client_id'] == client_id
     assert directory['rows'][0]['counterparty_id'] is None and directory['rows'][0]['deal_id'] is None
     deal = (await api.post('/sales/deals', headers=OWN, json={'number':'CRM-CONTACT-DEAL',
-        'title':'Order', 'counterparty':'Ignored', 'crm_client_id':client_id})).json()
+        'title':'Order', 'counterparty':'Ignored', 'crm_client_id':client_id, 'counterparty_id': await selected_buyer_id(session, client_id)})).json()
     assert (await api.get(f"/sales/deals/{deal['id']}/contacts", headers=OWN)).json() == [contact]
     assert (await api.get(f'/sales/clients/{client_id}/deals', headers=FOREIGN)).status_code == 404
     assert (await api.get(f'/sales/clients/{client_id}/deals', headers=OWN)).json()[0]['id'] == deal['id']
@@ -46,7 +57,7 @@ async def test_contact_before_deal_replay_scope_and_numeric_link(api, session):
         json={'full_name':'Борис', 'request_key':'second-contact'})
     assert second.status_code == 201 and second.json()['crm_client_id'] == client_id, second.text
     assert await session.scalar(select(func.count()).select_from(Contact)) == 0
-    assert await session.scalar(select(func.count()).select_from(Counterparty)) == 0
+    assert await session.scalar(select(func.count()).select_from(Counterparty)) == 1
 
 
 async def test_primary_collision_and_rejected_duplicate_leave_mdm_and_primary_unchanged(api, session):

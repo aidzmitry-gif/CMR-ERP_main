@@ -3,6 +3,7 @@ import asyncio
 import ipaddress
 import json
 import os
+import re
 import socket
 import sys
 from contextlib import asynccontextmanager
@@ -41,17 +42,42 @@ def getaddrinfo(host, *args, **kwargs):
 socket.socket.connect, socket.socket.connect_ex, socket.getaddrinfo = connect, connect_ex, getaddrinfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+def _test_database_path():
+    """Resolve only the legacy workspace DB or an exact owned Linux test DB."""
+    expected = Path(__file__).resolve().parents[2] / "e2e.db"
+    owner = os.environ.get("E2E_DOCKER_OWNER")
+    value = os.environ.get("E2E_SQLITE_PATH")
+    if owner is None and value is None:
+        return None
+    if owner is not None:
+        if (sys.platform != "linux" or not re.fullmatch(r"[a-f0-9]{32}", owner)
+                or value != f"/e2e-db/{owner}/e2e.db"):
+            raise RuntimeError("Exact owner-bound Linux E2E database configuration is required")
+        path = Path(value)
+    else:
+        if not value or Path(value).is_symlink():
+            raise RuntimeError("Explicit E2E database path is invalid")
+        path = Path(value).resolve()
+        if path != expected:
+            raise RuntimeError("Only the fixed workspace E2E database is allowed without an owner")
+    if (not path.parent.is_dir() or path.parent.is_symlink()
+            or path.resolve() != path.absolute() or path.is_symlink()):
+        raise RuntimeError("E2E database and parent must have exact non-symlink identities")
+    sidecars = [Path(str(path) + suffix) for suffix in ("-wal", "-shm", "-journal")]
+    if path.exists() or any(item.exists() or item.is_symlink() for item in sidecars):
+        raise RuntimeError("E2E backend requires a new database with no existing sidecars")
+    return path
+
+
 test_directory = TemporaryDirectory(prefix='crm-playwright-')
 database_path = Path(test_directory.name) / 'synthetic.db'
 # The invoice seeder runs in a separate process; an explicit dedicated path
 # lets both processes use the same synthetic database.
-if os.environ.get('E2E_SQLITE_PATH'):
-    candidate = Path(os.environ['E2E_SQLITE_PATH']).resolve()
-    expected = Path(__file__).resolve().parents[2] / 'e2e.db'
-    if candidate != expected or candidate.exists():
-        raise RuntimeError('E2E_SQLITE_PATH must be a new workspace e2e.db')
-    database_path = candidate
+selected_database_path = _test_database_path()
+if selected_database_path is not None:
+    database_path = selected_database_path
 os.environ.update(AIOS_ENVIRONMENT='dev', AIOS_AUTH_MODE='dev',
+                  AIOS_SELLER_UNP='190000007',
                   AIOS_DATABASE_URL=f'sqlite+aiosqlite:///{database_path.as_posix()}',
                   AIOS_SALES_EMAIL_ENABLED='false', AIOS_AI_ENABLED='false',
                   AIOS_SMTP_HOST='127.0.0.1', AIOS_SMTP_FROM='crm@example.test', AIOS_SMTP_TLS='false')
@@ -59,6 +85,7 @@ os.environ.update(AIOS_ENVIRONMENT='dev', AIOS_AUTH_MODE='dev',
 from config.access import USERS  # noqa: E402
 from core.domain.models import Counterparty, Sku, User  # noqa: E402
 from core.runtime.app import create_app  # noqa: E402
+from modules.hr.models import Employee  # noqa: E402
 from modules.integrations.models import StockItem  # noqa: E402
 from modules.sales.models import PriceQuote  # noqa: E402
 
@@ -96,7 +123,9 @@ async def seed():
                      department='Продажи', role='sales', status='active', deal_visibility='own')
         foreign = User(username='e2e_foreign', full_name='Чужой менеджер E2E', employee_id=2902,
                        department='Продажи', role='sales', status='active', deal_visibility='own')
-        session.add_all([buyer, stocked, ordered, owner, foreign])
+        owner_employee = Employee(id=2901, full_name=owner.full_name, position='E2E sales', department='Продажи', status='active')
+        foreign_employee = Employee(id=2902, full_name=foreign.full_name, position='E2E sales', department='Продажи', status='active')
+        session.add_all([buyer, stocked, ordered, owner_employee, foreign_employee, owner, foreign])
         await session.flush()
         session.add_all([StockItem(sku_code=stocked.code, qty_available=10, qty_reserved=0),
                          StockItem(sku_code=ordered.code, qty_available=0, qty_reserved=0),

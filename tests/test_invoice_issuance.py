@@ -1,3 +1,4 @@
+from copy import deepcopy
 from decimal import Decimal
 from hashlib import sha256
 
@@ -13,7 +14,7 @@ from modules.sales.models import Deal, DealDocument, DealItem
 from modules.sales.reservation_source import SalesReservationSource
 from modules.sales.reserve import tick_invoice_reserve
 from modules.wms.invoice_reservations import InvoiceReservation
-from modules.wms.models import ReservationVersion, StockMovement
+from modules.wms.models import ReservationVersion, StockMovement, WarehouseDirectory
 
 
 async def seed(api, session, *, qty="2", physical="10", suffix=""):
@@ -64,6 +65,10 @@ async def seed(api, session, *, qty="2", physical="10", suffix=""):
             reason="receipt",
         )
     )
+    session.add(WarehouseDirectory(
+        organization_id=org.id, name="W", title="Synthetic physical warehouse",
+        created_by="issuer", is_active=True, wms_enabled=False, prohibit_negative_stock=True,
+    ))
     await session.commit()
     ids = {
         "org": org.id,
@@ -260,6 +265,9 @@ async def test_local_issue_exact_original_receipt_and_events_without_legacy_gate
     original = doc.original_html
     assert "Exact buyer" in original and "WRONG DISPLAY NAME" not in original
     assert "20.00" in original and "2026-09-01" in original and "TEST ACCOUNT" in original
+    assert "240.00" in original and original.count('<th>') == 10
+    assert '<dt>Адрес</dt><dd>Buyer address</dd>' in original
+    assert '{&quot;address&quot;' not in original
     events = (
         await session.scalars(
             select(OutboxEvent).where(
@@ -296,11 +304,20 @@ async def test_local_issue_exact_original_receipt_and_events_without_legacy_gate
     )
 
 
-async def test_replay_survives_changed_sources_without_new_events_or_stock(api, session):
+async def test_replay_survives_changed_sources_without_new_events_or_stock(api, session, monkeypatch):
     ids, base = await seed(api, session)
     cmd, _ = await command(api, ids, base)
     first = await create(api, ids, cmd)
     assert first.status_code == 201, first.text
+    doc = await session.get(DealDocument, first.json()['document']['id'])
+    frozen = (doc.original_html, doc.content_sha256, deepcopy(doc.snapshot_json))
+    event_count = await session.scalar(select(func.count()).select_from(OutboxEvent))
+    stock_count = await session.scalar(select(func.count()).select_from(StockMovement))
+
+    def forbidden_render(*args, **kwargs):
+        raise AssertionError('A captured original must not be rendered again')
+
+    monkeypatch.setattr('modules.sales.documents.render_erp_invoice', forbidden_render)
     row = await session.get(DealItem, ids["item"])
     row.qty = 99
     buyer = await session.get(Counterparty, ids["buyer"])
@@ -311,6 +328,13 @@ async def test_replay_survives_changed_sources_without_new_events_or_stock(api, 
     assert second.json() == {**first.json(), "replayed": True}
     assert await session.scalar(select(func.count()).select_from(InvoiceIssuanceReceipt)) == 1
     assert await session.scalar(select(func.count()).select_from(ReservationVersion)) == 1
+    response = await api.get(f'/sales/documents/{doc.id}/render')
+    assert response.status_code == 200 and response.text == frozen[0]
+    await session.refresh(doc)
+    assert (doc.original_html, doc.content_sha256, doc.snapshot_json) == frozen
+    assert await verified_receipt(session, doc, ids['org']) is not None
+    assert await session.scalar(select(func.count()).select_from(OutboxEvent)) == event_count
+    assert await session.scalar(select(func.count()).select_from(StockMovement)) == stock_count
 
 
 @pytest.mark.parametrize(
@@ -576,6 +600,10 @@ async def test_same_sku_lines_preserve_separate_allocation_matrix(api, session):
             reason="receipt",
         )
     )
+    session.add(WarehouseDirectory(
+        organization_id=ids["org"], name="SECOND", title="Synthetic second warehouse",
+        created_by="issuer", is_active=True, wms_enabled=False, prohibit_negative_stock=True,
+    ))
     await session.commit()
     base["pricing"].append({"item_id": line.id, "unit_price_net": "3.33", "vat_rate": "0.00"})
     cmd, _ = await command(api, ids, base)
@@ -617,6 +645,7 @@ async def test_parallel_file_sqlite_invoices_cannot_overissue(tmp_path):
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     app = create_app()
+    app.state.core.services.db.session_factory = factory
 
     async def request_session():
         async with factory() as session:
@@ -711,3 +740,62 @@ async def test_paid_erp_invoice_is_not_warned_or_cancelled(api, session, monkeyp
     await session.refresh(doc)
     assert doc.reminded_at is None
     assert doc.status == "paid" and doc.reserve_status == "reserved"
+
+
+@pytest.mark.parametrize('case', ['full', 'partial', 'escaping', 'nested', 'long_zero'])
+def test_invoice_print_requisites_preserve_facts_without_json_or_empty_separators(case):
+    from modules.sales.documents import render_erp_invoice
+
+    prepared = {
+        'seller': {'name': 'Продавец контрольный', 'unp': '190000007', 'address': 'Адрес продавца',
+                   'bank': 'Контрольный банк', 'bik': 'TESTBIK', 'account': 'TESTACCOUNT',
+                   'phone': '', 'email': None, 'director': 'Руководитель'},
+        'buyer': {'name': 'Покупатель контрольный', 'unp': '500000007', 'requisites': {}},
+        'lines': [dict(line_no=1, sku_code='CONTROL-1', name='Аккумулятор контрольный', qty='2.00',
+                       unit='шт', price='100.00', vat_rate='20.00', net='200.00', tax='40.00', total='240.00')],
+        'document_date': '2026-07-01', 'valid_until': '2026-07-06', 'amount': '240.00', 'currency': 'BYN',
+        'reserve_mode': 'on_order', 'payment_terms': '', 'delivery_terms': '', 'pricing_evidence': 'Контроль',
+    }
+    if case == 'full':
+        prepared['payment_terms'] = 'Предоплата 100%'
+        prepared['delivery_terms'] = 'Самовывоз <по согласованию>'
+        prepared['seller'].update(phone='+375000000000', email='seller@example.test')
+        prepared['buyer']['requisites'] = {'legal_address': 'Юридический адрес покупателя', 'iban': 'TESTIBAN'}
+        expected = ['Юридический адрес', 'Юридический адрес покупателя', 'IBAN', 'TESTIBAN',
+                    '+375000000000, seller@example.test, Руководитель']
+    elif case == 'partial':
+        prepared['seller'].update(bank='', bik='', account='', director='')
+        prepared['buyer']['requisites'] = {'address': '', 'email': None, 'empty': {}}
+        expected = []
+    elif case == 'escaping':
+        prepared['buyer']['name'] = '<script>"Контроль" & партнёры</script>'
+        prepared['buyer']['requisites'] = {'<key>': '<img src="https://example.invalid/"> & адрес'}
+        expected = ['&lt;script&gt;&quot;Контроль&quot; &amp; партнёры&lt;/script&gt;',
+                    '&lt;key&gt;', '&lt;img src=&quot;https://example.invalid/&quot;&gt; &amp; адрес']
+    elif case == 'nested':
+        prepared['buyer']['requisites'] = {'bank': {'bik': 'NESTEDBIK'}, 'Дополнительно': ['Секция', {'code': 0}]}
+        expected = ['Банк / БИК', 'NESTEDBIK', 'Дополнительно / 1', 'Секция', 'Дополнительно / 2 / code', '<dd>0</dd>']
+    else:
+        long = 'ДлинноеНаименование' * 12
+        prepared['buyer']['requisites'] = {'address': long, 'Показатель': 0}
+        prepared['lines'][0].update(sku_code='CONTROL-' + '1' * 90, name=long, qty='0.00', net='0.00', tax='0.00', total='0.00')
+        prepared['amount'] = '0.00'
+        expected = [long, 'CONTROL-' + '1' * 90, '<dd>0</dd>', '0.00 BYN']
+    before = deepcopy(prepared)
+    original = render_erp_invoice('КОНТРОЛЬ-001', prepared)
+    assert prepared == before
+    assert original.count('<th>') == 10 and original.count('<col style=') == 10
+    assert 'table-layout:fixed' in original and 'overflow-wrap:anywhere' in original
+    assert ', ,' not in original and ', </dd>' not in original
+    assert '<dt>Реквизиты покупателя</dt>' not in original
+    if case == 'full':
+        assert '<p>Условия оплаты: Предоплата 100%</p>' in original
+        assert '<p>Условия поставки: Самовывоз &lt;по согласованию&gt;</p>' in original
+    else:
+        assert 'Условия оплаты:' not in original and 'Условия поставки:' not in original
+    for text in expected:
+        assert text in original
+    if case == 'partial':
+        assert '<dt>Банк / счёт</dt>' not in original and '<dt>Контакты / руководитель</dt>' not in original
+    if case == 'escaping':
+        assert '<script>' not in original and '<img ' not in original

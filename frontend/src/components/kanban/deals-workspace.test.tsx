@@ -977,11 +977,13 @@ describe("DealsWorkspace (канбан)", () => {
     ];
     render(<DealsWorkspace initialStages={many} initialKpis={[]} />);
     fireEvent.click(screen.getByTitle("По датам действий"));
-    // Бакеты гейтятся гидрационным `now` — ждём появления карточек, а не заголовка бакета
-    // «Сегодня» (тот неоднозначен: совпадает с чипом срочности на каждой карточке).
+    // До гидрационного `now` видна прежняя стадия с теми же 50 карточками и кнопкой.
+    // Сначала подтверждаем переключение ветки, затем проверяем лимит именно бакета дат.
+    await waitFor(() => expect(screen.queryByTestId("stage-column-new")).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getAllByTestId(/^deal-card-/)).toHaveLength(50));
     fireEvent.click(screen.getByRole("button", { name: "Показать ещё 10 (из 60)" }));
     await waitFor(() => expect(screen.getAllByTestId(/^deal-card-/)).toHaveLength(60));
+    expect(screen.queryByRole("button", { name: "Показать ещё 10 (из 60)" })).not.toBeInTheDocument();
   });
 
   // --- «Все вместе»: свой обработчик drag&drop секции (FunnelSection.handleDragEnd) ---

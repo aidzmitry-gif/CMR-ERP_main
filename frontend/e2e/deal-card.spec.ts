@@ -1,58 +1,26 @@
-import { execFileSync } from "node:child_process";
-import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import { ensureConfiguredOrganization, configuredOrganization, createBuyer, createDealFromBuyer, createDealThroughUI, seedInvoiceFacts, addInvoiceItemUI, confirmInvoicePartiesUI, issueInvoiceUI, prepareInvoiceUI } from "./fixtures";
 
 // Критический путь карточки: создать сделку → проверить реквизиты → выпустить счёт ERP с резервом.
 // Самодостаточно (на пустой доске CI карточек нет — создаём свою).
 test("карточка сделки: выпуск счёта ERP с резервом", async ({ page }, testInfo) => {
-  const clientName = `ООО E2E-Документ ${Date.now()}`;
-  await page.goto("/crm/deals");
-  // Кнопка SSR-видима до подключения React onClick; ждём завершения гидрации.
-  await expect(page.getByTestId("deals-client-ready")).toBeVisible();
-
-  await page.getByRole("button", { name: /Создать сделку/ }).click();
-  const form = page.locator("form.shadow-pop");
-  await expect(form).toBeVisible();
-  await form.getByPlaceholder("CRM-2024-0200").fill(`E2E-DOC-${Date.now()}`);
-  await form.getByPlaceholder("ООО ...").fill(clientName);
-  await form.getByPlaceholder("Поставка ...").fill("Поставка для E2E");
-  await form.getByRole("button", { name: "Создать" }).click();
-
-  // открыть карточку созданной сделки (double-click: single-click открывает drawer-preview,
-  // double-click — router.push на полную карточку /crm/deals/[id] с вкладкой Документы)
-  await page.getByText(clientName).first().dblclick();
-  await expect(page.getByText("Документы")).toBeVisible();
-
+  test.setTimeout(120_000);
+  await ensureConfiguredOrganization(page);
+  const buyer = await createBuyer(page, `E2E invoice buyer ${Date.now()}`);
+  const createdDeal = await createDealThroughUI(page, buyer, `E2E-DOC-${Date.now()}`);
+  const cardLink = page.getByTestId(`deal-card-${createdDeal.id}`).getByRole("link");
+  await expect(cardLink).toHaveAttribute("href", `/crm/deals/${createdDeal.id}`);
+  await cardLink.dblclick();
+  await expect(page).toHaveURL(new RegExp(`/crm/deals/${createdDeal.id}$`));
+  await expect(page.getByText("Документы", { exact: true })).toBeVisible();
   const dealId = Number(new URL(page.url()).pathname.split("/").pop());
-  const actor = (await page.context().cookies()).find(cookie => cookie.name === "aios_actor")?.value;
-  expect(actor).toBeTruthy();
-  const fixture = JSON.parse(execFileSync(process.env.E2E_PYTHON ?? "python", ["-m", "scripts.seed_invoice_e2e"], {
-    cwd: resolve(process.cwd(), ".."),
-    input: JSON.stringify({ deal_id: dealId, actor }),
-    env: { ...process.env, AIOS_E2E_SEED: "1" }, encoding: "utf8",
-  })) as { organization: number; item: number; sku: string; buyer: number; loss_reason: string };
-  const profile = await page.request.post(`/api/accounting/organizations/${fixture.organization}/seller-profiles`, { data: {
-    source_key: `e2e-seller-${dealId}`, expected_revision: 0, effective_from: "2026-01-01",
-    currency: "BYN", address: "Synthetic seller address", account: "TEST ACCOUNT", bank: "TEST BANK",
-    bik: "TEST BIK", director: "Synthetic director", evidence: "Synthetic E2E approved seller profile", confirmed: true,
-  } });
-  expect(profile.status(), await profile.text()).toBe(201);
-  await page.getByRole("button", { name: /Сформировать/ }).click();
-  await page.getByLabel("Юрлицо", { exact: true }).selectOption(String(fixture.organization));
-  await page.getByText("Проверить принадлежность", { exact: true }).click();
-  await page.getByText("Продолжить к счёту", { exact: true }).click();
-  for (const [label, value] of [["Валюта", "BYN"], ["Дата счёта", "2026-09-10"], ["Действителен до", "2026-09-15"],
-    [`Цена строки ${fixture.item}`, "100.00"], [`Ставка строки ${fixture.item}`, "20.00"], ["Основание цен и ставок", "Synthetic negotiated price and VAT for E2E"]]) {
-    await page.getByLabel(label, { exact: true }).fill(value);
-  }
-  await page.getByText("Получить предпросмотр", { exact: true }).click();
-  await expect(page.getByText("Всего: 240.00 BYN", { exact: true })).toBeVisible();
-  await page.getByLabel("Склад распределения 1", { exact: true }).selectOption("E2E-W");
-  await page.getByLabel("Количество распределения 1", { exact: true }).fill("2.00");
-  await page.getByLabel("Основание полноты физического журнала", { exact: true }).fill("Synthetic opening physical stock: 10 units, no earlier reservations");
-  await page.getByRole("checkbox", { name: /Подтверждаю полноту физического журнала/ }).check();
-  await page.getByRole("button", { name: "Выпустить счёт и зарезервировать", exact: true }).click();
-  await expect(page.getByRole("link", { name: "Открыть оригинал", exact: true })).toBeVisible();
+  expect(dealId).toBe(createdDeal.id);
+  const configured = await configuredOrganization(page);
+  const seeded = await seedInvoiceFacts(page, dealId, buyer);
+  const fixture = await addInvoiceItemUI(page, dealId, seeded, "100.00");
+  expect(fixture.organization).toBe(configured.id);
+  await confirmInvoicePartiesUI(page, dealId, fixture, buyer);
+  await issueInvoiceUI(page, dealId, fixture, buyer, "stock", "100.00");
   const documents = await page.request.get(`/api/sales/deals/${dealId}/documents`);
   expect(documents.ok()).toBeTruthy();
   const invoices = (await documents.json()).filter((doc: { kind: string }) => doc.kind === "invoice");
@@ -60,7 +28,7 @@ test("карточка сделки: выпуск счёта ERP с резерв
   expect(invoices[0]).toMatchObject({ status: "issued", reserve_status: "reserved", onec_ref: null, amount: 240 });
   const original = await page.request.get(`/api/sales/documents/${invoices[0].id}/render`);
   expect(original.ok()).toBeTruthy();
-  expect(await original.text()).toContain("E2E invoice buyer");
+  expect(await original.text()).toContain(buyer.name);
   await page.goto(`/crm/deals/${dealId}?org=${fixture.organization}&invoice=${invoices[0].id}#document-register`);
   const dealRegister = page.getByRole("region", { name: "Реестр документов сделки", exact: true });
   await expect(dealRegister.getByRole("button", { name: "Аннулирование счёта", exact: true })).toBeVisible();
@@ -68,17 +36,20 @@ test("карточка сделки: выпуск счёта ERP с резерв
   await expect(dealRegister.getByText(/Зарезервирован/).first()).toBeVisible();
   await dealRegister.screenshot({ path: testInfo.outputPath("deal-document-register.png") });
   await page.goto(`/erp/spravochniki/counterparty/${fixture.buyer}`);
-  const clientRegister = page.getByRole("region", { name: "Документы клиента по юрлицу", exact: true });
-  await clientRegister.getByLabel("Юрлицо документов клиента", { exact: true }).selectOption(String(fixture.organization));
+  const clientRegister = page.getByRole("region", { name: "Документы клиента", exact: true });
+  await expect(clientRegister).toContainText(`${configured.name} · УНП ${configured.unp}`);
+  await expect(clientRegister.getByLabel("Юрлицо документов клиента", { exact: true })).toHaveCount(0);
   await expect(clientRegister.getByRole("article", { name: `Документ клиента ${invoices[0].id}`, exact: true })).toBeVisible();
   await clientRegister.screenshot({ path: testInfo.outputPath("client-document-register.png") });
   // Partial shipment and release use the same invoice; released stock is not a full shipment.
   const identity = { expected_version: invoices[0].version, expected_content_sha256: invoices[0].content_sha256 };
-  const warehousePath = `/api/wms/organizations/${fixture.organization}/invoices/${invoices[0].id}`;
-  const shipmentPreview = await page.request.post(`${warehousePath}/physical-shipments/preview`, { data: identity });
+  const warehousePath = `/api/accounting/organizations/${fixture.organization}/invoices/${invoices[0].id}/document-shipments`;
+  const shipmentPreview = await page.request.post(`${warehousePath}/preview`, { data: identity });
   expect(shipmentPreview.ok()).toBeTruthy();
   const basis = await shipmentPreview.json();
-  const shipped = await page.request.post(`${warehousePath}/physical-shipments`, { data: {
+  expect(basis.lines).toHaveLength(1);
+  expect(basis.lines[0]).toMatchObject({ sku_code: fixture.sku, warehouse: "E2E-W", execution_mode: "document", prohibit_negative_stock: true });
+  const shipped = await page.request.post(warehousePath, { data: {
     ...identity, source_key: crypto.randomUUID(), expected_reservation_digest: basis.reservation_digest,
     expected_remaining_digest: basis.remaining_digest, expected_physical_digest: basis.physical_digest,
     operation_date: new Date().toISOString().slice(0, 10), evidence: "Synthetic partial shipment",
@@ -88,6 +59,7 @@ test("карточка сделки: выпуск счёта ERP с резерв
   await page.goto(`/crm/deals/${dealId}?org=${fixture.organization}&invoice=${invoices[0].id}#document-register`);
   await page.getByRole("button", { name: "Фактическая отгрузка и акты", exact: true }).click();
   const shipmentPanel = page.getByRole("region", { name: "Фактическая отгрузка счёта", exact: true });
+  await expect(shipmentPanel).toContainText("Без WMS · по накладной");
   await shipmentPanel.getByLabel("Причина снятия остатка", { exact: true }).fill("Synthetic customer declined unshipped remainder");
   await shipmentPanel.getByRole("button", { name: "Рассчитать снятие остатка", exact: true }).click();
   await expect(shipmentPanel.getByText(/снять 1.00/)).toBeVisible();
@@ -116,11 +88,8 @@ test("карточка сделки: выпуск счёта ERP с резерв
 });
 
 test("документы: ошибка загрузки отличается от пустого списка и допускает повтор", async ({ page }) => {
-  const created = await page.request.post("/api/sales/deals", { data: {
-    number: `E2E-DOC-LOAD-${Date.now()}`, title: "Синтетическая проверка загрузки", counterparty: "E2E document load",
-  } });
-  expect(created.status()).toBe(201);
-  const deal = await created.json();
+  const buyer = await createBuyer(page, `E2E document load ${Date.now()}`);
+  const deal = await createDealFromBuyer(page, buyer, `E2E-DOC-LOAD-${Date.now()}`);
   let fail = true;
   await page.route(`**/api/sales/deals/${deal.id}/documents`, (route) => fail && route.request().method() === "GET"
     ? route.fulfill({ status: 500, contentType: "application/json", body: '{"detail":"synthetic failure"}' })
@@ -135,49 +104,22 @@ test("документы: ошибка загрузки отличается о�
 
 test("счёт под заказ: потерянный ответ, повтор и неизменяемый оригинал", async ({ page }) => {
   test.setTimeout(120_000);
-  const clientName = `ООО E2E-Документ ${Date.now()}`;
-  await page.goto("/crm/deals");
-  // Кнопка SSR-видима до подключения React onClick; ждём завершения гидрации.
-  await expect(page.getByTestId("deals-client-ready")).toBeVisible();
-
-  await page.getByRole("button", { name: /Создать сделку/ }).click();
-  const form = page.locator("form.shadow-pop");
-  await expect(form).toBeVisible();
-  await form.getByPlaceholder("CRM-2024-0200").fill(`E2E-DOC-${Date.now()}`);
-  await form.getByPlaceholder("ООО ...").fill(clientName);
-  await form.getByPlaceholder("Поставка ...").fill("Поставка для E2E");
-  await form.getByRole("button", { name: "Создать" }).click();
-
-  // открыть карточку созданной сделки (double-click: single-click открывает drawer-preview,
-  // double-click — router.push на полную карточку /crm/deals/[id] с вкладкой Документы)
-  await page.getByText(clientName).first().dblclick();
-  await expect(page.getByText("Документы")).toBeVisible();
-
+  await ensureConfiguredOrganization(page);
+  const buyer = await createBuyer(page, `E2E invoice buyer ${Date.now()}`);
+  const createdDeal = await createDealThroughUI(page, buyer, `E2E-DOC-${Date.now()}`);
+  const cardLink = page.getByTestId(`deal-card-${createdDeal.id}`).getByRole("link");
+  await expect(cardLink).toHaveAttribute("href", `/crm/deals/${createdDeal.id}`);
+  await cardLink.dblclick();
+  await expect(page).toHaveURL(new RegExp(`/crm/deals/${createdDeal.id}$`));
+  await expect(page.getByText("Документы", { exact: true })).toBeVisible();
   const dealId = Number(new URL(page.url()).pathname.split("/").pop());
-  const actor = (await page.context().cookies()).find(cookie => cookie.name === "aios_actor")?.value;
-  expect(actor).toBeTruthy();
-  const fixture = JSON.parse(execFileSync(process.env.E2E_PYTHON ?? "python", ["-m", "scripts.seed_invoice_e2e"], {
-    cwd: resolve(process.cwd(), ".."),
-    input: JSON.stringify({ deal_id: dealId, actor }),
-    env: { ...process.env, AIOS_E2E_SEED: "1" }, encoding: "utf8",
-  })) as { organization: number; item: number; sku: string; buyer: number; loss_reason: string };
-  const profile = await page.request.post(`/api/accounting/organizations/${fixture.organization}/seller-profiles`, { data: {
-    source_key: `e2e-seller-${dealId}`, expected_revision: 0, effective_from: "2026-01-01",
-    currency: "BYN", address: "Synthetic seller address", account: "TEST ACCOUNT", bank: "TEST BANK",
-    bik: "TEST BIK", director: "Synthetic director", evidence: "Synthetic E2E approved seller profile", confirmed: true,
-  } });
-  expect(profile.status(), await profile.text()).toBe(201);
-  await page.getByRole("checkbox", { name: "Под заказ — без резерва", exact: true }).check();
-  await page.getByRole("button", { name: /Сформировать/ }).click();
-  await page.getByLabel("Юрлицо", { exact: true }).selectOption(String(fixture.organization));
-  await page.getByText("Проверить принадлежность", { exact: true }).click();
-  await page.getByText("Продолжить к счёту", { exact: true }).click();
-  for (const [label, value] of [["Валюта", "BYN"], ["Дата счёта", "2026-09-10"], ["Действителен до", "2026-09-15"],
-    [`Цена строки ${fixture.item}`, "100.00"], [`Ставка строки ${fixture.item}`, "20.00"], ["Основание цен и ставок", "Synthetic negotiated price and VAT for E2E"]]) {
-    await page.getByLabel(label, { exact: true }).fill(value);
-  }
-  await page.getByText("Получить предпросмотр", { exact: true }).click();
-  await expect(page.getByText("Всего: 240.00 BYN", { exact: true })).toBeVisible();
+  expect(dealId).toBe(createdDeal.id);
+  const configured = await configuredOrganization(page);
+  const seeded = await seedInvoiceFacts(page, dealId, buyer);
+  const fixture = await addInvoiceItemUI(page, dealId, seeded, "100.00");
+  expect(fixture.organization).toBe(configured.id);
+  await confirmInvoicePartiesUI(page, dealId, fixture, buyer);
+  await prepareInvoiceUI(page, dealId, fixture, buyer, "on_order", "100.00");
   const endpoint = `/api/sales/deals/${dealId}/documents`;
   let originalCommand: unknown;
   let originalHtml = "";

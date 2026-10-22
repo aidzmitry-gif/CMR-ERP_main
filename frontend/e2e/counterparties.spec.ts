@@ -13,7 +13,7 @@ test("контрагенты: создание, preview, повторное об
   const iban = "DE89370400440532013000";
   const bic = "COBADEFFXXX";
   const contactName = "CRM E2E Contact";
-  const contactPhone = "+375 29 123-45-67";
+  const contactPhone = "000000000";
   const contactEmail = "contact@example.invalid";
 
   await test.step("catalog tile ведёт в поиск контрагентов", async () => {
@@ -135,6 +135,7 @@ test("контрагенты: создание, preview, повторное об
       const duplicateName = `${runName} duplicate`;
       await duplicateEditor.getByLabel("Наименование компании").fill(duplicateName);
       await duplicateEditor.getByLabel("УНП (карточка)").fill(demoUnp);
+      await duplicateEditor.getByLabel("Юридический адрес").fill("Synthetic duplicate legal address");
       await duplicateEditor.getByRole("button", { name: "Сохранить" }).click();
       await expect(duplicateEditor.getByRole("alert")).toContainText("Найдите карточку по УНП");
       await expect(duplicateEditor.getByLabel("Наименование компании")).toHaveValue(duplicateName);

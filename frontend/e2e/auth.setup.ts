@@ -1,4 +1,5 @@
 import { expect, test as setup } from "@playwright/test";
+import { ensureConfiguredOrganization } from "./fixtures";
 
 // Единый dev-логин для всех e2e. AppShell гейтит /crm/* и /erp/*: без cookie сессии
 // (aios_user) уводит на /login. Проходим экран входа как Директор (первый в списке —
@@ -22,5 +23,6 @@ setup("dev-логин (Директор)", async ({ page }) => {
   // и гейт AppShell пропустил.
   await page.waitForURL("**/crm/deals");
   await expect(page.getByRole("button", { name: /Создать сделку/ })).toBeVisible();
+  await ensureConfiguredOrganization(page);
   await page.context().storageState({ path: authFile });
 });

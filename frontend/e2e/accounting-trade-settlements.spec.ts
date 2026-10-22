@@ -2,27 +2,26 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 import { expect, test } from "@playwright/test";
+import { configuredOrganization } from "./fixtures";
 
 test("60/62: бухгалтер видит документ и скачивает только согласованную внутреннюю расшифровку", async ({ page }, testInfo) => {
   const stamp = Date.now();
-  const first = await page.request.post("/api/accounting/organizations", {
-    data: { name: `E2E settlements A ${stamp}`, unp: String(stamp).slice(-9) },
-  });
-  expect(first.ok(), await first.text()).toBeTruthy();
-  const orgA = await first.json();
+  const orgA = await configuredOrganization(page);
   const second = await page.request.post("/api/accounting/organizations", {
     data: { name: `E2E settlements B ${stamp}`, unp: String(stamp + 1).slice(-9) },
   });
   expect(second.ok(), await second.text()).toBeTruthy();
   const orgB = await second.json();
+  expect(orgB.id).not.toBe(orgA.id);
 
-  let wrongScope = false;
+  let mode: "matched" | "osvmismatch" | "wrongscope" = "matched";
   await page.route("**/api/accounting/organizations/*/reports/trade-settlements?*", async (route) => {
     const url = new URL(route.request().url());
     const selectedOrg = Number(url.pathname.match(/organizations\/(\d+)\/reports/)?.[1]);
-    const mismatch = selectedOrg === orgB.id && !wrongScope;
+    expect(selectedOrg).toBe(orgA.id);
+    const mismatch = mode === "osvmismatch";
     const report = {
-      organization_id: wrongScope ? orgA.id : selectedOrg,
+      organization_id: mode === "wrongscope" ? orgB.id : selectedOrg,
       from: url.searchParams.get("start"), to: url.searchParams.get("end"),
       status: "preliminary", scope: "posted_accounts_60_62",
       due_dates_verified: false, statutory_certified: false, review_items: [],
@@ -55,7 +54,8 @@ test("60/62: бухгалтер видит документ и скачивае�
   });
 
   await page.goto("/erp/accounting");
-  await page.getByLabel("Организация", { exact: true }).selectOption(String(orgA.id));
+  await expect(page.getByText(`${orgA.name} · УНП ${orgA.unp}`, { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Организация", { exact: true })).toHaveCount(0);
   await page.getByLabel("Начало периода").fill("2026-09-01");
   await page.getByLabel("Конец периода").fill("2026-09-30");
   await page.getByRole("navigation", { name: "Разделы бухгалтерии" }).getByRole("button", { name: "Отчёты" }).click();
@@ -116,13 +116,14 @@ test("60/62: бухгалтер видит документ и скачивае�
   }]);
   await page.screenshot({ path: testInfo.outputPath("trade-comparison.png"), fullPage: true });
 
-  await page.getByLabel("Организация", { exact: true }).selectOption(String(orgB.id));
+  mode = "osvmismatch";
+  await page.getByLabel("Конец периода").fill("2026-09-29");
   await expect(page.getByRole("alert").filter({ hasText: "Расхождение с ОСВ" })).toBeVisible();
   await expect(page.getByText("synthetic-difference.csv", { exact: false })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Скачать черновой протокол сравнения" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Скачать CSV для внутренней сверки" })).toHaveCount(0);
-  wrongScope = true;
-  await page.getByLabel("Конец периода").fill("2026-09-29");
+  mode = "wrongscope";
+  await page.getByLabel("Конец периода").fill("2026-09-28");
   await expect(page.getByRole("alert").filter({ hasText: "Ответ расчётов не соответствует выбранной книге" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Скачать CSV для внутренней сверки" })).toHaveCount(0);
 });

@@ -74,6 +74,25 @@ class AccountingGateway(Protocol):
         """Authorize an internal finance consumer in this book without committing."""
         ...
 
+
+    async def finance_bank_transaction_ids(self, session: Any, organization_id: int,
+                                           user: Any) -> list[int]:
+        """Authorize finance read and return only explicitly own-bound bank IDs.
+
+        Holds the organization lock; never creates or infers source ownership.
+        """
+        ...
+
+
+    async def lock_finance_bank_transaction(self, session: Any, organization_id: int,
+                                            user: Any, transaction_id: int) -> None:
+        """Authorize finance write, then lock the exact own bank-source binding.
+
+        Caller next locks the fresh transaction, then its scoped Payment and
+        retains this transaction through allocation/outbox/commit. No commit here.
+        """
+        ...
+
     async def source_organizations(self, session: Any, user: Any) -> list[dict]: ...
 
     async def source_owner_authority(self, session: Any, organization_id: int, user: Any) -> str:

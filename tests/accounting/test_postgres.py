@@ -3,14 +3,17 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import runpy
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select, text
+from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from core.domain.reference import Currency
@@ -18,6 +21,8 @@ from modules.accounting import service
 from modules.accounting.schemas import CloseInput
 
 pytestmark = pytest.mark.integration
+
+REGISTERED_HEAD_REVISION = "0198"
 
 
 # ``migration-proposal.py`` freezes the shared 0130 accounting baseline for
@@ -73,6 +78,9 @@ ACCOUNTING_TAIL_MIGRATIONS = (
     "0188_manual_document_void.py",
     "0189_inventory_issue_directory_identity.py",
     "0190_procurement_receipt_correction_drafts.py",
+    "crm_rel_001_auto_posting_01.py",
+    "crm_rel_001_wms_mode_01.py",
+    "0194_warehouse_negative_stock_policy.py",
 )
 
 
@@ -373,7 +381,10 @@ async def test_primary_receipt_http_concurrent_replay_and_snapshot(pg_factory, p
 
 
 @pytest_asyncio.fixture
-async def pg_factory():
+async def pg_factory(request):
+    mode = getattr(request, "param", None)
+    if mode not in {None, "registered_head"}:
+        pytest.fail("Unknown isolated accounting fixture mode")
     from sqlalchemy.engine import make_url
 
     url = os.getenv("ACCOUNTING_TEST_POSTGRES_URL")
@@ -382,16 +393,70 @@ async def pg_factory():
     parsed = make_url(url)
     if parsed.host not in {"127.0.0.1", "localhost"} or parsed.database != "accounting_test":
         pytest.fail("Refusing a non-local/non-test PostgreSQL target")
+    if mode == "registered_head":
+        if parsed.drivername != "postgresql+psycopg" or parsed.query:
+            pytest.fail("Refusing an overridden or unsupported PostgreSQL target")
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+
+        owner = os.getenv("REGISTERED_HEAD_TEST_OWNER", "")
+        if re.fullmatch(r"[a-f0-9]{32}", owner) is None:
+            pytest.fail("Registered-head fixture requires its isolated master owner")
+        root = Path(__file__).resolve().parents[2]
+        config = Config(str(root / "alembic.ini"))
+        config.set_main_option("script_location", str(root / "migrations"))
+        if ScriptDirectory.from_config(config).get_heads() != [REGISTERED_HEAD_REVISION]:
+            pytest.fail("Registered-head fixture requires its pinned revision")
     admin = create_async_engine(url, isolation_level="AUTOCOMMIT")
     database = "acc_test_" + uuid4().hex
     engine = None
     created = False
     try:
         async with admin.connect() as conn:
+            if mode == "registered_head":
+                master_marker = await conn.scalar(text(
+                    "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname=current_database()"
+                ))
+                if master_marker != f"crm-registered-head:{owner}":
+                    pytest.fail("Registered-head master is not owned by this test run")
             await conn.execute(text(f'CREATE DATABASE "{database}"'))
             created = True
             await conn.execute(text(f'COMMENT ON DATABASE "{database}" IS \'crm-acc-fixture:{database}\''))
-        engine = create_async_engine(parsed.set(database=database))
+        engine_options = {}
+        if mode == "registered_head":
+            engine_options = {"connect_args": {"options": "-c statement_timeout=15000 -c lock_timeout=12000"}}
+        engine = create_async_engine(parsed.set(database=database), **engine_options)
+        if mode == "registered_head":
+            async with engine.connect() as conn:
+                version = int(await conn.scalar(text("SHOW server_version_num")))
+                assert 160000 <= version < 170000, "PostgreSQL 16 acceptance required"
+                assert await conn.scalar(text("SELECT current_database()")) == database
+            migration_log = request.getfixturevalue("tmp_path") / "registered-head-migration.private.log"
+            child_env = dict(os.environ, AIOS_ENVIRONMENT="dev", AIOS_AUTH_MODE="dev",
+                             AIOS_DATABASE_URL=parsed.set(database=database).render_as_string(hide_password=False))
+            child_env.pop("ALEMBIC_CONFIG", None)
+            with migration_log.open("xb") as log:
+                result = await asyncio.to_thread(
+                    subprocess.run, [sys.executable, "-B", "-m", "alembic", "-c", str(root / "alembic.ini"),
+                                     "upgrade", "head"],
+                    cwd=root, env=child_env, stdout=log, stderr=subprocess.STDOUT, timeout=150,
+                )
+            assert result.returncode == 0, "Registered-head migration failed; private fixture log retained"
+            async with engine.connect() as conn:
+                assert await conn.scalar(text("SELECT current_database()")) == database
+                assert (await conn.scalars(text("SELECT version_num FROM alembic_version"))).all() == [REGISTERED_HEAD_REVISION]
+                marker = await conn.scalar(text(
+                    "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname=current_database()"
+                ))
+                assert marker == f"crm-acc-fixture:{database}", "Registered-head database marker changed"
+
+            def reject_orm_schema_repair(connection, cursor, statement, parameters, context, executemany):
+                if context.isddl:
+                    raise AssertionError("Registered-head tests must not repair schema through ORM DDL")
+
+            event.listen(engine.sync_engine, "before_cursor_execute", reject_orm_schema_repair)
+            yield async_sessionmaker(engine, expire_on_commit=False)
+            return
         async with engine.begin() as conn:
             # Exercise the frozen proposal via real Alembic Operations, not create_all.
             # Revision registration remains subject to the shared allocator/operator.
@@ -462,19 +527,6 @@ async def pg_factory():
                 DealStageEvent.__table__.create(connection)
                 LossReason.__table__.create(connection)
 
-                # Bank-source completeness is part of month closing; these
-                # existing finance tables precede the accounting migration.
-                from modules.finance.models import (
-                    BankAccount,
-                    BankTransaction,
-                    Payment,
-                    PaymentAllocation,
-                )
-
-                connection.execute(text("CREATE SCHEMA finance"))
-                for table in (BankAccount.__table__, Payment.__table__, PaymentAllocation.__table__, BankTransaction.__table__):
-                    table.create(connection)
-
                 connection.execute(text("CREATE SCHEMA logistics"))
                 Shipment.__table__.create(connection)
                 CarrierRfq.__table__.create(connection)
@@ -520,6 +572,20 @@ async def pg_factory():
                 connection.execute(text("ALTER TABLE public.audit_log ALTER COLUMN actor TYPE varchar(128)"))
                 with Operations.context(MigrationContext.configure(connection)):
                     migration["upgrade"]()
+                    # Bank-source completeness is part of month closing; these
+                    # existing finance tables precede the accounting migration.
+                    from modules.finance.models import (
+                        BankAccount,
+                        BankTransaction,
+                        Payment,
+                        PaymentAllocation,
+                    )
+
+                    connection.execute(text("CREATE SCHEMA finance"))
+                    for table in (BankAccount.__table__, Payment.__table__, PaymentAllocation.__table__, BankTransaction.__table__):
+                        table.create(connection)
+
+
                     remainder = runpy.run_path("migrations/versions/0131_invoice_remainder.py")
                     remainder["upgrade"]()
                     runpy.run_path("migrations/versions/0132_expense_approval_digest.py")["upgrade"]()

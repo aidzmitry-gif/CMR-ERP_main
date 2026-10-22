@@ -117,3 +117,12 @@ class ProcurementSourceGateway(Protocol):
         Missing owned source returns None; inconsistent history raises ValueError.
         """
         ...
+
+    async def landed_financial_source(self, session: Any, organization_id: int,
+                                      purchase_order_id: int, event_id: int) -> dict:
+        """Lock the owned PO and verify the exact immutable calculation/event receipt.
+
+        Caller holds the organization lock. This is cost, not cash or a posting.
+        Historical receipts without the calculation cannot establish a new owner.
+        """
+        ...

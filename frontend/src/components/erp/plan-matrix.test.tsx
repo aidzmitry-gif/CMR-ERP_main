@@ -150,7 +150,7 @@ describe("PlanMatrix", () => {
       ),
     );
     // форма закрылась, новое изделие в таблице
-    expect(screen.queryByPlaceholderText("Название изделия")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByPlaceholderText("Название изделия")).not.toBeInTheDocument());
     expect(await screen.findByText("Крышка")).toBeInTheDocument();
   });
 

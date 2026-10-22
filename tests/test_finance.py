@@ -73,21 +73,22 @@ async def test_issued_invoice_does_not_create_a_zero_receivable_from_bad_amount(
     assert (await session.execute(select(Payment))).scalars().all() == []
 
 
-async def test_malformed_landed_amount_does_not_fall_back_to_another_field(session):
-    from modules.finance.events import on_landed_cost
+async def test_malformed_landed_amount_does_not_fall_back_to_another_field(api, session):
+    runtime = landed_runtime(api, session)
+    item = await received_landed(runtime)
+    before = await landed_state(session)
+    with pytest.raises(ValueError, match="match"):
+        await deliver_landed(session, runtime, item, {**item["payload"], "total_landed_byn": "invalid", "amount": "100"})
+    assert await landed_state(session) == before
 
-    with pytest.raises(ValueError, match="amount"):
-        await on_landed_cost({"amount": "invalid", "total_landed_byn": "100.00"}, _ctx(session))
-    assert (await session.execute(select(Payment))).scalars().all() == []
 
-
-async def test_payment_paid_sets_paid_at_and_emits(session, api):
+async def test_payment_paid_sets_paid_at_and_emits(session, finance_api, finance_org):
     from core.domain.models import OutboxEvent
 
-    session.add(Payment(ref="СЧ-1", amount=Decimal("100"), status="pending", kind="receivable"))
+    session.add(Payment(organization_id=finance_org, ref="СЧ-1", amount=Decimal("100"), status="pending", kind="receivable"))
     await session.commit()
     pid = (await session.execute(select(Payment.id))).scalar_one()
-    r = await api.patch(f"/finance/payments/{pid}", json={"status": "paid"})
+    r = await finance_api.patch(f"/finance/payments/{pid}", json={"status": "paid"})
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "paid" and body["paid_at"] is not None
@@ -95,10 +96,10 @@ async def test_payment_paid_sets_paid_at_and_emits(session, api):
     assert "finance.payment.paid" in types
 
 
-async def test_payment_is_overdue_computed_on_read(session, api):
+async def test_payment_is_overdue_computed_on_read(session, finance_api, finance_org):
     yesterday = date.today() - timedelta(days=5)
     session.add(
-        Payment(
+        Payment(organization_id=finance_org,
             ref="СЧ-OVERDUE",
             amount=Decimal("200"),
             status="pending",
@@ -107,7 +108,7 @@ async def test_payment_is_overdue_computed_on_read(session, api):
         )
     )
     session.add(
-        Payment(
+        Payment(organization_id=finance_org,
             ref="СЧ-FUTURE",
             amount=Decimal("300"),
             status="pending",
@@ -116,7 +117,7 @@ async def test_payment_is_overdue_computed_on_read(session, api):
         )
     )
     await session.commit()
-    r = await api.get("/finance/payments")
+    r = await finance_api.get("/finance/payments")
     rows = {p["ref"]: p for p in r.json()}
     assert rows["СЧ-OVERDUE"]["is_overdue"] is True
     assert rows["СЧ-FUTURE"]["is_overdue"] is False
@@ -127,105 +128,95 @@ async def test_payment_is_overdue_computed_on_read(session, api):
 # ───────────────────────── P2: allocations (частичная оплата) ─────────────────────────
 
 
-async def test_two_partial_allocations_close_invoice(session, api):
+async def test_two_partial_allocations_close_invoice(session, finance_api, finance_org):
     from core.domain.models import OutboxEvent
 
-    session.add(Payment(ref="СЧ-PART", amount=Decimal("1000"), status="pending", kind="receivable"))
+    session.add(Payment(organization_id=finance_org, ref="СЧ-PART", amount=Decimal("1000"), status="pending", kind="receivable"))
     await session.commit()
     pid = (await session.execute(select(Payment.id))).scalar_one()
 
     # 1: 400 → partial, события paid нет
-    r1 = await api.post(f"/finance/payments/{pid}/allocations", json={"amount": 400})
+    r1 = await finance_api.post(f"/finance/payments/{pid}/allocations", json={"amount": 400})
     assert r1.status_code == 201
-    detail1 = (await api.get(f"/finance/payments/{pid}")).json()
+    detail1 = (await finance_api.get(f"/finance/payments/{pid}")).json()
     assert detail1["status"] == "partial" and detail1["outstanding"] == "600.00"
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
     assert "finance.payment.paid" not in types
 
     # 2: 600 → paid, событие финиш-оплаты
-    r2 = await api.post(f"/finance/payments/{pid}/allocations", json={"amount": 600})
+    r2 = await finance_api.post(f"/finance/payments/{pid}/allocations", json={"amount": 600})
     assert r2.status_code == 201
-    detail2 = (await api.get(f"/finance/payments/{pid}")).json()
+    detail2 = (await finance_api.get(f"/finance/payments/{pid}")).json()
     assert detail2["status"] == "paid" and detail2["outstanding"] == "0.00"
     assert len(detail2["allocations"]) == 2
     types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
     assert "finance.payment.paid" in types
 
 
-async def test_allocation_amount_must_be_positive(session, api):
-    session.add(Payment(ref="СЧ-X", amount=Decimal("100"), status="pending", kind="receivable"))
+async def test_allocation_amount_must_be_positive(session, finance_api, finance_org):
+    session.add(Payment(organization_id=finance_org, ref="СЧ-X", amount=Decimal("100"), status="pending", kind="receivable"))
     await session.commit()
     pid = (await session.execute(select(Payment.id))).scalar_one()
-    r = await api.post(f"/finance/payments/{pid}/allocations", json={"amount": 0})
+    r = await finance_api.post(f"/finance/payments/{pid}/allocations", json={"amount": 0})
     assert r.status_code == 400
 
 
 # ───────────────────────── P11: landed-маржа из qty+unit / total_landed_byn ─────────────────────────
 
 
-async def test_landed_uses_total_landed_byn_when_present(session):
-    """Закупки эмитят total_landed_byn (предпочтительный путь, точный для landed-маржи)."""
-    from modules.finance.events import on_landed_cost
-
-    # реальный payload закупок (procurement/routes.py:230): qty+unit+total строками
-    await on_landed_cost(
-        {
-            "sku_code": "S-X",
-            "unit_landed_cost_byn": "15.0000",
-            "qty": "10",
-            "total_landed_byn": "150.00",  # предпочтительнее, если есть
-            "deal_id": 7,
-            "entity_ref": "purchase_order:3",
-        },
-        _ctx(session),
-    )
-    await session.commit()
-    p = (await session.execute(select(Payment).where(Payment.kind == "landed"))).scalars().one()
-    assert float(p.amount) == 150.0 and p.deal_id == 7
+async def test_landed_uses_total_landed_byn_when_present(api, session):
+    runtime = landed_runtime(api, session)
+    item = await received_landed(runtime, lines=[("S-X", "10", "150")])
+    assert Decimal(item["payload"]["total_landed_byn"]) == Decimal("150")
+    await deliver_landed(session, runtime, item)
+    assert_recorded_landed((await session.scalars(select(Payment))).one(), item, "150")
 
 
-async def test_landed_falls_back_to_unit_times_qty(session):
-    """Если total нет — используем unit×qty (закупки могут не прислать total в старых эмитах)."""
-    from modules.finance.events import on_landed_cost
-
-    await on_landed_cost(
-        {"sku_code": "S-Y", "unit_landed_cost_byn": "12", "qty": "5"}, _ctx(session)
-    )
-    await session.commit()
-    p = (await session.execute(select(Payment).where(Payment.kind == "landed"))).scalars().one()
-    assert float(p.amount) == 60.0
+async def test_landed_falls_back_to_unit_times_qty(api, session):
+    # Legacy test name retained: only the actual producer may calculate unit*qty.
+    runtime = landed_runtime(api, session)
+    item = await received_landed(runtime, lines=[("S-Y", "5", "60")])
+    assert Decimal(item["payload"]["unit_landed_cost_byn"]) == Decimal("12")
+    await deliver_landed(session, runtime, item)
+    assert_recorded_landed((await session.scalars(select(Payment))).one(), item, "60")
+    before = await landed_state(session)
+    payload = dict(item["payload"])
+    del payload["total_landed_byn"]
+    with pytest.raises(ValueError):
+        await deliver_landed(session, runtime, item, payload)
+    assert await landed_state(session) == before
 
 
 # ───────────────────────── P3: AR/AP aging ─────────────────────────
 
 
-async def _seed_aging(session):
+async def _seed_aging(session, finance_org):
     today = date.today()
     session.add_all([
         # AR
-        Payment(ref="AR-CUR", amount=Decimal("100"), kind="receivable", status="pending",
+        Payment(organization_id=finance_org, ref="AR-CUR", amount=Decimal("100"), kind="receivable", status="pending",
                 due_date=today + timedelta(days=10)),
-        Payment(ref="AR-15", amount=Decimal("200"), kind="receivable", status="pending",
+        Payment(organization_id=finance_org, ref="AR-15", amount=Decimal("200"), kind="receivable", status="pending",
                 due_date=today - timedelta(days=15)),
-        Payment(ref="AR-45", amount=Decimal("300"), kind="receivable", status="pending",
+        Payment(organization_id=finance_org, ref="AR-45", amount=Decimal("300"), kind="receivable", status="pending",
                 due_date=today - timedelta(days=45)),
-        Payment(ref="AR-NO", amount=Decimal("50"), kind="receivable", status="pending"),
-        Payment(ref="AR-PAID", amount=Decimal("999"), kind="receivable", status="paid",
+        Payment(organization_id=finance_org, ref="AR-NO", amount=Decimal("50"), kind="receivable", status="pending"),
+        Payment(organization_id=finance_org, ref="AR-PAID", amount=Decimal("999"), kind="receivable", status="paid",
                 due_date=today - timedelta(days=200)),  # paid → не в aging
         # AP
-        Payment(ref="FR-100", amount=Decimal("400"), kind="freight", status="pending",
+        Payment(organization_id=finance_org, ref="FR-100", amount=Decimal("400"), kind="freight", status="pending",
                 due_date=today - timedelta(days=100)),
-        Payment(ref="LN-CUR", amount=Decimal("500"), kind="landed", status="pending",
+        Payment(organization_id=finance_org, ref="LN-CUR", amount=Decimal("500"), kind="landed", status="pending",
                 due_date=today + timedelta(days=5)),
     ])
     await session.commit()
 
 
-async def test_aging_buckets_split_correctly(session):
+async def test_aging_buckets_split_correctly(session, finance_org):
     from modules.finance.aging import aging_buckets
 
-    await _seed_aging(session)
-    r = await aging_buckets(session)
+    await _seed_aging(session, finance_org)
+    r = await aging_buckets(session, organization_id=finance_org)
     assert r["currency"] == "BYN"
     ar = r["ar"]["buckets"]
     assert ar["current"] == "100.00"
@@ -237,10 +228,10 @@ async def test_aging_buckets_split_correctly(session):
     assert ap["90+"] == "400.00" and ap["current"] == "500.00"
 
 
-async def test_aging_empty(session):
+async def test_aging_empty(session, finance_org):
     from modules.finance.aging import aging_buckets
 
-    r = await aging_buckets(session)
+    r = await aging_buckets(session, organization_id=finance_org)
     assert r["ar"]["total"] == "0.00" and r["ap"]["total"] == "0.00"
 
 
@@ -296,56 +287,45 @@ def test_fx_unknown_currency_raises():
         to_byn(10, "JPY")
 
 
-async def test_landed_with_foreign_currency_stores_byn_and_orig(session, official_usd):
-    from modules.finance.events import on_landed_cost
+async def test_landed_with_foreign_currency_stores_byn_and_orig(api, session, official_usd):
+    from core.services import nbrb
 
-    await on_landed_cost(
-        {
-            "sku_code": "S1",
-            "amount": "100",
-            "currency": "USD",
-            "entity_ref": "purchase:7",
-        },
-        _ctx(session),
-    )
-    await session.commit()
-    p = (await session.execute(select(Payment).where(Payment.kind == "landed"))).scalars().one()
-    expected_byn = Decimal("330.00")
-    assert Decimal(str(p.amount)) == expected_byn
-    assert p.currency == "USD" and Decimal(str(p.amount_orig)) == Decimal("100")
+    # USD conversion belongs upstream; the verified cost receipt is already BYN.
+    converted, quote = await nbrb.convert(session, Decimal("100"), "USD", date(2026, 9, 1))
+    assert converted == Decimal("330.00") and quote["source"] == "NBRB"
+    runtime = landed_runtime(api, session)
+    item = await received_landed(runtime, lines=[("S1", "1", str(converted))])
+    await deliver_landed(session, runtime, item)
+    assert_recorded_landed((await session.scalars(select(Payment))).one(), item, "330")
 
 
-async def test_landed_byn_keeps_amount_orig_none(session):
-    from modules.finance.events import on_landed_cost
-
-    await on_landed_cost(
-        {"sku_code": "S2", "amount": "200", "currency": "BYN"}, _ctx(session)
-    )
-    await session.commit()
-    p = (await session.execute(select(Payment).where(Payment.kind == "landed"))).scalars().one()
-    assert p.amount_orig is None and p.currency == "BYN"
+async def test_landed_byn_keeps_amount_orig_none(api, session):
+    runtime = landed_runtime(api, session)
+    item = await received_landed(runtime, lines=[("S2", "1", "200")])
+    await deliver_landed(session, runtime, item)
+    assert_recorded_landed((await session.scalars(select(Payment))).one(), item, "200")
 
 
 # ───────────────────────── P6: cash-flow forecast ─────────────────────────
 
 
-async def test_cashflow_forecast_groups_by_week_with_cumulative(session):
+async def test_cashflow_forecast_groups_by_week_with_cumulative(session, finance_org):
     from modules.finance.cashflow import cashflow_forecast
 
     today = date(2026, 7, 1)  # среда
     # opening_balance: оплачено 500 receivable, оплачено 100 freight → 400
-    session.add(Payment(ref="paid-in", amount=Decimal("500"), kind="receivable", status="paid"))
-    session.add(Payment(ref="paid-out", amount=Decimal("100"), kind="freight", status="paid"))
+    session.add(Payment(organization_id=finance_org, ref="paid-in", amount=Decimal("500"), kind="receivable", status="paid"))
+    session.add(Payment(organization_id=finance_org, ref="paid-out", amount=Decimal("100"), kind="freight", status="paid"))
     # неделя 0 (с понедельника 2026-06-29): inflow 200
-    session.add(Payment(ref="in-w0", amount=Decimal("200"), kind="receivable", status="pending",
+    session.add(Payment(organization_id=finance_org, ref="in-w0", amount=Decimal("200"), kind="receivable", status="pending",
                         due_date=date(2026, 7, 3)))
     # неделя 1 (2026-07-06): outflow 150
-    session.add(Payment(ref="out-w1", amount=Decimal("150"), kind="landed", status="pending",
+    session.add(Payment(organization_id=finance_org, ref="out-w1", amount=Decimal("150"), kind="landed", status="pending",
                         due_date=date(2026, 7, 8)))
     # без срока
-    session.add(Payment(ref="no-due", amount=Decimal("777"), kind="receivable", status="pending"))
+    session.add(Payment(organization_id=finance_org, ref="no-due", amount=Decimal("777"), kind="receivable", status="pending"))
     await session.commit()
-    r = await cashflow_forecast(session, weeks=3, today=today)
+    r = await cashflow_forecast(session, organization_id=finance_org, weeks=3, today=today)
     assert r["opening_balance"] == "400.00"
     weeks = r["weeks"]
     assert weeks[0]["inflow"] == "200.00" and weeks[0]["outflow"] == "0.00"
@@ -686,13 +666,13 @@ async def test_po_drafted_zero_amount_skipped(session):
     assert rows == []
 
 
-async def test_cashflow_includes_po_planned_in_outflow(session):
+async def test_cashflow_includes_po_planned_in_outflow(session, finance_org):
     from modules.finance.cashflow import cashflow_forecast
 
     today = date(2026, 7, 1)
     # PO на 800 со сроком в неделе 1 (понедельник 2026-07-06 → 2026-07-08)
     session.add(
-        Payment(
+        Payment(organization_id=finance_org,
             ref="po:PO-A",
             amount=Decimal("800"),
             kind="po_planned",
@@ -701,16 +681,16 @@ async def test_cashflow_includes_po_planned_in_outflow(session):
         )
     )
     await session.commit()
-    r = await cashflow_forecast(session, weeks=3, today=today)
+    r = await cashflow_forecast(session, organization_id=finance_org, weeks=3, today=today)
     assert r["weeks"][1]["outflow"] == "800.00"
 
 
-async def test_aging_does_not_include_po_planned(session):
+async def test_aging_does_not_include_po_planned(session, finance_org):
     from modules.finance.aging import aging_buckets
 
     today = date.today()
     session.add(
-        Payment(
+        Payment(organization_id=finance_org,
             ref="po:OLD",
             amount=Decimal("500"),
             kind="po_planned",
@@ -719,23 +699,23 @@ async def test_aging_does_not_include_po_planned(session):
         )
     )
     await session.commit()
-    r = await aging_buckets(session)
+    r = await aging_buckets(session, organization_id=finance_org)
     assert r["ar"]["total"] == "0.00" and r["ap"]["total"] == "0.00"  # planned НЕ в overdue
 
 
 # FIN-A3: claim_refund в summary и margin; po_planned НЕ в марже
 
 
-async def test_summary_claim_refund_reduces_net_landed(session):
+async def test_summary_claim_refund_reduces_net_landed(session, finance_org):
     from modules.finance.summary import finance_summary
 
     session.add_all([
-        Payment(ref="r1", amount=Decimal("1500"), kind="receivable", status="paid"),
-        Payment(ref="l1", amount=Decimal("1000"), kind="landed", status="pending"),
-        Payment(ref="c1", amount=Decimal("200"), kind="claim_refund", status="pending"),
+        Payment(organization_id=finance_org, ref="r1", amount=Decimal("1500"), kind="receivable", status="paid"),
+        Payment(organization_id=finance_org, ref="l1", amount=Decimal("1000"), kind="landed", status="pending"),
+        Payment(organization_id=finance_org, ref="c1", amount=Decimal("200"), kind="claim_refund", status="pending"),
     ])
     await session.commit()
-    r = await finance_summary(session)
+    r = await finance_summary(session, organization_id=finance_org)
     # net_landed = 1000 − 200 = 800; gross = 1500 − 800 = 700
     assert r["margin"]["landed"] == "800.00"
     assert r["margin"]["claim_refund"] == "200.00"
@@ -857,20 +837,20 @@ async def test_cost_center_includes_claim_refund_and_excludes_po_planned(session
 # FIN-R4-1: дневной режим cashflow + кумулятив
 
 
-async def test_cashflow_day_mode_buckets_by_date(session):
+async def test_cashflow_day_mode_buckets_by_date(session, finance_org):
     from modules.finance.cashflow import cashflow_forecast
 
     today = date(2026, 7, 1)
     session.add(
-        Payment(ref="in-d1", amount=Decimal("300"), kind="receivable", status="pending",
+        Payment(organization_id=finance_org, ref="in-d1", amount=Decimal("300"), kind="receivable", status="pending",
                 due_date=date(2026, 7, 2))
     )
     session.add(
-        Payment(ref="out-d4", amount=Decimal("100"), kind="landed", status="pending",
+        Payment(organization_id=finance_org, ref="out-d4", amount=Decimal("100"), kind="landed", status="pending",
                 due_date=date(2026, 7, 5))
     )
     await session.commit()
-    r = await cashflow_forecast(session, days=10, mode="day", today=today)
+    r = await cashflow_forecast(session, organization_id=finance_org, days=10, mode="day", today=today)
     assert r["mode"] == "day"
     assert r["bucket_size_days"] == 1
     by_date = {b["bucket_start"]: b for b in r["buckets"]}
@@ -882,12 +862,12 @@ async def test_cashflow_day_mode_buckets_by_date(session):
     ) + 300
 
 
-async def test_cashflow_week_mode_backward_compatible(session):
+async def test_cashflow_week_mode_backward_compatible(session, finance_org):
     """Старый клиент с `weeks` алиасом не сломается (мы рендерим week_start в weeks[])."""
     from modules.finance.cashflow import cashflow_forecast
 
     today = date(2026, 7, 1)
-    r = await cashflow_forecast(session, weeks=4, mode="week", today=today)
+    r = await cashflow_forecast(session, organization_id=finance_org, weeks=4, mode="week", today=today)
     assert r["mode"] == "week"
     assert r["bucket_size_days"] == 7
     assert len(r["weeks"]) == 4
@@ -1114,36 +1094,35 @@ async def test_reference_facade_failure_is_failsoft(session):
     assert recompute[0].payload["inputs"] == {}  # fail-soft
 
 
-async def test_cashflow_account_filter(session):
+async def test_cashflow_account_filter(session, finance_org):
     from modules.finance.cashflow import cashflow_forecast
     from modules.finance.models import BankAccount
 
-    acc_main = BankAccount(code="main", title="Основной", currency="BYN",
+    acc_main = BankAccount(organization_id=finance_org, code="main", title="Основной", currency="BYN",
                            opening_balance=Decimal("1000"))
-    acc_cny = BankAccount(code="cny", title="Валюта", currency="CNY")
+    acc_cny = BankAccount(organization_id=finance_org, code="cny", title="Валюта", currency="CNY")
     session.add_all([acc_main, acc_cny])
     await session.flush()
 
     today = date(2026, 7, 1)
     # Счёт main: 500 приток
     session.add(
-        Payment(ref="m-in", amount=Decimal("500"), kind="receivable", status="pending",
+        Payment(organization_id=finance_org, ref="m-in", amount=Decimal("500"), kind="receivable", status="pending",
                 due_date=date(2026, 7, 2), account_id=acc_main.id)
     )
     # Счёт cny: 200 приток (не должен попасть в выборку main)
     session.add(
-        Payment(ref="c-in", amount=Decimal("200"), kind="receivable", status="pending",
+        Payment(organization_id=finance_org, ref="c-in", amount=Decimal("200"), kind="receivable", status="pending",
                 due_date=date(2026, 7, 2), account_id=acc_cny.id)
     )
     # Без счёта: 999 — общий кэш, не суммируется в main
     session.add(
-        Payment(ref="no-acc", amount=Decimal("999"), kind="receivable", status="pending",
+        Payment(organization_id=finance_org, ref="no-acc", amount=Decimal("999"), kind="receivable", status="pending",
                 due_date=date(2026, 7, 2))
     )
     await session.commit()
 
-    r_main = await cashflow_forecast(
-        session, days=5, mode="day", today=today, account_id=acc_main.id
+    r_main = await cashflow_forecast(session, organization_id=finance_org, days=5, mode="day", today=today, account_id=acc_main.id
     )
     by = {b["bucket_start"]: b for b in r_main["buckets"]}
     assert by["2026-07-02"]["inflow"] == "500.00"  # только main
@@ -1151,7 +1130,7 @@ async def test_cashflow_account_filter(session):
     assert r_main["opening_balance"] == "1000.00"
 
     # Без фильтра — все три (общий кэш + main + cny)
-    r_all = await cashflow_forecast(session, days=5, mode="day", today=today)
+    r_all = await cashflow_forecast(session, organization_id=finance_org, days=5, mode="day", today=today)
     by_all = {b["bucket_start"]: b for b in r_all["buckets"]}
     assert by_all["2026-07-02"]["inflow"] == "1699.00"  # 500 + 200 + 999
 
@@ -1279,29 +1258,29 @@ async def test_b2_cascade_mixed_kinds_dedupes_by_sku(session):
 # К5-3: платёжный календарь — edge параметры (days вне 1-90, account_id у Payment None)
 
 
-async def test_cashflow_negative_days_does_not_explode(session):
+async def test_cashflow_negative_days_does_not_explode(session, finance_org):
     """days=-5 / 0 / 200 — кламп безопасный, не исключение."""
     from modules.finance.cashflow import cashflow_forecast
 
     today = date(2026, 7, 1)
     for bad in (-5, 0, 200):
-        r = await cashflow_forecast(session, days=bad, mode="day", today=today)
+        r = await cashflow_forecast(session, organization_id=finance_org, days=bad, mode="day", today=today)
         # должен вернуть результат с КЛАМП-длиной (1..90), не падать
         assert isinstance(r["buckets"], list)
         assert 1 <= len(r["buckets"]) <= 90
 
 
-async def test_cashflow_payment_with_null_account_id_works(session):
-    """Платёж без account_id (FK ON DELETE SET NULL — счёт удалён) не должен ронять прогноз.
+async def test_cashflow_payment_with_null_account_id_works(session, finance_org):
+    """Платёж без account_id (счёт ещё не выбран; FK запрещает удаление) не должен ронять прогноз.
 
-    Случай: BankAccount удалили, Payment.account_id → None по FK. Запрос без account-фильтра
+    Случай: Payment создан без выбранного счёта. Запрос без account-фильтра
     должен учитывать; запрос с account_id=X — пропускать (общий кэш не принадлежит ни одному).
     """
     from modules.finance.cashflow import cashflow_forecast
 
     today = date(2026, 7, 1)
     session.add(
-        Payment(
+        Payment(organization_id=finance_org,
             ref="orphan",
             amount=Decimal("123"),
             kind="receivable",
@@ -1312,22 +1291,29 @@ async def test_cashflow_payment_with_null_account_id_works(session):
     )
     await session.commit()
     # без фильтра — попадает в общий
-    r_all = await cashflow_forecast(session, days=10, mode="day", today=today)
+    r_all = await cashflow_forecast(session, organization_id=finance_org, days=10, mode="day", today=today)
     by = {b["bucket_start"]: b for b in r_all["buckets"]}
     assert by["2026-07-03"]["inflow"] == "123.00"
-    # с фильтром по несуществующему account_id — НЕ должно крашить и НЕ включать orphan
-    r_filt = await cashflow_forecast(
-        session, days=10, mode="day", today=today, account_id=99999
+    # Пустой счёт той же книги исключает платёж без счёта.
+    from modules.finance.cashflow import FinanceAccountUnavailable
+    from modules.finance.models import BankAccount
+    empty = BankAccount(organization_id=finance_org, code="empty", title="Synthetic empty")
+    session.add(empty)
+    await session.flush()
+    r_filt = await cashflow_forecast(session, organization_id=finance_org, days=10, mode="day", today=today, account_id=empty.id
     )
     by_f = {b["bucket_start"]: b for b in r_filt["buckets"]}
     assert by_f["2026-07-03"]["inflow"] == "0.00"
+
+    with pytest.raises(FinanceAccountUnavailable):
+        await cashflow_forecast(session, organization_id=finance_org, account_id=99999)
 
 
 # К5-4: money-выходы — СТРОКИ, не float (деньги собственника не проходят через float).
 # Фикс закрыт полосой finance-money-str: xfail СНЯТ, скан теперь ЗЕЛЁНЫЙ и охраняет контракт.
 
 
-async def test_money_outputs_use_str_not_float_scan(session, api):
+async def test_money_outputs_use_str_not_float_scan(session, finance_api, finance_org):
     """Деньго-сканер: money-поля во всех finance-ответах — строки, не float.
 
     Float дрейфует копейки на собственнике (приоритет №1 PLATFORM.md). Проверяем
@@ -1337,12 +1323,12 @@ async def test_money_outputs_use_str_not_float_scan(session, api):
     from modules.finance.cashflow import cashflow_forecast
     from modules.finance.summary import finance_summary
 
-    session.add(Payment(ref="X", amount=Decimal("1234.56"), kind="receivable",
+    session.add(Payment(organization_id=finance_org, ref="X", amount=Decimal("1234.56"), kind="receivable",
                         status="pending", due_date=date(2026, 7, 3)))
     await session.commit()
 
     # 1) summary — маржа + касса + затраты
-    s = await finance_summary(session)
+    s = await finance_summary(session, organization_id=finance_org)
     for key in ("revenue", "landed", "landed_gross", "claim_refund", "freight", "gross"):
         assert isinstance(s["margin"][key], str), f"margin.{key} — не str"
     for key in ("inflow", "outflow", "net", "received", "pending_receivable", "freight_refund"):
@@ -1351,44 +1337,44 @@ async def test_money_outputs_use_str_not_float_scan(session, api):
         assert isinstance(c["amount"], str), f"costs[{c['kind']}].amount — не str"
 
     # 2) cashflow — opening_balance + бакеты
-    cf = await cashflow_forecast(session, days=10, mode="day", today=date(2026, 7, 1))
+    cf = await cashflow_forecast(session, organization_id=finance_org, days=10, mode="day", today=date(2026, 7, 1))
     assert isinstance(cf["opening_balance"], str)
     for b in cf["buckets"]:
         for key in ("inflow", "outflow", "net", "cumulative"):
             assert isinstance(b[key], str), f"cashflow bucket.{key} — не str"
 
     # 3) API-схемы: PaymentOut.amount/outstanding, BankAccountOut.opening_balance, AllocationOut.amount
-    payments = (await api.get("/finance/payments")).json()
+    payments = (await finance_api.get("/finance/payments")).json()
     assert payments and isinstance(payments[0]["amount"], str), "PaymentOut.amount — не str"
     assert isinstance(payments[0]["outstanding"], str), "PaymentOut.outstanding — не str"
 
-    acc = (await api.post("/finance/bank-accounts", json={
+    acc = (await finance_api.post("/finance/bank-accounts", json={"organization_id": finance_org,
         "code": "scan", "title": "Скан", "currency": "BYN", "opening_balance": "10.00"
     })).json()
     assert isinstance(acc["opening_balance"], str), "BankAccountOut.opening_balance — не str"
 
     pid = payments[0]["id"]
-    alloc = (await api.post(f"/finance/payments/{pid}/allocations", json={"amount": "1.00"})).json()
+    alloc = (await finance_api.post(f"/finance/payments/{pid}/allocations", json={"amount": "1.00"})).json()
     assert isinstance(alloc["amount"], str), "AllocationOut.amount — не str"
 
 
 # ───────────────────────── finance-money-str: точечные контракты money=str ─────────────────────────
 
 
-async def test_payment_api_amount_is_string(session, api):
+async def test_payment_api_amount_is_string(session, finance_api, finance_org):
     """PaymentOut.amount — строка, не float."""
-    session.add(Payment(ref="T-STR", amount=Decimal("999.99"), kind="receivable", status="pending"))
+    session.add(Payment(organization_id=finance_org, ref="T-STR", amount=Decimal("999.99"), kind="receivable", status="pending"))
     await session.commit()
-    r = await api.get("/finance/payments")
+    r = await finance_api.get("/finance/payments")
     rows = r.json()
     assert len(rows) == 1
     assert isinstance(rows[0]["amount"], str), "amount должен быть строкой"
     assert rows[0]["amount"] == "999.99"
 
 
-async def test_bank_account_opening_balance_is_string(session, api):
+async def test_bank_account_opening_balance_is_string(session, finance_api, finance_org):
     """BankAccountOut.opening_balance — строка."""
-    r = await api.post("/finance/bank-accounts", json={
+    r = await finance_api.post("/finance/bank-accounts", json={"organization_id": finance_org,
         "code": "test-main", "title": "Тест", "currency": "BYN", "opening_balance": "5000.00"
     })
     assert r.status_code == 201
@@ -1397,23 +1383,23 @@ async def test_bank_account_opening_balance_is_string(session, api):
     assert body["opening_balance"] == "5000.00"
 
 
-async def test_allocation_amount_is_string(session, api):
+async def test_allocation_amount_is_string(session, finance_api, finance_org):
     """AllocationOut.amount — строка."""
-    session.add(Payment(ref="T-ALLOC", amount=Decimal("200.00"), kind="receivable", status="pending"))
+    session.add(Payment(organization_id=finance_org, ref="T-ALLOC", amount=Decimal("200.00"), kind="receivable", status="pending"))
     await session.commit()
     pid = (await session.execute(select(Payment.id))).scalar_one()
-    r = await api.post(f"/finance/payments/{pid}/allocations", json={"amount": "100.00"})
+    r = await finance_api.post(f"/finance/payments/{pid}/allocations", json={"amount": "100.00"})
     assert r.status_code == 201
     body = r.json()
     assert isinstance(body["amount"], str), "allocation amount должен быть строкой"
 
 
-async def test_payment_amount_roundtrip_no_float_error(session, api):
+async def test_payment_amount_roundtrip_no_float_error(session, finance_api, finance_org):
     """Деньги проходят сквозь API без float-дрейфа."""
     precise = "1234567.89"
-    session.add(Payment(ref="T-PRECISE", amount=Decimal(precise), kind="receivable", status="pending"))
+    session.add(Payment(organization_id=finance_org, ref="T-PRECISE", amount=Decimal(precise), kind="receivable", status="pending"))
     await session.commit()
-    r = await api.get("/finance/payments")
+    r = await finance_api.get("/finance/payments")
     row = r.json()[0]
     assert Decimal(row["amount"]) == Decimal(precise), "float-дрейф недопустим для денег собственника"
 
@@ -1439,3 +1425,352 @@ async def test_claim_resolved_is_idempotent_on_redelivery(session):
     assert len(rows) == 1  # ровно один приток, а не два (задвоение денег собственника)
     assert rows[0].amount == Decimal("1200.00")
     assert rows[0].ref == "claim:claim:21"
+
+
+@pytest.fixture
+async def finance_org(session):
+    """Explicit synthetic ownership at creation; never repair/backfill legacy rows."""
+    from core.domain.models import User
+    from modules.accounting.models import AccessGrant, Organization
+
+    session.add_all([
+        Organization(id=900001, name="Synthetic Finance owner", unp="111111111"),
+        Organization(id=900002, name="Synthetic foreign owner", unp="222222222"),
+        User(username="yi-finance", full_name="Synthetic finance actor", role="accountant", status="active"),
+    ])
+    await session.flush()
+    session.add(AccessGrant(organization_id=900001, subject="yi-finance", role="accountant"))
+    await session.commit()
+    return 900001
+
+
+@pytest.fixture
+async def finance_api(api, finance_org):
+    api.headers.update({"X-User": "yi-finance", "X-User-Roles": "accountant"})
+    api.params = {"organization_id": finance_org}
+    return api
+
+
+async def test_finance_owned_lists_hide_foreign_and_legacy_rows(session, finance_api, finance_org):
+    from modules.finance.models import BankAccount
+
+    for owner, ref in ((finance_org, "OWN"), (900002, "FOREIGN"), (None, "LEGACY")):
+        session.add(Payment(organization_id=owner, ref=ref, amount=Decimal("100"), kind="receivable"))
+        session.add(BankAccount(organization_id=owner, code=ref, title=ref))
+    await session.commit()
+    payments = await finance_api.get("/finance/payments")
+    accounts = await finance_api.get("/finance/bank-accounts")
+    assert payments.status_code == accounts.status_code == 200
+    assert [row["ref"] for row in payments.json()] == ["OWN"]
+    assert [row["code"] for row in accounts.json()] == ["OWN"]
+    assert all(row["organization_id"] == finance_org for row in payments.json() + accounts.json())
+    summary = await finance_api.get("/finance/summary")
+    assert summary.status_code == 200
+    assert summary.json()["margin"]["revenue"] == "100.00"
+    assert summary.json()["source_completeness"]["status"] == "unknown"
+    foreign = await session.scalar(select(Payment).where(Payment.ref == "FOREIGN"))
+    assert (await finance_api.get(f"/finance/payments/{foreign.id}")).status_code == 404
+    assert (await finance_api.get("/finance/payments", params={"organization_id": 900002})).status_code == 403
+
+
+async def test_finance_account_codes_are_unique_only_within_book(session, finance_api, finance_org):
+    from modules.accounting.models import AccessGrant
+
+    session.add(AccessGrant(organization_id=900002, subject="yi-finance", role="accountant"))
+    await session.commit()
+    data = {"code": "same", "title": "Synthetic cash", "opening_balance": "12.34"}
+    first = await finance_api.post("/finance/bank-accounts", json={**data, "organization_id": finance_org})
+    duplicate = await finance_api.post("/finance/bank-accounts", json={**data, "organization_id": finance_org})
+    other = await finance_api.post("/finance/bank-accounts", params={"organization_id": 900002},
+                                   json={**data, "organization_id": 900002})
+    assert first.status_code == other.status_code == 201
+    assert duplicate.status_code == 409
+    assert first.json()["id"] != other.json()["id"]
+    assert first.json()["organization_id"] == finance_org and other.json()["organization_id"] == 900002
+
+
+async def test_finance_payment_scope_cannot_be_changed_by_query_body_or_account(session, finance_api, finance_org):
+    from modules.finance.models import BankAccount
+
+    foreign = BankAccount(organization_id=900002, code="foreign", title="Synthetic foreign")
+    session.add(foreign)
+    await session.commit()
+    base = {"organization_id": finance_org, "ref": "SYN-SCOPE", "amount": "100.01"}
+    mismatch = await finance_api.post("/finance/payments", json={**base, "organization_id": 900002})
+    account = await finance_api.post("/finance/payments", json={**base, "account_id": foreign.id})
+    query = await finance_api.post("/finance/payments", params={"organization_id": 900002}, json=base)
+    assert mismatch.status_code == 422 and account.status_code == 404 and query.status_code == 403
+    assert (await session.scalars(select(Payment))).all() == []
+    good = await finance_api.post("/finance/payments", json=base)
+    assert good.status_code == 201, good.text
+    pid = good.json()["id"]
+    changed = await finance_api.patch(f"/finance/payments/{pid}",
+                                    json={"status": "pending", "organization_id": 900002})
+    assert changed.status_code == 200 and changed.json()["organization_id"] == finance_org
+    stored = await session.get(Payment, pid)
+    assert stored.organization_id == finance_org and stored.account_id is None
+
+
+async def test_finance_reader_cannot_mutate_accounts_payments_or_allocations(session, finance_api, finance_org):
+    from core.domain.models import OutboxEvent
+    from modules.accounting.models import AccessGrant
+    from modules.finance.models import BankAccount, PaymentAllocation
+
+    account = BankAccount(organization_id=finance_org, code="read", title="Synthetic reader cash")
+    payment = Payment(organization_id=finance_org, ref="READ-ONLY", amount=Decimal("200"))
+    session.add_all([account, payment])
+    grant = await session.scalar(select(AccessGrant).where(AccessGrant.subject == "yi-finance"))
+    grant.role = "reader"
+    await session.commit()
+    for method, url, data in (
+        ("post", "/finance/bank-accounts", {"organization_id": finance_org, "code": "denied", "title": "Denied"}),
+        ("patch", f"/finance/bank-accounts/{account.id}", {"opening_balance": "999"}),
+        ("post", "/finance/payments", {"organization_id": finance_org, "ref": "denied", "amount": "1"}),
+        ("patch", f"/finance/payments/{payment.id}", {"status": "paid"}),
+        ("post", f"/finance/payments/{payment.id}/allocations", {"amount": "1"}),
+    ):
+        response = await getattr(finance_api, method)(url, json=data)
+        assert response.status_code == 403, response.text
+    await session.refresh(payment)
+    await session.refresh(account)
+    assert payment.status == "pending" and account.opening_balance == Decimal("0")
+    assert len((await session.scalars(select(Payment))).all()) == 1
+    assert len((await session.scalars(select(BankAccount))).all()) == 1
+    assert (await session.scalars(select(PaymentAllocation))).all() == []
+    assert (await session.scalars(select(OutboxEvent))).all() == []
+
+
+async def test_finance_source_controlled_payments_keep_their_lifecycle(session, finance_api, finance_org):
+    from core.domain.models import OutboxEvent
+    from modules.finance.models import PaymentAllocation
+
+    rows = [
+        Payment(organization_id=finance_org, ref="SYN-DOC", amount=Decimal("100"), entity_ref="document:1", status="pending"),
+        Payment(organization_id=finance_org, ref="SYN-COST", kind="landed", amount=Decimal("200"), entity_ref="landed-receipt:1", status="recorded"),
+        Payment(organization_id=finance_org, ref="SYN-CANCEL", amount=Decimal("100"), entity_ref="document:2", status="cancelled"),
+        Payment(organization_id=finance_org, ref="SYN-SUPER", amount=Decimal("100"), entity_ref="document:3", status="superseded"),
+    ]
+    session.add_all(rows)
+    await session.commit()
+    for row in rows:
+        assert (await finance_api.patch(f"/finance/payments/{row.id}", json={"status": "paid"})).status_code == 409
+    for row in rows[1:]:
+        assert (await finance_api.post(f"/finance/payments/{row.id}/allocations", json={"amount": "50"})).status_code == 409
+    assert (await session.scalars(select(PaymentAllocation))).all() == []
+    assert (await session.scalars(select(OutboxEvent))).all() == []
+    allowed = await finance_api.post(f"/finance/payments/{rows[0].id}/allocations", json={"amount": "50"})
+    assert allowed.status_code == 201, allowed.text
+    await session.refresh(rows[0])
+    assert rows[0].status == "partial"
+    assert [row.organization_id for row in rows] == [finance_org] * 4
+
+
+# Genuine producer/receipt package shared by unit and registered-PostgreSQL tests.
+def landed_runtime(api, session):
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    # Explicit synthetic principal; no production user or grant is touched.
+    api.headers["X-User"] = "landed-tester"
+    return api, async_sessionmaker(session.bind, expire_on_commit=False), api._transport.app.state.core
+
+
+async def seeded_landed_order(runtime, suffix="1", lines=None):
+    from modules.procurement.models import PurchaseOrder, PurchaseOrderLine
+
+    api, factory, _ = runtime
+    actor = api.headers["X-User"]
+    assert actor in {"issuer", "landed-tester"}
+    response = await api.post("/accounting/organizations", json={
+        "name": "Synthetic landed owner " + suffix, "unp": "99999993" + suffix})
+    assert response.status_code == 201, response.text
+    org = response.json()["id"]
+    async with factory() as db:
+        order = PurchaseOrder(number="LANDED-NATIVE", supplier="Synthetic supplier", status="customs",
+                              freight_byn=Decimal("0.00"))
+        db.add(order)
+        await db.flush()
+        order_id = order.id
+        for sku, qty, goods in lines if lines is not None else [("LANDED-SAME", "1", "0.50"), ("LANDED-SAME", "1", "0.51")]:
+            db.add(PurchaseOrderLine(order_id=order_id, sku_code=sku, qty=Decimal(qty),
+                goods_value_byn=Decimal(goods), weight=Decimal("0.000"), volume=Decimal("0.0000")))
+        await db.commit()
+    body = {"kind": "order", "source_id": order_id, "evidence": "Synthetic reviewed ownership"}
+    prefix = f"/procurement/organizations/{org}"
+    preview = await api.post(prefix + "/purchase-ownership/preview", json=body)
+    assert preview.status_code == 200, preview.text
+    assigned = await api.post(prefix + "/purchase-ownership",
+        json={**body, "expected_snapshot": preview.json()["snapshot"]})
+    assert assigned.status_code == 201, assigned.text
+    return dict(org=org, order=order_id, owner=assigned.json()["id"], actor=actor,
+        endpoint=prefix + f"/orders/{order_id}/edit-commands",
+        headers={"X-Expected-Organization": str(org), "X-Expected-Principal": actor})
+
+
+async def received_landed(runtime, action="status", suffix="1", lines=None):
+    from copy import deepcopy
+
+    from core.domain.models import OutboxEvent
+    from modules.procurement import order_edit_commands as commands
+    from tests.accounting.test_procurement_order_edit_commands import command
+
+    api, factory, core = runtime
+    item = await seeded_landed_order(runtime, suffix, lines)
+    payload = {"status": "received"} if action == "status" else {"status": {"status": "received"}}
+    cmd = command(item["order"], action, payload)
+    response = await api.post(item["endpoint"], json=cmd, headers=item["headers"])
+    assert response.status_code == 200, response.text
+    result = response.json()
+    effect = result["effect"] if action == "status" else result["effect"]["status"]
+    assert effect["landed"]
+    item.update(cmd=cmd, result=deepcopy(result), events=deepcopy(effect["landed"]),
+                event=effect["landed"][0]["event_id"], payload=deepcopy(effect["landed"][0]["payload"]))
+    async with factory() as db:
+        saved = await db.scalar(select(commands.PurchaseOrderEditCommand).where(
+            commands.PurchaseOrderEditCommand.request_key == cmd["request_key"]))
+        item["receipt"] = saved.id
+        for emitted in item["events"]:
+            event = await db.get(OutboxEvent, emitted["event_id"])
+            assert event.payload == emitted["payload"] and event.processed_at is None
+        verified = await core.services.procurement_source.landed_financial_source(
+            db, item["org"], item["order"], item["event"])
+        assert verified["receipt_id"] == item["receipt"] and verified["payload"] == item["payload"]
+    return item
+
+
+async def deliver_landed(session, runtime, item, payload=None, event_id=None):
+    from copy import deepcopy
+
+    from modules.finance.events import on_landed_cost
+
+    await on_landed_cost(deepcopy(item["payload"] if payload is None else payload),
+        EventContext(session, runtime[2].services, event_id=item["event"] if event_id is None else event_id))
+    await session.flush()
+
+
+async def landed_state(session):
+    from copy import deepcopy
+
+    from core.domain.models import AuditLog, OutboxEvent
+    from modules.finance.models import PaymentAllocation
+    from modules.procurement.models import PurchaseOrder, PurchaseOrderLine
+    from modules.procurement.order_edit_commands import PurchaseOrderEditCommand
+
+    # Values from storage, including the immutable source and money-related rows.
+    return deepcopy([(await session.execute(select(model.__table__).order_by(model.id))).all()
+        for model in (Payment, PaymentAllocation, AuditLog, OutboxEvent,
+                      PurchaseOrderEditCommand, PurchaseOrder, PurchaseOrderLine)])
+
+
+def assert_recorded_landed(row, item, amount):
+    assert row.organization_id == item["org"] and row.amount == Decimal(amount)
+    assert row.currency == "BYN" and row.amount_orig is None
+    assert row.status == "recorded" and row.kind == "landed"
+    assert row.account_id is row.paid_at is row.deal_id is row.counterparty_ref is row.due_date is None
+    assert row.entity_ref.startswith(f"landed-receipt:{item['receipt']}:{item['order']}:")
+    assert row.description.startswith("landed-v1:")
+
+
+@pytest.mark.parametrize("fault", ["foreign-org", "wrong-po", "wrong-event", "noncanonical-id", "wrong-stage",
+    "missing-receipt", "corrupt-receipt", "changed-event", "missing-total"])
+async def test_landed_source_rejects_mismatch(api, session, fault):
+    from copy import deepcopy
+
+    from fastapi import HTTPException
+    from sqlalchemy import delete, update
+
+    from core.domain.models import OutboxEvent
+    from modules.procurement.order_edit_commands import PurchaseOrderEditCommand
+
+    runtime = landed_runtime(api, session)
+    item = await received_landed(runtime)
+    payload = deepcopy(item["payload"])
+    event_id = item["event"]
+    if fault == "foreign-org":
+        other = await api.post("/accounting/organizations", json={"name": "Synthetic other", "unp": "999999939"})
+        assert other.status_code == 201
+        payload["organization_id"] = other.json()["id"]
+    elif fault == "wrong-po":
+        payload["purchase_order_id"] += 1000
+    elif fault == "wrong-event":
+        event_id += 100000
+    elif fault == "noncanonical-id":
+        payload["organization_id"] = str(payload["organization_id"])
+    elif fault == "wrong-stage":
+        payload["stage"] = "planned"
+    elif fault == "missing-receipt":
+        await session.execute(delete(PurchaseOrderEditCommand).where(PurchaseOrderEditCommand.id == item["receipt"]))
+    elif fault == "corrupt-receipt":
+        saved = deepcopy(item["result"])
+        saved["effect"]["landed"][0]["payload"]["calculation"]["freight_byn"] = "9.99"
+        await session.execute(update(PurchaseOrderEditCommand).where(PurchaseOrderEditCommand.id == item["receipt"]).values(result=saved))
+    elif fault == "changed-event":
+        changed = {**payload, "total_landed_byn": "9.99"}
+        await session.execute(update(OutboxEvent).where(OutboxEvent.id == item["event"]).values(payload=changed))
+    elif fault == "missing-total":
+        del payload["total_landed_byn"]
+    await session.flush()
+    before = await landed_state(session)
+    if fault == "corrupt-receipt":
+        with pytest.raises(HTTPException) as rejected:
+            await deliver_landed(session, runtime, item, payload, event_id)
+        assert rejected.value.status_code == 409
+        assert rejected.value.detail == "Stored edit receipt is inconsistent"
+    else:
+        with pytest.raises(ValueError):
+            await deliver_landed(session, runtime, item, payload, event_id)
+    assert await landed_state(session) == before
+
+
+@pytest.mark.parametrize("fault", ["unowned", "foreign-owned", "corrupt-binding", "allocated"])
+async def test_landed_projection_conflict_is_atomic(api, session, fault):
+    from sqlalchemy import update
+
+    from modules.finance.models import PaymentAllocation
+
+    runtime = landed_runtime(api, session)
+    item = await received_landed(runtime)
+    foreign_org = None
+    if fault == "foreign-owned":
+        other = await api.post("/accounting/organizations", json={"name": "Synthetic foreign", "unp": "999999939"})
+        assert other.status_code == 201
+        foreign_org = other.json()["id"]
+    await deliver_landed(session, runtime, item)
+    row = (await session.scalars(select(Payment))).one()
+    row_id = row.id
+    if fault == "allocated":
+        # Existing historical zero allocation is still an allocation, not absence.
+        for amount in ("1.00", "0.00"):
+            session.add(PaymentAllocation(payment_id=row_id, amount=Decimal(amount)))
+            await session.flush()
+            before = await landed_state(session)
+            with pytest.raises(ValueError, match="allocations"):
+                await deliver_landed(session, runtime, item)
+            assert await landed_state(session) == before
+            await session.execute(PaymentAllocation.__table__.delete().where(PaymentAllocation.payment_id == row_id))
+        return
+    changes = {"organization_id": None} if fault == "unowned" else {"description": "corrupt binding"}
+    if fault == "foreign-owned":
+        changes = {"organization_id": foreign_org}
+    changed = await session.execute(update(Payment).where(Payment.id == row_id).values(**changes))
+    assert changed.rowcount == 1
+    await session.flush()
+    saved = (await session.execute(select(Payment.__table__).where(Payment.id == row_id))).one()
+    assert all(saved._mapping[key] == value for key, value in changes.items())
+    before = await landed_state(session)
+    with pytest.raises(ValueError, match="conflicts"):
+        await deliver_landed(session, runtime, item)
+    assert await landed_state(session) == before
+
+
+async def test_landed_verified_zero_is_recorded_without_cash(api, session):
+    from modules.finance.models import PaymentAllocation
+
+    runtime = landed_runtime(api, session)
+    item = await received_landed(runtime, lines=[("ZERO", "1", "0")])
+    await deliver_landed(session, runtime, item)
+    row = (await session.scalars(select(Payment))).one()
+    assert_recorded_landed(row, item, "0")
+    before = await landed_state(session)
+    await deliver_landed(session, runtime, item)
+    assert await landed_state(session) == before
+    assert (await session.scalars(select(PaymentAllocation))).all() == []

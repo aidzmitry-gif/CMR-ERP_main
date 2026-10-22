@@ -8,6 +8,7 @@ from sqlalchemy import select
 from core.domain.models import OutboxEvent
 from core.services.eventbus import EventContext, OutboxEventBus
 from tests.reservation_source import event_context, invoice
+from tests.test_finance import finance_org as finance_org  # noqa: F401
 from tests.test_logistics_invoice_binding import exact as logistics_invoice  # noqa: F401
 
 
@@ -259,45 +260,46 @@ async def test_freight_refund_creates_credit(session):
     ) == 1
 
 
-async def test_landed_cost_creates_finance_expense(session):
-    from modules.finance.events import on_landed_cost
+async def test_landed_cost_creates_finance_expense(api, session):
+    import pytest
+
     from modules.finance.models import Payment
+    from tests.test_finance import (
+        assert_recorded_landed,
+        deliver_landed,
+        landed_runtime,
+        landed_state,
+        received_landed,
+    )
 
-    # готовая сумма себестоимости → расход kind=landed
-    await on_landed_cost(
-        {"sku_code": "SKU-1", "amount": 1200.00, "entity_ref": "purchase:5"}, _ctx(session)
-    )
-    # сумма как unit×qty (amount не задан)
-    await on_landed_cost(
-        {"sku_code": "SKU-2", "unit_landed_cost_byn": 10, "qty": 3}, _ctx(session)
-    )
-    await session.commit()
-    rows = (await session.execute(select(Payment).where(Payment.kind == "landed"))).scalars().all()
+    runtime = landed_runtime(api, session)
+    item = await received_landed(runtime, lines=[("SKU-1", "1", "1200"), ("SKU-2", "10", "30")])
+    for emitted in item["events"]:
+        await deliver_landed(session, runtime, item, emitted["payload"], emitted["event_id"])
+    rows = (await session.scalars(select(Payment).order_by(Payment.amount.desc()))).all()
     assert len(rows) == 2
-    by_ref = {r.ref: float(r.amount) for r in rows}
-    assert by_ref["landed:purchase:5"] == 1200.0
-    assert by_ref["landed:SKU-2"] == 30.0
-
-    # нулевая себестоимость не маскирует дыру — записи нет
-    await on_landed_cost({"sku_code": "SKU-3", "amount": 0}, _ctx(session))
-    await session.commit()
-    assert len((await session.execute(select(Payment).where(Payment.kind == "landed"))).scalars().all()) == 2
+    for row, amount in zip(rows, ["1200", "30"], strict=True):
+        assert_recorded_landed(row, item, amount)
+    before = await landed_state(session)
+    with pytest.raises(ValueError):
+        await deliver_landed(session, runtime, item, {"sku_code": "SKU-3", "amount": 0}, 0)
+    assert await landed_state(session) == before
 
 
-async def test_finance_summary_margin_and_cash(session):
+async def test_finance_summary_margin_and_cash(session, finance_org):
     from modules.finance.models import Payment
     from modules.finance.summary import finance_summary
 
     # выручка 1000 (оплачено 400), фрахт 100, возврат -30, landed 600
     session.add_all([
-        Payment(ref="inv:1", amount=Decimal("600"), status="paid", kind="receivable"),
-        Payment(ref="inv:2", amount=Decimal("400"), status="pending", kind="receivable"),
-        Payment(ref="freight:1", amount=Decimal("100"), status="pending", kind="freight"),
-        Payment(ref="freight_refund:1", amount=Decimal("-30"), status="pending", kind="freight_refund"),
-        Payment(ref="landed:1", amount=Decimal("600"), status="pending", kind="landed"),
+        Payment(organization_id=finance_org, ref="inv:1", amount=Decimal("600"), status="paid", kind="receivable"),
+        Payment(organization_id=finance_org, ref="inv:2", amount=Decimal("400"), status="pending", kind="receivable"),
+        Payment(organization_id=finance_org, ref="freight:1", amount=Decimal("100"), status="pending", kind="freight"),
+        Payment(organization_id=finance_org, ref="freight_refund:1", amount=Decimal("-30"), status="pending", kind="freight_refund"),
+        Payment(organization_id=finance_org, ref="landed:1", amount=Decimal("600"), status="pending", kind="landed"),
     ])
     await session.commit()
-    s = await finance_summary(session)
+    s = await finance_summary(session, organization_id=finance_org)
 
     # маржа = 1000 − 600 (landed) − 70 (фрахт 100 − возврат 30) = 330 — money=str (Decimal→str), pct float
     assert s["margin"]["revenue"] == "1000.00"
@@ -313,10 +315,10 @@ async def test_finance_summary_margin_and_cash(session):
     assert s["currency"] == "BYN"
 
 
-async def test_finance_summary_empty_is_honest(session):
+async def test_finance_summary_empty_is_honest(session, finance_org):
     from modules.finance.summary import finance_summary
 
-    s = await finance_summary(session)
+    s = await finance_summary(session, organization_id=finance_org)
     assert s["margin"]["revenue"] == "0.00" and s["margin"]["gross"] == "0.00"  # money=str
     assert s["margin"]["pct"] is None  # нет выручки → не делим на ноль (pct — float, не деньги)
     assert s["cash"]["net"] == "0.00"

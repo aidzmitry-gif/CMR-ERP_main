@@ -5,12 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ fetchAccess: vi.fn(), currentRole: vi.fn() }));
 
 vi.mock("@/components/sidebar", () => ({
-  Sidebar: ({ allowedSlugs, roleTitle }: { allowedSlugs: string[] | null; roleTitle: string }) => (
-    <div data-testid="sidebar" data-allowed={JSON.stringify(allowedSlugs)} data-role-title={roleTitle} />
+  Sidebar: ({ allowedSlugs, roleTitle, userName }: { allowedSlugs: string[] | null; roleTitle: string; userName: string }) => (
+    <div data-testid="sidebar" data-allowed={JSON.stringify(allowedSlugs)} data-role-title={roleTitle} data-user-name={userName} />
   ),
 }));
 vi.mock("@/components/topbar", () => ({
-  Topbar: ({ crumbs }: { crumbs: string[] }) => <div data-testid="topbar">{crumbs.join("/")}</div>,
+  Topbar: ({ crumbs, userName }: { crumbs: string[]; userName: string }) => (
+    <div data-testid="topbar" data-user-name={userName}>{crumbs.join("/")}</div>
+  ),
 }));
 vi.mock("@/components/calls/active-call-provider", () => ({
   ActiveCallProvider: ({ children, enabled }: { children: ReactNode; enabled?: boolean }) => (
@@ -23,7 +25,7 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
 }));
 vi.mock("@/lib/role-server", () => ({
-  currentUserName: async () => "Харькович Д.С.",
+  currentUserName: async () => "Анна Волкова",
   currentRole: mocks.currentRole,
 }));
 vi.mock("@/lib/access", () => ({ fetchAccess: mocks.fetchAccess }));
@@ -76,6 +78,8 @@ describe("AppShell", () => {
     render(ui);
     expect(screen.getByTestId("sidebar")).toBeInTheDocument();
     expect(screen.getByTestId("topbar")).toHaveTextContent("CRM/Лиды");
+    expect(screen.getByTestId("topbar")).toHaveAttribute("data-user-name", "Анна Волкова");
+    expect(screen.getByTestId("sidebar")).toHaveAttribute("data-user-name", "Анна Волкова");
     expect(screen.getByText("содержимое страницы")).toBeInTheDocument();
   });
 
