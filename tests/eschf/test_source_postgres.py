@@ -50,7 +50,7 @@ from modules.accounting.models import Organization
 from modules.eschf.bridge import MappingReceipt, SalesNativeSourceProvider, VerifiedCapture
 from modules.eschf.models import Original, Snapshot
 from modules.sales.deal_loss import DealLossRequest, DealLossResolution
-from modules.sales.models import Deal, DealDocument, Stage
+from modules.sales.models import CrmClient, Deal, DealDocument, Stage
 from tests.eschf.test_repository_postgres import pg as pg
 from tests.onec_eschf.test_adapter import (
     binding_for,
@@ -69,6 +69,7 @@ async def source_pg(pg):
         User.__table__,
         Counterparty.__table__,
         CounterpartyBranch.__table__,
+        CrmClient.__table__,
         Deal.__table__,
         DealDocument.__table__,
         Organization.__table__,
@@ -165,7 +166,7 @@ async def bridge_http(source_pg, monkeypatch):
     for name in (
         "core.services.auth.get_settings",
         "core.runtime.access.get_settings",
-        "modules.sales.access.get_settings",
+        "core.services.crm_access.get_settings",
     ):
         monkeypatch.setattr(name, lambda: settings)
     core = Core(
@@ -176,7 +177,9 @@ async def bridge_http(source_pg, monkeypatch):
         )
     )
     load_modules(core, ["eschf"])
-    core.declare_role(Role("source_reader", ("sales.deal.read",)))
+    accountant = next(role for role in core.roles if role.name == "eschf_accountant")
+    source_role = Role("synthetic_source_accountant", accountant.permissions + ("sales.deal.read",))
+    core.declare_role(source_role)
     app = FastAPI()
     app.state.core = core
     source, _, native = setup_case(shared=True)
@@ -195,7 +198,7 @@ async def bridge_http(source_pg, monkeypatch):
                 username="synthetic-accountant",
                 full_name="Synthetic accountant",
                 employee_id=701,
-                role="eschf_accountant",
+                role=source_role.name,
                 status="active",
                 deal_visibility="own",
             )
@@ -257,7 +260,7 @@ async def bridge_http(source_pg, monkeypatch):
     for registered in core.routers:
         app.include_router(registered.router, prefix=registered.prefix)
     app.add_middleware(AccessControlMiddleware, prefixes=build_prefix_map(core))
-    actor = CurrentUser("synthetic-accountant", ["eschf_accountant", "source_reader"])
+    actor = CurrentUser("synthetic-accountant", [source_role.name])
     request = Request(
         {
             "type": "http",
@@ -384,6 +387,8 @@ async def test_source_snapshot_and_branch_identity_are_required(bridge_http, cha
 
 async def test_eschf_permission_does_not_grant_source_access(bridge_http):
     h = bridge_http
+    async with h.pg.begin() as session:
+        await session.execute(update(User).where(User.id == 1).values(role="eschf_accountant"))
     response = await h.client.post(
         "/eschf/preparations",
         json={"source_document_id": 301, "source_document_version": 1},
@@ -552,19 +557,18 @@ async def test_refresh_rechecks_source_and_keeps_previous_snapshot_on_failure(br
 
 async def test_oidc_source_uses_stable_subject_without_username_fallback(bridge_http):
     h = bridge_http
-    h.core.declare_role(Role("eschf_accountant", ("sales.deal.read",)))
     async with h.pg.begin() as session:
         await session.execute(update(User).values(keycloak_user_id="synthetic-stable-subject"))
     actor = CurrentUser(
         "renamed-accountant",
-        ["eschf_accountant"],
+        h.actor.roles,
         "synthetic-stable-subject",
         issued_at=int(datetime.now(UTC).timestamp()),
     )
     prepared = await h.provider.prepare_source(h.request, actor, 301, 1)
     async with h.pg.begin() as session:
         await prepared.recheck(session, actor)
-    unknown_subject = CurrentUser("synthetic-accountant", ["eschf_accountant"], "unknown-subject")
+    unknown_subject = CurrentUser("synthetic-accountant", h.actor.roles, "unknown-subject")
     with pytest.raises(HTTPException) as error:
         await h.provider.prepare_source(h.request, unknown_subject, 301, 1)
     assert error.value.status_code == 403
@@ -572,12 +576,11 @@ async def test_oidc_source_uses_stable_subject_without_username_fallback(bridge_
 
 async def test_oidc_revocation_fact_is_rechecked_after_native_io(bridge_http):
     h = bridge_http
-    h.core.declare_role(Role("eschf_accountant", ("sales.deal.read",)))
     async with h.pg.begin() as session:
         await session.execute(update(User).values(keycloak_user_id="synthetic-stable-subject"))
     actor = CurrentUser(
         "synthetic-accountant",
-        ["eschf_accountant"],
+        h.actor.roles,
         "synthetic-stable-subject",
         issued_at=int((datetime.now(UTC) - timedelta(seconds=10)).timestamp()),
     )

@@ -17,12 +17,12 @@ from tests.integration.test_invoice_physical_shipments_postgres import physical_
 from tests.test_invoice_physical_shipments import endpoint, request
 
 
-async def prepare_accounting(physical_pg, *, full=False, stock_cost="10.00", normative_verified=False):
+async def prepare_accounting(physical_pg, *, full=False, stock_cost="10.00", normative_verified=False, shipment_body=None):
     api, factory, org, facts = physical_pg
     physical_lines = [{"line_no": 1, "warehouse": "W", "qty": "1.00"}]
     if full:
         physical_lines.append({"line_no": 2, "warehouse": "W", "qty": "2.00"})
-    body = await request(api, org, facts, physical_lines)
+    body = shipment_body if shipment_body is not None else await request(api, org, facts, physical_lines)
     response = await api.post(endpoint(org), json=body)
     assert response.status_code == 201, response.text
     act = response.json()

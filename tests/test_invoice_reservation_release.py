@@ -45,7 +45,7 @@ from modules.wms.invoice_reservations import (
 )
 from modules.wms.invoice_reservations import _digest as package_digest
 from modules.wms.invoice_shipments import PhysicalShipmentAct, PhysicalShipmentLine
-from modules.wms.models import Location, ReservationVersion, StockMovement, Task
+from modules.wms.models import Location, ReservationVersion, StockMovement, Task, WarehouseDirectory
 from modules.wms.reservation_events import ReservationEventState, ReservationPick, apply
 
 
@@ -66,7 +66,7 @@ class Proof(ProofBase):
 SCOPES = ("wms_issue", "wms_pick", "logistics_shipment", "accounting_issue", "legacy_fulfillment")
 TABLES = [m.__table__ for m in (Organization, Counterparty, CrmClient, CrmClientContact,
     Deal, DealDocument, Stage, DealLossRequest, DealLossResolution,
-    InvoiceIssuanceReceipt, DealOwnership, Location,
+    InvoiceIssuanceReceipt, DealOwnership, Location, WarehouseDirectory,
     StockMovement, Task, ReservationVersion, InvoiceReservation, ReservationEventState,
     ReservationPick, InvoiceReservationRelease, InvoiceReservationReleaseLine, PhysicalShipmentAct, PhysicalShipmentLine, RemainderRelease, RemainderReleaseLine, Proof)]
 
@@ -162,6 +162,10 @@ async def source_lock(session, doc=1):
 async def seed(factory, picks=True):
     async with factory() as session:
         session.add(Organization(id=1, name="Synthetic", unp="999999971"))
+        await session.flush()
+        for place in ("W", "X"):
+            session.add(WarehouseDirectory(organization_id=1, name=place, title=place,
+                is_active=True, wms_enabled=True, prohibit_negative_stock=True, created_by="tester"))
         await session.flush()
         for doc_id in (1, 2):
             session.add(Deal(id=doc_id, number=f"SYN-{doc_id}", title="Synthetic", counterparty="Synthetic"))

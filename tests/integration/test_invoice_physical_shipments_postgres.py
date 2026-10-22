@@ -153,23 +153,50 @@ async def test_pg_close_and_no_shipment_preview_share_org_lock(physical_pg):
     from fastapi import HTTPException
 
     from core.services.auth import CurrentUser
+    from modules.accounting import service, shipment_commands, shipment_preview
+    from modules.accounting.schemas import CloseInput
     from modules.sales.reservation_source import SalesReservationSource
     from modules.wms.invoice_reservations import release_preview
+    from tests.accounting.test_shipment_receipt_postgres import prepare_accounting
 
     api, factory, org, facts = physical_pg
     body = await request(api, org, facts)
-    assert (await api.post(endpoint(org), json=body)).status_code == 201
+    factory, org, act, data = await prepare_accounting(
+        physical_pg, normative_verified=True, shipment_body=body
+    )
+    assert act["snapshot"]["source_key"] == body["source_key"]
     async with factory() as session:
         await AccountingService().source_member(session, org, CurrentUser("allocator", ["director"]))
         current = await SalesReservationSource().invoice_reservation(session, 1)
         with pytest.raises(HTTPException, match="physical_act_excludes"):
             await release_preview(session, org, current)
         await session.rollback()
-        await session.execute(text("UPDATE accounting.period SET closed=true WHERE organization_id=:org"), {"org": org})
+        plan = await shipment_preview.prepare(session, org, act, data)
+        await shipment_commands.confirm(session, org, act, data, plan["basis_digest"], "allocator")
         await session.commit()
-    assert (await api.post(endpoint(org), json=body)).status_code == 201
+        month = body["operation_date"][:7]
+        await service.lock_organization(session, org)
+        period = await service.period_for(session, org, month)
+        await session.refresh(period)
+        await service.close_period(session, org, month, CloseInput(
+            expected_generation=period.generation,
+            evidence={key: "Synthetic verified closing control" for key in service.CLOSE_STEPS},
+        ), "allocator")
+        await session.commit()
+        assert period.closed and period.closed_generation == period.generation
+        before = await counts(session)
+    replay = await api.post(endpoint(org), json=body)
+    assert replay.status_code == 201 and replay.json() == act
     next_body = await request(api, org, facts)
-    assert (await api.post(endpoint(org), json=next_body)).status_code == 409
+    denied = await api.post(endpoint(org), json=next_body)
+    assert denied.status_code == 409 and "closed period" in denied.text
+    async with factory() as session:
+        assert await counts(session) == before
+        observed = await api.post(endpoint(org) + "/preview", json={
+            "expected_version": facts["version"], "expected_content_sha256": facts["content_sha256"],
+        })
+        assert observed.status_code == 200, observed.text
+        assert {r["line_no"]: r["remaining_qty"] for r in observed.json()["lines"]} == {1: "1.00", 2: "3.00"}
 
 
 async def test_pg_raw_partial_package_rejected(physical_pg):

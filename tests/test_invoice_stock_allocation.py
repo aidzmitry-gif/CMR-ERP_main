@@ -9,18 +9,21 @@ from core.services.auth import CurrentUser
 from modules.accounting.gateway import AccountingService
 from modules.sales.reservation_source import SalesReservationSource
 from modules.wms.invoice_reservations import InvoiceReservation, ReserveInput, reserve
-from modules.wms.models import ReservationVersion, StockMovement
+from modules.wms.models import ReservationVersion, StockMovement, WarehouseDirectory
 from modules.wms.reservation_gateway import WmsReservationService
 from tests.reservation_source import invoice
 
 
-async def setup(api, session, *, physical="10"):
+async def setup(api, session, *, physical="10", create_warehouse=True):
     api.headers["X-User"] = "allocator"
     response = await api.post("/accounting/organizations", json={"name": "Allocation test", "unp": "999999978"})
     assert response.status_code == 201, response.text
     org = response.json()["id"]
     await invoice(session, 1, [{"sku_code": "A", "qty": "2"}, {"sku_code": "A", "qty": "3"}], org)
     session.add(StockMovement(organization_id=org, sku_code="A", warehouse="W", kind="in", qty=physical, reason="receipt"))
+    if create_warehouse:
+        session.add(WarehouseDirectory(organization_id=org, name="W", title="Synthetic W",
+            is_active=True, wms_enabled=True, prohibit_negative_stock=True, created_by="allocator"))
     await session.commit()
     actor = await AccountingService().source_member(session, org, CurrentUser("allocator", ["director"]))
     facts = await SalesReservationSource().invoice_reservation(session, 1)
@@ -129,8 +132,17 @@ async def test_current_manual_reservations_reduce_available_stock(api, session):
         session.add(ReservationVersion(organization_id=org, source="manual", version=version,
                                       sku_code="A", warehouse="W", qty=qty, evidence="Synthetic", actor=actor))
     await session.flush()
-    with pytest.raises(HTTPException, match="Insufficient"):
+    with pytest.raises(HTTPException) as error:
         await reserve(session, org, facts, data, actor)
+    assert error.value.status_code == 409
+    detail = error.value.detail
+    assert isinstance(detail["message"], str) and detail["message"].strip()
+    assert {key: value for key, value in detail.items() if key != "message"} == {
+        "code": "stock_shortage", "reason": "reserved_by_other_documents",
+        "sku_code": "A", "warehouse": "W", "requested": "5.00",
+        "physical": "10.00", "reserved": "6.00", "reserved_other": "6.00",
+        "available": "4.00", "shortage": "1.00",
+    }
     assert await session.scalar(select(InvoiceReservation.document_id)) is None
 
 

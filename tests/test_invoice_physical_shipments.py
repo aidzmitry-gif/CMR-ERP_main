@@ -30,7 +30,7 @@ async def prepared(api, session):
 async def prepared_issued(api, session):
     from tests.reservation_source import issued_invoice_for_shipments
 
-    org, facts = await issued_invoice_for_shipments(api, session)
+    org, facts = await issued_invoice_for_shipments(api, session, wms_enabled=True)
     assert facts["document_id"] == 1
     await apply(session, 1, [(line["sku_code"], "W", Decimal(line["qty"]))
                              for line in facts["lines"]], organization_id=org, release=False)
@@ -677,7 +677,7 @@ async def test_actual_event_and_api_receipt_after_unknown_response(api, session,
     assert await counts(session) == [1, 1, 3, 2]
 
 
-async def test_confirmed_inventory_records_shortage_preserves_reserve_and_blocks_fulfillment(api, session):
+async def prepared_inventory_shortage(api, session):
     org, facts = await prepared(api, session)
     created = await api.post("/wms/inventory", json={"organization_id": org, "warehouse": "W",
         "expected_source": "wms_physical", "source_evidence": "Synthetic complete journal", "journal_complete": True})
@@ -694,13 +694,73 @@ async def test_confirmed_inventory_records_shortage_preserves_reserve_and_blocks
     loss = await session.scalar(select(StockMovement).where(StockMovement.kind == "out"))
     assert loss.qty == Decimal("6") and loss.reason == "adjustment"
     available = await invoice_availability(session, org, ["A"])
-    assert available["rows"] == [{"sku_code": "A", "warehouse": "W", "physical": "4.00",
+    assert available["rows"] == [{"sku_code": "A", "warehouse": "W", "prohibit_negative_stock": True, "physical": "4.00",
                                   "reserved": "5.00", "free": "-1.00"}]
-    body = await request(api, org, facts)
+    return org, facts
+
+
+async def test_confirmed_inventory_records_shortage_preserves_reserve_and_blocks_fulfillment(api, session):
+    org, facts = await prepared_inventory_shortage(api, session)
+    body = await request(api, org, facts, [
+        {"line_no": 1, "warehouse": "W", "qty": "2.00"},
+        {"line_no": 2, "warehouse": "W", "qty": "3.00"},
+    ])
     denied = await api.post(endpoint(org), json=body)
-    assert denied.status_code == 409 and "physical_reserves_exceed_stock" in denied.text
+    assert denied.status_code == 409, denied.text
+    detail = denied.json()["detail"]
+    assert {k: detail[k] for k in ("code", "reason", "sku_code", "warehouse", "requested", "physical",
+                                  "reserved", "reserved_other", "available", "shortage")} == {
+        "code": "stock_shortage", "reason": "insufficient_stock", "sku_code": "A", "warehouse": "W",
+        "requested": "5.00", "physical": "4.00", "reserved": "5.00", "reserved_other": "0.00",
+        "available": "4.00", "shortage": "1.00",
+    }
+    assert detail["message"]
     await session.rollback()
     assert await counts(session) == [0, 0, 2, 2]
+    assert (await invoice_availability(session, org, ["A"]))["rows"][0]["reserved"] == "5.00"
+
+
+async def test_inventory_shortage_allows_available_partial_once_and_rejects_uncovered_remainder(api, session):
+    org, facts = await prepared_inventory_shortage(api, session)
+    body = await request(api, org, facts)
+    created = await api.post(endpoint(org), json=body)
+    assert created.status_code == 201, created.text
+    expected = created.json()
+    assert [(r["line_no"], r["warehouse"], r["qty"]) for r in expected["snapshot"]["lines"]] == [(1, "W", "1.00")]
+    identity = {"expected_version": facts["version"], "expected_content_sha256": facts["content_sha256"]}
+    assert await counts(session) == [1, 1, 3, 3]
+    observed = await api.post(endpoint(org) + "/preview", json=identity)
+    assert observed.status_code == 200, observed.text
+    assert {r["line_no"]: r["remaining_qty"] for r in observed.json()["lines"]} == {1: "1.00", 2: "3.00"}
+    assert (await invoice_availability(session, org, ["A"]))["rows"] == [{
+        "sku_code": "A", "warehouse": "W", "prohibit_negative_stock": True,
+        "physical": "3.00", "reserved": "4.00", "free": "-1.00",
+    }]
+    replay = await api.post(endpoint(org), json=body)
+    assert replay.status_code == 201 and replay.json() == expected
+    assert await counts(session) == [1, 1, 3, 3]
+    observed = await api.post(endpoint(org) + "/preview", json=identity)
+    assert observed.status_code == 200, observed.text
+    assert {r["line_no"]: r["remaining_qty"] for r in observed.json()["lines"]} == {1: "1.00", 2: "3.00"}
+    remaining = await request(api, org, facts, [
+        {"line_no": 1, "warehouse": "W", "qty": "1.00"},
+        {"line_no": 2, "warehouse": "W", "qty": "3.00"},
+    ])
+    denied = await api.post(endpoint(org), json=remaining)
+    assert denied.status_code == 409, denied.text
+    detail = denied.json()["detail"]
+    assert {k: detail[k] for k in ("code", "reason", "requested", "physical", "reserved",
+                                  "reserved_other", "available", "shortage")} == {
+        "code": "stock_shortage", "reason": "insufficient_stock", "requested": "4.00",
+        "physical": "3.00", "reserved": "4.00", "reserved_other": "0.00",
+        "available": "3.00", "shortage": "1.00",
+    }
+    await session.rollback()
+    assert await counts(session) == [1, 1, 3, 3]
+    observed = await api.post(endpoint(org) + "/preview", json=identity)
+    assert observed.status_code == 200, observed.text
+    assert {r["line_no"]: r["remaining_qty"] for r in observed.json()["lines"]} == {1: "1.00", 2: "3.00"}
+    assert (await invoice_availability(session, org, ["A"]))["rows"][0]["reserved"] == "4.00"
 
 
 @pytest.mark.parametrize("change", ["confirmation", "stale", "access", "uncounted"])

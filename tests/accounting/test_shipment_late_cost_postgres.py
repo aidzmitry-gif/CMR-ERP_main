@@ -6,11 +6,11 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import func, select, update
 
-from core.domain.models import Counterparty
+from core.domain.models import Counterparty, Sku
 from modules.accounting.late_cost_receipts import LateCostCommand
 from modules.accounting.models import AccessGrant, Entry, LateCostReceipt, Policy, SourceControl
 from modules.procurement.models import Supplier
-from modules.wms.models import StockMovement
+from modules.wms.models import StockMovement, WarehouseDirectory
 from tests.accounting.test_postgres import pg_factory  # noqa: F401
 from tests.accounting.test_shipment_receipt_postgres import prepare_accounting
 from tests.integration.test_invoice_physical_shipments_postgres import physical_pg  # noqa: F401
@@ -38,13 +38,25 @@ async def test_physical_shipment_consumes_verified_late_cost(physical_pg, same_c
         await session.flush()
         supplier = Supplier(name="supplier", unp="", status="active", counterparty_id=party.id)
         session.add(supplier)
+        session.add(Sku(code="A", title="Synthetic A", unit="шт", is_active=True))
         await session.flush()
         supplier_id = supplier.id
+        warehouse = (await session.scalars(select(WarehouseDirectory).where(
+            WarehouseDirectory.organization_id == org, WarehouseDirectory.name == "W",
+            WarehouseDirectory.is_active.is_(True),
+        ))).one()
+        sku = (await session.scalars(select(Sku).where(Sku.code == "A", Sku.is_active.is_(True)))).one()
+        assert sku.unit and sku.unit.strip()
+        warehouse_id, warehouse_title = warehouse.id, warehouse.title
+        sku_id, sku_title, sku_unit = sku.id, sku.title, sku.unit
         await session.commit()
     source = {"currency": "BYN", "invoice_reference": "receipt-cost", "document_date": today,
         "operation_date": today, "supplier": "supplier", "supplier_id": supplier_id,
         "supplier_unp": "", "contract": "contract", "warehouse": "W",
-        "explanation": "Synthetic acquisition", "items": [{"sku": "A", "lot": "L", "quantity": "3",
+        "contract_basis": "Synthetic supplier agreement not registered in catalogue",
+        "warehouse_id": warehouse_id, "warehouse_title": warehouse_title,
+        "explanation": "Synthetic acquisition", "items": [{"sku": "A", "sku_id": sku_id, "sku_title": sku_title, "unit": sku_unit,
+            "lot": "L", "quantity": "3",
             "net_amount": "10.00", "vat_rate": "0", "vat_amount": "0.00", "vat_basis": "Synthetic"}]}
     created = await api.post(receipt_root, json={"key": "late-source", "document": source})
     assert created.status_code == 201, created.text

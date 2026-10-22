@@ -2,6 +2,8 @@
 from datetime import datetime
 from types import SimpleNamespace
 
+from sqlalchemy import select
+
 from core.services.eventbus import EventContext
 from modules.accounting.gateway import AccountingService
 from modules.accounting.models import Organization
@@ -9,17 +11,26 @@ from modules.sales.accounting_ownership import DealOwnership
 from modules.sales.documents import digest
 from modules.sales.models import Deal, DealDocument
 from modules.sales.reservation_source import SalesReservationSource
+from modules.wms.models import WarehouseDirectory
 
 
 def event_context(session):
     return EventContext(session, SimpleNamespace(sales_source=SalesReservationSource(), accounting=AccountingService()))
 
 
-async def issued_invoice_for_shipments(api, session):
+async def issued_invoice_for_shipments(api, session, *, wms_enabled=False):
     """Use the trusted issuance flow when the caller verifies the immutable buyer."""
     from tests.test_invoice_issuance import command, create, seed
 
     ids, base = await seed(api, session, qty="5")
+    if wms_enabled:
+        warehouse = await session.scalar(select(WarehouseDirectory).where(
+            WarehouseDirectory.organization_id == ids["org"],
+            WarehouseDirectory.name == "W", WarehouseDirectory.is_active.is_(True),
+        ))
+        assert warehouse is not None and warehouse.prohibit_negative_stock is True
+        warehouse.wms_enabled = True
+        await session.commit()
     payload, _ = await command(api, ids, base)
     response = await create(api, ids, payload)
     assert response.status_code == 201, response.text
