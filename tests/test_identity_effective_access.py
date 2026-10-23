@@ -291,6 +291,9 @@ async def test_picker_stock_rejects_missing_suspended_and_non_sales_identity(ses
         response = await api.get("/sales/picker-stock")
         assert response.status_code == 403
         assert set(response.json()) == {"detail"}
+        price_response = await api.get("/sales/picker-prices")
+        assert price_response.status_code == 403
+        assert set(price_response.json()) == {"detail"}
 
 
 async def _effective_access_client(session, monkeypatch, claimed: CurrentUser):

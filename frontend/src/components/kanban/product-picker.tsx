@@ -10,6 +10,7 @@ import {
   fetchStock,
   issueDocument,
   updateDeal,
+  type PickerReferencePrice,
   type SkuOption,
   type StockRow,
 } from "@/lib/api";
@@ -17,6 +18,7 @@ import {
 // с юнит-тестами (конвенция frontend/CLAUDE.md); здесь — только UI-обёртка.
 import { aggregateStock, groupStockBySku, marginOf, srokOf, type SkuStock, type SkuWarehouseStock } from "@/lib/stock";
 import { presetDateISO } from "@/lib/sales-stages";
+import { readPickerPrices } from "@/lib/catalog-picker-prices";
 import { useCurrency } from "./currency-context";
 
 /** Слайс 6 (A): текст авто-назначенного следующего шага после выставления счёта — тот же,
@@ -60,6 +62,15 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
   // (CatalogPickerModal, catalog-picker-modal.tsx): Остаток/Резерв/Свободно по каждому складу.
   const [warehouseStock, setWarehouseStock] = useState<Record<string, SkuWarehouseStock>>({});
   const [stockSnapshot, setStockSnapshot] = useState<StockRow[]>([]);
+  const [priceFeed, setPriceFeed] = useState<{
+    context?: string; status: "loading" | "reference" | "unavailable" | "auth" | "error";
+    rows: Record<number, PickerReferencePrice[]>;
+  }>({ status: "loading", rows: {} });
+  // Closing invalidates the feed during render, before a same-key reopen can expose it.
+  if (!active && priceFeed.status !== "loading") setPriceFeed({ status: "loading", rows: {} });
+  // Withhold the previous context synchronously, including the render before its effect runs.
+  const priceStatus = active && priceFeed.context === refetchKey ? priceFeed.status : "loading";
+  const referencePrices = active && priceFeed.context === refetchKey ? priceFeed.rows : {};
   const [rows, setRows] = useState<PickerRow[]>([]);
   const [query, setQuery] = useState("");
   // rowsRef — свежий снимок корзины для repeatLastOrder (дедуп по актуальным строкам);
@@ -80,6 +91,7 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
     setStockSnapshot([]);
     setStock({});
     setWarehouseStock({});
+    setPriceFeed({ context: refetchKey, status: "loading", rows: {} });
     void (async () => {
       try {
         const res = await fetch("/api/sales/skus?for_picker=1", { cache: "no-store" });
@@ -116,6 +128,24 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
         setWarehouseStock(groupStockBySku(stockRows));
       }
     });
+    void (async () => {
+      try {
+        const res = await fetch("/api/sales/picker-prices", { cache: "no-store" });
+        if (!alive) return;
+        if (!res.ok) {
+          setPriceFeed({ context: refetchKey, status: res.status === 401 || res.status === 403 ? "auth" : "error", rows: {} });
+          return;
+        }
+        const data = readPickerPrices(await res.json());
+        if (!alive) return;
+        if (!data) throw new Error("price_feed");
+        const grouped: Record<number, PickerReferencePrice[]> = {};
+        if (data.status === "reference") for (const row of data.rows) (grouped[row.sku_id] ??= []).push(row);
+        setPriceFeed({ context: refetchKey, status: data.status, rows: grouped });
+      } catch {
+        if (alive) setPriceFeed({ context: refetchKey, status: "error", rows: {} });
+      }
+    })();
     return () => {
       alive = false;
     };
@@ -250,6 +280,8 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
     stock,
     warehouseStock,
     stockSnapshot,
+    referencePrices,
+    priceStatus,
     rows,
     query,
     setQuery,
@@ -276,6 +308,17 @@ export function useProductPicker(active: boolean, refetchKey?: string) {
 }
 
 export type ProductPickerState = ReturnType<typeof useProductPicker>;
+
+/** Source strings stay exact; these references never enter the basket price calculation. */
+export function PickerReferencePrices({ prices }: { prices: PickerReferencePrice[] }) {
+  return <>{prices.map((price) => <span key={`${price.characteristic_guid}:${price.package_guid}:${price.currency}`}
+    className="mb-1 block text-[11px]" title="Справочная цена. Перед применением подтвердите цену клиенту и единицу цены.">
+    <span className="block truncate text-muted" title={price.kind}>{price.kind}</span>
+    <span className="block break-words font-semibold tabular-nums">{price.price.replace(".", ",")} {price.currency === "933" ? "BYN" : price.currency}</span>
+    <span className="block text-faint">{price.price_includes_vat ? "с НДС" : "без НДС"} · справочно</span>
+    <span className="block text-faint">от {price.effective_at.slice(0, 10).split("-").reverse().join(".")}</span>
+  </span>)}</>;
+}
 
 /** Текст пустой таблицы каталога (не путать auth/error с «ещё грузится»). */
 export function catalogEmptyMessage(
@@ -343,7 +386,7 @@ export function ProductPicker({
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[12.5px] font-semibold text-ink">{r.title}</div>
                   <div className="truncate text-[11px] text-faint">
-                    {price == null ? "Цена не подтверждена · " : `${fmt(price)} · `}своб {st?.free ?? 0}
+                    {price == null ? "Цена не подтверждена · " : `${fmt(price)} · `}своб {st?.free ?? "—"}
                     {st?.forecast ? ` · в пути ${st.forecast}` : ""} ·{" "}
                     <span className={s.cls}>{s.label}</span>
                     {m ? (
@@ -413,7 +456,7 @@ export function ProductPicker({
                     <span className="shrink-0 text-[11px] text-faint">{s.code}</span>
                   </span>
                   <span className="mt-0.5 block truncate text-[11px] text-faint">
-                    {st?.price ? `${fmt(st.price)} · ` : ""}своб {st?.free ?? 0}
+                    {st?.price ? `${fmt(st.price)} · ` : ""}своб {st?.free ?? "—"}
                     {st?.forecast ? ` · в пути ${st.forecast}` : ""} ·{" "}
                     <span className={sk.cls}>{sk.label}</span>
                     {m ? (
@@ -422,6 +465,7 @@ export function ProductPicker({
                       <span className="text-faint"> · предрасчёт</span>
                     ) : null}
                   </span>
+                  <PickerReferencePrices prices={state.referencePrices[s.id] ?? []} />
                 </span>
               </button>
             );
@@ -434,8 +478,8 @@ export function ProductPicker({
           {/* Провенанс данных (mdm-1c-data-provenance-ui): подчёркиваем, что остатки/цены —
               demo-зеркало 1С, а не боевые числа. */}
           <div className="px-2 pt-0.5 text-[11px] text-faint">
-            номенклатура · 1С (MDM); цена — из реализаций периода; остатки склада — когда
-            подключим регистр 1С
+            Справочный прайс показан отдельно. Цена клиенту подтверждается в подборе;
+            «—» означает отсутствие подтверждённых данных.
           </div>
         </div>
       )}

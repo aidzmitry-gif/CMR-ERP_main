@@ -453,7 +453,7 @@ class ImportInput(Input):
     cutover_date: date
     evidence: str = Field(min_length=10, max_length=2000)
     expected_entry_count: int = Field(gt=0, le=500, strict=True)
-    expected_line_count: int = Field(gt=0, le=1000, strict=True)
+    expected_line_count: int = Field(gt=0, le=10000, strict=True)
     expected_debit_byn: Money
     expected_credit_byn: Money
     entries: list[PostingInput] = Field(min_length=1, max_length=500)

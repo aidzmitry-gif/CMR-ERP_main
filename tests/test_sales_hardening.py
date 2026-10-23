@@ -9,12 +9,23 @@
 Хелперы переиспользуются из test_sales_deals_v2 (_new_deal/_FakeLanded/_seed_sku).
 """
 import pytest
+import pytest_asyncio
 from sqlalchemy import select
 
-from core.domain.models import OutboxEvent
+from core.domain.models import Counterparty, OutboxEvent
 from core.services.eventbus import EventContext
 from modules.sales.events import on_deal_won_handoff
 from tests.test_sales_deals_v2 import _FakeLanded, _new_deal, _seed_sku
+
+
+@pytest_asyncio.fixture
+async def api(api, session):
+    """Select existing synthetic parties before exercising unrelated deal guards."""
+    for name in ("c", "ООО Тест", "ООО Слепой", "ООО F", "ООО Альфа", "ООО Бета", "ООО Гамма"):
+        session.add(Counterparty(name=name))
+    await session.commit()
+    yield api
+
 
 # ══ R5-1: деньго-границы штрафа (Numeric(6,2)/String) → 422, не DB overflow ══
 # Guard: на коде БЕЗ Field-границ SQLite принял бы 10000 / строку >512 (не enforce-ит) → 201,

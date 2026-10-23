@@ -1,8 +1,37 @@
 """БД-зависимые тесты модуля Sales (SQLite в памяти)."""
 from decimal import Decimal
 
+import pytest_asyncio
 
-async def test_create_and_list_deal(api):
+from core.domain.models import Counterparty
+
+
+@pytest_asyncio.fixture
+async def selected_parties(session):
+    """Existing synthetic MDM selections for unrelated card and item scenarios."""
+    session.add_all(Counterparty(name=name) for name in (
+        "c", "X", "ООО Икс", "ООО Тест", "ООО Контактная",
+    ))
+    await session.commit()
+
+
+async def test_unknown_party_is_not_created_by_card_fixtures(api, session, selected_parties):
+    from sqlalchemy import func, select
+
+    from modules.sales.models import Deal
+
+    before = await session.scalar(select(func.count()).select_from(Counterparty))
+    response = await api.post("/sales/deals", json={
+        "number": "MISSING-PARTY", "title": "Synthetic missing selection",
+        "counterparty": "Not in the synthetic directory",
+    })
+    assert response.status_code == 422
+    assert "Создайте карточку контрагента" in response.json()["detail"]
+    assert await session.scalar(select(func.count()).select_from(Counterparty)) == before
+    assert await session.scalar(select(Deal.id).where(Deal.number == "MISSING-PARTY")) is None
+
+
+async def test_create_and_list_deal(api, selected_parties):
     r = await api.post(
         "/sales/deals",
         json={
@@ -24,7 +53,7 @@ async def test_create_and_list_deal(api):
     assert "CRM-T-1" in numbers
 
 
-async def test_unique_number(api):
+async def test_unique_number(api, selected_parties):
     payload = {"number": "CRM-DUP", "title": "A", "counterparty": "X"}
     r1 = await api.post("/sales/deals", json=payload)
     assert r1.status_code == 201
@@ -33,7 +62,7 @@ async def test_unique_number(api):
     assert r2.status_code == 409
 
 
-async def test_board_groups_by_stage(api):
+async def test_board_groups_by_stage(api, selected_parties):
     await api.post("/sales/deals", json={"number": "B1", "title": "t", "counterparty": "c", "stage": "new", "amount": 100})
     await api.post(
         "/sales/deals",
@@ -52,7 +81,7 @@ async def test_board_groups_by_stage(api):
     assert stages["new"]["title"] == "Новая заявка"
 
 
-async def test_get_deal_by_id(api):
+async def test_get_deal_by_id(api, selected_parties):
     created = (
         await api.post(
             "/sales/deals",
@@ -66,7 +95,7 @@ async def test_get_deal_by_id(api):
     assert (await api.get("/sales/deals/999999")).status_code == 404
 
 
-async def test_update_deal_flags(api):
+async def test_update_deal_flags(api, selected_parties):
     created = (
         await api.post("/sales/deals", json={"number": "FLG-1", "title": "t", "counterparty": "c"})
     ).json()
@@ -90,7 +119,7 @@ async def test_update_deal_flags(api):
     assert r2["starred"] is True
 
 
-async def test_deal_field_history_records_actor_time_before_after_and_exact_deal(api):
+async def test_deal_field_history_records_actor_time_before_after_and_exact_deal(api, selected_parties):
     deal = (await api.post("/sales/deals", json={
         "number": "AUD-1", "title": "Первый", "counterparty": "ООО Тест", "amount": 100,
     })).json()
@@ -120,7 +149,7 @@ async def test_deal_field_history_records_actor_time_before_after_and_exact_deal
     assert (await api.get("/sales/deals/999999/field-history")).status_code == 404
 
 
-async def test_deal_card_edit_rejects_stale_snapshot_without_changing_fields(api):
+async def test_deal_card_edit_rejects_stale_snapshot_without_changing_fields(api, selected_parties):
     deal = (await api.post("/sales/deals", json={
         "number": "EDIT-CAS-1", "title": "Первый", "counterparty": "ООО Тест", "amount": 100,
     })).json()
@@ -148,7 +177,7 @@ async def test_deal_card_edit_rejects_stale_snapshot_without_changing_fields(api
     assert (await api.patch(path, json={"expected_edit_token": None, "title": "Нет"})).status_code == 422
 
 
-async def test_update_deal_next_step_at(api):
+async def test_update_deal_next_step_at(api, selected_parties):
     """next_step_at (дата+время шага) сохраняется и читается независимо от next_step (текст)."""
     created = (
         await api.post("/sales/deals", json={"number": "NSA-1", "title": "t", "counterparty": "c"})
@@ -169,7 +198,7 @@ async def test_update_deal_next_step_at(api):
     assert r2.json()["next_step_at"] == "2026-07-10T09:00:00"
 
 
-async def test_update_deal_stage(api):
+async def test_update_deal_stage(api, selected_parties):
     created = (
         await api.post("/sales/deals", json={"number": "U1", "title": "t", "counterparty": "c", "stage": "new"})
     ).json()
@@ -293,7 +322,7 @@ async def test_kpis_period_scaling(session, api):
     assert month["percent"] == round(8 / 220 * 100)
 
 
-async def test_deal_items(session, api):
+async def test_deal_items(session, api, selected_parties):
     from core.domain.models import Sku
     from modules.sales.models import DealItem
 
@@ -315,7 +344,7 @@ async def test_deal_items(session, api):
     assert body["items"][0]["code"] == "SKU-1"
 
 
-async def test_deal_contacts(api):
+async def test_deal_contacts(api, selected_parties):
     deal = (
         await api.post(
             "/sales/deals", json={"number": "CNT-1", "title": "t", "counterparty": "ООО Контактная"}
@@ -422,7 +451,7 @@ async def test_skus_for_picker_excludes_demo(session, api):
     assert any(s["code"] == "REAL-1" for s in picker)
 
 
-async def test_deal_items_crud(session, api):
+async def test_deal_items_crud(session, api, selected_parties):
     from core.domain.models import Sku
 
     session.add(Sku(code="IT-CR", title="Позиция CRUD", unit="шт"))
@@ -504,7 +533,7 @@ async def test_outbox_emit_and_relay(session):
     assert await bus.relay_once(session) == 0
 
 
-async def test_deal_create_emits_outbox(session, api):
+async def test_deal_create_emits_outbox(session, api, selected_parties):
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent

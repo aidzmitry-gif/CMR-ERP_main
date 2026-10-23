@@ -16,6 +16,20 @@ vi.mock("./currency-context", () => ({
 const sku = { id: 1, code: "A1", title: "Товар А", unit: "шт" };
 const stock = { sku_code: "A1", warehouse: "Основной", qty_available: 10, qty_reserved: 0, qty_forecast: 0, price: 150 };
 
+function referenceFeed(price = "12.50"): api.PickerPrices {
+  return { status: "reference", snapshot: { id: "00000000-0000-0000-0000-000000000101", kind: "Оптовая (н)",
+    source_as_of: "2026-10-23T12:00:00", observed_at: "2026-10-23T09:00:00Z", row_count: 1,
+    response_complete: true, full_coverage: false, activity_verified: false, mapped: 1, held: 0, unmapped: 0 },
+    rows: [{ sku_id: sku.id, sku_code: sku.code, unit: sku.unit, price, currency: "933",
+      kind: "Оптовая (н)", price_includes_vat: false, effective_at: "2026-10-22T00:00:00",
+      characteristic_guid: "00000000-0000-0000-0000-000000000000", package_guid: "00000000-0000-0000-0000-000000000000", application_status: "reference_only" }] };
+}
+
+function withReferenceFeed(price = "12.50") {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, status: 200,
+    json: async () => url.includes("picker-prices") ? referenceFeed(price) : [sku] })));
+}
+
 function Harness({ onClose = vi.fn(), onCommitted = vi.fn() }: { onClose?: () => void; onCommitted?: () => void }) {
   const picker = useProductPicker(true, "d1");
   return <CatalogPickerModal state={picker} dealId="d1" counterparty="Клиент" onClose={onClose} onCommitted={onCommitted} />;
@@ -32,6 +46,47 @@ beforeEach(() => {
   vi.mocked(api.requestApproval).mockResolvedValue(true);
 });
 afterEach(() => vi.unstubAllGlobals());
+
+describe("CatalogPickerModal — independent source price", () => {
+  it("shows kind, exact amount, currency, VAT and date without inventing stock or applying the reference", async () => {
+    withReferenceFeed();
+    render(<Harness />);
+    await screen.findByText("12,50 BYN");
+    const table = screen.getByRole("table", { name: "Товары по складам" });
+    const cells = within(within(table).getByTitle(sku.title).closest("tr")!).getAllByRole("cell");
+    for (const index of [1, 2, 3, 4]) expect(cells[index]).toHaveTextContent("—");
+    expect(cells[5]).toHaveTextContent("Оптовая (н)12,50 BYNбез НДС · справочноот 22.10.2026");
+    fireEvent.click(screen.getByText(sku.title));
+    expect(screen.getByLabelText("Цена за единицу")).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("Количество товара"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Цена за единицу"), { target: { value: "17.25" } });
+    fireEvent.click(screen.getByRole("button", { name: "Добавить в подбор", exact: true }));
+    expect(api.addDealItem).not.toHaveBeenCalled();
+    await act(async () => { fireEvent.click(screen.getAllByRole("button", { name: "Перенести в документ" })[0]); });
+    expect(api.addDealItem).toHaveBeenCalledWith("d1", 1, 2, 17.25, expect.any(String));
+  });
+
+  it("shows a source price once per SKU while both warehouse quantities stay visible", async () => {
+    withReferenceFeed();
+    vi.mocked(api.fetchStock).mockResolvedValue([stock, { ...stock, warehouse: "Дополнительный", qty_available: 4, qty_reserved: 1, price: 165 }]);
+    render(<Harness />);
+    await screen.findByText("12,50 BYN");
+    const cells = within(screen.getByTitle(sku.title).closest("tr")!).getAllByRole("cell");
+    expect(cells[1]).toHaveTextContent("ОсновнойДополнительный");
+    expect(cells[2]).toHaveTextContent("104"); expect(cells[3]).toHaveTextContent("01");
+    expect(within(cells[5]).getAllByText("12,50 BYN")).toHaveLength(1);
+    expect(cells[5]).not.toHaveTextContent("150.00"); expect(cells[5]).not.toHaveTextContent("165.00");
+  });
+
+  it("keeps an explicit source zero visible as reference while leaving customer price unconfirmed", async () => {
+    withReferenceFeed("0.00");
+    render(<Harness />);
+    await screen.findByText("0,00 BYN");
+    fireEvent.click(screen.getByText(sku.title));
+    expect(screen.getByLabelText("Цена за единицу")).toHaveValue("");
+    expect(api.addDealItem).not.toHaveBeenCalled(); expect(api.createPriceQuote).not.toHaveBeenCalled();
+  });
+});
 
 describe("CatalogPickerModal — selection stays open", () => {
   it("ignores the second click on the quantity backdrop without closing either dialog", async () => {

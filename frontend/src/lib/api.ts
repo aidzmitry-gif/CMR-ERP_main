@@ -609,6 +609,29 @@ export async function fetchSkus(forPicker = true): Promise<SkuOption[]> {
   }
 }
 
+/** Selected source prices are reference-only, independently of stock. */
+export interface PickerReferencePrice {
+  sku_id: number;
+  sku_code: string;
+  unit: string;
+  price: string;
+  currency: string;
+  kind: string;
+  price_includes_vat: boolean;
+  effective_at: string;
+  characteristic_guid: string;
+  package_guid: string;
+  application_status: "reference_only";
+}
+
+export interface PickerPrices {
+  status: "reference" | "unavailable";
+  snapshot: { id: string; kind: string; source_as_of: string; observed_at: string;
+    row_count: number; response_complete: true; full_coverage: false;
+    activity_verified: false; mapped: number; held: number; unmapped: number } | null;
+  rows: PickerReferencePrice[];
+}
+
 /** Строка остатка/цены по складу (demo-зеркало 1С, владелец — integrations). */
 export interface StockRow {
   sku_code: string;

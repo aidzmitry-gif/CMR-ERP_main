@@ -4,10 +4,10 @@ import clsx from "clsx";
 import { RefreshCw, Search, ShoppingCart, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { requestApproval, type SkuOption } from "@/lib/api";
+import { requestApproval, type PickerReferencePrice, type SkuOption } from "@/lib/api";
 import { marginOf, type SkuStock } from "@/lib/stock";
 import { useCurrency } from "./currency-context";
-import { catalogEmptyMessage, type PickerRow, type ProductPickerState } from "./product-picker";
+import { catalogEmptyMessage, PickerReferencePrices, type PickerRow, type ProductPickerState } from "./product-picker";
 import { orderedPickerColumns, compactSkuCode, pickerWarehouseViews, type PickerWarehouseView } from "@/lib/catalog-picker-table";
 import { PickerColumnsControl, usePickerColumns } from "./catalog-picker-columns";
 
@@ -393,6 +393,11 @@ export function CatalogPickerModal({
                     <tr>
                       <td colSpan={visibleColumns.length} className="px-2.5 pb-0.5 pt-2 text-[10.5px] font-bold uppercase tracking-wide text-faint">
                         {groupLabel} · {filtered.length}. Остаток — всего; свободно — за вычетом резерва. — = нет подтверждённых данных.
+                        <span className="block normal-case font-normal">
+                          {picker.priceStatus === "reference" ? "Справочный прайс — отдельно от складов. Цену клиенту подтвердите в подборе."
+                            : picker.priceStatus === "loading" ? "Загружаем прайс…"
+                            : "Прайс недоступен. Если цена есть в данных склада, она показана по складу."}
+                        </span>
                       </td>
                     </tr>
                     {pageRows.map(({ sku }, i) => {
@@ -451,6 +456,10 @@ export function CatalogPickerModal({
                                 {highlight(sku.title)}<span className="ml-1 text-[10px] font-normal text-muted">{sku.unit}</span>
                                 {row?.priceOverride != null && <div className="mt-1 text-[11px] font-semibold text-accent-ink">Цена в подборе: {fmt(row.priceOverride)} ✎</div>}
                               </div> : c.id === "code" ? <span title={sku.code} className="block truncate font-mono text-[11px] text-muted">{compactSkuCode(sku.code)}</span>
+                                : c.id === "price" && picker.priceStatus === "reference"
+                                  ? (picker.referencePrices[sku.id]?.length
+                                    ? <PickerReferencePrices prices={picker.referencePrices[sku.id]} />
+                                    : <span title="Для товара нет подтверждённой цены выбранного прайса">—</span>)
                                 : <>
                                   {dataRows.map((wh) => <div key={wh.warehouse}
                                     style={{ minHeight: Math.max(1, wh.prices.length) * 20 + 4 }}
@@ -620,6 +629,7 @@ export function CatalogPickerModal({
           warehouseRows={warehouseViews[popoverSku.code]}
           existingQty={popover?.row?.qty}
           basePrice={stock[popoverSku.code]?.unitPrice ?? null}
+          referencePrices={picker.referencePrices[popoverSku.id] ?? []}
           existingPrice={popover?.row ? picker.agreedPriceOf(popover.row) : undefined}
           onCancel={() => setPopoverSku(null)}
           onOk={(qty, price) => {
@@ -651,6 +661,7 @@ function QtyPricePopover({
   existingQty,
   existingPrice,
   basePrice,
+  referencePrices,
   onCancel,
   onOk,
 }: {
@@ -662,6 +673,7 @@ function QtyPricePopover({
    *  открытии попапа показываем ЕЁ, а не сбрасываем на цену со склада. */
   existingPrice?: number | null;
   basePrice: number | null;
+  referencePrices: PickerReferencePrice[];
   onCancel: () => void;
   onOk: (qty: number, price: number | null) => void;
 }) {
@@ -753,6 +765,10 @@ function QtyPricePopover({
           <div className="mt-2.5 text-[11px] text-faint">нет данных по складам — услуга или остаток не пришёл из 1С</div>
         )}
 
+        {referencePrices.length > 0 && <div className="mt-2.5 rounded border border-line p-2">
+          <PickerReferencePrices prices={referencePrices} />
+          <span className="text-[11px] text-muted">Подтвердите единицу цены и введите цену клиенту ниже.</span>
+        </div>}
         <div className="mt-2.5 flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-muted">Цена</span>

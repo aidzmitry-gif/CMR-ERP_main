@@ -993,6 +993,55 @@ async def _registered_cancel_replay(api, factory):
     return response.json()
 
 
+async def _registered_full_state(factory):
+    """Full marked synthetic-PG state; preserve row multiplicity and JSON SQL NULLs.
+
+    Catalog projections match the accepted migration-rehearsal reader.
+    """
+    import hashlib
+    import json
+    import re
+
+    queries = {'tables': "SELECT coalesce(json_agg(x ORDER BY s,t),'[]'::json) FROM\n (SELECT table_schema s, table_name t, string_agg(quote_ident(column_name),',' ORDER BY ordinal_position) cols\n FROM information_schema.columns c WHERE table_schema NOT IN ('pg_catalog','information_schema')\n AND EXISTS(SELECT 1 FROM information_schema.tables z WHERE z.table_schema=c.table_schema\n AND z.table_name=c.table_name AND z.table_type='BASE TABLE') GROUP BY table_schema,table_name) x", 'sequences': "SELECT coalesce(json_agg(x ORDER BY schemaname,sequencename),'[]'::json) FROM\n (SELECT schemaname,sequencename,start_value,min_value,max_value,increment_by,cycle,cache_size,last_value\n FROM pg_sequences WHERE schemaname NOT IN ('pg_catalog','information_schema')) x", 'constraints': "SELECT n.nspname, t.relname, c.conname,\n json_build_object('type',c.contype,'columns',ARRAY(SELECT a.attname FROM unnest(c.conkey) WITH ORDINALITY k(id,pos)\n JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=k.id ORDER BY k.pos),\n 'refSchema',rn.nspname,'refTable',rt.relname,'refColumns',ARRAY(SELECT a.attname FROM unnest(c.confkey) WITH ORDINALITY k(id,pos)\n JOIN pg_attribute a ON a.attrelid=c.confrelid AND a.attnum=k.id ORDER BY k.pos),\n 'onDelete',c.confdeltype,'onUpdate',c.confupdtype,'match',c.confmatchtype,\n 'validated',c.convalidated,'deferrable',c.condeferrable,'deferred',c.condeferred,'noInherit',c.connoinherit,\n 'expression',pg_get_expr(c.conbin,c.conrelid))\n FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace\n LEFT JOIN pg_class rt ON rt.oid=c.confrelid LEFT JOIN pg_namespace rn ON rn.oid=rt.relnamespace\n WHERE n.nspname NOT IN ('pg_catalog','information_schema') ORDER BY 1,2,3", 'columns': "SELECT n.nspname,t.relname,a.attname,a.attnum,format_type(a.atttypid,a.atttypmod),\n a.attnotnull,pg_get_expr(d.adbin,d.adrelid),a.attidentity,a.attgenerated,\n CASE WHEN a.attcollation=0 THEN NULL ELSE cn.nspname||'.'||cl.collname END\n FROM pg_attribute a JOIN pg_class t ON t.oid=a.attrelid JOIN pg_namespace n ON n.oid=t.relnamespace\n LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum\n LEFT JOIN pg_collation cl ON cl.oid=a.attcollation LEFT JOIN pg_namespace cn ON cn.oid=cl.collnamespace\n WHERE t.relkind IN ('r','p') AND a.attnum>0 AND NOT a.attisdropped\n AND n.nspname NOT IN ('pg_catalog','information_schema') ORDER BY 1,2,4", 'functions': "SELECT n.nspname,p.proname,pg_get_function_identity_arguments(p.oid),\n json_build_object('arguments',pg_get_function_arguments(p.oid),'result',pg_get_function_result(p.oid),\n 'kind',p.prokind,'language',l.lanname,'source',p.prosrc,'binary',p.probin,'strict',p.proisstrict,\n 'volatility',p.provolatile,'securityDefiner',p.prosecdef,'leakproof',p.proleakproof,\n 'parallel',p.proparallel,'config',p.proconfig,'owner',pg_get_userbyid(p.proowner),\n 'acl',p.proacl,'cost',p.procost,'rows',p.prorows,'returnsSet',p.proretset,\n 'defaultsCount',p.pronargdefaults,'defaults',pg_get_expr(p.proargdefaults,0),\n 'variadic',CASE WHEN p.provariadic=0 THEN NULL ELSE format_type(p.provariadic,NULL) END,\n 'support',p.prosupport::regprocedure::text,'sqlStandardBody',p.prosqlbody IS NOT NULL,\n 'aggregate',CASE WHEN a.aggfnoid IS NULL THEN NULL ELSE\n (to_jsonb(a)-ARRAY['aggfnoid','aggtransfn','aggfinalfn','aggcombinefn','aggserialfn','aggdeserialfn',\n 'aggmtransfn','aggminvtransfn','aggmfinalfn','aggsortop','aggtranstype','aggmtranstype']) || jsonb_build_object(\n 'transition',a.aggtransfn::regprocedure::text,'final',a.aggfinalfn::regprocedure::text,\n 'combine',a.aggcombinefn::regprocedure::text,'serialize',a.aggserialfn::regprocedure::text,\n 'deserialize',a.aggdeserialfn::regprocedure::text,'movingTransition',a.aggmtransfn::regprocedure::text,\n 'movingInverse',a.aggminvtransfn::regprocedure::text,'movingFinal',a.aggmfinalfn::regprocedure::text,\n 'sortOperator',a.aggsortop::regoperator::text,'transitionType',a.aggtranstype::regtype::text,\n 'movingType',a.aggmtranstype::regtype::text) END)\n FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace JOIN pg_language l ON l.oid=p.prolang LEFT JOIN pg_aggregate a ON a.aggfnoid=p.oid\n WHERE n.nspname NOT IN ('pg_catalog','information_schema') ORDER BY 1,2,3", 'triggers': "SELECT n.nspname,t.relname,g.tgname,json_build_object(\n 'definition',pg_get_triggerdef(g.oid,true),'enabled',g.tgenabled,\n 'function',pn.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')',\n 'deferrable',g.tgdeferrable,'deferred',g.tginitdeferred)\n FROM pg_trigger g JOIN pg_class t ON t.oid=g.tgrelid JOIN pg_namespace n ON n.oid=t.relnamespace\n JOIN pg_proc p ON p.oid=g.tgfoid JOIN pg_namespace pn ON pn.oid=p.pronamespace\n WHERE NOT g.tgisinternal AND n.nspname NOT IN ('pg_catalog','information_schema') ORDER BY 1,2,3", 'enums': "SELECT n.nspname,t.typname,coalesce(json_agg(json_build_object('label',e.enumlabel,'order',e.enumsortorder) ORDER BY e.enumsortorder) FILTER (WHERE e.oid IS NOT NULL),'[]'::json)\n FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace LEFT JOIN pg_enum e ON e.enumtypid=t.oid\n WHERE t.typtype='e' AND n.nspname NOT IN ('pg_catalog','information_schema') GROUP BY 1,2 ORDER BY 1,2", 'indexes': "SELECT schemaname,indexname,indexdef FROM pg_indexes WHERE schemaname NOT IN ('pg_catalog','information_schema') ORDER BY 1,2"}
+    quote = factory.kw["bind"].dialect.identifier_preparer.quote
+    result = {"tables": {}, "sequences": []}
+    async with factory() as session:
+        await session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        assert await session.scalar(text("SHOW transaction_read_only")) == "on"
+        assert await session.scalar(text("SHOW transaction_isolation")) == "repeatable read"
+        database = await session.scalar(text("SELECT current_database()"))
+        assert re.fullmatch(r"acc_test_[a-f0-9]{32}", database)
+        assert await session.scalar(text("SELECT shobj_description(oid,'pg_database') FROM pg_database WHERE datname=current_database()")) == f"crm-acc-fixture:{database}"
+        tables = await session.scalar(text(queries["tables"]))
+        assert len(tables) == 274
+        for item in tables:
+            schema, name = item["s"], item["t"]
+            table = quote(schema) + "." + quote(name)
+            json_columns = (await session.scalars(text("""SELECT column_name FROM information_schema.columns
+                WHERE table_schema=:schema AND table_name=:name AND data_type IN ('json','jsonb')
+                ORDER BY ordinal_position"""), {"schema": schema, "name": name})).all()
+            bits = ",".join("t." + quote(column) + " IS NULL" for column in json_columns)
+            payload = "jsonb_build_object('row',to_jsonb(t),'sqlNulls',jsonb_build_array(" + bits + "))::text"
+            rows = (await session.scalars(text("SELECT " + payload + " FROM " + table
+                                              + " t ORDER BY " + payload + ' COLLATE "C"'))).all()
+            digest = hashlib.sha256()
+            for row in rows:
+                digest.update(row.encode("utf-8") + b"\n")
+            result["tables"][table] = {"rows": len(rows), "sha256": digest.hexdigest(), "jsonColumns": json_columns}
+        sequences = await session.scalar(text(queries["sequences"]))
+        assert len(sequences) == 208
+        for sequence in sequences:
+            name = quote(sequence["schemaname"]) + "." + quote(sequence["sequencename"])
+            state = (await session.execute(text("SELECT last_value,is_called FROM " + name))).one()
+            result["sequences"].append({**sequence, "state": tuple(state)})
+        result["catalog"] = {}
+        for kind in ("constraints", "indexes", "columns", "functions", "triggers", "enums"):
+            result["catalog"][kind] = [tuple(row) for row in (await session.execute(text(queries[kind]))).all()]
+            if kind == "functions":
+                assert all(row[3]["sqlStandardBody"] is False for row in result["catalog"][kind])
+    return json.loads(json.dumps(result, sort_keys=True))
+
+
 @pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
 @pytest.mark.parametrize("case", [
     "populated_0197", "downgrade_before_history", "downgrade_refuses_new_history",
@@ -1041,9 +1090,18 @@ async def test_registered_no_stock_migration(registered_api, tmp_path, case):
             path, data = await _atomic_command(api, session, ids, doc)
         result = await api.post(path, json=data)
         assert result.status_code == 201, result.text
+        async with factory() as session:
+            release_id, snapshot = (await session.execute(text(
+                "SELECT release_id,snapshot FROM sales.invoice_cancellation_receipt WHERE document_id=:document_id"
+            ), {"document_id": doc.id})).one()
+            assert release_id is None
+            assert snapshot["stock_outcome"] == "no_stock_release"
+            assert isinstance(snapshot["no_stock_release"], dict) and "release" not in snapshot
         before = await _registered_package_state(factory)
+        full_before = await _registered_full_state(factory)
         await _registered_revision(factory, tmp_path, "downgrade", "0197", succeeds=False)
         assert await _registered_package_state(factory) == before
+        assert await _registered_full_state(factory) == full_before
         return
     await _registered_revision(factory, tmp_path, "downgrade", "0197")
     restored = await _registered_package_state(factory)

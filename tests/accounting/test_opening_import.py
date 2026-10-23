@@ -1,9 +1,14 @@
 from copy import deepcopy
+from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import select
+import pytest
+from pydantic import ValidationError
+from sqlalchemy import func, select
 
-from modules.accounting.models import OpeningImportReceipt
+from modules.accounting import opening_import, service
+from modules.accounting.models import Entry, Line, OpeningImportReceipt
+from modules.accounting.schemas import ImportInput
 
 
 async def test_opening_import_protocol_preview_confirm_and_list(client, db, book, posting, opening_package):
@@ -129,3 +134,100 @@ async def test_opening_import_rejects_duplicate_entry_identity(client, book, pos
     response = await client.post(prefix + "/imports/preview", json=package)
     assert response.status_code == 422
     assert "distinct posting identities" in response.text
+
+
+def _large_opening_package(posting, opening_package, line_count):
+    """Synthetic cash/equity lines exercise package capacity, not stock identities."""
+    sizes = []
+    while line_count > 1000:
+        sizes.append(1000)
+        line_count -= 1000
+    if line_count == 1:
+        sizes[-1] -= 1
+        line_count += 1
+    sizes.append(line_count)
+    entries = []
+    for index, size in enumerate(sizes):
+        entry = posting(f"large-opening-{index}", "51", "80", f"{size - 1}.00", opening=True)
+        debit = entry.lines[0].model_copy(update={"amount": Decimal("1.00")})
+        entry.lines = [debit.model_copy() for _ in range(size - 1)] + [entry.lines[1]]
+        entries.append(entry)
+    return opening_package(entries, batch="synthetic-large-opening")
+
+
+async def test_large_atomic_opening_import_confirm_readback_and_replay(
+    client, db, book, posting, opening_package
+):
+    prefix = f"/accounting/organizations/{book[0]}"
+    data = _large_opening_package(posting, opening_package, 1195)
+    preview = await client.post(prefix + "/imports/preview", json=data)
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["control_totals"]["line_count"] == 1195
+    confirmed = await client.post(prefix + "/imports/confirm", json=data)
+    assert confirmed.status_code == 200, confirmed.text
+    receipt = confirmed.json()
+    assert receipt["confirmed"] is True
+    assert receipt["control_totals"] == {
+        "entry_count": 2, "line_count": 1195,
+        "debit_byn": "1193.00", "credit_byn": "1193.00",
+    }
+    assert len(receipt["entry_ids"]) == 2
+    assert await db.scalar(select(func.count()).select_from(Line)) == 1195
+    listed = await client.get(prefix + "/imports")
+    assert listed.status_code == 200
+    assert listed.json()[0]["receipt_id"] == receipt["receipt_id"]
+    replay = await client.post(prefix + "/imports/confirm", json=data)
+    assert replay.status_code == 200
+    assert replay.json()["receipt_id"] == receipt["receipt_id"]
+    assert await db.scalar(select(func.count()).select_from(OpeningImportReceipt)) == 1
+    assert await db.scalar(select(func.count()).select_from(Line)) == 1195
+
+
+async def test_large_atomic_opening_import_rolls_back_late_post_failure(
+    client, db, book, posting, opening_package, monkeypatch
+):
+    data = _large_opening_package(posting, opening_package, 1195)
+    original_post = opening_import.service.post
+    posted = []
+
+    async def fail_second_post(*args, **kwargs):
+        if posted:
+            raise service.AccountingError("Synthetic late posting failure")
+        entry = await original_post(*args, **kwargs)
+        posted.append(entry.id)
+        return entry
+
+    monkeypatch.setattr(opening_import.service, "post", fail_second_post)
+    response = await client.post(f"/accounting/organizations/{book[0]}/imports/confirm", json=data)
+    assert response.status_code == 422, response.text
+    assert "Synthetic late posting failure" in response.text
+    assert len(posted) == 1
+    for model in (Entry, Line, OpeningImportReceipt):
+        assert await db.scalar(select(func.count()).select_from(model)) == 0
+
+
+@pytest.mark.parametrize("line_count,accepted", [(10000, True), (10001, False)])
+def test_opening_import_total_line_capacity_boundary(posting, opening_package, line_count, accepted):
+    data = _large_opening_package(posting, opening_package, line_count)
+    if accepted:
+        assert ImportInput.model_validate(data).expected_line_count == line_count
+    else:
+        with pytest.raises(ValidationError) as error:
+            ImportInput.model_validate(data)
+        assert any(e["loc"] == ("expected_line_count",) for e in error.value.errors())
+
+
+def test_large_opening_import_rejects_false_declared_line_count(posting, opening_package):
+    data = _large_opening_package(posting, opening_package, 1195)
+    data["expected_line_count"] = 1000
+    with pytest.raises(ValidationError, match="line count does not match"):
+        ImportInput.model_validate(data)
+
+
+def test_large_opening_import_retains_per_entry_line_limit(posting, opening_package):
+    data = _large_opening_package(posting, opening_package, 1000)
+    data["entries"][0]["lines"].insert(0, deepcopy(data["entries"][0]["lines"][0]))
+    data["expected_line_count"] = 1001
+    with pytest.raises(ValidationError) as error:
+        ImportInput.model_validate(data)
+    assert any(e["loc"] == ("entries", 0, "lines") for e in error.value.errors())

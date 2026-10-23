@@ -12,6 +12,7 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from modules.integrations.catalog_prices import read_reference_prices
 from modules.integrations.models import Batch, StockItem
 
 # Порог FEFO-предупреждения по сроку годности — менее года до «годен до» (макет batch).
@@ -49,6 +50,9 @@ async def _locked_stock(session: AsyncSession, codes) -> dict[str, StockItem]:
 
 
 class StockService:
+    async def reference_prices(self, session: AsyncSession) -> dict:
+        return await session.run_sync(read_reference_prices)
+
     async def lock_reservation_items(self, session: AsyncSession, items: list[dict]) -> None:
         """Lock all old/new stock before a transaction performs release + reserve."""
         quantities = _quantities(items)

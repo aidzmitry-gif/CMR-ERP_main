@@ -28,6 +28,16 @@ const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
 const fmt = (v: number) => `${v.toFixed(2)} BYN`;
 
+function priceFeed(price = "12.50", skuId = 1) {
+  return { status: "reference", snapshot: { id: "00000000-0000-0000-0000-000000000101", kind: "Synthetic wholesale",
+    source_as_of: "2026-10-23T12:00:00", observed_at: "2026-10-23T09:00:00Z", row_count: 1,
+    response_complete: true, full_coverage: false, activity_verified: false, mapped: 1, held: 0, unmapped: 0 },
+    rows: [{ sku_id: skuId, sku_code: "SYNTHETIC", unit: "unit", price, currency: "933",
+      kind: "Synthetic wholesale", price_includes_vat: false, effective_at: "2026-10-22T00:00:00",
+      characteristic_guid: "00000000-0000-0000-0000-000000000000",
+      package_guid: "00000000-0000-0000-0000-000000000000", application_status: "reference_only" }] };
+}
+
 it("встроенный подбор меняет количество, выбор и удаление только одной повторённой строки", async () => {
   mockSkusFetch();
   mock(api.fetchStock).mockResolvedValue([]);
@@ -114,6 +124,68 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+it("withholds previous-context references and ignores a late price body after switching deals", async () => {
+  const feed = (id: number) => priceFeed("12.50", id);
+  let resolveFirst!: (value: unknown) => void;
+  const firstBody = new Promise((resolve) => { resolveFirst = resolve; });
+  let calls = 0;
+  global.fetch = vi.fn(async (url: string) => ({ ok: true, status: 200,
+    json: () => url.includes("picker-prices") ? (++calls === 1 ? firstBody
+      : calls === 2 ? Promise.resolve(feed(2)) : new Promise(() => {})) : Promise.resolve(skus),
+  })) as unknown as typeof fetch;
+  const { result, rerender } = renderHook(({ deal }) => useProductPicker(true, deal), { initialProps: { deal: "a" } });
+  await waitFor(() => expect(calls).toBe(1));
+  rerender({ deal: "b" });
+  await waitFor(() => expect(result.current.referencePrices[2]).toHaveLength(1));
+  await act(async () => { resolveFirst(feed(1)); });
+  expect(result.current.referencePrices[1]).toBeUndefined();
+  expect(result.current.referencePrices[2]).toHaveLength(1);
+  rerender({ deal: "c" });
+  expect(result.current.priceStatus).toBe("loading");
+  expect(result.current.referencePrices).toEqual({});
+});
+
+it.each(["row", "envelope"])("withholds a damaged %s without crashing the picker", async (kind) => {
+  const raw = priceFeed();
+  const invalid = kind === "row" ? { ...raw, rows: [{ ...raw.rows[0], price: null }] }
+    : { ...raw, snapshot: { ...raw.snapshot, activity_verified: true } };
+  global.fetch = vi.fn(async (url: string) => ({ ok: true, status: 200,
+    json: async () => url.includes("picker-prices") ? invalid : skus,
+  })) as unknown as typeof fetch;
+  const { result } = renderHook(() => useProductPicker(true, "damaged"));
+  await waitFor(() => expect(result.current.priceStatus).toBe("error"));
+  expect(result.current.referencePrices).toEqual({});
+  expect(result.current.catalogStatus).toBe("ready");
+});
+
+it("never renders old references when reopening the same deal and ignores the closed request body", async () => {
+  const renders: { active: boolean; prices: number[] }[] = [];
+  let resolveOld!: (value: unknown) => void;
+  const oldBody = new Promise(resolve => { resolveOld = resolve; });
+  let calls = 0;
+  global.fetch = vi.fn(async (url: string) => ({ ok: true, status: 200,
+    json: () => url.includes("picker-prices") ? (++calls === 1 ? Promise.resolve(priceFeed()) : oldBody) : Promise.resolve(skus),
+  })) as unknown as typeof fetch;
+  const { result, rerender } = renderHook(({ active }) => {
+    const state = useProductPicker(active, "same");
+    renders.push({ active, prices: Object.keys(state.referencePrices).map(Number) });
+    return state;
+  }, { initialProps: { active: true } });
+  await waitFor(() => expect(result.current.referencePrices[1]).toHaveLength(1));
+  rerender({ active: false });
+  const boundary = renders.length;
+  rerender({ active: true });
+  expect(renders.slice(boundary).every(render => render.prices.length === 0)).toBe(true);
+  expect(result.current.priceStatus).toBe("loading");
+  await waitFor(() => expect(calls).toBe(2));
+  rerender({ active: false });
+  await act(async () => { resolveOld(priceFeed("99.00")); });
+  expect(result.current.referencePrices).toEqual({});
+  rerender({ active: true });
+  // The previous HTTP body has resolved, but it belongs to the closed request.
+  expect(renders.at(-1)?.prices).toEqual([]);
 });
 
 describe("catalogEmptyMessage", () => {
