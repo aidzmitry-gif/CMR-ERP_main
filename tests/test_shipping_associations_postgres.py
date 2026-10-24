@@ -9,7 +9,7 @@ from tests.accounting.test_postgres import pg_factory  # noqa: F401
 pytestmark = pytest.mark.integration
 
 
-async def test_fresh_database_cleanup_after_schema_setup_failure(monkeypatch):
+async def test_fresh_database_cleanup_after_schema_setup_failure(monkeypatch, request):
     from tests.accounting import test_postgres as fixtures
 
     real_engine = fixtures.create_async_engine
@@ -31,7 +31,7 @@ async def test_fresh_database_cleanup_after_schema_setup_failure(monkeypatch):
 
     monkeypatch.setattr(fixtures, "create_async_engine", capture_engine)
     monkeypatch.setattr(fixtures.runpy, "run_path", broken_schema)
-    generator = fixtures.pg_factory.__wrapped__()
+    generator = fixtures.pg_factory.__wrapped__(request)
     with pytest.raises(RuntimeError, match="synthetic proposal setup failure"):
         await anext(generator)
     await generator.aclose()

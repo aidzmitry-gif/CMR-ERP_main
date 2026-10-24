@@ -665,6 +665,30 @@ async def pg_book(pg_factory, db, book):
             for row in rows:
                 session.add(model(**{c.key: getattr(row, c.key) for c in model.__table__.columns}))
             await session.flush()
+        database, marker = (await session.execute(text(
+            "SELECT current_database(), shobj_description(oid, 'pg_database') "
+            "FROM pg_database WHERE datname=current_database()"
+        ))).one()
+        assert re.fullmatch(r"acc_test_[a-f0-9]{32}", database)
+        assert marker == f"crm-acc-fixture:{database}"
+        # Explicit fixture IDs do not advance PostgreSQL sequences.
+        for table, expected_sequence in (
+            ("public.counterparty", "public.counterparty_id_seq"),
+            ("wms.warehouse_directory", "wms.warehouse_directory_id_seq"),
+        ):
+            sequence = await session.scalar(text("SELECT pg_get_serial_sequence(:table, 'id')"), {"table": table})
+            assert sequence is not None
+            assert await session.scalar(text(
+                "SELECT CAST(:actual AS regclass) = CAST(:expected AS regclass)"
+            ), {"actual": sequence, "expected": expected_sequence})
+            last_value, is_called = (await session.execute(text(
+                f"SELECT last_value, is_called FROM {expected_sequence}"
+            ))).one()
+            max_id = await session.scalar(text(f"SELECT max(id) FROM {table}"))
+            if max_id is not None and (max_id > last_value or (max_id == last_value and not is_called)):
+                await session.execute(text(
+                    "SELECT setval(CAST(:sequence AS regclass), :max_id, true)"
+                ), {"sequence": sequence, "max_id": max_id})
         await session.commit()
     return book
 
@@ -2425,17 +2449,12 @@ async def test_wms_concurrent_accept_preserves_owner_without_duplicate_moves(pg_
 async def test_wms_event_retry_after_rollback_and_concurrent_replay(pg_factory, pg_book):
     from sqlalchemy import select
 
-    from core.domain.models import OutboxEvent, Sku
+    from core.domain.models import OutboxEvent
     from core.services.eventbus import EventContext, OutboxEventBus
     from modules.wms.events import on_goods_received
     from modules.wms.models import Receipt, ReceiptLine
 
     async with pg_factory() as session:
-        conn = await session.connection()
-        def catalog(sync):
-            Sku.metadata.tables["ref_nomenclature_category"].create(sync)
-            Sku.__table__.create(sync)
-        await conn.run_sync(catalog)
         event = OutboxEvent(event_type="procurement.received", payload={"organization_id": pg_book[0], "item": "A", "qty": "1.25", "entity_ref": "purchase_order:1:1"})
         session.add(event)
         await session.commit()

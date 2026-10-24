@@ -1,6 +1,5 @@
 """PostgreSQL guards for immutable expense-article attribution receipts."""
 
-import runpy
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -22,23 +21,8 @@ from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 pytestmark = pytest.mark.integration
 
 
-async def apply_attribution_migration(session):
-    from alembic.migration import MigrationContext
-    from alembic.operations import Operations
-
-    connection = await session.connection()
-    migration = runpy.run_path(str(Path("migrations/versions/0156_expense_article_attribution.py")))
-
-    def upgrade(sync_connection):
-        with Operations.context(MigrationContext.configure(sync_connection)):
-            migration["upgrade"]()
-
-    await connection.run_sync(upgrade)
-
-
 async def test_postgres_attribution_guard_accepts_only_immutable_receipt(pg_factory, pg_book):  # noqa: F811
     async with pg_factory() as session:
-        await apply_attribution_migration(session)
         catalog = await expenses.execute(
             session,
             pg_book[0],

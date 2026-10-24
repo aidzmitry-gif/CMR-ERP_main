@@ -183,6 +183,13 @@ async def test_analytics_and_tracking_validation(db, book, posting):
 
 async def test_event_adapter_and_registration(db, book, posting):
     from modules.accounting import expense_routes, routes
+    from modules.accounting.stock_issue_source import router as stock_issue_router
+    from modules.wms.invoice_shipments import (
+        document_create_route,
+        document_history_route,
+        document_preview_route,
+        document_read_route,
+    )
 
     registered = []
     routers = []
@@ -198,8 +205,18 @@ async def test_event_adapter_and_registration(db, book, posting):
     module = get_module()
     assert isinstance(module, AccountingModule)
     module.register(core)
-    assert registered == ["router", "router", "event", "widget", "reference"]
-    assert routers == [(routes.router, "/accounting"), (expense_routes.router, "/accounting")]
+    assert registered == ["router", "router", "router", "router", "event", "widget", "reference"]
+    assert routers[:3] == [(routes.router, "/accounting"), (expense_routes.router, "/accounting"),
+                           (stock_issue_router, "/accounting")]
+    assert all(prefix == "/accounting" for _, prefix in routers)
+    shipment_prefix = "/organizations/{org}/invoices/{document}/document-shipments"
+    assert [(route.path, route.methods, route.endpoint, route.status_code)
+            for route in routers[3][0].routes] == [
+        (shipment_prefix + "/preview", {"POST"}, document_preview_route, None),
+        (shipment_prefix, {"POST"}, document_create_route, 201),
+        (shipment_prefix + "/by-key/{key}", {"GET"}, document_read_route, None),
+        (shipment_prefix + "/history", {"POST"}, document_history_route, None),
+    ]
     ctx = SimpleNamespace(session=db)
     with pytest.raises(service.AccountingError, match="organization"):
         await on_posting_requested({"organization_id": None}, ctx)
