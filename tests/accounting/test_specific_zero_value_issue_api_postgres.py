@@ -24,6 +24,7 @@ from tests.accounting.test_inventory_allocation_api_postgres import (
 )
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_zero_value_disposals_postgres import zeroed_output
+from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 pytestmark = pytest.mark.integration
 
@@ -202,9 +203,10 @@ async def test_http_specific_zero_issue_preview_confirm_retry_and_remaining(pg_f
 
 
 @pytest.mark.parametrize("method", ["fifo", "weighted_average"])
-async def test_http_v4_zero_issue_multi_source_confirm_retry_after_late_cost(pg_factory, pg_book, method):
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_http_v4_zero_issue_multi_source_confirm_retry_after_late_cost(pg_factory, pg_book, method, issuance_pg):
     """The public issue route persists the complete server-selected V4 packet."""
-    policy_id, outputs = await output_sources(pg_factory, pg_book, method)
+    policy_id, outputs = await output_sources(pg_factory, pg_book, method, api=issuance_pg[0])
     async with pg_factory() as session:
         await service.post(session, pg_book[0], PostingInput(
             source="v4-zero-reverse-wip", source_version=1, operation="manual",

@@ -38,8 +38,8 @@ from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa
 pytestmark = pytest.mark.integration
 
 
-async def mixed_production_disposal(factory, book, *, api, method="weighted_average", same_lot=False, sale=False):
-    """Two real 2-unit outputs at one cent each, followed by a 2.1-unit disposal."""
+async def production_output_sources(factory, book, *, api, method="weighted_average", same_lot=False):
+    """Two accepted physical outputs, each transferred at one cent."""
     from core.domain.models import Sku
     from core.services.auth import CurrentUser
     from modules.accounting.gateway import AccountingService
@@ -109,6 +109,17 @@ async def mixed_production_disposal(factory, book, *, api, method="weighted_aver
                                                     production=production, warehouse_gateway=warehouse)
             output_ids.append(output.id)
         await session.commit()
+    return policy_id, output_ids
+
+
+async def mixed_production_disposal(factory, book, *, api, method="weighted_average", same_lot=False, sale=False):
+    """Two real 2-unit outputs at one cent each, followed by a 2.1-unit disposal."""
+    from core.domain.models import Sku
+    from modules.wms.models import WarehouseDirectory
+
+    policy_id, output_ids = await production_output_sources(
+        factory, book, api=api, method=method, same_lot=same_lot)
+    async with factory() as session:
         warehouse_row = (await session.scalars(select(WarehouseDirectory).where(
             WarehouseDirectory.organization_id == book[0], WarehouseDirectory.name == "Main",
             WarehouseDirectory.is_active.is_(True)))).one()

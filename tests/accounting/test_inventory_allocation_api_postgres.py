@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 
 from core.domain.models import Sku
@@ -21,22 +21,15 @@ from modules.accounting.production_output_cost_workflow import (
     confirm_output_cost_correction,
     preview_output_cost_correction,
 )
-from modules.accounting.production_output_transfer import (
-    ProductionOutputTransferConfirmInput,
-    confirm_output_transfer,
-    prepare_output_transfer,
-)
 from modules.accounting.schemas import LineInput, PostingInput
 from modules.wms.models import WarehouseDirectory
 from tests.accounting.test_finished_goods_inventory_postgres import _output_cost_command
-from tests.accounting.test_inventory_allocation_cost_stream_postgres import TwoOutputs
-from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
-from tests.accounting.test_production_output_transfer_postgres import (
-    _seed_production_book,
-    _seed_wip,
-    transfer_input,
+from tests.accounting.test_inventory_allocation_cost_stream_postgres import (
+    production_output_sources,
 )
+from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_zero_value_output_cost_postgres import run_migration
+from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 pytestmark = pytest.mark.integration
 
@@ -63,23 +56,49 @@ async def inventory_identities(factory, book):
         return result
 
 
-async def output_sources(factory, book, method):
-    policy_id = await _seed_production_book(factory, book, method)
-    await _seed_wip(factory, book, policy_id, [("SHOP", "ORDER-42", "0.01"), ("SHOP", "ORDER-43", "0.01")])
-    production, output_ids = TwoOutputs(), []
-    async with factory() as session:
-        for order_id in (42, 43):
-            command = transfer_input(policy_id).model_copy(update={
-                "order_id": order_id, "analytical_order": f"ORDER-{order_id}", "output_document_ids": [order_id + 59]})
-            preview = await prepare_output_transfer(session, book[0], "2026-10", command, production, object())
-            confirmation = ProductionOutputTransferConfirmInput.model_validate({
-                **command.model_dump(mode="json"), "basis_digest": preview["basis_digest"], "digest": preview["digest"]})
-            output = await confirm_output_transfer(session, book[0], "2026-10", confirmation, "tester",
-                                                   production=production, warehouse_gateway=object())
-            output_ids.append(output.id)
-        await session.commit()
+async def output_sources(factory, book, method, *, api):
+    result = await production_output_sources(factory, book, api=api, method=method)
     await inventory_identities(factory, book)
-    return policy_id, output_ids
+    return result
+
+
+async def prepare_allocation_revision_0145(factory):
+    """Exercise 0146-0150 functions on owned modern data; this is not a schema restore."""
+    import re
+
+    from tests.accounting.historical_0145 import portable_snapshot
+
+    async with factory() as session:
+        database = await session.scalar(text("SELECT current_database()"))
+        assert re.fullmatch(r"acc_test_[a-f0-9]{32}", database)
+        marker = await session.scalar(text(
+            "SELECT shobj_description(oid,'pg_database') FROM pg_database WHERE datname=current_database()"))
+        assert marker == f"crm-acc-fixture:{database}"
+        assert (await session.scalars(text("SELECT version_num FROM alembic_version"))).all() == ["0199"]
+        assert await session.scalar(text("SELECT count(*) FROM accounting.inventory_zero_value_disposal_receipt")) == 0
+        assert await session.scalar(text("""SELECT count(*) FROM accounting.inventory_issue_receipt
+            WHERE command::jsonb->>'source' LIKE 'production:material:%'
+              AND cost::jsonb ? 'source_allocation_version'""")) == 0
+    before = await portable_snapshot(factory)
+    async with factory() as session:
+        for revision in (
+            "0150_zero_material_allocations.py", "0149_production_material_allocations.py",
+            "0148_zero_value_allocated_sales.py", "0147_zero_value_allocation_runtime.py",
+            "0146_zero_value_allocation_basis.py",
+        ):
+            await run_migration(session, revision, "downgrade")
+        for signature in (
+            "accounting.production_material_zero_allocation_version()",
+            "accounting.production_material_allocation_version()",
+            "accounting.zero_value_allocated_sale_version()",
+            "accounting.zero_value_allocation_runtime_version()",
+            "accounting.zero_value_allocation_basis(integer,jsonb,integer)",
+            "accounting.zero_value_material_allocation_basis(integer,jsonb,integer)",
+            "accounting.zero_allocation_cost_stream(integer,text,text,text,date,integer)",
+        ):
+            assert await session.scalar(text("SELECT to_regprocedure(:signature)"), {"signature": signature}) is None
+        await session.commit()
+    assert await portable_snapshot(factory) == before
 
 
 def application(factory):
@@ -106,8 +125,9 @@ def issue_document(policy_id, identities):
 
 @pytest.mark.parametrize("method", ["fifo", "weighted_average"])
 @pytest.mark.parametrize("sale", [False, True])
-async def test_accountant_mixed_allocation_http_confirm_retry_stock_and_late_cost(pg_factory, pg_book, method, sale):
-    policy_id, outputs = await output_sources(pg_factory, pg_book, method)
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_accountant_mixed_allocation_http_confirm_retry_stock_and_late_cost(pg_factory, pg_book, method, sale, issuance_pg):
+    policy_id, outputs = await output_sources(pg_factory, pg_book, method, api=issuance_pg[0])
     payload = issue_document(policy_id, await inventory_identities(pg_factory, pg_book))
     if sale:
         payload |= {"net_amount": "10.00", "vat_rate": "0", "vat_basis": "Synthetic exemption",
@@ -194,8 +214,9 @@ async def test_accountant_mixed_allocation_http_confirm_retry_stock_and_late_cos
         assert blocked.status_code == 422 and "FIFO or weighted-average" in blocked.text
 
 
-async def test_public_issue_requires_both_directory_snapshots(pg_factory, pg_book):
-    policy_id, _ = await output_sources(pg_factory, pg_book, "weighted_average")
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_public_issue_requires_both_directory_snapshots(pg_factory, pg_book, issuance_pg):
+    policy_id, _ = await output_sources(pg_factory, pg_book, "weighted_average", api=issuance_pg[0])
     payload = issue_document(policy_id, await inventory_identities(pg_factory, pg_book))
     payload.pop("warehouse_identity")
     payload.pop("sku_identity")

@@ -16,9 +16,13 @@ from modules.accounting.zero_value_disposals import (
     receipt_digest,
 )
 from tests.accounting.test_finished_goods_inventory_postgres import _output_cost_command
-from tests.accounting.test_inventory_allocation_api_postgres import output_sources
+from tests.accounting.test_inventory_allocation_api_postgres import (
+    output_sources,
+    prepare_allocation_revision_0145,
+)
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_zero_value_output_cost_postgres import run_migration
+from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 pytestmark = pytest.mark.integration
 
@@ -29,8 +33,9 @@ async def basis(session, org, command, cutoff=2147483647):
 
 
 @pytest.mark.parametrize("method", ["fifo", "weighted_average"])
-async def test_v4_basis_binds_multiple_origins_cutoff_and_preserves_disabled_write_path(pg_factory, pg_book, method):
-    policy_id, outputs = await output_sources(pg_factory, pg_book, method)
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_v4_basis_binds_multiple_origins_cutoff_and_preserves_disabled_write_path(pg_factory, pg_book, method, issuance_pg):
+    policy_id, outputs = await output_sources(pg_factory, pg_book, method, api=issuance_pg[0])
     async with pg_factory() as session:
         await service.post(session, pg_book[0], PostingInput(source="zero-v4-reverse-wip", source_version=1,
             operation="manual", document_date="2026-10-31", operation_date="2026-10-31", posting_date="2026-10-31",
@@ -41,6 +46,8 @@ async def test_v4_basis_binds_multiple_origins_cutoff_and_preserves_disabled_wri
         for output_id in outputs:
             await confirm_output_cost_correction(session, pg_book[0], "2026-10",
                 await _output_cost_command(session, pg_book[0], output_id), "tester")
+        await session.commit()
+        await prepare_allocation_revision_0145(pg_factory)
         await run_migration(session, "0146_zero_value_allocation_basis.py", "upgrade")
         source_rows = (await session.execute(text("SELECT entry_id,id,dimensions FROM accounting.line WHERE entry_id IN (:a,:b) AND side='debit' ORDER BY entry_id,id"),
             {"a": outputs[0], "b": outputs[1]})).all()
