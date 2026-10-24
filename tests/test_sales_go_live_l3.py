@@ -4,6 +4,8 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 
+from tests.test_sales_db import selected_parties  # noqa: F401
+
 SALES_HEADERS = {"X-User": "l3-sales", "X-User-Roles": "sales"}
 GUEST_HEADERS = {"X-User-Roles": "guest"}
 SALES_HEAD_HEADERS = {"X-User": "l3-head", "X-User-Roles": "sales_head"}
@@ -56,6 +58,7 @@ async def test_board_guest_403(api):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("selected_parties")
 async def test_stage_change_sales_manager(api):
     """Менеджер (sales) может сменить стадию сделки."""
     created = (
@@ -100,6 +103,7 @@ async def test_skus_picker_excludes_demo_seed(session, api):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("selected_parties")
 async def test_sales_manager_cannot_approve_document(api):
     """sales без sales.deal.approve → 403 на decide; sales_head → 200."""
     deal = (

@@ -22,7 +22,7 @@ from modules.accounting.schemas import CloseInput
 
 pytestmark = pytest.mark.integration
 
-REGISTERED_HEAD_REVISION = "0198"
+REGISTERED_HEAD_REVISION = "0199"
 
 
 # ``migration-proposal.py`` freezes the shared 0130 accounting baseline for
@@ -383,7 +383,7 @@ async def test_primary_receipt_http_concurrent_replay_and_snapshot(pg_factory, p
 @pytest_asyncio.fixture
 async def pg_factory(request):
     mode = getattr(request, "param", None)
-    if mode not in {None, "registered_head"}:
+    if mode not in {None, "registered_head", "legacy_0139", "empty_restore"}:
         pytest.fail("Unknown isolated accounting fixture mode")
     from sqlalchemy.engine import make_url
 
@@ -393,6 +393,12 @@ async def pg_factory(request):
     parsed = make_url(url)
     if parsed.host not in {"127.0.0.1", "localhost"} or parsed.database != "accounting_test":
         pytest.fail("Refusing a non-local/non-test PostgreSQL target")
+    if mode == "empty_restore":
+        if parsed.drivername != "postgresql+psycopg" or parsed.query:
+            pytest.fail("Empty restore requires an unmodified PostgreSQL target")
+        owner = os.getenv("REGISTERED_HEAD_TEST_OWNER", "")
+        if re.fullmatch(r"[a-f0-9]{32}", owner) is None:
+            pytest.fail("Empty restore requires its isolated master owner")
     if mode == "registered_head":
         if parsed.drivername != "postgresql+psycopg" or parsed.query:
             pytest.fail("Refusing an overridden or unsupported PostgreSQL target")
@@ -413,7 +419,7 @@ async def pg_factory(request):
     created = False
     try:
         async with admin.connect() as conn:
-            if mode == "registered_head":
+            if mode in {"registered_head", "empty_restore"}:
                 master_marker = await conn.scalar(text(
                     "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname=current_database()"
                 ))
@@ -423,9 +429,30 @@ async def pg_factory(request):
             created = True
             await conn.execute(text(f'COMMENT ON DATABASE "{database}" IS \'crm-acc-fixture:{database}\''))
         engine_options = {}
-        if mode == "registered_head":
+        if mode in {"registered_head", "empty_restore"}:
             engine_options = {"connect_args": {"options": "-c statement_timeout=15000 -c lock_timeout=12000"}}
         engine = create_async_engine(parsed.set(database=database), **engine_options)
+        if mode == "empty_restore":
+            async with engine.connect() as conn:
+                version = int(await conn.scalar(text("SHOW server_version_num")))
+                assert 160000 <= version < 170000, "PostgreSQL 16 restore required"
+                assert await conn.scalar(text("SELECT current_database()")) == database
+                marker = await conn.scalar(text(
+                    "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname=current_database()"
+                ))
+                assert marker == f"crm-acc-fixture:{database}", "Empty restore database marker changed"
+                for catalog, namespace_column in (("pg_class", "relnamespace"), ("pg_proc", "pronamespace"), ("pg_type", "typnamespace")):
+                    objects = await conn.scalar(text(
+                        f"SELECT count(*) FROM {catalog} c JOIN pg_namespace n ON n.oid=c.{namespace_column} "
+                        "WHERE n.nspname <> 'information_schema' AND n.nspname NOT LIKE 'pg_%'"
+                    ))
+                    assert objects == 0, "Restore requires a database without user objects"
+                assert await conn.scalar(text(
+                    "SELECT count(*) FROM pg_namespace WHERE nspname NOT IN ('public','information_schema') "
+                    "AND nspname NOT LIKE 'pg_%'"
+                )) == 0, "Restore requires a database without user schemas"
+            yield async_sessionmaker(engine, expire_on_commit=False)
+            return
         if mode == "registered_head":
             async with engine.connect() as conn:
                 version = int(await conn.scalar(text("SHOW server_version_num")))
@@ -591,7 +618,7 @@ async def pg_factory(request):
                     runpy.run_path("migrations/versions/0132_expense_approval_digest.py")["upgrade"]()
                     for migration_name in (
                         "0139_production_output_cost_revision.py",
-                        *ACCOUNTING_TAIL_MIGRATIONS,
+                        *(ACCOUNTING_TAIL_MIGRATIONS if mode != "legacy_0139" else ()),
                     ):
                         runpy.run_path(f"migrations/versions/{migration_name}")["upgrade"]()
 

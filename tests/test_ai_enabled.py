@@ -1,3 +1,4 @@
+# ruff: noqa: F811 -- imported fixture is registered for explicit prerequisites.
 """API-тесты AI-эндпоинтов при ВКЛЮЧЁННОМ AI-слое (mock-режим шлюза).
 
 Дополняют тесты с выключенным AI (503): покрывают рабочие ветки генерации и
@@ -6,9 +7,10 @@
 from sqlalchemy import select
 
 from core.domain.models import OutboxEvent
+from tests.test_sales_db import selected_parties  # noqa: F401
 
 
-async def test_ai_draft_reply_enabled(ai_api):
+async def test_ai_draft_reply_enabled(ai_api, selected_parties):
     deal = (
         await ai_api.post("/sales/deals", json={"number": "AID-1", "title": "t", "counterparty": "c"})
     ).json()
@@ -18,7 +20,7 @@ async def test_ai_draft_reply_enabled(ai_api):
     assert body["text"] and body["model"] == "qwen2.5"
 
 
-async def test_ai_draft_reply_uses_last_inbound(session, ai_api):
+async def test_ai_draft_reply_uses_last_inbound(session, ai_api, selected_parties):
     deal = (
         await ai_api.post("/sales/deals", json={"number": "AID-3", "title": "t", "counterparty": "c"})
     ).json()
@@ -32,7 +34,7 @@ async def test_ai_draft_reply_uses_last_inbound(session, ai_api):
     assert "ai.draft.generated" in types
 
 
-async def test_ai_assist_enabled_both_kinds(session, ai_api):
+async def test_ai_assist_enabled_both_kinds(session, ai_api, selected_parties):
     deal = (
         await ai_api.post("/sales/deals", json={"number": "AID-2", "title": "t", "counterparty": "c"})
     ).json()

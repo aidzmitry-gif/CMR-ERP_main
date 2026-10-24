@@ -1,7 +1,10 @@
+# ruff: noqa: F811 -- imported fixture is registered for explicit prerequisites.
 """Добор покрытия ядра: зависимости, шина, Telegram, согласования, системные роуты."""
 from types import SimpleNamespace
 
 from sqlalchemy import text
+
+from tests.test_sales_db import selected_parties  # noqa: F401
 
 # --- deps.get_session: реальная зависимость (в API-тестах она подменяется) ---
 
@@ -55,7 +58,7 @@ async def test_telegram_approve_arg_validation(api):
     assert "не найдено" in missing.json()["text"]
 
 
-async def test_telegram_module_command_and_already_decided(api):
+async def test_telegram_module_command_and_already_decided(api, selected_parties):
     # команда, объявленная модулем sales (/deals) — исполняется хендлер модуля
     deals = await api.post("/telegram/webhook", json={"message": {"text": "/deals", "chat": {"id": 1}}})
     assert deals.json()["text"]
@@ -115,7 +118,7 @@ async def test_approval_approve_404(api):
     assert (await api.post("/approvals/999999/approve", json={"by": "X"})).status_code == 404
 
 
-async def test_approval_reject_endpoint(api):
+async def test_approval_reject_endpoint(api, selected_parties):
     deal = (
         await api.post("/sales/deals", json={"number": "RJ-1", "title": "t", "counterparty": "c"})
     ).json()
@@ -129,7 +132,7 @@ async def test_approval_reject_endpoint(api):
 # --- Системные роуты: журнал событий и аудита ---
 
 
-async def test_system_events_and_audit(api):
+async def test_system_events_and_audit(api, selected_parties):
     await api.post("/sales/deals", json={"number": "SE-1", "title": "t", "counterparty": "c"})
     assert isinstance((await api.get("/system/events")).json(), list)
     assert isinstance((await api.get("/system/audit")).json(), list)

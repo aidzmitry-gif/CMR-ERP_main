@@ -5,7 +5,7 @@ from core.domain.models import AuditLog, Counterparty
 
 
 async def test_edit_names_retains_legacy_and_records_each_field(api, session):
-    cp = Counterparty(name="Legacy link", unp="600187521")
+    cp = Counterparty(name="Legacy link", unp="600187521", requisites={"legal_address": "Synthetic address"})
     session.add(cp)
     await session.commit()
     cp_id, revision = cp.id, cp.revision
@@ -30,7 +30,7 @@ async def test_edit_names_retains_legacy_and_records_each_field(api, session):
 
 async def test_create_with_two_names_then_create_branch(api):
     created = await api.post("/system/mdm/counterparty", json={"manual": {
-        "display_name": "Short", "legal_name": "Legal", "unp": "600187521",
+        "display_name": "Short", "legal_name": "Legal", "unp": "600187521", "legal_address": "Synthetic address",
     }})
     assert created.status_code == 201, created.text
     cp = created.json()
@@ -41,8 +41,12 @@ async def test_create_with_two_names_then_create_branch(api):
     assert branch.json()["legal_entity_id"] == cp["id"]
 
 
-async def test_legacy_card_does_not_invent_legal_name(api):
-    created = await api.post("/system/mdm/counterparty", json={"manual": {"name": "Unverified short"}})
-    data = (await api.get(f"/system/mdm/counterparty/{created.json()['id']}")).json()
+async def test_legacy_card_does_not_invent_legal_name(api, session):
+    legacy = Counterparty(name="Unverified short")
+    session.add(legacy)
+    await session.commit()
+    response = await api.get(f"/system/mdm/counterparty/{legacy.id}")
+    assert response.status_code == 200, response.text
+    data = response.json()
     assert data["display_name"] == "Unverified short"
     assert data["legal_name"] is None

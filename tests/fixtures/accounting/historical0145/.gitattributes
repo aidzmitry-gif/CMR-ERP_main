@@ -1,0 +1,6 @@
+# Preserve byte-pinned historical fixtures across Windows and Linux checkouts.
+manifest.json -text
+fixtures.json -text
+run_consumer.py -text
+consumer/** -text
+*.gz -text

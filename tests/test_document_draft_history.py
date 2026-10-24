@@ -1,12 +1,19 @@
 """A CRM document draft keeps a scoped, conflict-safe field history."""
 
+from core.domain.models import Counterparty
 from modules.sales.models import DealDocument
 
 
 async def test_draft_terms_save_and_history(api, session):
-    deal = (await api.post("/sales/deals", json={
+    buyer = Counterparty(name="Покупатель")
+    session.add(buyer)
+    await session.commit()
+    created = await api.post("/sales/deals", json={
         "number": "HIST-DOC-1", "title": "Поставка", "counterparty": "Покупатель",
-    })).json()
+        "counterparty_id": buyer.id,
+    })
+    assert created.status_code == 201, created.text
+    deal = created.json()
     doc = DealDocument(deal_id=deal["id"], kind="contract", number="DOG-HIST-DOC-1",
                        status="draft")
     session.add(doc)

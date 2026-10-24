@@ -5,10 +5,10 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 
-from modules.accounting import inventory_cost, inventory_issues, models, sales, service
+from modules.accounting import inventory_issues, sales, service
 from modules.accounting.inventory_allocation_loader import load_authenticated_inventory_dispositions
 from modules.accounting.production_output_cost_workflow import (
     ProductionOutputCostConfirmInput,
@@ -23,77 +23,121 @@ from modules.accounting.production_output_transfer import (
 )
 from modules.accounting.schemas import (
     InventoryIssueDocument,
-    InventoryIssuePreviewInput,
     LineInput,
     PostingInput,
 )
-from tests.accounting.test_finished_goods_inventory_postgres import _confirm_output
-from tests.accounting.test_inventory_allocation_loader import save_mixed_weighted_receipt
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_production_output_transfer_postgres import (
-    SyntheticProduction,
     _seed_production_book,
     _seed_wip,
     transfer_input,
 )
 from tests.accounting.test_zero_value_output_cost_postgres import run_migration
+from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 pytestmark = pytest.mark.integration
 
 
-class TwoOutputs(SyntheticProduction):
-    def __init__(self, same_lot=False):
-        self.same_lot = same_lot
-
-    async def output_reconciliation(self, session, organization_id, order_id, warehouse):
-        facts = await super().output_reconciliation(session, organization_id, order_id, warehouse)
-        return {**facts, "lot": "SHARED" if self.same_lot else f"LOT-{order_id}",
-                "documents": [{"document_id": order_id + 59, "operation_date": "2026-10-10"}]}
-
-
-async def mixed_production_disposal(factory, book, *, method="weighted_average", same_lot=False, sale=False):
+async def mixed_production_disposal(factory, book, *, api, method="weighted_average", same_lot=False, sale=False):
     """Two real 2-unit outputs at one cent each, followed by a 2.1-unit disposal."""
+    from core.domain.models import Sku
+    from core.services.auth import CurrentUser
+    from modules.accounting.gateway import AccountingService
+    from modules.production.accounting_ownership import (
+        OwnershipCommand,
+        assign_order,
+        order_snapshot,
+    )
+    from modules.production.models import ProductionOrder
+    from modules.production.output_documents import OutputCommand, confirm_output, prepare_output
+    from modules.wms.models import Location, Receipt, ReceiptLine, WarehouseDirectory
+
     policy_id = await _seed_production_book(factory, book, method)
     await _seed_wip(factory, book, policy_id, [("SHOP", "ORDER-42", "0.01"), ("SHOP", "ORDER-43", "0.01")])
-    production = TwoOutputs(same_lot)
+    api.headers["X-User"] = "tester"
+    core = api._transport.app.state.core
+    production, warehouse = core.services.production_output, core.services.wms_reservations
+    gateway, user = AccountingService(), CurrentUser("tester", ["director"])
+    documents = {}
+    async with factory() as session:
+        orders = [ProductionOrder(id=order_id, number=f"SYN-{order_id}", product="Synthetic widget", qty=2)
+                  for order_id in (42, 43)]
+        place = Location(warehouse="Main", code="SYN-OUTPUT")
+        session.add_all([*orders, place, Sku(code="SYN-WIDGET", title="Synthetic widget", unit="шт"),
+                         WarehouseDirectory(id=42, organization_id=book[0], name="Main",
+                             title="Synthetic output warehouse", wms_enabled=False,
+                             prohibit_negative_stock=True, is_active=True, created_by="tester")])
+        await session.flush()
+        for order in orders:
+            digest = order_snapshot(order)[1]
+            await assign_order(session, gateway, book[0], user, OwnershipCommand(
+                order_id=order.id, expected_digest=digest, evidence="Synthetic reviewed owner"))
+            document = await prepare_output(session, gateway, book[0], user, OutputCommand(
+                request_id=uuid4(), order_id=order.id, expected_order_digest=digest,
+                operation_date="2026-10-10", sku_code="SYN-WIDGET", quantity="2.00", warehouse="Main",
+                location_id=place.id, lot="SHARED" if same_lot else f"LOT-{order.id}",
+                evidence="Synthetic reviewed output"), warehouse_gateway=warehouse)
+            await confirm_output(session, gateway, book[0], user, document.id, document.digest,
+                                 warehouse_gateway=warehouse)
+            documents[order.id] = document.id
+        await session.commit()
+    assert await core.event_bus.relay_pending(factory, core.services, event_types=("production.output.confirmed",)) == 2
+    async with factory() as session:
+        rows = (await session.execute(select(Receipt.id, ReceiptLine.id).join(
+            ReceiptLine, ReceiptLine.receipt_id == Receipt.id).where(
+                Receipt.organization_id == book[0],
+                Receipt.entity_ref.in_([f"production_output:{doc_id}" for doc_id in documents.values()])))).all()
+        assert len(rows) == 2
+    for receipt_id, line_id in rows:
+        path = f"/wms/receipts/{receipt_id}"
+        detail = await api.get(path)
+        assert detail.status_code == 200, detail.text
+        qc = await api.post(path + "/qc", json={"expected_revision": detail.json()["qc_revision"], "decisions": [
+            {"line_id": line_id, "accepted_qty": "2.00", "rejected_qty": "0.00", "reject_reason": "Synthetic accepted output"}]})
+        assert qc.status_code == 200, qc.text
+        accepted = await api.post(path + "/accept")
+        assert accepted.status_code == 200, accepted.text
     output_ids = []
     async with factory() as session:
-        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
-                         "0142_zero_value_command_dates.py", "0143_zero_value_sales.py",
-                         "0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py"):
-            await run_migration(session, revision, "upgrade")
         for order_id in (42, 43):
             command = transfer_input(policy_id).model_copy(update={
-                "order_id": order_id, "analytical_order": f"ORDER-{order_id}", "output_document_ids": [order_id + 59]})
-            preview = await prepare_output_transfer(session, book[0], "2026-10", command, production, object())
+                "order_id": order_id, "analytical_order": f"ORDER-{order_id}", "output_document_ids": [documents[order_id]]})
+            preview = await prepare_output_transfer(session, book[0], "2026-10", command, production, warehouse)
             confirmation = ProductionOutputTransferConfirmInput.model_validate({
                 **command.model_dump(mode="json"), "basis_digest": preview["basis_digest"], "digest": preview["digest"]})
             output = await confirm_output_transfer(session, book[0], "2026-10", confirmation, "tester",
-                                                    production=production, warehouse_gateway=object())
+                                                    production=production, warehouse_gateway=warehouse)
             output_ids.append(output.id)
         await session.commit()
+        warehouse_row = (await session.scalars(select(WarehouseDirectory).where(
+            WarehouseDirectory.organization_id == book[0], WarehouseDirectory.name == "Main",
+            WarehouseDirectory.is_active.is_(True)))).one()
+        sku_row = (await session.scalars(select(Sku).where(
+            Sku.code == "SYN-WIDGET", Sku.is_active.is_(True)))).one()
         document = InventoryIssueDocument(source="mixed-output-issue", source_version=1,
             document_date="2026-10-31", operation_date="2026-10-31", posting_date="2026-10-31", policy_id=policy_id,
             account="43", warehouse="Main", sku="SYN-WIDGET", lot="", quantity="2.1", expense_account="90.4",
-            expense_dimensions={}, explanation="Reviewed mixed output disposal")
-        request = InventoryIssuePreviewInput(**document.model_dump(include=set(InventoryIssuePreviewInput.model_fields)))
-        policy, rows, verified, finished = await inventory_cost._inventory_rows(session, book[0], request)
-        cost = inventory_cost.issue_result(policy, rows, book[0], request,
-            verified_output_lines=verified, finished_goods=finished, include_source_identity=True)
-        cost["source_allocation_version"] = 1
-        assert [layer["amount_byn"] for layer in cost["inventory_layers"]] == ["0.01", "0.00"]
+            expense_dimensions={}, explanation="Reviewed mixed output disposal",
+            warehouse_identity={"id": warehouse_row.id, "name": warehouse_row.name, "title": warehouse_row.title},
+            sku_identity={"id": sku_row.id, "code": sku_row.code, "title": sku_row.title, "unit": sku_row.unit})
         if sale:
             document = sales.SaleDocument(**document.model_dump(), net_amount="10.00", vat_rate="0",
                 vat_basis="Synthetic exemption", buyer_account="62", revenue_account="90.1",
                 vat_revenue_account="90.2", vat_payable_account="68",
                 buyer_dimensions={"counterparty": "BUYER", "contract": "CONTRACT", "settlement_document": "INVOICE"})
-        package = sales.posting_for(document, cost) if sale else inventory_issues.posting_for(document, cost)
-        package = package.model_copy(update={"lines": [line for line in package.lines if line.amount > 0]})
-        entry = await service.post(session, book[0], package, "tester", inventory_issue=not sale, inventory_sale=sale)
-        receipt_type = models.InventorySaleReceipt if sale else models.InventoryIssueReceipt
-        session.add(receipt_type(entry_id=entry.id, organization_id=book[0],
-            command=document.model_dump(mode="json"), cost=json.loads(json.dumps(cost, default=str)),
-            posting=package.model_dump(mode="json"), digest=service.digest(package), actor="tester"))
+            await inventory_issues.verify_inventory_identity(session, book[0], document)
+            prepared = await sales.prepare(session, book[0], document, source_allocations=True)
+            cost = prepared["cost"]
+        else:
+            cost, package = await inventory_issues.prepare(session, book[0], document,
+                source_allocations=True, require_current_inventory=True)
+        assert [layer["amount_byn"] for layer in cost["inventory_layers"]] == ["0.01", "0.00"]
+        if sale:
+            entry = await sales.confirm(session, book[0], document, cost["basis_digest"], prepared["digest"],
+                                        "tester", source_allocations=True)
+        else:
+            entry = await inventory_issues.confirm(session, book[0], document, cost["basis_digest"],
+                service.digest(package), "tester", source_allocations=True, require_current_inventory=True)
         await session.commit()
         events = await load_authenticated_inventory_dispositions(session, book[0])
         assert len(events) == 1
@@ -102,8 +146,9 @@ async def mixed_production_disposal(factory, book, *, method="weighted_average",
 
 
 @pytest.mark.parametrize("same_lot", [False, True])
-async def test_fifo_late_cost_uses_exact_output_source_including_zero_portion(pg_factory, pg_book, same_lot):
-    policy_id, outputs, issue_id = await mixed_production_disposal(pg_factory, pg_book, method="fifo", same_lot=same_lot)
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_fifo_late_cost_uses_exact_output_source_including_zero_portion(pg_factory, pg_book, same_lot, issuance_pg):
+    policy_id, outputs, issue_id = await mixed_production_disposal(pg_factory, pg_book, api=issuance_pg[0], method="fifo", same_lot=same_lot)
     async with pg_factory() as session:
         await service.post(session, pg_book[0], PostingInput(source="fifo-late-wip", source_version=1, operation="manual",
             document_date="2026-10-31", operation_date="2026-10-31", posting_date="2026-10-31", policy_id=policy_id,
@@ -132,8 +177,9 @@ async def test_fifo_late_cost_uses_exact_output_source_including_zero_portion(pg
 
 
 @pytest.mark.parametrize("sale", [False, True])
-async def test_mixed_production_late_cost_confirm_replay_and_historical_cutoff(pg_factory, pg_book, sale):
-    policy_id, output_ids, issue_id = await mixed_production_disposal(pg_factory, pg_book, sale=sale)
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_mixed_production_late_cost_confirm_replay_and_historical_cutoff(pg_factory, pg_book, sale, issuance_pg):
+    policy_id, output_ids, issue_id = await mixed_production_disposal(pg_factory, pg_book, api=issuance_pg[0], sale=sale)
     async with pg_factory() as session:
         late = PostingInput(source="mixed-late-wip", source_version=1, operation="manual",
             document_date="2026-10-31", operation_date="2026-10-31", posting_date="2026-10-31", policy_id=policy_id,
@@ -177,6 +223,7 @@ async def test_mixed_production_late_cost_confirm_replay_and_historical_cutoff(p
                 await run_migration(session, "0145_inventory_allocation_cost_stream.py", "downgrade")
 
 
+@pytest.mark.parametrize("pg_factory", ["legacy_0139"], indirect=True)
 async def test_0145_empty_roundtrip_retains_legacy_evidence_definitions(pg_factory):
     async with pg_factory() as session:
         for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
@@ -193,63 +240,93 @@ async def test_0145_empty_roundtrip_retains_legacy_evidence_definitions(pg_facto
         await session.commit()
 
 
+@pytest.mark.parametrize("pg_factory", ["empty_restore"], indirect=True)
 @pytest.mark.parametrize("method", ["specific", "weighted_average"])
-async def test_0145_preserves_legacy_monetary_sale_and_correction_history(pg_factory, pg_book, method):
-    from tests.accounting.test_finished_goods_inventory_postgres import (
-        test_output_cost_preview_authenticates_late_wip_and_sale_destinations as legacy_scenario,
+async def test_0145_preserves_legacy_monetary_sale_and_correction_history(pg_factory, tmp_path, method):
+    from tests.accounting.historical_0145 import run_historical_case
+
+    await run_historical_case(pg_factory, tmp_path, "monetary-" + method)
+
+
+@pytest.mark.parametrize("pg_factory", ["empty_restore"], indirect=True)
+async def test_0145_keeps_existing_zero_issue_late_cost(pg_factory, tmp_path):
+    from tests.accounting.historical_0145 import run_historical_case
+
+    await run_historical_case(pg_factory, tmp_path, "zero-existing-issue")
+
+
+async def single_actual_output(factory, book, api):
+    """One accepted physical output, with its reviewed 100 BYN accounting transfer."""
+    from core.domain.models import Sku
+    from core.services.auth import CurrentUser
+    from modules.accounting.gateway import AccountingService
+    from modules.production.accounting_ownership import (
+        OwnershipCommand,
+        assign_order,
+        order_snapshot,
     )
+    from modules.production.models import ProductionOrder
+    from modules.production.output_documents import OutputCommand, confirm_output, prepare_output
+    from modules.wms.models import Location, Receipt, ReceiptLine, WarehouseDirectory
 
-    async with pg_factory() as session:
-        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
-                         "0142_zero_value_command_dates.py", "0143_zero_value_sales.py",
-                         "0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py"):
-            await run_migration(session, revision, "upgrade")
+    policy_id = await _seed_production_book(factory, book, "weighted_average")
+    await _seed_wip(factory, book, policy_id)
+    api.headers["X-User"] = "tester"
+    core = api._transport.app.state.core
+    production, warehouse = core.services.production_output, core.services.wms_reservations
+    gateway, user = AccountingService(), CurrentUser("tester", ["director"])
+    async with factory() as session:
+        order = ProductionOrder(id=42, number="SYN-42", product="Synthetic widget", qty=2)
+        place = Location(warehouse="Main", code="SYN-OUTPUT")
+        session.add_all([order, place, Sku(code="SYN-WIDGET", title="Synthetic widget", unit="шт"),
+                        WarehouseDirectory(id=42, organization_id=book[0], name="Main",
+                            title="Synthetic output warehouse", wms_enabled=False,
+                            prohibit_negative_stock=True, is_active=True, created_by="tester")])
+        await session.flush()
+        digest = order_snapshot(order)[1]
+        await assign_order(session, gateway, book[0], user, OwnershipCommand(
+            order_id=order.id, expected_digest=digest, evidence="Synthetic reviewed owner"))
+        physical = await prepare_output(session, gateway, book[0], user, OutputCommand(
+            request_id=uuid4(), order_id=order.id, expected_order_digest=digest,
+            operation_date="2026-10-10", sku_code="SYN-WIDGET", quantity="2.00", warehouse="Main",
+            location_id=place.id, lot="LOT-1", evidence="Synthetic reviewed output"), warehouse_gateway=warehouse)
+        await confirm_output(session, gateway, book[0], user, physical.id, physical.digest,
+                             warehouse_gateway=warehouse)
+        physical_id = physical.id
         await session.commit()
-    await legacy_scenario(pg_factory, pg_book, method)
-
-
-async def test_0145_keeps_existing_zero_issue_late_cost(pg_factory, pg_book):
-    from modules.accounting.zero_value_disposals import (
-        preview_standalone_zero_value_issue_basis,
-        register_standalone_zero_value_issue,
-    )
-    from tests.accounting.test_zero_value_disposals_postgres import command, zeroed_output
-
-    async with pg_factory() as session:
-        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
-                         "0142_zero_value_command_dates.py", "0143_zero_value_sales.py"):
-            await run_migration(session, revision, "upgrade")
+    assert await core.event_bus.relay_pending(factory, core.services, event_types=("production.output.confirmed",)) == 1
+    async with factory() as session:
+        receipt_id, line_id = (await session.execute(select(Receipt.id, ReceiptLine.id).join(
+            ReceiptLine, ReceiptLine.receipt_id == Receipt.id).where(
+                Receipt.organization_id == book[0], Receipt.entity_ref == f"production_output:{physical_id}"))).one()
+    path = f"/wms/receipts/{receipt_id}"
+    detail = await api.get(path)
+    assert detail.status_code == 200, detail.text
+    qc = await api.post(path + "/qc", json={"expected_revision": detail.json()["qc_revision"], "decisions": [
+        {"line_id": line_id, "accepted_qty": "2.00", "rejected_qty": "0.00", "reject_reason": "Synthetic accepted output"}]})
+    assert qc.status_code == 200, qc.text
+    accepted = await api.post(path + "/accept")
+    assert accepted.status_code == 200, accepted.text
+    async with factory() as session:
+        command = transfer_input(policy_id).model_copy(update={"output_document_ids": [physical_id]})
+        preview = await prepare_output_transfer(session, book[0], "2026-10", command, production, warehouse)
+        confirmation = ProductionOutputTransferConfirmInput.model_validate({
+            **command.model_dump(mode="json"), "basis_digest": preview["basis_digest"], "digest": preview["digest"]})
+        output = await confirm_output_transfer(session, book[0], "2026-10", confirmation, "tester",
+                                                production=production, warehouse_gateway=warehouse)
+        output_id = output.id
         await session.commit()
-    policy_id, output_id, line_id = await zeroed_output(pg_factory, pg_book)
-    async with pg_factory() as session:
-        draft = command(policy_id, output_id, line_id, destination_account="90.4", destination_dimensions={})
-        basis = await preview_standalone_zero_value_issue_basis(session, pg_book[0], draft)
-        await register_standalone_zero_value_issue(session, pg_book[0], "tester", draft.model_copy(update={"basis_digest": basis}))
-        for revision in ("0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py"):
-            await run_migration(session, revision, "upgrade")
-        await service.post(session, pg_book[0], PostingInput(source="legacy-zero-late-wip", source_version=1, operation="manual",
-            document_date="2026-10-31", operation_date="2026-10-31", posting_date="2026-10-31", policy_id=policy_id,
-            rule_version="synthetic", explanation="Legacy zero issue late cost", lines=[
-                LineInput(account="20", side="debit", amount="100", dimensions={"department": "SHOP", "order": "ORDER-42"}),
-                LineInput(account="60", side="credit", amount="100")]), "tester")
-        request = ProductionOutputCostPreviewInput(original_entry_id=output_id, posting_date="2026-10-31",
-                                                  request_evidence="Legacy zero receipt survives 0145")
-        preview = await preview_output_cost_correction(session, pg_book[0], "2026-10", request)
-        assert preview["trace"]["disposals"][0]["kind"] == "zero"
-        assert sorted(row["amount_byn"] for row in preview["destinations"]) == ["25.00", "75.00"]
-        await confirm_output_cost_correction(session, pg_book[0], "2026-10",
-            ProductionOutputCostConfirmInput(**request.model_dump(), request_key=uuid4(), basis_digest=preview["basis_digest"]), "tester")
-        await session.commit()
+    return output_id
 
 
-async def test_pool_stream_preserves_real_production_output(pg_factory, pg_book):
-    await _confirm_output(pg_factory, pg_book, method="weighted_average")
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_pool_stream_preserves_real_production_output(pg_factory, pg_book, issuance_pg):
+    actual_output_id = await single_actual_output(pg_factory, pg_book, issuance_pg[0])
     async with pg_factory() as session:
-        for revision in ("0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py"):
-            await run_migration(session, revision, "upgrade")
-        output_id = await session.scalar(text(
+        output_id = (await session.execute(text(
             "SELECT entry_id FROM accounting.production_output_transfer_receipt WHERE organization_id=:org"
-        ), {"org": pg_book[0]})
+        ), {"org": pg_book[0]})).scalar_one()
+        assert output_id == actual_output_id
         rows = await session.scalar(text(
             "SELECT accounting.output_pool_revision_rows(:org,:output,DATE '2026-10-31',NULL,NULL)"
         ), {"org": pg_book[0], "output": output_id})
@@ -260,12 +337,63 @@ async def test_pool_stream_preserves_real_production_output(pg_factory, pg_book)
         await session.rollback()
 
 
-async def test_full_allocation_stream_preserves_zero_portion_and_cutoff(pg_factory, pg_book, posting):
-    async with pg_factory() as session:
-        for revision in ("0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py"):
-            await run_migration(session, revision, "upgrade")
+async def current_mixed_disposal(factory, book, posting):
+    """Post the mixed-cent disposal through current directory and receipt guards."""
+    from datetime import date
+
+    from sqlalchemy import func
+
+    from core.domain.models import Sku
+    from modules.accounting.models import Account, Entry, InventoryIssueReceipt, Policy
+    from modules.wms.models import WarehouseDirectory
+    from tests.accounting.test_inventory_cost import move
+
+    async with factory() as session:
+        policy_id = (await session.scalar(select(func.max(Policy.id))) or 0) + 1
+        account_id = (await session.scalar(select(func.max(Account.id))) or 0) + 1
+        policy = Policy(id=policy_id, organization_id=book[0], effective_from=date(2026, 2, 1),
+            reference="Synthetic allocation policy", inventory_method="weighted_average", allocation_basis="direct_cost",
+            depreciation_method="straight_line", normative_reference="Synthetic", normative_verified=False,
+            approved_by="tester")
+        warehouse = WarehouseDirectory(id=42, organization_id=book[0], name="W", title="Synthetic inventory warehouse",
+            wms_enabled=False, prohibit_negative_stock=True, is_active=True, created_by="tester")
+        sku = Sku(code="SKU", title="Synthetic allocation item", unit="шт", is_active=True)
+        session.add_all([policy, warehouse, sku, Account(id=account_id, organization_id=book[0], code="41.2",
+            title="Quantitative goods", category="asset", valid_from=date(2026, 1, 1), required_dimensions=[],
+            currency_tracking=True, quantity_tracking=True, cash=False, normative_ref="synthetic")])
         await session.commit()
-    await save_mixed_weighted_receipt(pg_factory, pg_book, posting)
+        await move(session, (book[0], policy_id), posting, "allocation-old", "1", "0.01", day="2026-09-01", lot="old")
+        await move(session, (book[0], policy_id), posting, "allocation-new", "2", "0.01", day="2026-09-02", lot="new")
+        document = InventoryIssueDocument(source="allocation-weighted-cent", source_version=1,
+            document_date="2026-09-03", operation_date="2026-09-03", posting_date="2026-09-03", policy_id=policy_id,
+            account="41.2", warehouse="W", sku="SKU", lot="", quantity="2", expense_account="90.4",
+            expense_dimensions={}, explanation="Synthetic explicit allocation",
+            warehouse_identity={"id": warehouse.id, "name": warehouse.name, "title": warehouse.title},
+            sku_identity={"id": sku.id, "code": sku.code, "title": sku.title, "unit": sku.unit})
+        cost, package = await inventory_issues.prepare(session, book[0], document,
+            source_allocations=True, require_current_inventory=True)
+        assert [layer["amount_byn"] for layer in cost["inventory_layers"]] == ["0.01", "0.00"]
+        digest = service.digest(package)
+        entry = await inventory_issues.confirm(session, book[0], document, cost["basis_digest"], digest,
+            "tester", source_allocations=True, require_current_inventory=True)
+        entry_id = entry.id
+        await session.commit()
+    async with factory() as session:
+        events = await load_authenticated_inventory_dispositions(session, book[0])
+        assert len(events) == 1 and events[0].entry_id == entry_id and events[0].allocation.quantity == Decimal("2")
+        entries = await session.scalar(select(func.count()).select_from(Entry).where(Entry.organization_id == book[0]))
+        replay = await inventory_issues.confirm(session, book[0], document, cost["basis_digest"], digest,
+            "tester", source_allocations=True, require_current_inventory=True)
+        assert replay.id == entry_id
+        await session.commit()
+        assert await session.scalar(select(func.count()).select_from(Entry).where(Entry.organization_id == book[0])) == entries
+        assert await session.scalar(select(func.count()).select_from(InventoryIssueReceipt).where(
+            InventoryIssueReceipt.organization_id == book[0])) == 1
+
+
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_full_allocation_stream_preserves_zero_portion_and_cutoff(pg_factory, pg_book, posting):
+    await current_mixed_disposal(pg_factory, pg_book, posting)
     query = text("SELECT * FROM accounting.inventory_allocation_cost_stream(:org,'41.2','W','SKU',CAST(:cutoff AS date),:token)")
     async with pg_factory() as session:
         params = {"org": pg_book[0], "cutoff": "2026-09-04", "token": None}

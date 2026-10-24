@@ -61,6 +61,8 @@ exclude_lines = [
 ]
 
 [tool.ruff]
+# Historical business sources are immutable byte-pinned test fixtures.
+extend-exclude = ["tests/fixtures/accounting/historical0145/consumer"]
 line-length = 100
 target-version = "py312"
 cache-dir = ".tmp_ruff_cache"

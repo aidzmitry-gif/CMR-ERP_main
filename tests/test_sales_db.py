@@ -15,6 +15,22 @@ async def selected_parties(session):
     await session.commit()
 
 
+@pytest_asyncio.fixture
+async def contract_parties(session):
+    """Existing synthetic buyers for contract approval and RBAC scenarios."""
+    session.add_all(Counterparty(name=name) for name in ("ООО Бета", "ООО Гамма", "c"))
+    await session.commit()
+
+
+@pytest_asyncio.fixture
+async def workflow_parties(session):
+    """Existing synthetic buyers for chat, pricing, bot and approval scenarios."""
+    session.add_all(Counterparty(name=name) for name in (
+        "ООО Чат", "ООО Прайс", "ООО Бот", "ООО Згода",
+    ))
+    await session.commit()
+
+
 async def test_unknown_party_is_not_created_by_card_fixtures(api, session, selected_parties):
     from sqlalchemy import func, select
 
@@ -400,6 +416,8 @@ async def test_ambiguous_counterparty_name_never_selects_or_changes_arbitrary_re
     candidate = Contact(counterparty_id=first.id, full_name="Private second")
     foreign = Contact(counterparty_id=second.id, full_name="Other client", is_primary=True)
     session.add_all([primary, candidate, foreign])
+    await session.flush()
+    candidate_id = candidate.id
     await session.commit()
     rejected = await api.post("/sales/deals", json={
         "number": "CP-AMBIGUOUS", "title": "Ambiguous client", "counterparty": "Same client",
@@ -421,7 +439,7 @@ async def test_ambiguous_counterparty_name_never_selects_or_changes_arbitrary_re
     added = await api.post(f"/sales/deals/{legacy.id}/contacts",
                            json={"full_name": "New", "is_primary": True}, headers=headers)
     assert added.status_code == 409, added.text
-    changed = await api.patch(f"/sales/contacts/{candidate.id}/primary", headers=headers)
+    changed = await api.patch(f"/sales/contacts/{candidate_id}/primary", headers=headers)
     assert changed.status_code == 404, changed.text
     await session.refresh(legacy)
     assert legacy.counterparty_id is None
@@ -584,7 +602,7 @@ async def test_create_invoice_uses_erp_issuance_contract(session, api):
     assert (await api.post("/sales/deals/999999/documents", json={"kind": "invoice", **request})).status_code == 404
 
 
-async def test_contract_goes_through_approval(session, api):
+async def test_contract_goes_through_approval(session, api, contract_parties):
     from sqlalchemy import select
 
     from core.domain.models import Approval, OutboxEvent
@@ -641,7 +659,7 @@ async def test_contract_goes_through_approval(session, api):
     ).status_code == 409
 
 
-async def test_contract_rejected(session, api):
+async def test_contract_rejected(session, api, contract_parties):
     deal = (
         await api.post(
             "/sales/deals", json={"number": "CT-2", "title": "t", "counterparty": "ООО Гамма"}
@@ -657,7 +675,7 @@ async def test_contract_rejected(session, api):
     assert d.json()["onec_ref"] is None
 
 
-async def test_decide_document_rbac_enforced(session, api):
+async def test_decide_document_rbac_enforced(session, api, contract_parties):
     deal = (
         await api.post("/sales/deals", json={"number": "CT-3", "title": "t", "counterparty": "c"})
     ).json()
@@ -674,7 +692,7 @@ async def test_decide_document_rbac_enforced(session, api):
     assert denied.status_code == 403
 
 
-async def test_order_reserves_stock(session, api):
+async def test_order_reserves_stock(session, api, selected_parties):
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent, Sku
@@ -850,7 +868,7 @@ async def test_payment_preserves_invoice_reserve(session, api):
     assert await session.scalar(select(OutboxEvent).where(OutboxEvent.event_type == "sales.stock.reserved")) is not None
 
 
-async def test_chats(api):
+async def test_chats(api, workflow_parties):
     deal = (
         await api.post("/sales/deals", json={"number": "CH-1", "title": "t", "counterparty": "ООО Чат"})
     ).json()
@@ -863,7 +881,7 @@ async def test_chats(api):
     )
 
 
-async def test_messages_omnichannel(session, api):
+async def test_messages_omnichannel(session, api, selected_parties):
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent
@@ -901,7 +919,7 @@ async def test_messages_omnichannel(session, api):
     ).status_code == 404
 
 
-async def test_price_engine(session, api):
+async def test_price_engine(session, api, workflow_parties):
     from core.domain.models import Sku
     from modules.sales.models import DealItem
 
@@ -1022,7 +1040,7 @@ async def test_dispatch_ctx_backward_compat(session):
     assert seen2 == [({"x": 1}, ctx)]  # новый получил контекст
 
 
-async def test_ai_assist_endpoint_disabled(api):
+async def test_ai_assist_endpoint_disabled(api, selected_parties):
     deal = (
         await api.post("/sales/deals", json={"number": "AS-2", "title": "t", "counterparty": "c"})
     ).json()
@@ -1042,7 +1060,7 @@ async def test_ai_gateway_disabled_raises():
         await gateway.complete("test")
 
 
-async def test_ai_draft_endpoint_disabled(api):
+async def test_ai_draft_endpoint_disabled(api, selected_parties):
     deal = (
         await api.post("/sales/deals", json={"number": "AI-2", "title": "t", "counterparty": "c"})
     ).json()
@@ -1051,7 +1069,7 @@ async def test_ai_draft_endpoint_disabled(api):
     assert r.status_code == 503
 
 
-async def test_telegram_bot(session, api):
+async def test_telegram_bot(session, api, workflow_parties):
     # /help перечисляет встроенные команды и команды модулей
     r = await api.post("/telegram/webhook", json={"message": {"text": "/help", "chat": {"id": 1}}})
     assert r.status_code == 200
@@ -1090,7 +1108,7 @@ async def test_owner_ai_insight_disabled(api):
     assert r.status_code == 503
 
 
-async def test_owner_dashboard(session, api):
+async def test_owner_dashboard(session, api, selected_parties):
     # данные для метрик: сделка + согласование на ней
     deal = (
         await api.post("/sales/deals", json={"number": "OWN-1", "title": "t", "counterparty": "c"})
@@ -1108,7 +1126,7 @@ async def test_owner_dashboard(session, api):
     assert any(w["key"] == "sales_pipeline" for w in d["widgets"])
 
 
-async def test_approval_request_and_decide(session, api):
+async def test_approval_request_and_decide(session, api, workflow_parties):
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent
@@ -1164,7 +1182,7 @@ async def test_approval_escalation(session):
     assert overdue.escalation_level == 1
 
 
-async def test_rbac_approve_enforced(session, api):
+async def test_rbac_approve_enforced(session, api, selected_parties):
     deal = (
         await api.post("/sales/deals", json={"number": "RB-1", "title": "t", "counterparty": "c"})
     ).json()

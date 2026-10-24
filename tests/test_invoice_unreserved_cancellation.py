@@ -1013,7 +1013,10 @@ async def _registered_full_state(factory):
         assert re.fullmatch(r"acc_test_[a-f0-9]{32}", database)
         assert await session.scalar(text("SELECT shobj_description(oid,'pg_database') FROM pg_database WHERE datname=current_database()")) == f"crm-acc-fixture:{database}"
         tables = await session.scalar(text(queries["tables"]))
-        assert len(tables) == 274
+        # Head 0199 adds two price tables and one observation sequence.
+        assert len(tables) == 276
+        assert {("integrations", "catalog_price_snapshot"),
+                ("integrations", "catalog_price_observation")} <= {(item["s"], item["t"]) for item in tables}
         for item in tables:
             schema, name = item["s"], item["t"]
             table = quote(schema) + "." + quote(name)
@@ -1029,7 +1032,9 @@ async def _registered_full_state(factory):
                 digest.update(row.encode("utf-8") + b"\n")
             result["tables"][table] = {"rows": len(rows), "sha256": digest.hexdigest(), "jsonColumns": json_columns}
         sequences = await session.scalar(text(queries["sequences"]))
-        assert len(sequences) == 208
+        assert len(sequences) == 209
+        assert any(item["schemaname"] == "integrations"
+                   and item["sequencename"] == "catalog_price_observation_id_seq" for item in sequences)
         for sequence in sequences:
             name = quote(sequence["schemaname"]) + "." + quote(sequence["sequencename"])
             state = (await session.execute(text("SELECT last_value,is_called FROM " + name))).one()

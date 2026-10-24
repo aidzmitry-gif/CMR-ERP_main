@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "syntheticOnly": true,
+  "postgresMajor": 16,
+  "privacyReview": "All rows, nested JSON, archive SQL and consumer sources reviewed; no real contacts or secrets.",
+  "cases": {
+    "monetary-specific": {
+      "producer": {
+        "organizationId": 1,
+        "producerOracle": "original monetary assertions"
+      },
+      "prerequisiteMigrationSHA": {
+        "0140_zero_value_disposals.py": "e8ad68283bfdc20c0e50d042ae8bd4eb265283312f05123fd6b7a70911770de0",
+        "0141_zero_value_output_cost.py": "db6be5cb438a489ae2abda7bb1d3cdecf20c3c2eafac74c2cb9cd5e9e350c30b",
+        "0142_zero_value_command_dates.py": "fa563c57a3f4bbbed3521a241f55372ae99b84dcce2f1ac07adffbb9188d4d0d",
+        "0143_zero_value_sales.py": "13f4ff92a31d7da04b4f78bbcc674f7bc3c944ccf730e7ea0ef5b0f62de5b730",
+        "0144_inventory_explicit_allocation_guards.py": "d99db7b138e144dc1a4070dcce22ab7255003f28cf8b5288310d5bb99dc05d3e"
+      },
+      "originalProducerAssertionsPassed": true,
+      "archive": {
+        "name": "monetary-specific.dump.gz",
+        "bytes": 160141,
+        "sha256": "f561e5cf1e4aeda8de6af68e17342958d84b961427a1c7f820c05a8e209fdddb",
+        "rawBytes": 1176026,
+        "rawSHA256": "88a182f1c90c2345827ad20e3a571b146f009dbc4135b90ea1fe834b7f4f9145"
+      },
+      "snapshot": {
+        "name": "monetary-specific.snapshot.json.gz",
+        "bytes": 13678,
+        "sha256": "bcd366ec1fb3ce7b38659f52e440d3dbb16c3b0a232b824fdff84d84731cde6b",
+        "rawBytes": 190511,
+        "rawSHA256": "554e1a17e45e3d6f0b06f676a3ebe53f0aedf6e5f1d8eb7b8111a53e52bf0437"
+      }
+    },
+    "monetary-weighted_average": {
+      "producer": {
+        "organizationId": 1,
+        "producerOracle": "original monetary assertions"
+      },
+      "prerequisiteMigrationSHA": {
+        "0140_zero_value_disposals.py": "e8ad68283bfdc20c0e50d042ae8bd4eb265283312f05123fd6b7a70911770de0",
+        "0141_zero_value_output_cost.py": "db6be5cb438a489ae2abda7bb1d3cdecf20c3c2eafac74c2cb9cd5e9e350c30b",
+        "0142_zero_value_command_dates.py": "fa563c57a3f4bbbed3521a241f55372ae99b84dcce2f1ac07adffbb9188d4d0d",
+        "0143_zero_value_sales.py": "13f4ff92a31d7da04b4f78bbcc674f7bc3c944ccf730e7ea0ef5b0f62de5b730",
+        "0144_inventory_explicit_allocation_guards.py": "d99db7b138e144dc1a4070dcce22ab7255003f28cf8b5288310d5bb99dc05d3e"
+      },
+      "originalProducerAssertionsPassed": true,
+      "archive": {
+        "name": "monetary-weighted_average.dump.gz",
+        "bytes": 160161,
+        "sha256": "8d2f5e229f475292ee80fd3a1600dc4726b0a914cbefa831008c5811ca91cac6",
+        "rawBytes": 1176071,
+        "rawSHA256": "1a47fd7703c40cf04e5fb3776c6d4183889fef8a27c33471ea943175b4a30ff8"
+      },
+      "snapshot": {
+        "name": "monetary-weighted_average.snapshot.json.gz",
+        "bytes": 13711,
+        "sha256": "da30f7fa40fd60338344b198ad56ed4baddc131518b9dc35286137e17f53d2cd",
+        "rawBytes": 190589,
+        "rawSHA256": "8c6cfb380807c8ab2dbf64e60b4e0d87e7782b5c5d2a08f4c337e41892bcd9e1"
+      }
+    },
+    "zero-existing-issue": {
+      "producer": {
+        "organizationId": 1,
+        "policyId": 2,
+        "outputId": 2,
+        "lineId": 3,
+        "zeroReceiptId": 1
+      },
+      "prerequisiteMigrationSHA": {
+        "0140_zero_value_disposals.py": "e8ad68283bfdc20c0e50d042ae8bd4eb265283312f05123fd6b7a70911770de0",
+        "0141_zero_value_output_cost.py": "db6be5cb438a489ae2abda7bb1d3cdecf20c3c2eafac74c2cb9cd5e9e350c30b",
+        "0142_zero_value_command_dates.py": "fa563c57a3f4bbbed3521a241f55372ae99b84dcce2f1ac07adffbb9188d4d0d",
+        "0143_zero_value_sales.py": "13f4ff92a31d7da04b4f78bbcc674f7bc3c944ccf730e7ea0ef5b0f62de5b730"
+      },
+      "originalProducerAssertionsPassed": true,
+      "archive": {
+        "name": "zero-existing-issue.dump.gz",
+        "bytes": 156402,
+        "sha256": "a324fb4a30581cdea733e438b2599195eaa1689d233170965f3a633fbc23ded7",
+        "rawBytes": 1163147,
+        "rawSHA256": "975deded5d82766672d8c253a173de3948ce61f8f2684701525f505b850a5436"
+      },
+      "snapshot": {
+        "name": "zero-existing-issue.snapshot.json.gz",
+        "bytes": 11772,
+        "sha256": "5c80e7131d31cc79793cab6ecdc7a35e6bd773757d1b5d44e465e32c8334b8b4",
+        "rawBytes": 168206,
+        "rawSHA256": "5c165a5cb5c43be173ba186255fb8cf712569b344195d47cc5947dd0409faef8"
+      }
+    }
+  },
+  "producerCommit": "7c71fb445f86bba8ce358fdc16c8b577bd1a7544",
+  "consumerCommit": "83706c062349bfd983933bf58b916b4eba6fbdf8",
+  "consumerManifestSHA256": "28481654401e7bda51f120d924274dca2e354bc36c723e0d9f1981e75b55457f"
+}

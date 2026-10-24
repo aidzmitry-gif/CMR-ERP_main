@@ -1,0 +1,201 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Synthetic historical 0145 migration consumer; immutable business sources, no producer",
+  "files": [
+    {
+      "path": "core/__init__.py",
+      "bytes": 109,
+      "sha256": "c3d87ed1a725147d4cf3b3c7eab44a0e523ab1a6a4e32ae4d2a3b34238fc5eab"
+    },
+    {
+      "path": "core/db/__init__.py",
+      "bytes": 105,
+      "sha256": "20ab2e55d9c3ba4b474ab749458b0564008613600e653b58d0eab643f8c38ee8"
+    },
+    {
+      "path": "core/db/base.py",
+      "bytes": 1104,
+      "sha256": "bd55d885c6900ef4c0f435f306e7ec794d4717d6a02807a11ec923aeed03f04f"
+    },
+    {
+      "path": "core/domain/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "core/domain/reference.py",
+      "bytes": 14290,
+      "sha256": "17c2fa4720211932b41f4a4a839a2775887bece53e499f0c4905fb5980b98cef"
+    },
+    {
+      "path": "core/services/__init__.py",
+      "bytes": 84,
+      "sha256": "6a603610407832de8901b15416296e862cb9cbb41f46ecb02cf7f7285301e840"
+    },
+    {
+      "path": "core/services/procurement.py",
+      "bytes": 3213,
+      "sha256": "1b6f2c0f3ed3f0af6e78a1cd6903c08597adbeaa82b16b75955d20396b27c860"
+    },
+    {
+      "path": "modules/__init__.py",
+      "bytes": 110,
+      "sha256": "af39ce7bfc310b25be572dd14291d58ddd23f761f3eda090f4457ebf79ead042"
+    },
+    {
+      "path": "modules/accounting/__init__.py",
+      "bytes": 78,
+      "sha256": "295b33313558a34b0e8242600a605cfc37cee7dfcb9280008320fe4c28c7ceeb"
+    },
+    {
+      "path": "modules/accounting/closing_commands.py",
+      "bytes": 739,
+      "sha256": "2743013abef9647152267365705a5528c4fac1e72a630b9ad7be418d7c29f482"
+    },
+    {
+      "path": "modules/accounting/financial_closing.py",
+      "bytes": 123,
+      "sha256": "07527bfcf4f33718e8b316d47bcb605fe66e616f5f50631c689cf704b5bf9240"
+    },
+    {
+      "path": "modules/accounting/inventory_allocation_loader.py",
+      "bytes": 12773,
+      "sha256": "82971c925dc2f44b06c956f8dcc4fe04d8ae13c12e0ecbdfb1bb65d57ad0dcad"
+    },
+    {
+      "path": "modules/accounting/inventory_allocation_receipts.py",
+      "bytes": 7357,
+      "sha256": "e8dd910a4cad013e53357248247783a03a84e5dc74dc8c310b86d80b5ca010bf"
+    },
+    {
+      "path": "modules/accounting/inventory_cost.py",
+      "bytes": 42679,
+      "sha256": "227b5ffb8a807ae3704f9a6ababb8e44ecae9c45657d7b98ae1799638f53adbc"
+    },
+    {
+      "path": "modules/accounting/inventory_issues.py",
+      "bytes": 14368,
+      "sha256": "54e6695507eaf3fa8111e61b1697594aea3d4610ba53265862904cef306db1eb"
+    },
+    {
+      "path": "modules/accounting/late_cost_allocation.py",
+      "bytes": 4439,
+      "sha256": "73d5dca7be40e6ff845dee5db6364d535f8f12b923f85b3b5ec91b9d56bad8ad"
+    },
+    {
+      "path": "modules/accounting/late_cost_disposals.py",
+      "bytes": 1939,
+      "sha256": "d745c89e644bfbe1d9f63cfb40ee16194a437fbfe6e5995b87be98a8f017a074"
+    },
+    {
+      "path": "modules/accounting/late_cost_posting.py",
+      "bytes": 4714,
+      "sha256": "9e3fe53a68c5e459b4ca78f812e030054fffe73ef495f40b23b3a5b241b967e7"
+    },
+    {
+      "path": "modules/accounting/late_cost_preview.py",
+      "bytes": 6455,
+      "sha256": "7ee39d37e6095cc9bf5a321fb0fb0e9e4fab5c608b23bd6ccc99484127a64439"
+    },
+    {
+      "path": "modules/accounting/late_cost_receipts.py",
+      "bytes": 3625,
+      "sha256": "e62740fc149470012aa818d57e247b93c1661fa87f5d3162a006502913416a26"
+    },
+    {
+      "path": "modules/accounting/late_cost_sources.py",
+      "bytes": 8771,
+      "sha256": "7248ef6a50dd901a3b6b87e5c77b845acbf3602cf822bf1c75d34f33939c77d7"
+    },
+    {
+      "path": "modules/accounting/late_cost_trace.py",
+      "bytes": 5387,
+      "sha256": "cde6172243d1b9569b1fa97ba89ce1ea47e27cb3a0c5f1c5afd1c04fa49aca99"
+    },
+    {
+      "path": "modules/accounting/models.py",
+      "bytes": 58166,
+      "sha256": "cb8daf32f05741b3ae08d99debed9d607d0bbbe8ad4716ace71b563bf87f7945"
+    },
+    {
+      "path": "modules/accounting/production_cost_policy.py",
+      "bytes": 1770,
+      "sha256": "409e8985142191bcaf009d20ff19da05687d159cc72e805f78c9cafa10ef3533"
+    },
+    {
+      "path": "modules/accounting/production_cost_sources.py",
+      "bytes": 6198,
+      "sha256": "90ab939a62276869988dcb0e26e19b14a5f9a313b0046904a5eda97a84d94575"
+    },
+    {
+      "path": "modules/accounting/production_output_cost.py",
+      "bytes": 12020,
+      "sha256": "e81ebad262f3984c6ac6154ca6626bf9a58f34bb47b48854d092e6c8db72d04d"
+    },
+    {
+      "path": "modules/accounting/production_output_cost_workflow.py",
+      "bytes": 11033,
+      "sha256": "a13ea246136b82f5de425617daf4f7d80e313604fe0a3417806f6ae509d931c7"
+    },
+    {
+      "path": "modules/accounting/production_output_inventory.py",
+      "bytes": 5430,
+      "sha256": "f0804ac362dae41c33b1a0a16ae5422f028396826e537e2107ab6dda245f2100"
+    },
+    {
+      "path": "modules/accounting/production_output_revisions.py",
+      "bytes": 4071,
+      "sha256": "fa888f5f464312c03f50ad9aa319ca7e82d6b234ac4b90d3a0b5117251e61ec7"
+    },
+    {
+      "path": "modules/accounting/production_output_transfer.py",
+      "bytes": 16266,
+      "sha256": "d6d7d8d7bbec1cc68cf4b1706c1c2dee37e08d9ccbf70c75a0341256610c97a5"
+    },
+    {
+      "path": "modules/accounting/purchases.py",
+      "bytes": 5178,
+      "sha256": "69b83d616f99ab64f659b1da45a01a032c1d2350a0db56d5286d7c2ddfee0c39"
+    },
+    {
+      "path": "modules/accounting/sales.py",
+      "bytes": 12888,
+      "sha256": "320c333dc144770a077638f2e5a7678b197e329300335610b5dcb1ebc4439168"
+    },
+    {
+      "path": "modules/accounting/schemas.py",
+      "bytes": 16863,
+      "sha256": "d5d3940432dfc183d2237b15c29f1b2d4e95d70e321268f9ada25e84fe31987c"
+    },
+    {
+      "path": "modules/accounting/service.py",
+      "bytes": 17339,
+      "sha256": "9c66beb11bf21d377e9ed494b1af50940bdb3f1578c19dff620afd662f431d94"
+    },
+    {
+      "path": "modules/accounting/shipment_commands.py",
+      "bytes": 6855,
+      "sha256": "ecd9cb9579478c19126626435b3d45145c76573a50bcc516cf598c5c4e3491c0"
+    },
+    {
+      "path": "modules/accounting/shipment_preview.py",
+      "bytes": 13616,
+      "sha256": "19905819553d25691e4cad6a6579e92ffb9c8908ecea6333f1e23ffae66c54fc"
+    },
+    {
+      "path": "modules/accounting/specific_zero_value_issue.py",
+      "bytes": 9461,
+      "sha256": "8185825a7a0fe37b91943be0f47e52a59387167d7c53db0ac27cddec0886b454"
+    },
+    {
+      "path": "modules/accounting/zero_value_disposals.py",
+      "bytes": 19044,
+      "sha256": "5b2d4ecadacaf7e4fd3f5bc04dc64c4d4ae320fc2df43364ac0ddc42b922a865"
+    }
+  ],
+  "runnerSHA": "73d995a97b8842f944de0f66de275d66cf9bbeed1102b65e2bd6e1c14db9d00e",
+  "sourceConsumerCommit": "83706c062349bfd983933bf58b916b4eba6fbdf8",
+  "producerIncluded": false,
+  "currentFallbackAllowed": false,
+  "publicPrivacyAccepted": true
+}

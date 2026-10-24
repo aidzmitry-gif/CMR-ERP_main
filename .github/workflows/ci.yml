@@ -100,13 +100,21 @@ jobs:
       - name: Create isolated accounting acceptance database
         run: |
           python - <<'PY'
+          import os
+          import uuid
           import psycopg
+          from psycopg import sql
+          owner = uuid.uuid4().hex
           with psycopg.connect("postgresql://aios:aios@localhost:5432/aios", autocommit=True) as connection:
               connection.execute("CREATE DATABASE accounting_test")
+              connection.execute(sql.SQL("COMMENT ON DATABASE accounting_test IS {}").format(sql.Literal("crm-registered-head:" + owner)))
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              print("REGISTERED_HEAD_TEST_OWNER=" + owner, file=output)
           PY
       - name: Tests with coverage (unit + api + integration)
         env:
           PRODUCER_PG_EVIDENCE_DIR: ${{ runner.temp }}/producer-pg-evidence
+          ACCOUNTING_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
         run: >-
           pytest -q
           --cov --cov-branch
