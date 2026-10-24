@@ -12,6 +12,7 @@ from tests.accounting.test_zero_value_output_cost_postgres import run_migration
 pytestmark = pytest.mark.integration
 
 
+@pytest.mark.parametrize("pg_factory", ["legacy_0139"], indirect=True)
 async def test_explicit_allocation_guard_empty_roundtrip(pg_factory):
     async with pg_factory() as session:
         await run_migration(session, "0144_inventory_explicit_allocation_guards.py", "upgrade")
@@ -24,9 +25,6 @@ async def test_explicit_allocation_guard_empty_roundtrip(pg_factory):
 
 @pytest.mark.parametrize("mutation", [None, "missing_marker", "null_marker", "wrong_source", "wrong_total", "duplicate_source", "credit_quantity"])
 async def test_explicit_mixed_packet_guard_at_commit(pg_factory, pg_book, posting, mutation):
-    async with pg_factory() as session:
-        await run_migration(session, "0144_inventory_explicit_allocation_guards.py", "upgrade")
-        await session.commit()
 
     def prepare_packet(cost, package):
         package = package.model_copy(update={"rule_version": package.rule_version + ":a1"})
@@ -60,9 +58,6 @@ async def test_explicit_mixed_packet_guard_at_commit(pg_factory, pg_book, postin
 
 @pytest.mark.parametrize("method,sale", [("fifo", False), ("fifo", True), ("weighted_average", True)])
 async def test_guarded_fifo_and_sale_preserve_mixed_remaining_cost(pg_factory, pg_book, posting, method, sale):
-    async with pg_factory() as session:
-        await run_migration(session, "0144_inventory_explicit_allocation_guards.py", "upgrade")
-        await session.commit()
     await save_mixed_weighted_receipt(pg_factory, pg_book, posting, method=method, sale=sale,
         prepare_packet=lambda cost, package: package.model_copy(update={"rule_version": package.rule_version + ":a1"}))
 
@@ -70,9 +65,6 @@ async def test_guarded_fifo_and_sale_preserve_mixed_remaining_cost(pg_factory, p
 async def test_loader_rejects_self_consistent_but_overpriced_saved_cost(pg_factory, pg_book, posting):
     from decimal import Decimal
 
-    async with pg_factory() as session:
-        await run_migration(session, "0144_inventory_explicit_allocation_guards.py", "upgrade")
-        await session.commit()
 
     def overpriced(cost, package):
         cost["inventory_layers"][0]["amount_byn"] = "0.02"

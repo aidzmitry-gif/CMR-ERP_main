@@ -82,6 +82,9 @@ async def test_saved_mixed_weighted_receipt_loader_replays_zero_portion_once(pg_
 async def save_mixed_weighted_receipt(pg_factory, pg_book, posting, *, prepare_packet=None,
                                      method="weighted_average", sale=False):
     """Synthetic immutable mixed-cent receipt -> loader -> next weighted issue replay."""
+    from core.domain.models import Sku
+    from modules.wms.models import WarehouseDirectory
+
     async with pg_factory() as session:
         from sqlalchemy import text
 
@@ -89,6 +92,23 @@ async def save_mixed_weighted_receipt(pg_factory, pg_book, posting, *, prepare_p
 
         if not await session.scalar(text("SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt') IS NOT NULL")):
             await run_migration(session, "0140_zero_value_disposals.py", "upgrade")
+        warehouse = await session.scalar(select(WarehouseDirectory).where(
+            WarehouseDirectory.organization_id == pg_book[0], WarehouseDirectory.name == "W"))
+        if warehouse is None:
+            warehouse = WarehouseDirectory(
+                organization_id=pg_book[0], name="W", title="Synthetic allocation warehouse",
+                is_active=True, created_by="tester")
+            session.add(warehouse)
+        sku = await session.scalar(select(Sku).where(Sku.code == "SKU"))
+        if sku is None:
+            sku = Sku(code="SKU", title="Synthetic allocation item", unit="шт", is_active=True)
+            session.add(sku)
+        await session.flush()
+        assert warehouse.is_active and sku.is_active
+        identities = {
+            "warehouse_identity": {"id": warehouse.id, "name": warehouse.name, "title": warehouse.title},
+            "sku_identity": {"id": sku.id, "code": sku.code, "title": sku.title, "unit": sku.unit},
+        }
         policy_id = (await session.scalar(select(func.max(models.Policy.id))) or 0) + 1
         account_id = (await session.scalar(select(func.max(models.Account.id))) or 0) + 1
         policy = models.Policy(id=policy_id, organization_id=pg_book[0], effective_from=date(2026, 2, 1),
@@ -105,7 +125,7 @@ async def save_mixed_weighted_receipt(pg_factory, pg_book, posting, *, prepare_p
         document = InventoryIssueDocument(source="allocation-weighted-cent", source_version=1,
             document_date="2026-09-03", operation_date="2026-09-03", posting_date="2026-09-03", policy_id=policy_id,
             account="41.2", warehouse="W", sku="SKU", lot="", quantity="3.1" if method == "fifo" else "2", expense_account="90.4",
-            expense_dimensions={}, explanation="Synthetic explicit allocation")
+            expense_dimensions={}, explanation="Synthetic explicit allocation", **identities)
         rows = (await session.execute(select(models.Entry, models.Line).join(models.Line, models.Line.entry_id == models.Entry.id).where(
             models.Entry.organization_id == pg_book[0], models.Line.account_code == "41.2").order_by(
             models.Entry.posting_date, models.Entry.id, models.Line.id))).all()
