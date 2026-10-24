@@ -12,7 +12,7 @@ from modules.sales.reservation_source import SalesReservationSource
 from modules.wms.invoice_remainder import RemainderRelease, RemainderReleaseLine
 from modules.wms.invoice_reservations import ReserveInput, invoice_availability, reserve
 from modules.wms.invoice_shipments import PhysicalShipmentAct
-from modules.wms.models import StockMovement, Task
+from modules.wms.models import StockMovement, Task, WarehouseDirectory
 from modules.wms.reservation_events import apply
 from tests.reservation_source import invoice
 from tests.test_invoice_physical_shipments import endpoint, request
@@ -25,6 +25,8 @@ async def prepared_six(api, session):
     org = response.json()['id']
     await invoice(session, 1, [{"sku_code": "A", "qty": "3"}, {"sku_code": "A", "qty": "3"}], org)
     session.add(StockMovement(organization_id=org, sku_code="A", warehouse="W", kind="in", qty=10, reason="receipt"))
+    session.add(WarehouseDirectory(organization_id=org, name="W", title="Synthetic W",
+        is_active=True, wms_enabled=True, prohibit_negative_stock=True, created_by="allocator"))
     await session.commit()
     actor = await AccountingService().source_member(session, org, CurrentUser("allocator", ["director"]))
     facts = await SalesReservationSource().invoice_reservation(session, 1)

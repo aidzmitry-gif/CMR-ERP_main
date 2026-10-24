@@ -233,20 +233,14 @@ async def test_event_only_legacy_pick_remains_assignable_but_not_directly_consum
 
 
 @pytest.mark.parametrize("enabled",[False,True])
-async def test_receipt_stock_is_independent_of_optional_putaway(api,session,services,enabled,monkeypatch):
+async def test_receipt_stock_is_independent_of_optional_putaway(api,session,services,enabled):
     from modules.wms.models import ReceiptLine
     from modules.wms.primary_receipts import create_from_primary
-    from tests import test_wms_primary_receipts as receipt_fixture
     from tests.test_wms_primary_receipts import command
     from tests.test_wms_primary_receipts import setup as receipt_setup
-    original_document = receipt_fixture.document
-    def selected_warehouse_document():
-        data = original_document()
-        data.update(warehouse="Main", warehouse_title="Main warehouse")
-        return data
-    monkeypatch.setattr(receipt_fixture, "document", selected_warehouse_document)
     org,source,core,user,_=await receipt_setup(api,session,services)
-    warehouse=await session.scalar(select(WarehouseDirectory).where(WarehouseDirectory.organization_id==org))
+    warehouse=await session.scalar(select(WarehouseDirectory).where(
+        WarehouseDirectory.organization_id==org, WarehouseDirectory.id==command().warehouse_id))
     warehouse.wms_enabled=enabled
     binding=await create_from_primary(session,core,user,org,source,command())
     line=await session.get(ReceiptLine,binding.line_bindings[0]["receipt_line_id"])

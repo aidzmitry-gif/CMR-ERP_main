@@ -138,9 +138,18 @@ async def test_finished_goods_sale_uses_immutable_output_layer_and_replays(pg_fa
 
 
 @pytest.mark.parametrize("method", ["specific", "fifo", "weighted_average"])
-async def test_output_cost_preview_authenticates_late_wip_and_sale_destinations(pg_factory, pg_book, method):
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_output_cost_preview_authenticates_late_wip_and_sale_destinations(pg_factory, pg_book, method, issuance_pg):
     """2 units / 100, one sale / 50, then WIP +20 -> +10 stock and +10 expense."""
-    policy_id = await _confirm_output(pg_factory, pg_book, method)
+    from tests.accounting.test_inventory_allocation_cost_stream_postgres import single_actual_output
+
+    output_entry_id = await single_actual_output(
+        pg_factory, pg_book, issuance_pg[0], method=method, normative_verified=False)
+    async with pg_factory() as session:
+        output = (await session.scalars(select(ProductionOutputTransferReceipt).where(
+            ProductionOutputTransferReceipt.organization_id == pg_book[0],
+            ProductionOutputTransferReceipt.entry_id == output_entry_id))).one()
+        policy_id = ProductionOutputTransferConfirmInput.model_validate(output.command).policy_id
     document = sale_document(policy_id)
     async with pg_factory() as session:
         await _upgrade_output_cost_revision(session)
@@ -262,14 +271,27 @@ async def _output_cost_command(session, org_id, receipt_id):
     )
 
 
-async def test_output_cost_confirm_same_command_concurrently_creates_one_revision(pg_factory, pg_book):
+async def _confirm_actual_output_policy(factory, book, app):
+    from tests.accounting.test_inventory_allocation_cost_stream_postgres import single_actual_output
+
+    output_entry_id = await single_actual_output(
+        factory, book, app, method="specific", normative_verified=False)
+    async with factory() as session:
+        output = (await session.scalars(select(ProductionOutputTransferReceipt).where(
+            ProductionOutputTransferReceipt.organization_id == book[0],
+            ProductionOutputTransferReceipt.entry_id == output_entry_id))).one()
+        return ProductionOutputTransferConfirmInput.model_validate(output.command).policy_id
+
+
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_output_cost_confirm_same_command_concurrently_creates_one_revision(pg_factory, pg_book, issuance_pg):
     """Two sessions retrying one request key serialize to the same immutable revision."""
     from sqlalchemy import func
 
     from modules.accounting.models import Entry, ProductionOutputCostRevision
     from modules.accounting.production_output_cost_workflow import confirm_output_cost_correction
 
-    policy_id = await _confirm_output(pg_factory, pg_book)
+    policy_id = await _confirm_actual_output_policy(pg_factory, pg_book, issuance_pg[0])
     async with pg_factory() as session:
         output = await session.scalar(select(ProductionOutputTransferReceipt).where(
             ProductionOutputTransferReceipt.organization_id == pg_book[0]))
@@ -305,11 +327,12 @@ async def test_output_cost_confirm_same_command_concurrently_creates_one_revisio
         )) == 1
 
 
-async def test_negative_output_cost_revision_changes_future_sale_not_historical_replay(pg_factory, pg_book):
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_negative_output_cost_revision_changes_future_sale_not_historical_replay(pg_factory, pg_book, issuance_pg):
     """A -20 WIP revision makes remaining stock 40 while the old sale stays 50."""
     from modules.accounting.production_output_cost_workflow import confirm_output_cost_correction
 
-    policy_id = await _confirm_output(pg_factory, pg_book)
+    policy_id = await _confirm_actual_output_policy(pg_factory, pg_book, issuance_pg[0])
     document = sale_document(policy_id)
     async with pg_factory() as session:
         prepared = await sales.prepare(session, pg_book[0], document)
@@ -373,7 +396,8 @@ async def test_output_cost_revision_downgrade_preserves_populated_history(pg_fac
         assert await session.get(Entry, entry_id) is not None
 
 
-async def test_empty_output_cost_revision_downgrades_and_upgrades(pg_factory, pg_book):
+@pytest.mark.parametrize("pg_factory", ["legacy_0139"], indirect=True)
+async def test_empty_output_cost_revision_downgrades_and_upgrades(pg_factory):
     async with pg_factory() as session:
         await _upgrade_output_cost_revision(session)
         await _run_output_cost_revision_migration(session, "downgrade")
@@ -385,6 +409,7 @@ async def test_empty_output_cost_revision_downgrades_and_upgrades(pg_factory, pg
         await session.commit()
 
 
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
 async def test_output_cost_correction_marks_downstream_output_stale_without_rewriting_material_history(issuance_pg, pg_book):
     """Real output -> accepted WMS receipt -> material issue -> second output."""
     from types import SimpleNamespace
@@ -419,7 +444,7 @@ async def test_output_cost_correction_marks_downstream_output_stale_without_rewr
         prepare_output,
     )
     from modules.wms.events import on_goods_received
-    from modules.wms.models import Location, Receipt, ReceiptLine
+    from modules.wms.models import Location, Receipt, ReceiptLine, WarehouseDirectory
     from modules.wms.production_material_issues import (
         ProductionMaterialIssueCommand,
         record_material_issue,
@@ -434,7 +459,10 @@ async def test_output_cost_correction_marks_downstream_output_stale_without_rewr
     await _seed_wip(factory, pg_book, policy_id)
     async with factory() as session:
         place = Location(warehouse="Main", code="COST-CHAIN")
-        session.add_all([place, Sku(code="SYN-WIDGET", title="First output", unit="шт"),
+        session.add_all([place, WarehouseDirectory(organization_id=pg_book[0], name="Main",
+                            title="Synthetic cost-chain warehouse", wms_enabled=True,
+                            prohibit_negative_stock=True, is_active=True, created_by="tester"),
+                        Sku(code="SYN-WIDGET", title="First output", unit="шт"),
                         Sku(code="SYN-WIDGET-2", title="Second output", unit="шт")])
         for order_id, qty in ((42, 2), (43, 1)):
             order = ProductionOrder(id=order_id, number=f"COST-CHAIN-{order_id}", product="Cost-chain widget", qty=qty)
@@ -442,7 +470,6 @@ async def test_output_cost_correction_marks_downstream_output_stale_without_rewr
             await session.flush()
             await assign_order(session, gateway, pg_book[0], user, OwnershipCommand(order_id=order.id,
                 expected_digest=order_snapshot(order)[1], evidence="Reviewed cost-chain owner"))
-        await _upgrade_group_guard(session)
         await session.commit()
         place_id = place.id
 
@@ -546,8 +573,9 @@ async def test_output_cost_correction_marks_downstream_output_stale_without_rewr
         await session.commit()
 
 
-async def test_finished_goods_manual_layer_is_not_an_output_source(pg_factory, pg_book):
-    policy_id = await _confirm_output(pg_factory, pg_book)
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_finished_goods_manual_layer_is_not_an_output_source(pg_factory, pg_book, issuance_pg):
+    policy_id = await _confirm_actual_output_policy(pg_factory, pg_book, issuance_pg[0])
     async with pg_factory() as session:
         manual = PostingInput(
             source="manual:forged-fg", source_version=1, operation="manual", document_date="2026-10-31",
@@ -568,23 +596,84 @@ async def test_finished_goods_manual_layer_is_not_an_output_source(pg_factory, p
             ))
 
 
+async def _confirm_secondary_physical_output(factory, book, api, *, sku_code):
+    from uuid import uuid4
+
+    from core.domain.models import Sku
+    from core.services.auth import CurrentUser
+    from modules.accounting.gateway import AccountingService
+    from modules.production.accounting_ownership import (
+        OwnershipCommand,
+        assign_order,
+        order_snapshot,
+    )
+    from modules.production.models import ProductionOrder
+    from modules.production.output_documents import OutputCommand, confirm_output, prepare_output
+    from modules.wms.models import Location, Receipt, ReceiptLine, WarehouseDirectory
+
+    assert sku_code in {"SYN-WIDGET", "OTHER-WIDGET"}
+    core = api._transport.app.state.core
+    gateway, user = AccountingService(), CurrentUser("tester", ["director"])
+    warehouse = core.services.wms_reservations
+    async with factory() as session:
+        directory = (await session.scalars(select(WarehouseDirectory).where(
+            WarehouseDirectory.organization_id == book[0], WarehouseDirectory.name == "Main",
+            WarehouseDirectory.is_active.is_(True)))).one()
+        place = (await session.scalars(select(Location).where(
+            Location.warehouse == directory.name, Location.code == "SYN-OUTPUT"))).one()
+        sku = await session.scalar(select(Sku).where(Sku.code == sku_code))
+        if sku is None:
+            assert sku_code == "OTHER-WIDGET"
+            session.add(Sku(code=sku_code, title="Other widget", unit="шт"))
+        else:
+            assert sku.unit == "шт"
+        order = ProductionOrder(id=43, number="SYN-43", product="Other widget", qty=1)
+        session.add(order)
+        await session.flush()
+        await assign_order(session, gateway, book[0], user, OwnershipCommand(
+            order_id=order.id, expected_digest=order_snapshot(order)[1], evidence="Synthetic reviewed owner"))
+        physical = await prepare_output(session, gateway, book[0], user, OutputCommand(
+            request_id=uuid4(), order_id=order.id, expected_order_digest=order_snapshot(order)[1],
+            operation_date="2026-10-10", sku_code=sku_code, quantity="1.00", warehouse=directory.name,
+            location_id=place.id, lot="LOT-2", evidence="Synthetic reviewed secondary output"), warehouse_gateway=warehouse)
+        await confirm_output(session, gateway, book[0], user, physical.id, physical.digest,
+                             warehouse_gateway=warehouse)
+        document_id = physical.id
+        await session.commit()
+    assert await core.event_bus.relay_pending(factory, core.services, event_types=("production.output.confirmed",)) == 1
+    async with factory() as session:
+        receipt_id, line_id = (await session.execute(select(Receipt.id, ReceiptLine.id).join(
+            ReceiptLine, ReceiptLine.receipt_id == Receipt.id).where(
+                Receipt.organization_id == book[0], Receipt.entity_ref == f"production_output:{document_id}"))).one()
+    path = f"/wms/receipts/{receipt_id}"
+    detail = await api.get(path)
+    assert detail.status_code == 200, detail.text
+    qc = await api.post(path + "/qc", json={"expected_revision": detail.json()["qc_revision"], "decisions": [
+        {"line_id": line_id, "accepted_qty": "1.00", "rejected_qty": "0.00", "reject_reason": "Synthetic accepted output"}]})
+    assert qc.status_code == 200, qc.text
+    accepted = await api.post(path + "/accept")
+    assert accepted.status_code == 200, accepted.text
+    return document_id
+
+
 @pytest.mark.parametrize("method", ["specific", "fifo", "weighted_average"])
-async def test_unrelated_stale_output_does_not_block_selected_finished_goods(pg_factory, pg_book, method):
-    policy_id = await _confirm_output(pg_factory, pg_book, method)
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_unrelated_stale_output_does_not_block_selected_finished_goods(pg_factory, pg_book, method, issuance_pg):
+    from tests.accounting.test_inventory_allocation_cost_stream_postgres import single_actual_output
 
-    class OtherProduction(SyntheticProduction):
-        async def cost_orders(self, _session, _organization_id, _order_ids):
-            return [{"order_id": 43, "product": "Other widget", "quantity": "1.00"}]
-
-        async def output_reconciliation(self, _session, _organization_id, _order_id, _warehouse):
-            return {"planned_quantity": "1.00", "confirmed_quantity": "1.00", "accepted_quantity": "1.00",
-                    "rejected_quantity": "0.00", "pending_quantity": "0.00", "sku_code": "OTHER-WIDGET",
-                    "unit": "шт", "lot": "LOT-2", "documents": [{"document_id": 102, "operation_date": "2026-10-10"}]}
-
-    other = OtherProduction()
+    output_entry_id = await single_actual_output(
+        pg_factory, pg_book, issuance_pg[0], method=method, normative_verified=False)
+    async with pg_factory() as session:
+        output = (await session.scalars(select(ProductionOutputTransferReceipt).where(
+            ProductionOutputTransferReceipt.organization_id == pg_book[0],
+            ProductionOutputTransferReceipt.entry_id == output_entry_id))).one()
+        policy_id = ProductionOutputTransferConfirmInput.model_validate(output.command).policy_id
+    document_id = await _confirm_secondary_physical_output(pg_factory, pg_book, issuance_pg[0], sku_code="OTHER-WIDGET")
+    core = issuance_pg[0]._transport.app.state.core
+    other, warehouse = core.services.production_output, core.services.wms_reservations
     command = ProductionOutputTransferConfirmInput.model_validate({
         "policy_id": policy_id, "order_id": 43, "analytical_order": "ORDER-43", "department": "SHOP",
-        "warehouse": "Main", "posting_date": "2026-10-31", "output_document_ids": [102],
+        "warehouse": "Main", "posting_date": "2026-10-31", "output_document_ids": [document_id],
         "basis_digest": "0" * 64, "digest": "0" * 64,
     })
     async with pg_factory() as session:
@@ -596,7 +685,7 @@ async def test_unrelated_stale_output_does_not_block_selected_finished_goods(pg_
                 LineInput(account="60", side="credit", amount="10.00", dimensions={}),
             ],
         ), "tester")
-        preview = await prepare_output_transfer(session, pg_book[0], "2026-10", command, other, object())
+        preview = await prepare_output_transfer(session, pg_book[0], "2026-10", command, other, warehouse)
         command = ProductionOutputTransferConfirmInput.model_validate({**command.model_dump(mode="json"),
                                                                          "basis_digest": preview["basis_digest"], "digest": preview["digest"]})
         await session.commit()
@@ -604,7 +693,7 @@ async def test_unrelated_stale_output_does_not_block_selected_finished_goods(pg_
         from modules.accounting.production_output_transfer import confirm_output_transfer
 
         await confirm_output_transfer(session, pg_book[0], "2026-10", command, "tester", production=other,
-                                      warehouse_gateway=object())
+                                      warehouse_gateway=warehouse)
         await service.post(session, pg_book[0], PostingInput(
             source="production:late-cost:43", source_version=1, operation="manual", document_date="2026-10-31",
             operation_date="2026-10-31", posting_date="2026-10-31", policy_id=policy_id,
@@ -616,22 +705,23 @@ async def test_unrelated_stale_output_does_not_block_selected_finished_goods(pg_
         assert (await sales.prepare(session, pg_book[0], sale_document(policy_id)))["cost"]["issue_cost_byn"] == "50.00"
 
 
-async def test_output_trace_maps_second_fifo_lot_to_aggregate_expense(pg_factory, pg_book):
-    policy_id = await _confirm_output(pg_factory, pg_book, "fifo")
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_output_trace_maps_second_fifo_lot_to_aggregate_expense(pg_factory, pg_book, issuance_pg):
+    from tests.accounting.test_inventory_allocation_cost_stream_postgres import single_actual_output
 
-    class OtherProduction(SyntheticProduction):
-        async def cost_orders(self, _session, _organization_id, _order_ids):
-            return [{"order_id": 43, "product": "Other widget", "quantity": "1.00"}]
-
-        async def output_reconciliation(self, _session, _organization_id, _order_id, _warehouse):
-            return {"planned_quantity": "1.00", "confirmed_quantity": "1.00", "accepted_quantity": "1.00",
-                    "rejected_quantity": "0.00", "pending_quantity": "0.00", "sku_code": "SYN-WIDGET",
-                    "unit": "шт", "lot": "LOT-2", "documents": [{"document_id": 102, "operation_date": "2026-10-10"}]}
-
-    other = OtherProduction()
+    output_entry_id = await single_actual_output(
+        pg_factory, pg_book, issuance_pg[0], method="fifo", normative_verified=False)
+    async with pg_factory() as session:
+        output = (await session.scalars(select(ProductionOutputTransferReceipt).where(
+            ProductionOutputTransferReceipt.organization_id == pg_book[0],
+            ProductionOutputTransferReceipt.entry_id == output_entry_id))).one()
+        policy_id = ProductionOutputTransferConfirmInput.model_validate(output.command).policy_id
+    document_id = await _confirm_secondary_physical_output(pg_factory, pg_book, issuance_pg[0], sku_code="SYN-WIDGET")
+    core = issuance_pg[0]._transport.app.state.core
+    other, warehouse = core.services.production_output, core.services.wms_reservations
     command = ProductionOutputTransferConfirmInput.model_validate({
         "policy_id": policy_id, "order_id": 43, "analytical_order": "ORDER-43", "department": "SHOP",
-        "warehouse": "Main", "posting_date": "2026-10-31", "output_document_ids": [102],
+        "warehouse": "Main", "posting_date": "2026-10-31", "output_document_ids": [document_id],
         "basis_digest": "0" * 64, "digest": "0" * 64,
     })
     async with pg_factory() as session:
@@ -643,7 +733,7 @@ async def test_output_trace_maps_second_fifo_lot_to_aggregate_expense(pg_factory
                 LineInput(account="60", side="credit", amount="50.00", dimensions={}),
             ],
         ), "tester")
-        preview = await prepare_output_transfer(session, pg_book[0], "2026-10", command, other, object())
+        preview = await prepare_output_transfer(session, pg_book[0], "2026-10", command, other, warehouse)
         command = ProductionOutputTransferConfirmInput.model_validate({**command.model_dump(mode="json"),
                                                                          "basis_digest": preview["basis_digest"], "digest": preview["digest"]})
         await session.commit()
@@ -651,7 +741,7 @@ async def test_output_trace_maps_second_fifo_lot_to_aggregate_expense(pg_factory
         from modules.accounting.production_output_transfer import confirm_output_transfer
 
         await confirm_output_transfer(session, pg_book[0], "2026-10", command, "tester", production=other,
-                                      warehouse_gateway=object())
+                                      warehouse_gateway=warehouse)
         await session.commit()
     async with pg_factory() as session:
         document = sales.SaleDocument.model_validate({**sale_document(policy_id).model_dump(mode="json"),
@@ -676,7 +766,8 @@ async def test_output_trace_maps_second_fifo_lot_to_aggregate_expense(pg_factory
         assert disposal["destination_dimensions"] == {}
 
 @pytest.mark.parametrize("delta", [20, -20, 0])
-async def test_output_revision_sql_checks_exact_destinations(pg_factory, pg_book, delta):
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_output_revision_sql_checks_exact_destinations(pg_factory, pg_book, delta, issuance_pg):
     """Exercise the real revision INSERT, including balanced forged alternatives."""
     import copy
     from uuid import uuid4
@@ -686,7 +777,7 @@ async def test_output_revision_sql_checks_exact_destinations(pg_factory, pg_book
 
     from modules.accounting.models import Account, Entry, Line, ProductionOutputCostRevision
 
-    policy_id = await _confirm_output(pg_factory, pg_book)
+    policy_id = await _confirm_actual_output_policy(pg_factory, pg_book, issuance_pg[0])
     async with pg_factory() as session:
         await _upgrade_output_cost_revision(session)
         doc = sale_document(policy_id)
@@ -790,7 +881,8 @@ async def test_output_revision_sql_checks_exact_destinations(pg_factory, pg_book
             ("20", "credit", 20), ("43", "debit", 10), ("90.4", "debit", 10)]
     await insert_revision(sequence=2)
 
-async def test_output_revision_empty_matrix_records_no_fabricated_entry(pg_factory, pg_book):
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_output_revision_empty_matrix_records_no_fabricated_entry(pg_factory, pg_book, issuance_pg):
     from uuid import uuid4
 
     from sqlalchemy import func, text
@@ -798,7 +890,7 @@ async def test_output_revision_empty_matrix_records_no_fabricated_entry(pg_facto
 
     from modules.accounting.models import Entry, ProductionOutputCostRevision
 
-    await _confirm_output(pg_factory, pg_book)
+    await _confirm_actual_output_policy(pg_factory, pg_book, issuance_pg[0])
     async with pg_factory() as session:
         await _upgrade_output_cost_revision(session)
         output = await session.scalar(select(ProductionOutputTransferReceipt).where(

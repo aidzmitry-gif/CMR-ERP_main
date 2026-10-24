@@ -23,7 +23,7 @@ if not os.environ.get("ESCHF_TEST_DATABASE_URL"):
         allow_module_level=True,
     )
 
-from core.domain.models import OutboxEvent
+from core.domain.models import IdentityInvitationRequest, OutboxEvent, User
 from core.runtime.access import AccessControlMiddleware, build_prefix_map
 from core.runtime.core import Core
 from core.runtime.loader import load_modules
@@ -95,33 +95,50 @@ class SyntheticSourceProvider:
 
 @pytest_asyncio.fixture
 async def http(pg, value, monkeypatch):
-    settings = SimpleNamespace(auth_mode="dev")
-    monkeypatch.setattr("core.services.auth.get_settings", lambda: settings)
-    monkeypatch.setattr("core.runtime.access.get_settings", lambda: settings)
-    core = Core(
-        SimpleNamespace(
-            config=settings, event_bus=OutboxEventBus(), db=SimpleNamespace(session_factory=pg)
+    engine = pg.kw["bind"]
+    async with engine.begin() as connection:
+        for model in (User, IdentityInvitationRequest):
+            await connection.run_sync(model.__table__.create)
+    try:
+        async with pg.begin() as session:
+            session.add_all([
+                User(username="synthetic-" + name, full_name="Synthetic " + name,
+                     role=role, status="active", deal_visibility="all")
+                for name, role in (("accountant", "eschf_accountant"),
+                                   ("auditor", "eschf_auditor"),
+                                   ("worker", "eschf_worker"), ("sales", "sales"))
+            ])
+        settings = SimpleNamespace(auth_mode="dev")
+        monkeypatch.setattr("core.services.auth.get_settings", lambda: settings)
+        monkeypatch.setattr("core.runtime.access.get_settings", lambda: settings)
+        core = Core(
+            SimpleNamespace(
+                config=settings, event_bus=OutboxEventBus(), db=SimpleNamespace(session_factory=pg)
+            )
         )
-    )
-    load_modules(core, ["eschf"])
-    app = FastAPI()
-    app.state.core = core
-    app.state.eschf_source_provider = SyntheticSourceProvider(value)
-    app.state.eschf_evidence_adapter = SyntheticAdapter()
-    for registered in core.routers:
-        app.include_router(registered.router, prefix=registered.prefix)
-    app.add_middleware(AccessControlMiddleware, prefixes=build_prefix_map(core))
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://synthetic-local", headers=ACCOUNTANT
-    ) as client:
-        yield SimpleNamespace(
-            client=client,
-            app=app,
-            core=core,
-            provider=app.state.eschf_source_provider,
-            adapter=app.state.eschf_evidence_adapter,
-            settings=settings,
-        )
+        load_modules(core, ["eschf"])
+        app = FastAPI()
+        app.state.core = core
+        app.state.eschf_source_provider = SyntheticSourceProvider(value)
+        app.state.eschf_evidence_adapter = SyntheticAdapter()
+        for registered in core.routers:
+            app.include_router(registered.router, prefix=registered.prefix)
+        app.add_middleware(AccessControlMiddleware, prefixes=build_prefix_map(core))
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://synthetic-local", headers=ACCOUNTANT
+        ) as client:
+            yield SimpleNamespace(
+                client=client,
+                app=app,
+                core=core,
+                provider=app.state.eschf_source_provider,
+                adapter=app.state.eschf_evidence_adapter,
+                settings=settings,
+            )
+    finally:
+        async with engine.begin() as connection:
+            for model in (IdentityInvitationRequest, User):
+                await connection.run_sync(model.__table__.drop)
 
 
 async def counts(pg):
@@ -207,8 +224,9 @@ async def test_guest_unrelated_role_and_auditor_permissions_cover_every_route(ht
         (root + "/observations", {}),
     ]
     before = await counts(pg)
-    for role in ("", "sales", "eschf_auditor"):
-        headers = {"X-User-Roles": role}
+    for username, role in (("synthetic-guest", ""), ("synthetic-sales", "sales"),
+                           ("synthetic-auditor", "eschf_auditor")):
+        headers = {"X-User": username, "X-User-Roles": role}
         for path, body in writes:
             response = await http.client.post(path, json=body, headers=headers)
             assert response.status_code == 403, (role, path, response.text)
@@ -217,7 +235,7 @@ async def test_guest_unrelated_role_and_auditor_permissions_cover_every_route(ht
             assert response.status_code == (200 if role == "eschf_auditor" else 403)
     # The worker can reconcile, but cannot prepare/approve/sign/queue.
     for path, body in writes[:4] + [writes[5]]:
-        response = await http.client.post(path, json=body, headers={"X-User-Roles": "eschf_worker"})
+        response = await http.client.post(path, json=body, headers={"X-User": "synthetic-worker", "X-User-Roles": "eschf_worker"})
         assert response.status_code == 403, (path, response.text)
     assert await counts(pg) == before
     assert len(http.provider.calls) == 1
@@ -474,7 +492,7 @@ async def test_attempt_unknown_recovery_and_authenticated_synthetic_observation(
         )
     assert (await http.client.get(root)).status_code == 409
     response = await http.client.post(
-        root + "/recovery", json={}, headers={"X-User-Roles": "eschf_worker"}
+        root + "/recovery", json={}, headers={"X-User": "synthetic-worker", "X-User-Roles": "eschf_worker"}
     )
     assert response.status_code == 200
     assert (

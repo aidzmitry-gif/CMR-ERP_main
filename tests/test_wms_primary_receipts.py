@@ -27,12 +27,20 @@ async def setup(api, session, services):
     session.add(Supplier(id=1, counterparty_id=1, name="supplier1", unp="190000001", status="active"))
     source_sku = Sku(code="sku1", title="Synthetic receipt item", unit="кг")
     session.add(source_sku)
-    session.add(WarehouseDirectory(organization_id=org, name="Main", title="Main warehouse",
-                                   created_by="wms-owner-test"))
+    source_warehouse = WarehouseDirectory(organization_id=org, name="warehouse1", title="Synthetic warehouse",
+                                          created_by="wms-owner-test")
+    session.add(source_warehouse)
     await session.flush()
+    physical_warehouse = WarehouseDirectory(organization_id=org, name="Main", title="Main warehouse",
+                                            created_by="wms-owner-test")
+    session.add(physical_warehouse)
+    await session.flush()
+    assert (source_warehouse.id, physical_warehouse.id) == (1, 2)
     sku_id = source_sku.id
     await session.commit()
     data = document()
+    data.update(warehouse_id=source_warehouse.id, warehouse=source_warehouse.name,
+                warehouse_title=source_warehouse.title)
     data["items"][0]["sku_id"] = sku_id
     data["items"][0].update(quantity="2.00", unit="кг")
     response = await api.post(f"/procurement/organizations/{org}/receipt-documents", json={"key": "physical-source", "document": data})
@@ -44,7 +52,7 @@ async def setup(api, session, services):
 
 def command(quantity="1.25", **changes):
     return PrimaryReceiptCommand.model_validate({"request_key": str(uuid4()), "expected_version": 1,
-        "warehouse_id": 1, "warehouse": "Main", "evidence": "Synthetic explicit SKU and warehouse correspondence",
+        "warehouse_id": 2, "warehouse": "Main", "evidence": "Synthetic explicit SKU and warehouse correspondence",
         "lines": [{"position": 1, "sku_code": "WAREHOUSE-SKU", "quantity": quantity}], **changes})
 
 
@@ -89,7 +97,7 @@ async def test_physical_warehouse_catalog_is_company_scoped_and_replayable(api, 
     path = f"/wms/organizations/{org}"
     options = await api.get(path + "/warehouse-options")
     assert options.status_code == 200, options.text
-    assert [(row["id"], row["name"]) for row in options.json()["items"]] == [(1, "Main")]
+    assert [(row["id"], row["name"]) for row in options.json()["items"]] == [(2, "Main"), (1, "warehouse1")]
     created = await api.post(path + "/warehouses", json={"name": "Overflow", "title": "Overflow store"})
     assert created.status_code == 201, created.text
     assert created.json()["organization_id"] == org
