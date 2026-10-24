@@ -266,7 +266,7 @@ async def test_0145_keeps_existing_zero_issue_late_cost(pg_factory, tmp_path):
     await run_historical_case(pg_factory, tmp_path, "zero-existing-issue")
 
 
-async def single_actual_output(factory, book, api):
+async def single_actual_output(factory, book, api, *, method="weighted_average", normative_verified=False):
     """One accepted physical output, with its reviewed 100 BYN accounting transfer."""
     from core.domain.models import Sku
     from core.services.auth import CurrentUser
@@ -280,7 +280,7 @@ async def single_actual_output(factory, book, api):
     from modules.production.output_documents import OutputCommand, confirm_output, prepare_output
     from modules.wms.models import Location, Receipt, ReceiptLine, WarehouseDirectory
 
-    policy_id = await _seed_production_book(factory, book, "weighted_average")
+    policy_id = await _seed_production_book(factory, book, method, normative_verified=normative_verified)
     await _seed_wip(factory, book, policy_id)
     api.headers["X-User"] = "tester"
     core = api._transport.app.state.core

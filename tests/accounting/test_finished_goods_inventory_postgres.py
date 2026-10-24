@@ -87,8 +87,17 @@ def sale_document(policy_id):
     })
 
 
-async def test_finished_goods_sale_uses_immutable_output_layer_and_replays(pg_factory, pg_book):
-    policy_id = await _confirm_output(pg_factory, pg_book)
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_finished_goods_sale_uses_immutable_output_layer_and_replays(pg_factory, pg_book, issuance_pg):
+    from tests.accounting.test_inventory_allocation_cost_stream_postgres import single_actual_output
+
+    output_entry_id = await single_actual_output(
+        pg_factory, pg_book, issuance_pg[0], method="specific", normative_verified=False)
+    async with pg_factory() as session:
+        output = (await session.scalars(select(ProductionOutputTransferReceipt).where(
+            ProductionOutputTransferReceipt.organization_id == pg_book[0],
+            ProductionOutputTransferReceipt.entry_id == output_entry_id))).one()
+        policy_id = ProductionOutputTransferConfirmInput.model_validate(output.command).policy_id
     document = sale_document(policy_id)
     async with pg_factory() as session:
         prepared = await sales.prepare(session, pg_book[0], document)
