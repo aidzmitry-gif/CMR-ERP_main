@@ -713,7 +713,7 @@ async def test_payroll_applicability_review_postgres_guards(pg_factory, pg_book,
     from modules.hr.models import Employee
 
     root = tmp_path / "private-payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     org_id = pg_book[0]
     async with pg_factory() as session:
@@ -782,7 +782,7 @@ async def test_payroll_organization_review_postgres_guards(pg_factory, pg_book, 
     from modules.accounting.payroll_organization_review import create as review_rules
 
     root = tmp_path / "private-payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     org_id = pg_book[0]
     async with pg_factory() as session:
