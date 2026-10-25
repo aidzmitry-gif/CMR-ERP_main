@@ -3,12 +3,17 @@
 import clsx from "clsx";
 import { ArrowLeftRight, ArrowUpFromLine, RefreshCw, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { InstanceOrganizationGate } from "@/components/instance-organization-gate";
+import { fetchInstanceOrganization, type InstanceOrganization } from "@/lib/instance-organization";
 import { formatNumber } from "@/lib/format";
 import {
   adjustment,
   fetchMovements,
+  fetchLocations,
+  fetchOperationWarehouses,
+  type OperationWarehousePage,
   locationLabel,
   REASON_LABELS,
   reasonLabel,
@@ -155,44 +160,89 @@ const OPS: { id: OpKind; label: string; Icon: typeof ArrowUpFromLine }[] = [
   { id: "adjustment", label: "Коррекция", Icon: SlidersHorizontal },
 ];
 
-const EMPTY = { sku: "", qty: "", warehouse: "Главный", loc: "", locTo: "", batch: "", note: "" };
+const EMPTY = { sku: "", qty: "", warehouse: "", loc: "", locTo: "", batch: "", note: "" };
 
-export function WmsMovements({
-  initial,
-  locations,
-  organizations = [],
-}: {
-  initial: StockMovement[];
-  locations: WmsLocation[];
-  organizations?: { id: number; name: string }[];
-}) {
-  const [organizationId, setOrganizationId] = useState("");
-  const [rows, setRows] = useState<StockMovement[]>(initial);
+export function WmsMovements() {
+  return <InstanceOrganizationGate>{organization => <CompanyMovements key={organization.id} organization={organization} />}</InstanceOrganizationGate>;
+}
+
+function CompanyMovements({ organization }: { organization: InstanceOrganization }) {
+  const [rows, setRows] = useState<StockMovement[] | null>(null);
+  const [catalog, setCatalog] = useState<OperationWarehousePage | null>(null);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [contextError, setContextError] = useState("");
+  const [companyChanged, setCompanyChanged] = useState(false);
+  const generation = useRef(0);
+  const mounted = useRef(true);
+  const [locationState, setLocationState] = useState<{ warehouse: string; rows: WmsLocation[]; error: string; loading: boolean }>({ warehouse: "", rows: [], error: "", loading: false });
+  const [locationAttempt, setLocationAttempt] = useState(0);
   const [op, setOp] = useState<OpKind>("shipment");
   const [f, setF] = useState({ ...EMPTY });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const locsForWh = useMemo(
-    () => locations.filter((l) => l.is_active && (!f.warehouse || l.warehouse === f.warehouse)),
-    [locations, f.warehouse],
-  );
+  const loadContext = useCallback(async (query: string) => {
+    const request = ++generation.current;
+    try {
+      const [movements, warehouses] = await Promise.all([
+        fetchMovements(organization.id), fetchOperationWarehouses(organization.id, query),
+      ]);
+      if (request !== generation.current) return false;
+      setRows(movements);
+      setCatalog(warehouses);
+      setF(previous => warehouses.items.some(item => item.name === previous.warehouse)
+        ? previous : { ...previous, warehouse: "", loc: "", locTo: "" });
+      setContextError("");
+      return true;
+    } catch {
+      if (request === generation.current) setContextError("Не удалось обновить журнал или склады. Показаны ранее загруженные движения, если они есть. Запись недоступна до успешной загрузки.");
+      return false;
+    } finally {
+      if (request === generation.current) setLoading(false);
+    }
+  }, [organization.id]);
+
+  const invalidateRequests = useCallback(() => { generation.current++; }, []);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- State updates follow the awaited remote reads.
+    void loadContext("");
+    mounted.current = true;
+    return () => { mounted.current = false; invalidateRequests(); };
+  }, [loadContext, invalidateRequests]);
+
+  useEffect(() => {
+    let active = true;
+    if (f.warehouse) void fetchLocations(f.warehouse).then(rows => {
+      if (active) setLocationState({ warehouse: f.warehouse, rows, loading: false, error: "" });
+    }).catch(() => {
+      if (active) setLocationState({ warehouse: f.warehouse, rows: [], loading: false,
+        error: "Не удалось загрузить ячейки выбранного склада. Повторите загрузку перед записью." });
+    });
+    return () => { active = false; };
+  }, [f.warehouse, locationAttempt]);
+
+  const locationsLoading = !!f.warehouse && (locationState.warehouse !== f.warehouse || locationState.loading);
+  const locationsError = locationState.warehouse === f.warehouse ? locationState.error : "";
+  const locsForWh = locationState.warehouse === f.warehouse
+    ? locationState.rows.filter(location => location.is_active && location.warehouse === f.warehouse) : [];
+
+  function chooseWarehouse(name: string) {
+    setF(previous => ({ ...previous, warehouse: name, loc: "", locTo: "" }));
+    setLocationState({ warehouse: name, rows: [], error: "", loading: !!name });
+  }
 
   async function refresh() {
-    setBusy(true);
-    try {
-      setRows(await fetchMovements());
-      setMsg(null);
-    } catch {
-      setMsg({ ok: false, text: "Не удалось обновить журнал. Показаны ранее загруженные движения." });
-    } finally {
-      setBusy(false);
-    }
+    setLoading(true);
+    if (await loadContext(search)) setMsg(null);
+    setLocationState({ warehouse: f.warehouse, rows: [], error: "", loading: !!f.warehouse });
+    setLocationAttempt(value => value + 1);
   }
 
   async function submit() {
-    if (!organizationId) {
-      setMsg({ ok: false, text: "Выберите юрлицо операции" });
+    if (busy || loading || contextError || companyChanged || locationsLoading || locationsError) return;
+    if (!catalog?.items.some(item => item.name === f.warehouse)) {
+      setMsg({ ok: false, text: "Выберите склад операции" });
       return;
     }
     const quantity = f.qty.trim().replace(",", ".");
@@ -205,29 +255,42 @@ export function WmsMovements({
       setMsg({ ok: false, text: "Укажите SKU и количество" });
       return;
     }
+    if ((f.loc && !locsForWh.some(location => String(location.id) === f.loc))
+      || (op === "transfer" && (!f.loc || !f.locTo || f.loc === f.locTo
+        || !locsForWh.some(location => String(location.id) === f.locTo)))) {
+      setMsg({ ok: false, text: "Для перемещения выберите две разные ячейки выбранного склада" });
+      return;
+    }
+    const request = generation.current;
     setBusy(true);
     const loc = f.loc ? Number(f.loc) : null;
-    const base = { organization_id: Number(organizationId), sku_code: f.sku.trim(), qty, warehouse: f.warehouse.trim() || "Главный", batch_ref: f.batch.trim(), note: f.note.trim() };
+    const base = { organization_id: organization.id, sku_code: f.sku.trim(), qty, warehouse: f.warehouse, batch_ref: f.batch.trim(), note: f.note.trim() };
     try {
+      const current = await fetchInstanceOrganization();
+      if (request !== generation.current) return;
+      if (current.id !== organization.id || current.unp !== organization.unp) {
+        setCompanyChanged(true);
+        return;
+      }
       let ok = false;
       if (op === "shipment") ok = await shipment({ ...base, location_id: loc });
       else if (op === "adjustment") ok = await adjustment({ ...base, location_id: loc });
       else ok = await transfer({ ...base, from_location_id: loc, to_location_id: f.locTo ? Number(f.locTo) : null });
+      if (request !== generation.current) return;
       if (!ok) {
         setMsg({ ok: false, text: "Не удалось подтвердить запись. Обновите журнал перед повторной отправкой." });
         return;
       }
       setF({ ...EMPTY, warehouse: f.warehouse });
-      try {
-        setRows(await fetchMovements());
-        setMsg({ ok: true, text: "Движение записано" });
-      } catch {
-        setMsg({ ok: false, text: "Движение записано, но журнал не обновился. Нажмите «Обновить»; повторно записывать операцию не нужно." });
-      }
+      setLoading(true);
+      const loaded = await loadContext(search);
+      if (!mounted.current) return;
+      if (loaded) setMsg({ ok: true, text: "Движение записано" });
+      else setMsg({ ok: false, text: "Движение записано, но журнал не обновился. Нажмите «Обновить»; повторно записывать операцию не нужно." });
     } catch {
-      setMsg({ ok: false, text: "Не удалось подтвердить запись. Обновите журнал перед повторной отправкой." });
+      if (request === generation.current) setMsg({ ok: false, text: "Не удалось подтвердить запись. Обновите журнал перед повторной отправкой." });
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }
 
@@ -252,14 +315,18 @@ export function WmsMovements({
         </div>
       </div>
 
-      <label className="mt-4 block text-sm">Юрлицо операции
-        <select aria-label="Юрлицо операции" value={organizationId} disabled={busy} onChange={(event) => setOrganizationId(event.target.value)} className="ml-2 rounded-lg border border-line bg-surface p-2">
-          <option value="">Выберите юрлицо</option>
-          {organizations.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
-        </select>
-      </label>
+      {companyChanged && <p role="alert" className="mt-3 text-red-700">Юрлицо установки изменилось. Перезагрузите страницу перед записью.</p>}
+      {contextError && <p role="alert" className="mt-3 text-red-700">{contextError}</p>}
+      {loading && <p role="status">Загрузка журнала и складов…</p>}
+      {(catalog?.truncated || search) && <div className="mt-3 flex flex-wrap items-center gap-2">
+        <label>Поиск склада <input aria-label="Поиск склада" value={search} disabled={busy || loading} onChange={event => setSearch(event.target.value)} className="rounded-lg border border-line p-2" /></label>
+        <button disabled={busy || loading} onClick={() => { setLoading(true); void loadContext(search); }}>Найти склад</button>
+        {catalog?.truncated && <p>Показана часть складов. Уточните название для поиска.</p>}
+      </div>}
+      {locationsLoading && <p role="status">Загрузка ячеек склада…</p>}
+      {locationsError && <p role="alert" className="text-red-700">{locationsError}</p>}
       {/* Панель операции */}
-      <fieldset disabled={busy} className="mt-4 rounded-xl border border-line bg-surface p-4">
+      <fieldset disabled={busy || loading || !!contextError || companyChanged || locationsLoading || !!locationsError} className="mt-4 rounded-xl border border-line bg-surface p-4">
         <div className="inline-flex rounded-lg border border-line bg-sunken p-1">
           {OPS.map((o) => (
             <button
@@ -278,13 +345,16 @@ export function WmsMovements({
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
           <input value={f.sku} onChange={(e) => setF({ ...f, sku: e.target.value })} placeholder="Код SKU*" className="rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent" />
           <input value={f.qty} onChange={(e) => setF({ ...f, qty: e.target.value })} inputMode="decimal" placeholder={op === "adjustment" ? "Кол-во (±)" : "Кол-во*"} className="rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent" />
-          <input value={f.warehouse} onChange={(e) => setF({ ...f, warehouse: e.target.value, loc: "", locTo: "" })} placeholder="Склад" className="rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent" />
-          <select value={f.loc} onChange={(e) => setF({ ...f, loc: e.target.value })} className="rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent">
+          <select aria-label="Склад операции" value={f.warehouse} onChange={e => chooseWarehouse(e.target.value)} className="rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink">
+            <option value="">Выберите склад</option>
+            {catalog?.items.map(warehouse => <option key={warehouse.id} value={warehouse.name}>{warehouse.title}</option>)}
+          </select>
+          <select aria-label="Из ячейки" value={f.loc} onChange={(e) => setF({ ...f, loc: e.target.value })} className="rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent">
             <option value="">{op === "transfer" ? "Из ячейки" : "Ячейка"}</option>
             {locsForWh.map((l) => <option key={l.id} value={l.id}>{locationLabel(l)}</option>)}
           </select>
           {op === "transfer" ? (
-            <select value={f.locTo} onChange={(e) => setF({ ...f, locTo: e.target.value })} className="rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent">
+            <select aria-label="В ячейку" value={f.locTo} onChange={(e) => setF({ ...f, locTo: e.target.value })} className="rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink outline-none focus:border-accent">
               <option value="">В ячейку</option>
               {locsForWh.map((l) => <option key={l.id} value={l.id}>{locationLabel(l)}</option>)}
             </select>
@@ -301,7 +371,7 @@ export function WmsMovements({
       </fieldset>
 
       {/* Журнал движений */}
-      <MovementsLog rows={rows} />
+      {rows === null ? <p className="mt-4">Журнал ещё не загружен; наличие движений неизвестно.</p> : <MovementsLog rows={rows} />}
     </div>
   );
 }

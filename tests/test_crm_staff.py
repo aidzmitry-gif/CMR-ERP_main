@@ -9,6 +9,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.domain.models import AuditLog, User
 from core.runtime.app import create_app
@@ -53,7 +54,22 @@ class FakeCrmIdentityGateway:
 @pytest_asyncio.fixture
 async def crm_staff_api(session):
     app = create_app()
+    app.state.core.services.db.session_factory = async_sessionmaker(
+        session.bind, expire_on_commit=False
+    )
     gateway = FakeCrmIdentityGateway()
+
+    session.add(User(
+        username="director", full_name="Synthetic CRM operator", role="director", status="active"
+    ))
+    for role in (
+        "hr", "crm_invitation_operator", "sales_head", "sales", "identity_provisioner", "onboarding"
+    ):
+        session.add(User(
+            username=f"crm-test-{role}", full_name=f"Synthetic CRM {role}", role=role,
+            status="onboarding" if role == "onboarding" else "active",
+        ))
+    await session.commit()
 
     async def _session():
         yield session
@@ -102,14 +118,19 @@ async def test_crm_staff_rejects_non_super_and_onboarding(session, crm_staff_api
     session.add(employee)
     await session.commit()
 
-    denied = await api.get("/system/users/crm-staff", headers={"X-User-Roles": "sales"})
+    denied = await api.get(
+        "/system/users/crm-staff",
+        headers={"X-User": "crm-test-sales", "X-User-Roles": "sales"},
+    )
     assert denied.status_code == 403
+    assert denied.json()["detail"] == "Недостаточно прав: identity.invite.read"
     onboarding = await api.post(
         "/system/users/crm-staff",
-        headers={"X-User-Roles": "onboarding"},
+        headers={"X-User": "crm-test-onboarding", "X-User-Roles": "onboarding"},
         json={"full_name": "Нельзя"},
     )
     assert onboarding.status_code == 403
+    assert onboarding.json()["detail"] == "Доступ ограничен режимом ознакомления с системой"
 
 
 async def _active_sales_user(
@@ -213,10 +234,22 @@ async def test_access_management_denies_non_owner_roles(session, crm_staff_api, 
     employee, _ = await _active_sales_user(session)
     result = await api.post(
         f"/system/users/{employee.id}/crm-access",
-        headers={"X-User-Roles": roles, "Idempotency-Key": "crm-access-denied-001"},
+        headers={
+            "X-User": f"crm-test-{roles}", "X-User-Roles": roles,
+            "Idempotency-Key": "crm-access-denied-001",
+        },
         json={"enabled": False, "expected_current_status": "active"},
     )
     assert result.status_code == 403
+    details = {
+        "onboarding": {"Доступ ограничен режимом ознакомления с системой"},
+        "crm_invitation_operator": {"Доступна только подготовка приглашений CRM"},
+        "identity_provisioner": {"Технической identity-роли доступен только workflow приглашений"},
+    }
+    assert result.json()["detail"] in details.get(roles, {
+        "Недостаточно прав: identity.invite.activate",
+        "Изменять доступ может только руководитель доступа",
+    })
     assert gateway.access_calls == []
 
 
@@ -230,7 +263,10 @@ async def test_access_management_never_changes_owner_self_or_foreign_employee(
     if target == "director":
         user.role = "director"
     elif target == "self":
-        user.username = "director"
+        user.employee_id = None
+        actor = (await session.execute(select(User).where(User.username == "director"))).scalar_one()
+        actor.employee_id = employee.id
+        actor.department = "Продажи"
     else:
         user.department = "Финансы / офис"
     await session.commit()
@@ -240,6 +276,12 @@ async def test_access_management_never_changes_owner_self_or_foreign_employee(
         json={"enabled": False, "expected_current_status": "active"},
     )
     assert result.status_code == 403
+    details = {
+        "director": "Операция разрешена только для непривилегированной CRM-записи",
+        "self": "Нельзя менять собственный доступ",
+        "foreign": "Операция ограничена отделом CRM",
+    }
+    assert result.json()["detail"] == details[target]
     assert gateway.access_calls == []
 
 

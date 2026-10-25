@@ -9,6 +9,7 @@ import {
   fetchLocations,
   fetchLocationsServer,
   fetchMovements,
+  fetchOperationWarehouses,
   fetchMovementsServer,
   locationLabel,
   reasonLabel,
@@ -242,7 +243,7 @@ describe("клиентские fetch* через /api", () => {
 });
 
 describe("операции записи (POST /api/wms/*)", () => {
-  const input = { sku_code: "AKB-60", qty: 5, warehouse: "Минск", location_id: 3, batch_ref: "B-1", note: "прим" };
+  const input = { organization_id: 7, sku_code: "AKB-60", qty: 5, warehouse: "Минск", location_id: 3, batch_ref: "B-1", note: "прим" };
 
   it("shipment: правильный путь /api/wms/shipment", async () => {
     const fn = stubFetch({});
@@ -264,6 +265,7 @@ describe("операции записи (POST /api/wms/*)", () => {
 
   it("transfer: путь /api/wms/transfer, тело с from/to", async () => {
     const transferInput = {
+      organization_id: 7,
       sku_code: "AKB-60",
       qty: 2,
       warehouse: "Минск",
@@ -297,5 +299,57 @@ describe("операции записи (POST /api/wms/*)", () => {
   it("createLocation: сеть упала → false", async () => {
     stubFetchThrow();
     expect(await createLocation({ warehouse: "Минск", code: "A-03" })).toBe(false);
+  });
+});
+
+describe("qualified operation reads", () => {
+  const row = { ...movement, organization_id: 7 };
+  const warehouse = { id: 1, organization_id: 7, name: "Минск", title: "Минск", is_active: true, wms_enabled: false, prohibit_negative_stock: true };
+  const page = { organization_id: 7, items: [warehouse], truncated: true };
+  it("loads exact company movements", async () => {
+    const fn = stubFetch([row]); expect(await fetchMovements(7)).toEqual([row]);
+    expect(fn).toHaveBeenCalledWith("/api/wms/movements?organization_id=7", { cache: "no-store" });
+  });
+  it("rejects foreign movements", async () => {
+    stubFetch([{ ...row, organization_id: 8 }]); await expect(fetchMovements(7)).rejects.toThrow();
+  });
+  it("rejects malformed movement data rather than rendering false empty", async () => {
+    for (const data of [{ rows: [] }, [{ ...row, qty: "5" }], [{ ...row, note: null }]]) {
+      stubFetch(data); await expect(fetchMovements(7)).rejects.toThrow();
+    }
+  });
+  it("loads active locations of one encoded warehouse", async () => {
+    const fn = stubFetch([location]); expect(await fetchLocations("Минск")).toEqual([location]);
+    expect(fn).toHaveBeenCalledWith(`/api/wms/locations?warehouse=${encodeURIComponent("Минск")}&active=true`, { cache: "no-store" });
+  });
+  it("scoped locations fail closed on network or HTTP error", async () => {
+    stubFetchThrow(); await expect(fetchLocations("Минск")).rejects.toThrow();
+    stubFetch([], false); await expect(fetchLocations("Минск")).rejects.toThrow();
+  });
+  it("rejects foreign, inactive and malformed scoped locations", async () => {
+    for (const data of [[{ ...location, warehouse: "Другой" }], [{ ...location, is_active: false }], {}]) {
+      stubFetch(data); await expect(fetchLocations("Минск")).rejects.toThrow();
+    }
+  });
+  it("preserves partial catalog and uses exact company and search", async () => {
+    const fn = stubFetch(page); expect(await fetchOperationWarehouses(7, " Минск ")).toEqual(page);
+    expect(fn).toHaveBeenCalledWith(`/api/wms/organizations/7/warehouse-options?q=${encodeURIComponent("Минск")}`, { cache: "no-store" });
+  });
+  it("rejects foreign catalog or warehouse identity", async () => {
+    for (const data of [{ ...page, organization_id: 8 }, { ...page, items: [{ ...warehouse, organization_id: 8 }] }]) {
+      stubFetch(data); await expect(fetchOperationWarehouses(7)).rejects.toThrow();
+    }
+  });
+  it("rejects inactive duplicate malformed or oversized warehouse catalog", async () => {
+    for (const data of [{ ...page, items: [{ ...warehouse, is_active: false }] }, { ...page, items: [warehouse, warehouse] },
+      { ...page, truncated: null }, { ...page, items: Array(51).fill(warehouse) }]) {
+      stubFetch(data); await expect(fetchOperationWarehouses(7)).rejects.toThrow();
+    }
+  });
+  it("requires valid scope before reads and preserves directory refusal", async () => {
+    const fn = stubFetch([], false);
+    await expect(fetchOperationWarehouses(0)).rejects.toThrow(); await expect(fetchMovements(-1)).rejects.toThrow();
+    await expect(fetchLocations(" ")).rejects.toThrow(); expect(fn).not.toHaveBeenCalled();
+    await expect(fetchOperationWarehouses(7)).rejects.toThrow();
   });
 });

@@ -100,17 +100,26 @@ export interface CyclePlan {
 }
 
 export interface Dashboard {
+  organization_id: number;
+  report_date: string;
+  period_start: string;
+  period_end: string;
+  period_basis: "stored_registration_date";
   receipts_pending_qc: number;
   tasks_putaway_open: number;
   tasks_pick_open: number;
-  alerts_count: number;
-  alerts_deficit_value: number; // Σ дефицит×себес 1С; 0 без шлюза
-  inventory_value: number; // оценка остатка WMS в деньгах (1С-себес); 0 без шлюза
   inventories_open: number;
-  recon_max_diff_value: number;
-  recon_total_diff_value: number;
-  movements_today_in: number;
-  movements_today_out: number;
+  movement_rows_today_in: number;
+  movement_rows_today_out: number;
+  alerts_count: number | null;
+  alerts_deficit_value: number | null;
+  inventory_value: number | null;
+  recon_max_diff_value: number | null;
+  recon_total_diff_value: number | null;
+  valuation_unavailable_reason: "organization_valuation_unavailable" | null;
+  movements_today_in: number | null;
+  movements_today_out: number | null;
+  quantity_unavailable_reason: "unit_snapshot_unavailable";
   gateway: boolean;
 }
 
@@ -211,8 +220,46 @@ async function post(path: string, body?: unknown): Promise<boolean> {
 }
 
 // ---- SSR ----
-export const fetchDashboardServer = (r?: string, authHeaders?: Record<string, string>) =>
-  ssr<Dashboard | null>("/wms/dashboard", r, null, authHeaders);
+const dashboardRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === "object" && !Array.isArray(value);
+
+/** A service connection cannot qualify company ownership or replace unknown figures with zero. */
+function parseDashboard(data: unknown, organizationId: number): Dashboard | null {
+  if (!dashboardRecord(data) || data.organization_id !== organizationId || typeof data.gateway !== "boolean") return null;
+  const counters = ["receipts_pending_qc", "tasks_putaway_open", "tasks_pick_open", "inventories_open",
+    "movement_rows_today_in", "movement_rows_today_out"];
+  if (counters.some(key => !Number.isSafeInteger(data[key]) || Number(data[key]) < 0)) return null;
+  if (typeof data.report_date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(data.report_date)
+    || data.period_basis !== "stored_registration_date" || typeof data.period_start !== "string" || typeof data.period_end !== "string") return null;
+  const start = Date.parse(data.report_date + "T00:00:00Z");
+  if (!Number.isFinite(start) || new Date(start).toISOString().slice(0, 10) !== data.report_date
+    || data.period_start !== data.report_date + "T00:00:00"
+    || data.period_end !== new Date(start + 86400000).toISOString().slice(0, 10) + "T00:00:00") return null;
+  const money = ["alerts_count", "alerts_deficit_value", "inventory_value", "recon_max_diff_value", "recon_total_diff_value"];
+  if (data.valuation_unavailable_reason === "organization_valuation_unavailable") {
+    if (money.some(key => data[key] !== null)) return null;
+  } else if (data.valuation_unavailable_reason !== null || !data.gateway
+    || money.some(key => typeof data[key] !== "number" || !Number.isFinite(data[key]) || Number(data[key]) < 0)
+    || !Number.isSafeInteger(data.alerts_count)) return null;
+  if (data.movements_today_in !== null || data.movements_today_out !== null
+    || data.quantity_unavailable_reason !== "unit_snapshot_unavailable") return null;
+  return data as unknown as Dashboard;
+}
+
+async function dashboardRead(organizationId: number, url: string, init: RequestInit): Promise<Dashboard | null> {
+  if (!Number.isSafeInteger(organizationId) || organizationId <= 0) return null;
+  try {
+    const response = await fetch(url, init);
+    return response.ok ? parseDashboard(await response.json(), organizationId) : null;
+  } catch { return null; }
+}
+
+export const fetchDashboardServer = (organizationId: number, roles?: string, authHeaders?: Record<string, string>) =>
+  dashboardRead(organizationId, BASE + "/wms/dashboard?organization_id=" + organizationId,
+    { cache: "no-store", headers: authHeaders ?? roleHeaders(roles) });
+
+export const fetchDashboard = (organizationId: number, signal?: AbortSignal) =>
+  dashboardRead(organizationId, "/api/wms/dashboard?organization_id=" + organizationId, { cache: "no-store", signal });
 export async function fetchReceiptsServer(r?: string, authHeaders?: Record<string, string>): Promise<Receipt[]> {
   const response = await fetch(`${BASE}/wms/receipts`, { cache: "no-store", headers: authHeaders ?? roleHeaders(r) });
   if (!response.ok) throw new Error(`Receipt list unavailable (${response.status})`);

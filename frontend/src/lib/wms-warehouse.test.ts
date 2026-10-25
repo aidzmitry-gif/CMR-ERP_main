@@ -11,7 +11,6 @@ import {
   fetchAlertsServer,
   fetchCyclePlans,
   fetchCyclePlansServer,
-  fetchDashboardServer,
   fetchReceipt,
   fetchReceiptServer,
   fetchReceiptsServer,
@@ -92,47 +91,6 @@ describe("canEmitAlerts", () => {
 });
 
 describe("SSR fetch-обёртки (ssr helper)", () => {
-  it("dashboard forwards verified OIDC headers and preserves unknown on denial", async () => {
-    const headers = { Authorization: "Bearer synthetic-token" };
-    const fetchMock = stubFetch({}, false);
-    expect(await fetchDashboardServer("director", headers)).toBeNull();
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/wms/dashboard",
-      expect.objectContaining({ cache: "no-store", headers }),
-    );
-  });
-  it("fetchDashboardServer: URL/заголовки-роли, маппинг ответа", async () => {
-    const data = {
-      receipts_pending_qc: 3, tasks_putaway_open: 1, tasks_pick_open: 2, alerts_count: 4,
-      alerts_deficit_value: 500, inventory_value: 10000, inventories_open: 1,
-      recon_max_diff_value: 20, recon_total_diff_value: 40, movements_today_in: 5,
-      movements_today_out: 6, gateway: true,
-    };
-    const fn = stubFetch(data);
-    const res = await fetchDashboardServer("sales");
-    expect(fn).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/wms/dashboard",
-      expect.objectContaining({ cache: "no-store", headers: { "X-User-Roles": "sales" } }),
-    );
-    expect(res).toEqual(data);
-  });
-
-  it("fetchDashboardServer: без ролей — headers undefined; !ok — данные неизвестны", async () => {
-    const fn = stubFetch({}, false);
-    const res = await fetchDashboardServer();
-    expect(fn).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/wms/dashboard",
-      expect.objectContaining({ headers: undefined }),
-    );
-    expect(res).toBeNull();
-  });
-
-  it("fetchDashboardServer: сетевая ошибка не подменяет остатки нулями", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
-    const res = await fetchDashboardServer();
-    expect(res).toBeNull();
-  });
-
   it("fetchReceiptsServer / fetchTasksServer / fetchCyclePlansServer / fetchThresholdsServer — пустой fallback при ошибке", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
     await expect(fetchReceiptsServer()).rejects.toThrow("down");

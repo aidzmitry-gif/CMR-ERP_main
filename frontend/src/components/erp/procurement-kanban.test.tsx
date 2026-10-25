@@ -116,3 +116,43 @@ it("дозагружает заявки своей компании без ду�
   expect(screen.getAllByText("REQ-001")).toHaveLength(1);
   expect(within(screen.getByLabelText("Оперативный обзор закупок")).getByText("Заявки в работе").nextElementSibling).toHaveTextContent("6");
 });
+
+
+it("сохраняет порядок колонок и переносит ту же заявку после обновления без выдуманного балла", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let stage = "need";
+  const request = { ...requests[0], id: 101, number: "REQ-UNBOUND", supplier: "Synthetic supplier", item: "Болты", quantity: "100", planned_amount: "0.00" };
+  vi.mocked(fetch).mockImplementation(async (url, options) => {
+    if (String(url).includes("owned-sources?kind=request")) return json({ organization_id: 1, items: [{ ...request, stage }], next_after_id: null }) as Response;
+    if (String(url).includes("owned-sources?kind=order")) return json({ organization_id: 1, items: [], next_after_id: null }) as Response;
+    return original(url, options);
+  });
+  render(<ProcurementKanban />);
+  await screen.findByText("REQ-UNBOUND");
+  const board = within(screen.getByLabelText("Канбан закупок"));
+  expect(board.getAllByRole("heading", { level: 2 }).map(heading => heading.textContent)).toEqual([
+    "Потребность", "Поиск поставщика", "Переговоры", "Анализ", "Согласование",
+    "Заказ поставщику", "Поставка", "Приёмка", "Завершено",
+  ]);
+  const need = within(screen.getByLabelText("Колонка Потребность"));
+  expect(need.getByText("1", { exact: true })).toBeInTheDocument();
+  const first = within(need.getByRole("article"));
+  expect(first.getByRole("link", { name: "REQ-UNBOUND" })).toHaveAttribute("href", "/erp/procurement/planning?org=1");
+  expect(first.getByText("Болты")).toBeInTheDocument();
+  expect(first.getByText("Synthetic supplier · 100 шт. · 0.00")).toBeInTheDocument();
+  expect(first.queryByText(/score|балл поставщика|оценка поставщика|8[.,]7/i)).not.toBeInTheDocument();
+  stage = "nego";
+  const refresh = screen.getByRole("button", { name: "Обновить канбан" });
+  await waitFor(() => expect(refresh).toBeEnabled());
+  fireEvent.click(refresh);
+  const nego = within(screen.getByLabelText("Колонка Переговоры"));
+  await nego.findByText("REQ-UNBOUND");
+  expect(need.queryByText("REQ-UNBOUND")).not.toBeInTheDocument();
+  expect(need.getByText("0", { exact: true })).toBeInTheDocument();
+  expect(nego.getByText("1", { exact: true })).toBeInTheDocument();
+  const moved = within(nego.getByRole("article"));
+  expect(moved.getByText("Болты")).toBeInTheDocument();
+  expect(moved.queryByText(/score|балл поставщика|оценка поставщика|8[.,]7/i)).not.toBeInTheDocument();
+  expect(screen.getAllByText("REQ-UNBOUND")).toHaveLength(1);
+  expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("owned-sources?kind=request"))).toHaveLength(2);
+});

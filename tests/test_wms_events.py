@@ -97,8 +97,26 @@ async def test_alerts_emit_clamps_negative_reorder(api, session):
 # --------------------------------------------------------------------------- #
 #  WMS-R3-3 / R3-8(3): эмит wms.shipment.completed из /wms/shipment
 # --------------------------------------------------------------------------- #
+async def _prepare_shipment_stock(api, organization_id):
+    warehouse = await api.post(
+        f"/wms/organizations/{organization_id}/warehouses",
+        json={"name": "Минск", "title": "Synthetic shipment warehouse"},
+    )
+    assert warehouse.status_code == 201, warehouse.text
+    row = warehouse.json()
+    assert row["organization_id"] == organization_id and row["is_active"] is True
+    assert row["wms_enabled"] is False and row["prohibit_negative_stock"] is True
+    movement = await api.post(
+        "/wms/movements",
+        json={"organization_id": organization_id, "warehouse": "Минск",
+              "sku_code": "AKB-60", "kind": "in", "qty": 5},
+    )
+    assert movement.status_code == 201, movement.text
+
+
 async def test_shipment_emits_completed_with_doc_ref(api, session):
     org = await book(api)
+    await _prepare_shipment_stock(api, org)
     r = await api.post(
         "/wms/shipment",
         json={"organization_id": org, "sku_code": "AKB-60", "qty": 5, "warehouse": "Минск", "doc_ref": "ДОК-2026-0007"},
@@ -118,6 +136,7 @@ async def test_shipment_emits_completed_with_doc_ref(api, session):
 
 async def test_shipment_silent_without_doc_ref(api, session):
     org = await book(api)
+    await _prepare_shipment_stock(api, org)
     r = await api.post("/wms/shipment", json={"organization_id": org, "sku_code": "AKB-60", "qty": 5, "warehouse": "Минск"})
     assert r.status_code == 201
     assert await _events(session, "wms.shipment.completed") == []

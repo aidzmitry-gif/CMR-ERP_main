@@ -3,10 +3,20 @@ from datetime import datetime
 from decimal import Decimal as D
 
 import pytest
+import pytest_asyncio
 
-from core.domain.models import Sku
+from core.domain.models import Counterparty, Sku
 from core.services.price_cost import ItemPriceCost
 from modules.sales.models import DealItem, PriceQuote
+
+
+@pytest_asyncio.fixture
+async def api(api, session):
+    """Select real synthetic MDM parties before exercising price and cost rules."""
+    for name in ("c", "ООО Q", "ООО R", "ООО T", "ООО W", "ООО X", "ООО Y", "ООО Z"):
+        session.add(Counterparty(name=name))
+    await session.commit()
+    yield api
 
 
 async def _new_deal(api, number, **extra):
