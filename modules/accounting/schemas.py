@@ -37,6 +37,36 @@ class OrganizationInput(Input):
     unp: str = Field(pattern=r"^\d{9}$")
 
 
+def seller_logo(value: str) -> str:
+    if not value:
+        return value
+    import warnings
+    from io import BytesIO
+
+    from PIL import Image
+
+    from core.services.intake_storage import decode_data_url
+
+    try:
+        mime, content = decode_data_url(value, max_b64_chars=43_692)
+        if not content or len(content) > 32_768 or mime not in {"image/png", "image/jpeg"}:
+            raise ValueError("Unsupported logo")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(content), formats=["PNG", "JPEG"]) as image:
+                width, height = image.size
+                if (image.format != {"image/png": "PNG", "image/jpeg": "JPEG"}[mime]
+                        or not 0 < width <= 2048 or not 0 < height <= 2048
+                        or width * height > 1_048_576 or getattr(image, "n_frames", 1) != 1
+                        or getattr(image, "is_animated", False)):
+                    raise ValueError("Unsupported logo")
+                image.verify()
+    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError,
+            Image.DecompressionBombWarning):
+        raise ValueError("Логотип: статичный PNG/JPEG до 32 КБ, стороны до 2048 и не более 1 мегапикселя") from None
+    return value
+
+
 class SellerProfileInput(Input):
     source_key: str = Field(min_length=1, max_length=160)
     expected_revision: int = Field(ge=0, strict=True)
@@ -49,6 +79,7 @@ class SellerProfileInput(Input):
     director: str = Field(min_length=1, max_length=300)
     phone: str = Field(default="", max_length=100)
     email: str = Field(default="", max_length=200)
+    logo_data_url: Annotated[str, AfterValidator(seller_logo)] = Field(default="", max_length=43_715)
     evidence: str = Field(min_length=1, max_length=2000)
     confirmed: bool = Field(strict=True)
 

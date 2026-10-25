@@ -1,10 +1,20 @@
 export type SellerSnapshot = { name: string; unp: string; currency: string; address: string; account: string; bank: string; bik: string; director: string; phone: string; email: string; logo_data_url: string; stamp_data_url: string | null; signature_data_url: string | null };
 export type SellerProfile = { organization_id: number; profile_id: number; revision: number; effective_from: string; digest: string; seller: SellerSnapshot; evidence: string; actor: string };
-export type SellerDraft = { effective_from: string; currency: string; address: string; account: string; bank: string; bik: string; director: string; phone: string; email: string; evidence: string; confirmed: boolean };
+export type SellerDraft = { effective_from: string; currency: string; address: string; account: string; bank: string; bik: string; director: string; phone: string; email: string; evidence: string; confirmed: boolean; logo_data_url?: string };
 export type SellerRequest = SellerDraft & { source_key: string; expected_revision: number };
 export class SellerProfileError extends Error { constructor(message: string, public status?: number) { super(message); } }
 export const sellerId = (v: string) => /^[1-9]\d*$/.test(v) && Number.isSafeInteger(Number(v));
 export const sellerCurrency = (v: string) => /^[A-Z]{3}$/.test(v);
+export const SELLER_LOGO_MAX_BYTES = 32_768;
+export function validSellerLogo(value: unknown): value is string {
+  if (value === "") return true;
+  if (typeof value !== "string") return false;
+  const match = /^data:image\/(?:png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
+  if (!match || match[1].length > 43_692 || match[1].length % 4 !== 0) return false;
+  const padding = match[1].endsWith("==") ? 2 : match[1].endsWith("=") ? 1 : 0;
+  const bytes = match[1].length / 4 * 3 - padding;
+  return bytes > 0 && bytes <= SELLER_LOGO_MAX_BYTES;
+}
 export function sellerDate(v: string) { if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false; const d = new Date(`${v}T00:00:00Z`); return !Number.isNaN(d.valueOf()) && d.toISOString().slice(0, 10) === v; }
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const positive = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v > 0;
@@ -20,7 +30,7 @@ export function sellerKey(): string {
 }
 export function validSellerDraft(v: SellerDraft) {
   const lengths = { address: 1000, account: 100, bank: 500, bik: 100, director: 300, evidence: 2000 } as const;
-  return sellerDate(v.effective_from) && sellerCurrency(v.currency) && v.confirmed === true && Object.entries(lengths).every(([key, limit]) => { const s = v[key as keyof typeof lengths]; return text(s) && !!s.trim() && s.length <= limit; }) && text(v.phone) && v.phone.length <= 100 && text(v.email) && v.email.length <= 200;
+  return sellerDate(v.effective_from) && sellerCurrency(v.currency) && v.confirmed === true && Object.entries(lengths).every(([key, limit]) => { const s = v[key as keyof typeof lengths]; return text(s) && !!s.trim() && s.length <= limit; }) && text(v.phone) && v.phone.length <= 100 && text(v.email) && v.email.length <= 200 && validSellerLogo(v.logo_data_url ?? "");
 }
 async function request(url: string, body?: SellerRequest): Promise<unknown> {
   let res: Response;
@@ -35,7 +45,7 @@ async function request(url: string, body?: SellerRequest): Promise<unknown> {
 function profile(v: unknown, org: string): SellerProfile {
   if (!object(v) || v.organization_id !== Number(org) || !positive(v.profile_id) || !positive(v.revision) || !text(v.effective_from) || !sellerDate(v.effective_from) || !text(v.digest) || !/^[a-f0-9]{64}$/.test(v.digest) || !text(v.evidence) || !text(v.actor) || !object(v.seller)) invalid();
   const s = v.seller;
-  if (!["name", "unp", "currency", "address", "account", "bank", "bik", "director", "phone", "email", "logo_data_url"].every((k) => text(s[k])) || !sellerCurrency(String(s.currency)) || !nullableText(s.stamp_data_url) || !nullableText(s.signature_data_url)) invalid();
+  if (!["name", "unp", "currency", "address", "account", "bank", "bik", "director", "phone", "email", "logo_data_url"].every((k) => text(s[k])) || !sellerCurrency(String(s.currency)) || !validSellerLogo(s.logo_data_url) || !nullableText(s.stamp_data_url) || !nullableText(s.signature_data_url)) invalid();
   return v as SellerProfile;
 }
 export async function fetchSellerHistory(org: string): Promise<SellerProfile[]> {
@@ -53,7 +63,8 @@ export async function createSellerProfile(org: string, body: SellerRequest): Pro
   if (!validSellerDraft(body) || !body.source_key.trim() || body.source_key.length > 160 || !Number.isSafeInteger(body.expected_revision) || body.expected_revision < 0) invalid();
   // Name, UNP and actor are server owned, even if a caller supplies extra keys.
   const payload: SellerRequest = { source_key: body.source_key, expected_revision: body.expected_revision, effective_from: body.effective_from, currency: body.currency, address: body.address, account: body.account, bank: body.bank, bik: body.bik, director: body.director, phone: body.phone, email: body.email, evidence: body.evidence, confirmed: body.confirmed };
+  if (body.logo_data_url) payload.logo_data_url = body.logo_data_url;
   const row = profile(await request(`${base(org)}/seller-profiles`, payload), org);
-  if (row.revision !== body.expected_revision + 1 || row.effective_from !== body.effective_from || row.evidence !== body.evidence || !["currency", "address", "account", "bank", "bik", "director", "phone", "email"].every((k) => row.seller[k as keyof SellerSnapshot] === body[k as keyof SellerDraft])) invalid();
+  if (row.revision !== body.expected_revision + 1 || row.effective_from !== body.effective_from || row.evidence !== body.evidence || row.seller.logo_data_url !== (body.logo_data_url ?? "") || !["currency", "address", "account", "bank", "bik", "director", "phone", "email"].every((k) => row.seller[k as keyof SellerSnapshot] === body[k as keyof SellerDraft])) invalid();
   return row;
 }

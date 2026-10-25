@@ -88,3 +88,157 @@ it.each(["currency", "future"])("invalid current %s rejected", async (kind) => {
 it("history accepts inactive-code snapshot; request excludes client-owned actor/name/UNP", async () => {
   const f = vi.fn().mockResolvedValueOnce(ok([{ ...row, seller: { ...seller, currency: "ZZZ" } }])).mockResolvedValueOnce(ok(saved)); vi.stubGlobal("fetch", f); expect((await fetchSellerHistory("7"))[0].seller.currency).toBe("ZZZ"); await createSellerProfile("7", { ...body, actor: "forged", name: "forged", unp: "forged" } as SellerRequest); const sent = JSON.parse(f.mock.calls[1][1].body); expect(sent.actor).toBeUndefined(); expect(sent.name).toBeUndefined(); expect(sent.unp).toBeUndefined();
 });
+
+
+const LOGO_A = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAE0lEQVR4nGP8//8/AwMDEwMYAAAkBgMBXaJOiAAAAABJRU5ErkJggg==";
+const LOGO_B = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNkYPjPwMDAxAAGAAsfAQMU4wsAAAAAAElFTkSuQmCC";
+function logoFile(blue = false) {
+  const bytes = Uint8Array.from(atob((blue ? LOGO_B : LOGO_A).split(",")[1]), (c) => c.charCodeAt(0));
+  return new File([bytes], blue ? "blue.png" : "white.png", { type: "image/png" });
+}
+function logoIO(manual = false) {
+  class Reader {
+    result: string | null = null;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    abort = vi.fn();
+    readAsDataURL(file: File) { this.result = file.name === "blue.png" ? LOGO_B : LOGO_A; readers.push(this); if (!manual) queueMicrotask(() => this.onload?.()); }
+  }
+  class Picture {
+    naturalWidth = 2;
+    naturalHeight = 2;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    value = "";
+    set src(value: string) { this.value = value; pictures.push(this); if (!manual) queueMicrotask(() => this.onload?.()); }
+    get src() { return this.value; }
+  }
+  const readers: Reader[] = [], pictures: Picture[] = [];
+  vi.stubGlobal("FileReader", Reader); vi.stubGlobal("Image", Picture);
+  return { readers, pictures };
+}
+const selectLogo = (file = logoFile()) => fireEvent.change(screen.getByLabelText("Логотип этой версии"), { target: { files: [file] } });
+const confirmLogo = () => fireEvent.click(screen.getByLabelText("Реквизиты проверены главным бухгалтером"));
+const savedLogo = { ...saved, seller: { ...saved.seller, logo_data_url: LOGO_A } };
+
+it("uploads a bounded logo and requires fresh confirmation", async () => {
+  logoIO(); vi.stubGlobal("crypto", { randomUUID: () => "logo-key" });
+  const f = vi.fn().mockResolvedValueOnce(ok([row])).mockResolvedValueOnce(ok([row])).mockResolvedValueOnce(ok(savedLogo)).mockResolvedValue(ok([savedLogo])); vi.stubGlobal("fetch", f);
+  render(<AccountingSellerProfiles org="7" />); await draft(); selectLogo();
+  expect(screen.getByLabelText("Реквизиты проверены главным бухгалтером")).not.toBeChecked();
+  expect(screen.getByRole("button", { name: "Подтвердить версию реквизитов" })).toBeDisabled();
+  expect(await screen.findByAltText("Предпросмотр логотипа")).toHaveAttribute("src", LOGO_A);
+  confirmLogo(); submit();
+  const receipt = await screen.findByLabelText("Фактически сохранена версия 6");
+  expect(within(receipt).getByRole("img")).toHaveAttribute("src", LOGO_A);
+  expect(JSON.parse(f.mock.calls.find(([, init]) => init.method === "POST")![1].body).logo_data_url).toBe(LOGO_A);
+});
+
+it("removes a logo and omits blank logo from the compatible payload", async () => {
+  logoIO(); const f = vi.fn().mockResolvedValueOnce(ok([row])).mockResolvedValueOnce(ok([row])).mockResolvedValueOnce(ok(saved)).mockResolvedValue(ok([saved])); vi.stubGlobal("fetch", f);
+  render(<AccountingSellerProfiles org="7" />); await draft(); selectLogo(); await screen.findByAltText("Предпросмотр логотипа"); confirmLogo();
+  fireEvent.click(screen.getByRole("button", { name: "Удалить логотип" }));
+  expect(screen.queryByAltText("Предпросмотр логотипа")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Реквизиты проверены главным бухгалтером")).not.toBeChecked();
+  confirmLogo(); submit(); await screen.findByLabelText("Фактически сохранена версия 6");
+  expect(JSON.parse(f.mock.calls.find(([, init]) => init.method === "POST")![1].body)).not.toHaveProperty("logo_data_url");
+});
+
+it("rejects invalid or oversized logo input before submit", async () => {
+  const io = logoIO(true), f = vi.fn().mockResolvedValue(ok([row])); vi.stubGlobal("fetch", f);
+  render(<AccountingSellerProfiles org="7" />); await draft();
+  selectLogo(new File(["<svg/>"], "bad.svg", { type: "image/svg+xml" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("PNG/JPEG"); expect(io.readers).toHaveLength(0);
+  selectLogo(new File([new Uint8Array(32_769)], "large.png", { type: "image/png" }));
+  expect(io.readers).toHaveLength(0);
+  selectLogo(); io.readers[0].result = "https://example.invalid/logo.png";
+  act(() => io.readers[0].onload?.()); expect(screen.getByRole("alert")).toHaveTextContent("PNG/JPEG");
+  selectLogo(); act(() => io.readers[1].onload?.()); io.pictures[0].naturalWidth = 2049;
+  act(() => io.pictures[0].onload?.());
+  expect(screen.queryByAltText("Предпросмотр логотипа")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Реквизиты проверены главным бухгалтером")).not.toBeChecked();
+  expect(f.mock.calls.every(([, init]) => init.method === "GET")).toBe(true);
+});
+
+it("rejects malformed server logos before mounting an image", async () => {
+  for (const logo of ["https://example.invalid/logo.png", "data:image/svg+xml;base64,PHN2Zy8+", "data:image/png;base64," + "A".repeat(43_696)]) {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok([{ ...row, seller: { ...seller, logo_data_url: logo } }])));
+    await expect(fetchSellerHistory("7")).rejects.toThrow();
+  }
+  render(<AccountingSellerProfiles org="7" />); expect(await screen.findByRole("alert")).toHaveTextContent("Некорректный ответ");
+  expect(screen.queryByRole("img")).not.toBeInTheDocument();
+});
+
+it("does not confirm a mismatched logo echo", async () => {
+  logoIO(); const other = { ...saved, seller: { ...saved.seller, logo_data_url: LOGO_B } };
+  const f = vi.fn().mockResolvedValueOnce(ok([row])).mockResolvedValueOnce(ok([row])).mockResolvedValueOnce(ok(other)); vi.stubGlobal("fetch", f);
+  render(<AccountingSellerProfiles org="7" />); await draft(); selectLogo(); await screen.findByAltText("Предпросмотр логотипа"); confirmLogo(); submit();
+  expect(await screen.findByRole("alert")).toHaveTextContent("Результат не подтверждён");
+  expect(screen.queryByLabelText("Фактически сохранена версия 6")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Повторить сохранённый запрос" })).toBeEnabled();
+  expect(screen.getByLabelText("Логотип этой версии")).toBeDisabled();
+});
+
+it("ignores late logo callbacks after replacement and remove", async () => {
+  const io = logoIO(true); vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok([row])));
+  render(<AccountingSellerProfiles org="7" />); await draft(); selectLogo(); selectLogo(logoFile(true));
+  act(() => io.readers[0].onload?.()); expect(io.pictures).toHaveLength(0);
+  act(() => io.readers[1].onload?.()); act(() => io.pictures[0].onload?.());
+  expect(screen.getByAltText("Предпросмотр логотипа")).toHaveAttribute("src", LOGO_B);
+  fireEvent.click(screen.getByRole("button", { name: "Удалить логотип" }));
+  act(() => { io.readers[0].onload?.(); io.pictures[0].onload?.(); });
+  expect(screen.queryByAltText("Предпросмотр логотипа")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Реквизиты проверены главным бухгалтером")).not.toBeChecked();
+});
+
+it("discards a pending logo read when organization changes", async () => {
+  const io = logoIO(true), f = vi.fn().mockResolvedValueOnce(ok([row])).mockResolvedValueOnce(ok([])); vi.stubGlobal("fetch", f);
+  const view = render(<AccountingSellerProfiles org="7" />); await draft(); selectLogo();
+  view.rerender(<AccountingSellerProfiles org="8" />);
+  await screen.findByText("Подтверждённых версий реквизитов пока нет.");
+  act(() => io.readers[0].onload?.());
+  expect(io.pictures).toHaveLength(0); expect(screen.queryByAltText("Предпросмотр логотипа")).not.toBeInTheDocument();
+  expect(io.readers[0].abort).toHaveBeenCalled(); expect(f.mock.calls[1][0]).toContain("/organizations/8/");
+});
+
+it("retries the exact frozen request containing a nonempty logo", async () => {
+  const io = logoIO(); vi.stubGlobal("crypto", { randomUUID: () => "frozen-logo-key" });
+  const f = vi.fn().mockResolvedValueOnce(ok([row])).mockResolvedValueOnce(ok([row])).mockRejectedValueOnce(new Error("network"))
+    .mockResolvedValueOnce(ok(savedLogo)).mockResolvedValue(ok([savedLogo])); vi.stubGlobal("fetch", f);
+  render(<AccountingSellerProfiles org="7" />); await draft(); selectLogo(); await screen.findByAltText("Предпросмотр логотипа"); confirmLogo(); submit();
+  await screen.findByRole("button", { name: "Повторить сохранённый запрос" });
+  selectLogo(logoFile(true)); act(() => io.readers[0].onload?.());
+  expect(io.readers).toHaveLength(1); expect(screen.getByAltText("Предпросмотр логотипа")).toHaveAttribute("src", LOGO_A);
+  fireEvent.click(screen.getByRole("button", { name: "Повторить сохранённый запрос" })); await screen.findByLabelText("Фактически сохранена версия 6");
+  const posts = f.mock.calls.filter(([, init]) => init.method === "POST");
+  expect(posts).toHaveLength(2); expect(posts[1][1].body).toBe(posts[0][1].body);
+  expect(JSON.parse(posts[0][1].body)).toMatchObject({ logo_data_url: LOGO_A, source_key: "frozen-logo-key" });
+});
+
+it("does not mount collapsed historical logo images", async () => {
+  const older = { ...row, revision: 4, profile_id: 4, seller: { ...seller, logo_data_url: LOGO_B } };
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok([{ ...row, seller: { ...seller, logo_data_url: LOGO_A } }, older])));
+  render(<AccountingSellerProfiles org="7" />);
+  const card = await screen.findByLabelText("Историческая версия 5"); expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  const details = within(card).getByText("Логотип версии 5").closest("details")!;
+  act(() => { details.open = true; fireEvent(details, new Event("toggle")); });
+  expect(await within(card).findByRole("img")).toHaveAttribute("src", LOGO_A);
+  expect(within(screen.getByLabelText("Историческая версия 4")).queryByRole("img")).not.toBeInTheDocument();
+});
+
+
+it("cancels a pending logo read when refreshing the profile basis", async () => {
+  const io = logoIO(true), pending = deferred();
+  const f = vi.fn().mockResolvedValueOnce(ok([row])).mockReturnValueOnce(pending.promise); vi.stubGlobal("fetch", f);
+  render(<AccountingSellerProfiles org="7" />); await draft(); selectLogo();
+  expect(screen.getByLabelText("Реквизиты проверены главным бухгалтером")).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Обновить основу версии" }));
+  act(() => io.readers[0].onload?.());
+  await act(async () => { pending.resolve(ok([row])); });
+  expect(io.readers[0].abort).toHaveBeenCalled(); expect(io.pictures).toHaveLength(0);
+  expect(screen.getByLabelText("Реквизиты проверены главным бухгалтером")).toBeEnabled();
+  expect(screen.getByLabelText("Реквизиты проверены главным бухгалтером")).not.toBeChecked();
+  expect(screen.queryByAltText("Предпросмотр логотипа")).not.toBeInTheDocument();
+  confirmLogo(); expect(screen.getByRole("button", { name: "Подтвердить версию реквизитов" })).toBeEnabled();
+  expect(f.mock.calls.every(([, init]) => init.method !== "POST")).toBe(true);
+});

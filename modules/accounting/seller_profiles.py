@@ -32,7 +32,10 @@ def result(row):
 
 async def create(session, org_id, data, actor):
     # Caller has chief authority and holds the organization lock.
-    request_digest = fingerprint(data.model_dump(mode="json"))
+    request = data.model_dump(mode="json")
+    if not request.get("logo_data_url"):
+        request.pop("logo_data_url", None)
+    request_digest = fingerprint(request)
     existing = await session.scalar(select(SellerProfile).where(
         SellerProfile.organization_id == org_id, SellerProfile.source_key == data.source_key))
     if existing:
@@ -50,8 +53,8 @@ async def create(session, org_id, data, actor):
     if org is None:
         raise HTTPException(404, "Organization not found")
     seller = {key: getattr(data, key) for key in (
-        "currency", "address", "account", "bank", "bik", "director", "phone", "email")}
-    seller.update(name=org.name, unp=org.unp, logo_data_url="", stamp_data_url=None,
+        "currency", "address", "account", "bank", "bik", "director", "phone", "email", "logo_data_url")}
+    seller.update(name=org.name, unp=org.unp, stamp_data_url=None,
                   signature_data_url=None)
     row = SellerProfile(organization_id=org_id, revision=latest + 1,
         effective_from=data.effective_from, currency=data.currency, source_key=data.source_key,
