@@ -16,8 +16,28 @@ async def book(api):
     return response.json()["id"]
 
 
+async def _prepare_warehouse(api, organization_id, name, *, wms_enabled=False):
+    response = await api.post(
+        f"/wms/organizations/{organization_id}/warehouses",
+        json={"name": name, "title": "Synthetic organization test warehouse"},
+    )
+    assert response.status_code == 201, response.text
+    row = response.json()
+    assert row["organization_id"] == organization_id and row["is_active"] is True
+    assert row["wms_enabled"] is False and row["prohibit_negative_stock"] is True
+    if wms_enabled:
+        response = await api.patch(
+            f"/wms/organizations/{organization_id}/warehouses/{row['id']}/execution-mode",
+            json={"expected_wms_enabled": False, "wms_enabled": True},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["wms_enabled"] is True
+        assert response.json()["prohibit_negative_stock"] is True
+
+
 async def test_receipt_company_flows_to_receipt_and_putaway_movements(api, session):
     org = await book(api)
+    await _prepare_warehouse(api, org, "Test", wms_enabled=True)
     await on_goods_received({"organization_id": org, "sku_code": "A", "qty": "1.25", "warehouse": "Test", "entity_ref": "purchase_order:1:1"}, SimpleNamespace(session=session))
     await session.commit()
     receipt_id = await session.scalar(select(Receipt.id))
@@ -44,6 +64,7 @@ async def test_receipt_company_flows_to_receipt_and_putaway_movements(api, sessi
 
 async def test_legacy_receipt_requires_explicit_chief_ownership(api, session):
     org = await book(api)
+    await _prepare_warehouse(api, org, "Главный")
     await on_goods_received({"item": "A", "qty": 1, "entity_ref": "purchase:old"}, SimpleNamespace(session=session))
     await session.commit()
     receipt_id = await session.scalar(select(Receipt.id))
@@ -261,7 +282,8 @@ async def test_task_list_filters_owner_before_kind_status_and_assignee(api, sess
 @pytest.mark.parametrize("kind", ["tasks"])
 async def test_manual_wms_task_requires_explicit_accessible_owner_and_exact_quantity(api, session, kind):
     org = await book(api)
-    data = {"kind": "pick", "sku_code": "A", "qty": "1.25"}
+    await _prepare_warehouse(api, org, "Own", wms_enabled=True)
+    data = {"kind": "pick", "sku_code": "A", "qty": "1.25", "warehouse": "Own"}
     assert (await api.post(f"/wms/{kind}", json=data)).status_code == 422
     for invalid_owner in [None, True, "1", 0, -1]:
         assert (await api.post(f"/wms/{kind}", json={**data, "organization_id": invalid_owner})).status_code == 422
@@ -298,6 +320,7 @@ async def test_supplier_receipt_shortcuts_are_rejected_before_stock_changes(api,
 @pytest.mark.parametrize("operation", ["movements", "shipment", "transfer", "adjustment", "pack"])
 async def test_manual_movement_owner_and_list_visibility(api, session, operation):
     org = await book(api)
+    await _prepare_warehouse(api, org, "Shared", wms_enabled=operation == "pack")
     payload = {"sku_code": "OWN-SKU", "qty": "1.25", "warehouse": "Shared"}
     if operation == "transfer":
         location = Location(warehouse="Shared", code="DEST", title="Synthetic")
@@ -350,6 +373,7 @@ async def test_balance_groups_accessible_books_separately_and_excludes_unknown(a
 @pytest.mark.parametrize("operation", ["movements", "shipment", "transfer", "adjustment", "pack"])
 async def test_manual_movement_rejects_wrong_inactive_and_missing_locations(api, session, operation):
     org = await book(api)
+    await _prepare_warehouse(api, org, "Own", wms_enabled=operation == "pack")
     own = Location(warehouse="Own", code="GOOD", is_active=True)
     other = Location(warehouse="Other", code="WRONG", is_active=True)
     inactive = Location(warehouse="Own", code="INACTIVE", is_active=False)
@@ -377,6 +401,7 @@ async def test_receipt_checks_qc_location_and_rechecks_all_before_accept(api, se
     from modules.wms.models import ReceiptLine
 
     org = await book(api)
+    await _prepare_warehouse(api, org, "Own")
     good = Location(warehouse="Own", code="GOOD", is_active=True)
     bad = Location(warehouse="Other", code="BAD", is_active=True)
     session.add_all([good, bad])
@@ -413,6 +438,7 @@ async def test_receipt_checks_qc_location_and_rechecks_all_before_accept(api, se
 @pytest.mark.parametrize("kind", ["putaway", "pick"])
 async def test_task_location_rechecked_before_completion_and_cancel_remains_available(api, session, kind):
     org = await book(api)
+    await _prepare_warehouse(api, org, "Own", wms_enabled=True)
     good = Location(warehouse="Own", code="GOOD", is_active=True)
     bad = Location(warehouse="Other", code="BAD", is_active=True)
     session.add_all([good, bad])

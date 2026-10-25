@@ -51,6 +51,7 @@ from modules.accounting import (
     inventory_issues,
     manual_documents,
     opening_import,
+    opening_stock,
     order_snapshot,
     output_vat_register,
     payroll_applicability_review,
@@ -3063,6 +3064,29 @@ async def import_confirm(org_id: int, data: ImportInput, ctx=Depends(member), co
 @router.get("/organizations/{org_id}/imports")
 async def opening_imports(org_id: int, ctx=Depends(member)):
     return await opening_import.list_receipts(ctx[0], org_id)
+
+
+@router.get("/organizations/{org_id}/opening-stock/context")
+async def opening_stock_context(org_id: int, on: date, response: Response, ctx=Depends(member)):
+    chief(ctx)
+    response.headers["Cache-Control"] = "private, no-store"
+    return await opening_stock.context(ctx[0], org_id, on)
+
+
+@router.post("/organizations/{org_id}/opening-stock/preview")
+async def opening_stock_preview(org_id: int, data: opening_stock.StockInput,
+                                response: Response, ctx=Depends(member)):
+    chief(ctx)
+    response.headers["Cache-Control"] = "private, no-store"
+    return await opening_stock.preview(ctx[0], org_id, data)
+
+
+@router.post("/organizations/{org_id}/opening-stock/confirm")
+async def opening_stock_confirm(org_id: int, data: opening_stock.StockConfirm,
+                                response: Response, ctx=Depends(member), core=Depends(get_core)):
+    chief(ctx)
+    response.headers["Cache-Control"] = "private, no-store"
+    return await opening_stock.confirm(ctx[0], org_id, data, ctx[1], core.services.event_bus)
 
 
 @router.get("/organizations/{org_id}/input-vat-lines")

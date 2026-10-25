@@ -1,14 +1,10 @@
 import { AppShell } from "@/components/app-shell";
-import { WmsReconciliation } from "@/components/erp/wms-reconciliation";
-import { currentRole } from "@/lib/role-server";
-import { fetchReconServer } from "@/lib/wms-warehouse";
+import { ScopedWmsReconciliation } from "@/components/erp/wms-reconciliation";
 
-export default async function WmsReconciliationPage() {
-  const role = await currentRole();
-  const data = await fetchReconServer(role);
+export default function WmsReconciliationPage() {
   return (
     <AppShell crumbs={["ERP", "Склад", "Сверка с 1С"]}>
-      <WmsReconciliation initial={data} />
+      <ScopedWmsReconciliation />
     </AppShell>
   );
 }

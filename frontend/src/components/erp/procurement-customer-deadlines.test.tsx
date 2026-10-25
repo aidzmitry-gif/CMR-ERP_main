@@ -41,3 +41,32 @@ it("discards a pending response when the order context changes", async () => {
   await waitFor(() => expect(screen.getByText("Проверить клиентские сроки")).toBeEnabled());
   expect(screen.queryByText(/Есть риск опоздания/)).not.toBeInTheDocument();
 });
+
+
+it("shows scoped signed slack and saved penalty terms without claiming a monetary penalty", async () => {
+  vi.mocked(fetchCustomerDeadlines).mockResolvedValue({ organization_id: 1, order_id: 7,
+    status: "live_review", source: "outstanding_expected_reservations", earliest_required_arrival: "2026-07-02",
+    slack_days: -91, unresolved_deadlines: 0, complete_customer_demand: false, at_risk: true,
+    items: [{ reservation_id: 11, deal_id: 21, deal_number: "SD-2", sku_code: "A", outstanding_qty: "1.00",
+      ship_deadline: "2026-07-05", required_arrival: "2026-07-02", deadline_status: "dated", at_risk: true,
+      slack_days: -91, penalty_rate_pct: "1.00", penalty_cap_pct: "10.00", penalty_terms: "По договору" }] });
+  render(<ProcurementCustomerDeadlines org={1} orderId={7} />);
+  fireEvent.click(screen.getByRole("button", { name: "Проверить клиентские сроки" }));
+  expect(await screen.findByText(/Запас по известным срокам/)).toHaveTextContent("-91");
+  const item = screen.getByText(/Сделка SD-2:/);
+  expect(item).toHaveTextContent("ставка штрафа 1.00%, предел 10.00%");
+  expect(item).toHaveTextContent("По договору");
+  expect(item).toHaveTextContent("Денежный штраф здесь не рассчитывается");
+});
+it("renders an explicit zero penalty separately from unknown cap and terms", async () => {
+  vi.mocked(fetchCustomerDeadlines).mockResolvedValue({ organization_id: 1, order_id: 7,
+    status: "live_review", source: "outstanding_expected_reservations", earliest_required_arrival: "2026-12-28",
+    slack_days: 0, unresolved_deadlines: 0, complete_customer_demand: false, at_risk: false,
+    items: [{ reservation_id: 11, deal_id: 21, sku_code: "A", outstanding_qty: "1.00",
+      ship_deadline: "2026-12-31", required_arrival: "2026-12-28", deadline_status: "dated", at_risk: false,
+      slack_days: 0, penalty_rate_pct: "0.00", penalty_cap_pct: null, penalty_terms: null }] });
+  render(<ProcurementCustomerDeadlines org={1} orderId={7} />);
+  fireEvent.click(screen.getByRole("button", { name: "Проверить клиентские сроки" }));
+  const item = await screen.findByText(/Сделка #21:/);
+  expect(item).toHaveTextContent("ставка штрафа 0.00%, предел не указан; условия: не указаны");
+});

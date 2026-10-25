@@ -1593,13 +1593,7 @@ async def test_manual_document_sku_snapshot_rechecked_on_postgres(pg_factory, pg
     from modules.accounting.schemas import PostingInput
 
     async with pg_factory() as session:
-        connection = await session.connection()
-
-        def catalog(sync):
-            Sku.metadata.tables["ref_nomenclature_category"].create(sync)
-            Sku.__table__.create(sync)
-
-        await connection.run_sync(catalog)
+        assert await session.scalar(text("SELECT to_regclass('public.sku')")) is not None
         session.add(Sku(id=71, code="PG-ITEM", title="Motor", unit="шт", is_active=True))
         await session.commit()
     source = posting("PG-MANUAL-SKU").model_dump(mode="json")
@@ -2223,20 +2217,18 @@ async def test_inventory_posting_serializes_with_competing_writer(pg_factory, pg
     from httpx import ASGITransport, AsyncClient
     from sqlalchemy import select
 
-    from core.domain.models import Sku
     from core.runtime.deps import get_session
     from core.services.auth import CurrentUser, get_current_user
     from modules.accounting.gateway import AccountingService
-    from modules.wms.models import StockMovement
+    from modules.wms.models import StockMovement, WarehouseDirectory
     from modules.wms.routes import router
 
     async with pg_factory() as session:
-        connection = await session.connection()
-        def catalog(sync):
-            Sku.metadata.tables["ref_nomenclature_category"].create(sync)
-            Sku.__table__.create(sync)
-        await connection.run_sync(catalog)
-        session.add(StockMovement(organization_id=pg_book[0], sku_code="A", warehouse="Test",
+        assert await session.scalar(text("SELECT to_regclass('public.sku')")) is not None
+        warehouse = await session.scalar(select(WarehouseDirectory).where(
+            WarehouseDirectory.organization_id == pg_book[0], WarehouseDirectory.name == "warehouse1"))
+        assert warehouse is not None and warehouse.wms_enabled is False and warehouse.prohibit_negative_stock is True
+        session.add(StockMovement(organization_id=pg_book[0], sku_code="A", warehouse="warehouse1",
                                   kind="in", qty="30", reason="receipt"))
         await session.commit()
     app = FastAPI()
@@ -2249,7 +2241,7 @@ async def test_inventory_posting_serializes_with_competing_writer(pg_factory, pg
     app.dependency_overrides[get_current_user] = lambda: CurrentUser("tester", ["director"])
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         created = await client.post("/wms/inventory", json={"organization_id": pg_book[0],
-            "warehouse": "Test", "expected_source": "wms_physical", "journal_complete": True,
+            "warehouse": "warehouse1", "expected_source": "wms_physical", "journal_complete": True,
             "source_evidence": "Synthetic PostgreSQL physical journal"})
         assert created.status_code == 201, created.text
         count_id = created.json()["id"]
@@ -2260,7 +2252,7 @@ async def test_inventory_posting_serializes_with_competing_writer(pg_factory, pg
         assert edited.status_code == 200, edited.text
         competing = (client.post(f"/wms/inventory/{count_id}/complete") if competitor == "complete"
                      else client.post("/wms/adjustment", json={"organization_id": pg_book[0],
-                          "warehouse": "Test", "sku_code": "A", "qty": "5"}))
+                          "warehouse": "warehouse1", "sku_code": "A", "qty": "5"}))
         posted, other = await asyncio.gather(client.post(f"/wms/inventory/{count_id}/complete"), competing)
         if competitor == "complete":
             assert [posted.status_code, other.status_code] == [200, 200], [posted.text, other.text]
@@ -2269,7 +2261,13 @@ async def test_inventory_posting_serializes_with_competing_writer(pg_factory, pg
             assert posted.status_code in {200, 409}, posted.text
     async with pg_factory() as session:
         movements = (await session.scalars(select(StockMovement))).all()
-        adjustments = [m for m in movements if m.reason == "adjustment"]
+        adjustments = [m for m in movements if m.reason == "adjustment" and m.doc_ref == created.json()["number"]]
+        competing_adjustments = [m for m in movements if m.reason == "adjustment" and m.doc_ref != created.json()["number"]]
+        if competitor == "adjustment":
+            assert len(competing_adjustments) == 1
+            assert competing_adjustments[0].kind == "in" and competing_adjustments[0].qty == 5
+        else:
+            assert competing_adjustments == []
         assert len(adjustments) == (1 if posted.status_code == 200 else 0)
         assert all(m.organization_id == pg_book[0] for m in movements)
         if adjustments:

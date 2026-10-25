@@ -61,6 +61,17 @@ def no_smtp(monkeypatch):
 
 
 @pytest.fixture
+async def mail_actors(session):
+    session.add_all([
+        User(username="director", full_name="Synthetic sales director", department="Продажи",
+             role="director", status="active"),
+        User(username="manager", full_name="Synthetic sales manager", department="Продажи",
+             role="sales", status="active", deal_visibility="own"),
+    ])
+    await session.commit()
+
+
+@pytest.fixture
 def token_headers(tmp_path, monkeypatch):
     token = "synthetic-inbound-token-only"
     path = tmp_path / "sales-mail-token"
@@ -254,13 +265,15 @@ async def test_matching_chain_respects_two_managers_on_every_view(api, session, 
     assert download.headers["x-content-type-options"] == "nosniff"
 
 
-async def test_inbox_assignment_is_head_only_scoped_and_audited(api, session, token_headers):
+async def test_inbox_assignment_is_head_only_scoped_and_audited(api, session, token_headers, mail_actors):
     outgoing = await accepted_outgoing(session)
     received = await ingest(api, token_headers)
     rid = received.json()["receipt_id"]
     endpoint = f"/sales/mail/inbox/{rid}/assign"
     manager = {"X-User-Roles": "sales", "X-User": "manager"}
-    assert (await api.post(endpoint, json={"deal_id": outgoing.deal_id}, headers=manager)).status_code == 403
+    denied = await api.post(endpoint, json={"deal_id": outgoing.deal_id}, headers=manager)
+    assert denied.status_code == 403
+    assert denied.json()["detail"] == "Недостаточно прав: sales.deal.approve"
     session.add(User(username="head", full_name="Head", role="sales_head", status="active",
                      employee_id=301, deal_visibility="own"))
     await session.commit()
@@ -377,7 +390,7 @@ async def test_list_is_bounded_and_does_not_load_raw_or_text(api, session, token
         assert (await api.get(f"/sales/mail/inbox?{query}")).status_code == 422
 
 
-async def test_reply_snapshot_recipient_and_idempotency(api, session, token_headers, monkeypatch):
+async def test_reply_snapshot_recipient_and_idempotency(api, session, token_headers, monkeypatch, mail_actors):
     monkeypatch.setattr(mail_routes, "sender_or_503", lambda core: "crm@example.test")
     original = await accepted_outgoing(session)
     raw = raw_message(references=[original.message_id], reply_to="attacker@example.test")
@@ -410,7 +423,7 @@ async def test_reply_snapshot_recipient_and_idempotency(api, session, token_head
     assert foreign.status_code == 404
 
 
-async def test_action_flags_hide_creator_identity_and_foreign_buttons(api, session, monkeypatch):
+async def test_action_flags_hide_creator_identity_and_foreign_buttons(api, session, monkeypatch, mail_actors):
     monkeypatch.setenv("AIOS_SALES_EMAIL_ENABLED", "1")
     monkeypatch.setattr(mail_routes, "sender_or_503", lambda core: "crm@example.test")
     email = await prepared(session)

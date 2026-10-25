@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 from tests.test_inventory_organization import CONFIRM
-from tests.test_wms_organization import book
+from tests.test_wms_organization import _prepare_warehouse, book
 
 # ===========================================================================
 # Кейс 1 — QC-гейт приёмки
@@ -56,6 +56,7 @@ async def test_qc_gate_accept_without_explicit_qc_uses_expected(api, session):
     from modules.wms.events import on_goods_received
 
     organization_id = await book(api)
+    await _prepare_warehouse(api, organization_id, "Минск", wms_enabled=False)
     await on_goods_received(
         {"organization_id": organization_id, "item": "AKB-R5-1A", "qty": 15, "warehouse": "Минск", "entity_ref": "purchase:100"},
         SimpleNamespace(session=session),
@@ -87,6 +88,7 @@ async def test_qc_gate_repeated_accept_still_exactly_one_movement(api, session):
     from modules.wms.events import on_goods_received
 
     organization_id = await book(api)
+    await _prepare_warehouse(api, organization_id, "Брест", wms_enabled=False)
     await on_goods_received(
         {"organization_id": organization_id, "item": "AKB-R5-2", "qty": 10, "warehouse": "Брест", "entity_ref": "purchase:101"},
         SimpleNamespace(session=session),

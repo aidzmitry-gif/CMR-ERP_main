@@ -11,9 +11,17 @@ from core.services import nbrb
 from core.services.eventbus import EventContext, OutboxEventBus
 from modules.finance.events import on_freight_cost
 from modules.finance.models import Payment
+from tests.accounting.conftest import book as book  # noqa: F401
+from tests.test_finance import finance_api as finance_api  # noqa: F401
 from tests.test_finance import finance_org as finance_org  # noqa: F401
 
 DAY = date(2026, 9, 1)
+
+
+@pytest.fixture(name="db")
+async def bank_db(session):
+    """Run the existing accounting book fixture on the full API's database."""
+    return session
 
 
 def response(code="RUB", rate="3.1234", scale=100):
@@ -64,9 +72,12 @@ async def test_outage_does_not_cache(session):
     assert not (await session.execute(select(AuditLog))).scalars().all()
 
 
-async def test_payment_api_preserves_original_and_quote(api, session):
+async def test_payment_api_preserves_original_and_quote(finance_api, finance_org, session):
+    api = finance_api
     await seed(session)
+    await session.commit()
     result = await api.post("/finance/payments", json={
+        "organization_id": finance_org,
         "ref": "test", "amount": "100", "currency": "USD", "operation_date": str(DAY)
     })
     assert result.status_code == 201, result.text
@@ -79,9 +90,11 @@ async def test_payment_api_preserves_original_and_quote(api, session):
     assert audit.detail["quote"]["date"] == str(DAY)
 
 
-async def test_foreign_payment_requires_date(api):
-    result = await api.post("/finance/payments", json={"ref": "test", "amount": "1", "currency": "USD"})
+async def test_foreign_payment_requires_date(finance_api, finance_org):
+    result = await finance_api.post("/finance/payments", json={
+        "organization_id": finance_org, "ref": "test", "amount": "1", "currency": "USD"})
     assert result.status_code == 422
+    assert result.json()["detail"] == "Укажите дату валютной операции"
 
 
 async def test_relay_uses_event_creation_date(session):
@@ -130,12 +143,17 @@ async def test_cross_module_api(api, session):
     assert result.json()["amount_byn"] == "312.34"
 
 
-async def test_bank_preserves_original_and_allocates_byn(session):
+async def test_bank_preserves_original_and_allocates_byn(api, session, book):
     from modules.finance.bank_ingest import sync_incoming
     from modules.finance.models import BankTransaction, PaymentAllocation
 
+    org = book[0]
+    api.headers.update({"X-User": "tester", "X-User-Roles": "director"})
+    api.params = {"organization_id": org}
     await seed(session)
-    session.add(Payment(ref="INV-77", amount=Decimal("312.34"), status="pending", kind="receivable"))
+    payment = Payment(organization_id=org, ref="INV-77", amount=Decimal("312.34"),
+                      status="pending", kind="receivable")
+    session.add(payment)
     await session.commit()
 
     class Bank:
@@ -145,11 +163,36 @@ async def test_bank_preserves_original_and_allocates_byn(session):
 
     result = await sync_incoming(session, Bank(), OutboxEventBus())
     await session.commit()
-    assert result["matched"] == 1
-    assert (await session.execute(select(PaymentAllocation))).scalar_one().amount == Decimal("312.34")
+    assert result["new"] == 1 and result["matched"] == 0 and result["unmatched"] == 1
     tx = (await session.execute(select(BankTransaction))).scalar_one()
     assert tx.amount == 100 and tx.currency == "USD"
+    match_path = f"/finance/bank/transactions/{tx.id}/match"
+    denied = await api.post(match_path, json={"payment_id": payment.id})
+    assert denied.status_code == 404, denied.text
+    assert (await session.scalars(select(PaymentAllocation))).all() == []
+    binding = await api.post(f"/accounting/organizations/{org}/source-bindings", json={
+        "source_type": "finance_bank_transaction", "source_id": tx.id,
+        "ownership": "own", "evidence": "Synthetic bank channel ownership confirmed for FX test"})
+    assert binding.status_code == 201, binding.text
+    assert binding.json()["organization_id"] == org
+    assert binding.json()["source_type"] == "finance_bank_transaction"
+    assert binding.json()["source_id"] == tx.id and binding.json()["ownership"] == "own"
+    assert binding.json()["actor"] == "tester"
+    matched = await api.post(match_path, json={"payment_id": payment.id})
+    assert matched.status_code == 200, matched.text
+    assert matched.json()["match_status"] == "manual" and matched.json()["payment_id"] == payment.id
+    allocation = (await session.execute(select(PaymentAllocation))).scalar_one()
+    assert allocation.amount == Decimal("312.34") and allocation.payment_id == payment.id
+    assert matched.json()["id"] == tx.id and matched.json()["organization_id"] == org
+    await session.refresh(tx)
+    assert tx.amount == 100 and tx.currency == "USD" and tx.occurred_on == DAY
+    assert tx.payment_id == payment.id and tx.allocation_id == allocation.id
     assert (await sync_incoming(session, Bank(), OutboxEventBus()))["new"] == 0
+    await session.commit()
+    repeated = await api.post(match_path, json={"payment_id": payment.id})
+    assert repeated.status_code == 409, repeated.text
+    assert (await session.scalars(select(PaymentAllocation))).all() == [allocation]
+    assert (await session.scalars(select(BankTransaction))).all() == [tx]
 
 
 async def test_sync_is_idempotent_and_keeps_history(session):
@@ -210,9 +253,13 @@ async def test_valid_employee_can_read_shared_quote(api, session):
     assert result.status_code == 200, result.text
 
 
-async def test_manual_foreign_allocation(api, session):
+async def test_manual_foreign_allocation(finance_api, finance_org, session):
+    api = finance_api
     await seed(session)
-    created = await api.post("/finance/payments", json={"ref": "allocation", "amount": "312.34"})
+    await session.commit()
+    created = await api.post("/finance/payments", json={
+        "organization_id": finance_org, "ref": "allocation", "amount": "312.34"})
+    assert created.status_code == 201, created.text
     pid = created.json()["id"]
     result = await api.post(f"/finance/payments/{pid}/allocations", json={
         "amount": "100", "currency": "USD", "operation_date": str(DAY)

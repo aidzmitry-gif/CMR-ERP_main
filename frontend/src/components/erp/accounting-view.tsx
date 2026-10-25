@@ -1162,7 +1162,7 @@ function AccountingWorkspace({ organization, suggestedOrg, suggestedEntry }: {
     section.pages.some((page) => page.id === tab) || section.hiddenTabs?.includes(tab)) ?? accountingSections[0];
 
   return <div className="min-w-0 w-full space-y-5 p-6 lg:pr-24 text-ink">
-    <header><h1 className="text-2xl font-semibold">Бухгалтерия</h1><p className="mt-1 text-sm text-muted">Проводки и регистры организации из настроек установки. Суммы в BYN.</p></header>
+    <header><h1 className="text-2xl font-semibold">Бухгалтерия</h1><p className="mt-1 text-sm text-muted">Проводки и регистры организации из настроек установки. Суммы в BYN.</p><Link href="/erp/accounting/opening-stock" className="text-accent underline">Ввод начальных остатков товаров</Link></header>
     {organizationHint(suggestedOrg) && organizationHint(suggestedOrg) !== org && <p role="alert" className="text-red-700">Ссылка относится к другому юрлицу. Используется только юрлицо из настроек установки; проводка из ссылки не загружена.</p>}
     {error && <div role="alert" className="rounded-xl border border-red-300 bg-surface p-3 text-red-700">{error}</div>}
     {manualCreateRecovery.status === "pending" && <section role="status" aria-label="Восстановление создания справки" className="space-y-2 rounded-xl border border-amber-300 bg-surface p-3 text-sm"><p className="font-semibold">Результат создания справки неизвестен · организация {manualCreateRecovery.journal.organization_id}</p><p>Создание и сохранение новой справки заблокированы. Повтор отправит сохранённые ключ и тело команды (digest {manualCreateRecovery.journal.reviewed_digest}).</p><Button variant="secondary" disabled={locked} onClick={() => void retryManualCreate()}>Повторить создание справки</Button></section>}

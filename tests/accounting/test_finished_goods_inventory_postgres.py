@@ -366,13 +366,14 @@ async def test_negative_output_cost_revision_changes_future_sale_not_historical_
         assert replay.id == original_sale.id
 
 
-async def test_output_cost_revision_downgrade_preserves_populated_history(pg_factory, pg_book):
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_output_cost_revision_downgrade_preserves_populated_history(pg_factory, pg_book, issuance_pg):
     from sqlalchemy.exc import DBAPIError
 
     from modules.accounting.models import Entry, ProductionOutputCostRevision
     from modules.accounting.production_output_cost_workflow import confirm_output_cost_correction
 
-    policy_id = await _confirm_output(pg_factory, pg_book)
+    policy_id = await _confirm_actual_output_policy(pg_factory, pg_book, issuance_pg[0])
     async with pg_factory() as session:
         output = await session.scalar(select(ProductionOutputTransferReceipt).where(
             ProductionOutputTransferReceipt.organization_id == pg_book[0]))

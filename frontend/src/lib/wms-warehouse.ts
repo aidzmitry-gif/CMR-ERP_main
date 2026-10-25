@@ -56,14 +56,16 @@ export interface ReconRow {
   title: string;
   warehouse: string;
   wms_qty: number;
-  onec_qty: number;
-  diff: number;
+  onec_qty: number | null;
+  diff: number | null;
   diff_value: number | null;
 }
 export interface Reconciliation {
+  organization_id: number;
   rows: ReconRow[];
   gateway: boolean;
-  total_abs_diff_value: number;
+  total_abs_diff_value: number | null;
+  source_unavailable_reason: "organization_stock_source_unverified" | "stock_gateway_unavailable" | null;
 }
 
 export interface AlertRow {
@@ -276,8 +278,32 @@ export async function fetchTasksServer(r?: string, authHeaders?: Record<string, 
   if (!response.ok) throw new Error(`Warehouse tasks unavailable (${response.status})`);
   return response.json();
 }
-export const fetchReconServer = (r?: string) =>
-  ssr<Reconciliation>("/wms/reconciliation", r, { rows: [], gateway: false, total_abs_diff_value: 0 });
+async function reconciliationRead(organizationId: number, url: string, init: RequestInit): Promise<Reconciliation | null> {
+  if (!Number.isSafeInteger(organizationId) || organizationId <= 0) return null;
+  try {
+    const response = await fetch(url, init);
+    if (!response.ok) return null;
+    const data: unknown = await response.json();
+    // The legacy source is unqualified. Reject money/1C quantities until a
+    // separately verified company-source contract replaces this response.
+    if (!dashboardRecord(data) || data.organization_id !== organizationId || data.gateway !== false
+      || typeof data.source_unavailable_reason !== "string"
+      || !["organization_stock_source_unverified", "stock_gateway_unavailable"].includes(data.source_unavailable_reason)
+      || data.total_abs_diff_value !== null || !Array.isArray(data.rows)) return null;
+    if (!data.rows.every(row => dashboardRecord(row)
+      && typeof row.sku_code === "string" && row.sku_code.trim() !== ""
+      && typeof row.title === "string" && typeof row.warehouse === "string" && row.warehouse.trim() !== ""
+      && typeof row.wms_qty === "number" && Number.isFinite(row.wms_qty)
+      && row.onec_qty === null && row.diff === null && row.diff_value === null)) return null;
+    return data as unknown as Reconciliation;
+  } catch { return null; }
+}
+export const fetchReconServer = (organizationId: number, r?: string, authHeaders?: Record<string, string>) =>
+  reconciliationRead(organizationId, `${BASE}/wms/reconciliation?organization_id=${organizationId}`,
+    { cache: "no-store", headers: authHeaders ?? roleHeaders(r) });
+export const fetchRecon = (organizationId: number, signal?: AbortSignal) =>
+  reconciliationRead(organizationId, `/api/wms/reconciliation?organization_id=${organizationId}`,
+    { cache: "no-store", signal });
 export const fetchAlertsServer = (r?: string) =>
   ssr<Alerts>("/wms/alerts", r, { rows: [], gateway: false });
 export const fetchCyclePlansServer = (r?: string) => ssr<CyclePlan[]>("/wms/cycle-plans", r, []);

@@ -114,16 +114,17 @@ describe("SSR fetch-обёртки (ssr helper)", () => {
     await expect(fetchReceiptServer("9")).rejects.toThrow("Receipt unavailable (403)");
   });
 
-  it("fetchReconServer: маппит строки и total_abs_diff_value; дефолт при ошибке", async () => {
+  it("fetchReconServer: сохраняет неизвестные значения компании; ошибка не становится нулём", async () => {
     const data = {
-      rows: [{ sku_code: "A", title: "t", warehouse: "w", wms_qty: 1, onec_qty: 2, diff: -1, diff_value: -50 }],
-      gateway: true, total_abs_diff_value: 50,
+      organization_id: 3,
+      rows: [{ sku_code: "A", title: "t", warehouse: "w", wms_qty: 1, onec_qty: null, diff: null, diff_value: null }],
+      gateway: false, total_abs_diff_value: null, source_unavailable_reason: "organization_stock_source_unverified",
     };
     stubFetch(data);
-    expect(await fetchReconServer()).toEqual(data);
+    expect(await fetchReconServer(3)).toEqual(data);
 
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
-    expect(await fetchReconServer()).toEqual({ rows: [], gateway: false, total_abs_diff_value: 0 });
+    expect(await fetchReconServer(3)).toBeNull();
   });
 
   it("fetchAlertsServer: маппит строки; дефолт при ошибке", async () => {

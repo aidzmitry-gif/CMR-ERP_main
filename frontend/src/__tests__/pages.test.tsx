@@ -12,7 +12,7 @@ vi.mock("@/lib/auth-headers-server", () => ({
 vi.mock("next/font/google", () => ({
   Inter: () => ({ variable: "--font-inter", className: "font-inter" }),
 }));
-vi.mock("next/link", () => ({ default: ({ children }: { children: React.ReactNode }) => <a>{children}</a> }));
+vi.mock("next/link", () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn(), notFound: vi.fn(() => { throw new Error("NEXT_NOT_FOUND"); }) }));
 vi.mock("next/font/google", () => ({ Inter: () => ({ variable: "mock-font", className: "mock-font" }) }));
 vi.mock("@/components/app-shell", () => ({
@@ -66,7 +66,7 @@ vi.mock("@/components/erp/accounting-view", () => ({ AccountingView: ({ suggeste
 vi.mock("@/components/erp/marketing-campaign-board", () => ({
   MarketingCampaignBoard: () => <div>campaign-board</div>,
 }));
-vi.mock("@/components/erp/wms-dashboard", () => ({ WmsDashboard: () => <div>wms-dashboard</div> }));
+vi.mock("@/components/erp/wms-dashboard", () => ({ ScopedWmsDashboard: () => <div>scoped-wms-dashboard</div> }));
 vi.mock("@/lib/wms-warehouse", () => ({ fetchDashboardServer: vi.fn().mockResolvedValue({}) }));
 vi.mock("@/lib/api", () => ({
   fetchBoardStages: vi.fn().mockResolvedValue([{ id: "new", title: "Новая", color: "#000", count: 1, sum: 100, deals: [] }]),
@@ -225,10 +225,11 @@ describe("страницы (src/app)", () => {
     }
   });
 
-  it("WmsPage монтирует дашборд склада (bespoke, async)", async () => {
-    render(await WmsPage());
-    expect(fetchDashboardServer).toHaveBeenCalledWith("director", { Authorization: "Bearer synthetic-token" });
-    expect(screen.getByText("wms-dashboard")).toBeInTheDocument();
+  it("WmsPage монтирует сводку компании без запроса с неопределённой организацией", () => {
+    render(<WmsPage />);
+    expect(fetchDashboardServer).not.toHaveBeenCalled();
+    expect(screen.getByText("scoped-wms-dashboard")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Настроить режим WMS по складам" })).toBeInTheDocument();
   });
 
   it("FinancePage монтирует финансовый view (bespoke, async)", async () => {

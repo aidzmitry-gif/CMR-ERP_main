@@ -7,12 +7,34 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from uuid import uuid4
 
 import pytest
+import pytest_asyncio
 
+from core.domain.models import Counterparty
+from modules.procurement.models import Supplier
+from modules.procurement.order_edit_commands import PurchaseOrderEditCommand  # noqa: F401
 from modules.procurement.plan import STAGE_ORDER
 
 pytestmark = pytest.mark.asyncio
+
+
+@pytest_asyncio.fixture
+async def api(api, session):
+    api.headers["X-User"] = "procurement-owner-test"
+    party = Counterparty(name="S", unp="999999991")
+    session.add(party)
+    await session.flush()
+    session.add(Supplier(counterparty_id=party.id, name=party.name, unp=party.unp, status="active"))
+    await session.commit()
+    created = await api.post("/accounting/organizations", json={
+        "name": "Synthetic procurement company", "unp": "999999994",
+    })
+    assert created.status_code == 201, created.text
+    api.headers["X-Expected-Organization"] = str(created.json()["id"])
+    api.headers["X-Expected-Principal"] = "procurement-owner-test"
+    yield api
 
 
 # ───────────────────────── справочник способов перевозки ─────────────────────────
@@ -45,22 +67,23 @@ async def test_transport_method_edit_404(api):
 # ───────────────────────── план машины (PurchaseOrder) ─────────────────────────
 
 
-async def _order(api, **over):
-    api.headers["X-User"] = "procurement-owner-test"
-    body = {"supplier": "S", "lines": [{"sku_code": "A", "qty": 1, "goods_value_byn": 100}]}
-    body.update(over)
-    r = await api.post("/procurement/orders", json=body)
-    assert r.status_code == 201, r.text
-    books = (await api.get("/accounting/organizations")).json()
-    if not books:
-        created = await api.post("/accounting/organizations", json={"name": "Synthetic procurement company", "unp": "999999994"})
-        assert created.status_code == 201, created.text
-        books = [created.json()]
-    assigned = await api.post(f"/procurement/organizations/{books[0]['id']}/purchase-ownership", json={"kind": "order", "source_id": r.json()["id"], "evidence": "Explicit synthetic lifecycle fixture"})
-    assert assigned.status_code == 201, assigned.text
-    api.headers["X-Expected-Organization"] = str(books[0]["id"])
-    api.headers["X-Expected-Principal"] = "procurement-owner-test"
-    return r.json()
+async def _order(api):
+    org = api.headers["X-Expected-Organization"]
+    options = await api.get(f"/procurement/organizations/{org}/supplier-options?q=S")
+    assert options.status_code == 200, options.text
+    supplier = next(row for row in options.json()["items"] if row["name"] == "S")
+    body = {"request_key": str(uuid4()), "document": {
+        "supplier": supplier["name"], "supplier_id": supplier["id"], "supplier_unp": supplier["unp"],
+        "eta_date": None, "freight_byn": "0.00", "lines": [{
+            "sku_code": "A", "qty": "1.00", "goods_value_byn": "100.00",
+            "weight": "0.000", "volume": "0.0000",
+        }],
+    }, "ownership_evidence": "Explicit synthetic shipment-plan fixture", "request_basis": None}
+    response = await api.post(f"/procurement/organizations/{org}/orders", json=body)
+    assert response.status_code == 201, response.text
+    result = response.json()
+    assert result["outcome"] == "created"
+    return {"id": result["order_id"], "number": result["number"]}
 
 
 async def test_plan_order_container_backward(api):

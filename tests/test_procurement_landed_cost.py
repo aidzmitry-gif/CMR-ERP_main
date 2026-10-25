@@ -12,11 +12,12 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import select
 
-from core.domain.models import OutboxEvent
+from core.domain.models import Counterparty, OutboxEvent
 from modules.procurement.landed_cost import LandedCostService
-from modules.procurement.models import LandedCost
+from modules.procurement.models import LandedCost, PurchaseOrder, PurchaseOrderLine, Supplier
 from modules.procurement.order_edit_commands import PurchaseOrderEditCommand  # noqa: F401
 
 pytestmark = pytest.mark.asyncio
@@ -24,35 +25,85 @@ pytestmark = pytest.mark.asyncio
 SVC = LandedCostService()
 
 
-async def _order(api, **fields):
+@pytest_asyncio.fixture
+async def api(api, session):
     api.headers["X-User"] = "procurement-owner-test"
-    payload = {"supplier": "Поставщик", "lines": [{"sku_code": "A", "qty": 10, "goods_value_byn": 1500}]}
-    payload.update(fields)
-    r = await api.post("/procurement/orders", json=payload)
-    assert r.status_code == 201, r.text
-    books = (await api.get("/accounting/organizations")).json()
-    if not books:
-        created = await api.post("/accounting/organizations", json={"name": "Synthetic procurement company", "unp": "999999994"})
-        assert created.status_code == 201, created.text
-        books = [created.json()]
-    org = books[0]["id"]
+    party = Counterparty(name="Поставщик", unp="999999991")
+    session.add(party)
+    await session.flush()
+    session.add(Supplier(counterparty_id=party.id, name=party.name, unp=party.unp, status="active"))
+    await session.commit()
+    created = await api.post("/accounting/organizations", json={
+        "name": "Synthetic procurement company", "unp": "999999994",
+    })
+    assert created.status_code == 201, created.text
+    api.headers["X-Expected-Organization"] = str(created.json()["id"])
+    api.headers["X-Expected-Principal"] = "procurement-owner-test"
+    yield api
+
+
+async def _order_command(api, **fields):
+    org = api.headers["X-Expected-Organization"]
+    options = await api.get(f"/procurement/organizations/{org}/supplier-options?q=Поставщик")
+    assert options.status_code == 200, options.text
+    supplier = next(row for row in options.json()["items"] if row["name"] == "Поставщик")
+    lines = fields.pop("lines", [{"sku_code": "A", "qty": 10, "goods_value_byn": 1500}])
+    freight = fields.pop("freight_byn", 0)
+    return {"request_key": str(uuid4()), "document": {
+        "supplier": supplier["name"], "supplier_id": supplier["id"], "supplier_unp": supplier["unp"],
+        "eta_date": fields.pop("eta_date", None), "freight_byn": f"{Decimal(str(freight)):.2f}",
+        "lines": [{"sku_code": line["sku_code"], "qty": f"{Decimal(str(line['qty'])):.2f}",
+                   "goods_value_byn": f"{Decimal(str(line.get('goods_value_byn', 0))):.2f}",
+                   "weight": f"{Decimal(str(line.get('weight', 0))):.3f}",
+                   "volume": f"{Decimal(str(line.get('volume', 0))):.4f}"} for line in lines],
+        **fields,
+    }, "ownership_evidence": "Explicit synthetic landed-cost fixture", "request_basis": None}
+
+
+async def _status(api, order_id, status):
+    org = api.headers["X-Expected-Organization"]
+    return await api.post(f"/procurement/organizations/{org}/orders/{order_id}/edit-commands", json={
+        "version": 1, "request_key": str(uuid4()), "order_id": order_id,
+        "action": "status", "payload": {"status": status},
+    })
+
+
+async def _order(api, **fields):
+    status = fields.pop("status", None)
+    body = await _order_command(api, **fields)
+    org = api.headers["X-Expected-Organization"]
+    response = await api.post(f"/procurement/organizations/{org}/orders", json=body)
+    assert response.status_code == 201, response.text
+    data = response.json()
+    assert data["outcome"] == "created"
+    result = {"id": data["order_id"], "number": data["number"]}
+    if status:
+        changed = await _status(api, result["id"], status)
+        assert changed.status_code == 200, changed.text
+    return result
+
+
+async def _legacy_order(api, session, *, lines):
+    """Historical zero/duplicate lines, never a new canonical order request."""
+    order = PurchaseOrder(number="LEGACY-" + str(uuid4()), supplier="Поставщик", status="draft")
+    session.add(order)
+    await session.flush()
+    for line in lines:
+        session.add(PurchaseOrderLine(order_id=order.id, sku_code=line["sku_code"],
+            qty=Decimal(str(line["qty"])), goods_value_byn=Decimal(str(line["goods_value_byn"]))))
+    await session.commit()
+    org = api.headers["X-Expected-Organization"]
     assigned = await api.post(f"/procurement/organizations/{org}/purchase-ownership", json={
-        "kind": "order", "source_id": r.json()["id"], "evidence": "Explicit synthetic landed-cost fixture"
+        "kind": "order", "source_id": order.id, "evidence": "Explicit synthetic legacy landed-cost fixture",
     })
     assert assigned.status_code == 201, assigned.text
-    api.headers["X-Expected-Organization"] = str(org)
-    api.headers["X-Expected-Principal"] = "procurement-owner-test"
-    return r.json()
+    return {"id": order.id, "number": order.number}
 
 
 async def _receive(api, order_id):
-    org = api.headers["X-Expected-Organization"]
-    r = await api.post(f"/procurement/organizations/{org}/orders/{order_id}/edit-commands", json={
-        "version": 1, "request_key": str(uuid4()), "order_id": order_id,
-        "action": "status", "payload": {"status": "received"}
-    })
-    assert r.status_code == 200, r.text
-    return r.json()
+    response = await _status(api, order_id, "received")
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 async def _rows(session):
@@ -97,8 +148,8 @@ async def test_freight_allocated_across_positions_by_weight(api, session):
 
 async def test_duplicate_sku_lines_aggregated(api, session):
     """Две позиции с одним sku_code → одна строка LandedCost (агрегация qty/стоимости)."""
-    order = await _order(
-        api,
+    order = await _legacy_order(
+        api, session,
         lines=[
             {"sku_code": "DUP", "qty": 4, "goods_value_byn": 400},
             {"sku_code": "DUP", "qty": 6, "goods_value_byn": 600},
@@ -136,8 +187,8 @@ async def test_receive_emits_landed_cost_calculated(api, session):
 
 async def test_zero_qty_line_skipped(api, session):
     """Позиция с qty=0 не фиксируется (unit неопределён) — не пишем 0, не маскируем дыру."""
-    order = await _order(
-        api,
+    order = await _legacy_order(
+        api, session,
         lines=[
             {"sku_code": "ZERO", "qty": 0, "goods_value_byn": 100},
             {"sku_code": "OK", "qty": 5, "goods_value_byn": 500},
@@ -151,15 +202,19 @@ async def test_zero_qty_line_skipped(api, session):
 
 
 async def test_invalid_status_rejected(api):
-    """Неизвестный статус → 422 (опечатка не должна тихо пропустить фиксацию landed cost)."""
-    r = await api.post(
-        "/procurement/orders",
-        json={"supplier": "S", "status": "recieved", "lines": [{"sku_code": "X", "qty": 1}]},
-    )
-    assert r.status_code == 422
+    """Invalid create/edit status fails specifically, not for missing required data."""
+    body = await _order_command(api)
+    body["document"]["status"] = "recieved"
+    org = api.headers["X-Expected-Organization"]
+    response = await api.post(f"/procurement/organizations/{org}/orders", json=body)
+    assert response.status_code == 422
+    assert any("status" in error["loc"] for error in response.json()["detail"])
+    assert all(error["type"] != "missing" for error in response.json()["detail"])
     order = await _order(api)
-    r = await api.patch(f"/procurement/orders/{order['id']}", json={"status": "bogus"})
-    assert r.status_code == 422
+    response = await _status(api, order["id"], "bogus")
+    assert response.status_code == 422
+    assert any("status" in error["loc"] or "status" in error["msg"] for error in response.json()["detail"])
+    assert all(error["type"] != "missing" for error in response.json()["detail"])
 
 
 async def test_repeated_receive_no_duplicate(api, session):
@@ -229,11 +284,11 @@ async def test_gateway_registered(services):
 
 
 async def test_open_orders_lists_in_transit_with_eta(api):
-    await _order(api, number="PO-SHIP", status="shipped", eta_date="2026-08-01",
+    shipped = await _order(api, status="shipped", eta_date="2026-08-01",
                  lines=[{"sku_code": "SKU-PO", "qty": 5, "goods_value_byn": 500}])
-    await _order(api, number="PO-CUST", status="customs", eta_date="2026-07-15",
+    customs = await _order(api, status="customs", eta_date="2026-07-15",
                  lines=[{"sku_code": "SKU-CU", "qty": 5, "goods_value_byn": 500}])
-    received = await _order(api, number="PO-DONE", status="ordered",
+    received = await _order(api, status="ordered",
                             lines=[{"sku_code": "SKU-QC", "qty": 5, "goods_value_byn": 500}])
     await _receive(api, received["id"])
 
@@ -242,8 +297,8 @@ async def test_open_orders_lists_in_transit_with_eta(api):
     assert response.status_code == 200, response.text
     rows = response.json()["items"]
     numbers = {o["number"] for o in rows}
-    assert numbers == {"PO-SHIP", "PO-CUST"}  # received — не открытый
+    assert numbers == {shipped["number"], customs["number"]}  # received — не открытый
     # Scoped reads use a stable ID keyset; ETA remains explicit data for the UI to sort/filter.
     by_number = {row["number"]: row for row in rows}
-    assert by_number["PO-CUST"]["eta_date"] == "2026-07-15"
-    assert by_number["PO-SHIP"]["eta_date"] == "2026-08-01"
+    assert by_number[customs["number"]]["eta_date"] == "2026-07-15"
+    assert by_number[shipped["number"]]["eta_date"] == "2026-08-01"

@@ -5,7 +5,7 @@ function milestones(target: string) {
   for (const m of [...result].reverse()) { m.planned_date = day.toISOString().slice(0, 10); day = new Date(day.getTime() - m.duration_days * 86400000); } return { milestones: result, start_date: day.toISOString().slice(0, 10) };
 }
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
-import { canonical, commandHash, decimalInput, emptyLine, fetchOrder, fetchExpectedReservations, fetchLandedPreview, fetchPlan, sendEdit, validCommand, validOutcome, MutationUnknown, type EditCommand, type EditOutcome } from "./procurement-machine";
+import { canonical, commandHash, decimalInput, emptyLine, fetchOrder, fetchCustomerDeadlines, fetchExpectedReservations, fetchLandedPreview, fetchPlan, sendEdit, validCommand, validOutcome, MutationUnknown, type EditCommand, type EditOutcome } from "./procurement-machine";
 const scope = { organization_id: 2, principal: "alice", can_manage: true };
 const command = (): EditCommand => ({ version: 1, request_key: "11111111-1111-4111-8111-111111111111", order_id: 7, action: "add_line", payload: { ...emptyLine(), sku_code: "A" } });
 const detail = () => ({ organization_id: 2, id: 7, number: "PO7", supplier: "S", status: "draft", eta_date: null, freight_byn: "0.00", lines: [], next_after_line_id: null });
@@ -102,4 +102,34 @@ it.each(["foreign-org", "wrong-po", "unknown-event", "duplicate-event", "duplica
   for (const mode of ["execute", "reconcile"] as const) await expect(sendEdit(scope, c, mode)).rejects.toBeInstanceOf(MutationUnknown);
   expect(f).toHaveBeenCalledTimes(2); // one request per explicit action; never auto-retry
   expect(f.mock.calls[0][1].body).toBe(f.mock.calls[1][1].body);
+});
+
+
+function customerReview() {
+  return { organization_id: 2, order_id: 7, status: "live_review", source: "outstanding_expected_reservations",
+    earliest_required_arrival: "2026-12-28", unresolved_deadlines: 0, complete_customer_demand: false, at_risk: true,
+    items: [{ reservation_id: 11, deal_id: 21, sku_code: "A", outstanding_qty: "1.00",
+      ship_deadline: "2026-12-31", required_arrival: "2026-12-28", deadline_status: "dated", at_risk: true }] };
+}
+it("reads signed live slack and preserves known zero versus unknown penalties", async () => {
+  const legacy = customerReview();
+  const value = { ...legacy, slack_days: -4, items: [{ ...legacy.items[0], deal_number: "SD-21",
+    slack_days: -4, penalty_rate_pct: "0.00", penalty_cap_pct: null, penalty_terms: null }] };
+  f.mockResolvedValue(ok(value));
+  expect(await fetchCustomerDeadlines(2, 7)).toEqual(value);
+  expect(f.mock.calls[0][0]).toBe("/api/procurement/organizations/2/orders/7/customer-deadlines");
+});
+it("keeps older deadline responses readable without inventing metadata", async () => {
+  const value = customerReview(); f.mockResolvedValue(ok(value));
+  expect(await fetchCustomerDeadlines(2, 7)).toEqual(value);
+});
+it.each([
+  ["slack_days", 1.5, false], ["deal_number", {}, true], ["penalty_rate_pct", "NaN", true],
+  ["penalty_cap_pct", "-1.00", true], ["penalty_terms", {}, true],
+])("rejects malformed optional deadline metadata %s", async (field, value, item) => {
+  const review = customerReview();
+  const bad = item ? { ...review, items: [{ ...review.items[0], [String(field)]: value }] }
+    : { ...review, [String(field)]: value };
+  f.mockResolvedValue(ok(bad));
+  await expect(fetchCustomerDeadlines(2, 7)).rejects.toThrow("Некорректные сведения");
 });

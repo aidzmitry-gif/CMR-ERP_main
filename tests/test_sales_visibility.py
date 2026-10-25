@@ -6,9 +6,18 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
+import pytest_asyncio
 
 from core.domain.models import Counterparty, User
 from modules.sales.models import CallLog, CrmClient, CrmTimelineAttachment, CrmTimelineComment
+
+
+@pytest_asyncio.fixture
+async def api(api, session):
+    for name in ("Тест", "Client OWN", "Client OTHER", "Client UNASSIGNED"):
+        session.add(Counterparty(name=name))
+    await session.commit()
+    yield api
 
 
 def _sales_headers(username: str) -> dict[str, str]:

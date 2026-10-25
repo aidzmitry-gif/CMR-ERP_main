@@ -297,11 +297,27 @@ export async function sendEdit(scope: Identity, command: EditCommand, mode: "exe
 }
 
 
-export type CustomerDeadlines = { organization_id: number; order_id: number; status: "live_review"; source: "outstanding_expected_reservations"; earliest_required_arrival: string | null; unresolved_deadlines: number; complete_customer_demand: false; at_risk: boolean | null; items: { reservation_id: number; deal_id: number; sku_code: string; outstanding_qty: string; ship_deadline: string | null; required_arrival: string | null; deadline_status: string; at_risk: boolean | null }[] };
+export type CustomerDeadlines = {
+  organization_id: number; order_id: number; status: "live_review";
+  source: "outstanding_expected_reservations"; earliest_required_arrival: string | null;
+  slack_days?: number | null; unresolved_deadlines: number; complete_customer_demand: false;
+  at_risk: boolean | null;
+  items: { reservation_id: number; deal_id: number; deal_number?: string; sku_code: string;
+    outstanding_qty: string; ship_deadline: string | null; required_arrival: string | null;
+    deadline_status: string; at_risk: boolean | null; slack_days?: number | null;
+    penalty_rate_pct?: string | null; penalty_cap_pct?: string | null; penalty_terms?: string | null }[];
+};
 export async function fetchCustomerDeadlines(org: number, orderId: number): Promise<CustomerDeadlines> {
   const v = await read<CustomerDeadlines>(`${prefix(org)}/orders/${orderId}/customer-deadlines`);
   const date = (x: unknown) => x === null || typeof x === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x);
   const risk = (x: unknown) => x === null || typeof x === "boolean";
+  const slack = (x: unknown) => x == null || Number.isSafeInteger(x);
+  const percent = (x: unknown) => x == null || typeof x === "string" && /^\d{1,4}\.\d{2}$/.test(x);
+  const metadata = (x: CustomerDeadlines["items"][number]) =>
+    (x.deal_number === undefined || typeof x.deal_number === "string") && slack(x.slack_days) &&
+    percent(x.penalty_rate_pct) && percent(x.penalty_cap_pct) &&
+    (x.penalty_terms == null || typeof x.penalty_terms === "string" && x.penalty_terms.length <= 512);
   if (v.organization_id !== org || v.order_id !== orderId || v.status !== "live_review" || v.source !== "outstanding_expected_reservations" || v.complete_customer_demand !== false || !date(v.earliest_required_arrival) || !risk(v.at_risk) || !Number.isInteger(v.unresolved_deadlines) || v.unresolved_deadlines < 0 || !Array.isArray(v.items) || v.items.some(x => !id(x.reservation_id) || !id(x.deal_id) || typeof x.sku_code !== "string" || typeof x.outstanding_qty !== "string" || !/^\d+\.\d{2}$/.test(x.outstanding_qty) || (x.ship_deadline !== null && typeof x.ship_deadline !== "string") || !date(x.required_arrival) || !risk(x.at_risk))) throw new Error("Некорректный обзор клиентских сроков");
+  if (!slack(v.slack_days) || v.items.some(x => !metadata(x))) throw new Error("Некорректные сведения о запасе времени или условиях штрафа");
   return v;
 }

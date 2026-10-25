@@ -36,6 +36,17 @@ async def api(api, session):
     yield api
 
 
+@pytest_asyncio.fixture
+async def active_loss_dictionary(session):
+    from modules.sales.models import LossReason
+
+    session.add_all([
+        LossReason(code=code, title=f"Synthetic {code} reason", active=True)
+        for code in ("price", "competitor", "no_need")
+    ])
+    await session.commit()
+
+
 async def _new_deal(api, number, **extra):
     payload = {"number": number, "title": "t", "counterparty": "c", **extra}
     r = await api.post("/sales/deals", json=payload)
@@ -262,7 +273,7 @@ async def test_confirmed_price_cannot_issue_an_item_with_missing_sku(api, sessio
 
 # ── SALES-40: отказ + причины ──────────────────────────────────────────────
 
-async def test_lose_requires_reason(api, session):
+async def test_lose_requires_reason(api, session, active_loss_dictionary):
     from uuid import uuid4
 
     deal = await _new_deal(api, "L-1", amount=1000)
@@ -322,7 +333,7 @@ async def test_loss_reasons_endpoint(session, api):
     assert codes == ["b", "a"]  # только активные, по sort_order
 
 
-async def test_lost_emits_event(session, api):
+async def test_lost_emits_event(session, api, active_loss_dictionary):
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent
@@ -338,7 +349,7 @@ async def test_lost_emits_event(session, api):
     assert types.count("sales.deal.loss_finalized") == 1
 
 
-async def test_lost_column_on_board(api, session):
+async def test_lost_column_on_board(api, session, active_loss_dictionary):
     deal = await _new_deal(api, "L-4", amount=700)
     command = await _loss_command(api, session, deal, "no_need")
     closed = await api.post(f"/sales/deals/{deal['id']}/lose", json=command)
@@ -396,7 +407,7 @@ async def test_win_deal_repeat_clients_resolves_rp_won(api):
     assert won_col["count"] == 1
 
 
-async def test_lose_deal_repeat_clients_resolves_rp_lost(api, session):
+async def test_lose_deal_repeat_clients_resolves_rp_lost(api, session, active_loss_dictionary):
     """Тот же класс бага, что Фикс 1 (win): lose на сделке repeat_clients ставит ``rp_lost``
     (не литерал "lost", которого нет в этой воронке) — иначе закрытая сделка выпадала бы
     с /board?funnel=repeat_clients."""

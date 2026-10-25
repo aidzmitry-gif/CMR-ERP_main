@@ -224,3 +224,71 @@ async def test_finalized_lost_deal_releases_expected_reserve_idempotently(client
         },
     )
     assert blocked.status_code == 409
+
+async def test_new_allocation_rejects_deleted_source_item(client, db, book):
+    from core.domain.models import AuditLog
+    from modules.sales.routes import router as sales_router
+
+    client._transport.app.include_router(sales_router, prefix="/sales")
+    connection = await db.connection()
+    await connection.run_sync(lambda sync: AuditLog.__table__.create(sync, checkfirst=True))
+    deal_id, item_id, order_id, line_id, _ = await setup_demand(db, book)
+    created = await client.post(
+        f"/procurement/organizations/{book[0]}/deals/{deal_id}/demands",
+        json=demand_payload(item_id, "6.00"),
+    )
+    assert created.status_code == 201, created.text
+    demand_id = created.json()["id"]
+    deleted = await client.delete(f"/sales/deal-items/{item_id}")
+    assert deleted.status_code == 204, deleted.text
+    assert await db.get(DealItem, item_id, populate_existing=True) is None
+    rejected = await client.post(
+        f"/procurement/organizations/{book[0]}/demands/{demand_id}/allocations",
+        json={"order_id": order_id, "order_line_id": line_id, "qty": "4.00",
+              "request_key": str(uuid4()), "evidence": "New allocation after source deletion"},
+    )
+    allocations = await db.scalar(select(func.count()).select_from(DealProcurementAllocation))
+    reservations = await db.scalar(select(func.count()).select_from(ExpectedReservation))
+    assert (rejected.status_code, allocations, reservations) == (409, 0, 0), rejected.text
+    assert rejected.json()["detail"] == "Confirm the organization, CRM deal, deal item and SKU"
+    assert await db.get(DealProcurementDemand, demand_id) is not None
+
+
+async def test_allocation_replay_preserves_history_after_source_deletion(client, db, book):
+    from core.domain.models import AuditLog
+    from modules.sales.routes import router as sales_router
+
+    client._transport.app.include_router(sales_router, prefix="/sales")
+    connection = await db.connection()
+    await connection.run_sync(lambda sync: AuditLog.__table__.create(sync, checkfirst=True))
+    deal_id, item_id, order_id, line_id, _ = await setup_demand(db, book)
+    demand = await client.post(
+        f"/procurement/organizations/{book[0]}/deals/{deal_id}/demands",
+        json=demand_payload(item_id, "6.00"),
+    )
+    assert demand.status_code == 201, demand.text
+    path = f"/procurement/organizations/{book[0]}/demands/{demand.json()['id']}/allocations"
+    command = {"order_id": order_id, "order_line_id": line_id, "qty": "4.00",
+               "request_key": str(uuid4()), "evidence": "Confirmed before source deletion"}
+    first = await client.post(path, json=command)
+    assert first.status_code == 201, first.text
+    tables = [DealProcurementDemand.__table__, DealProcurementAllocation.__table__,
+              ExpectedReservation.__table__]
+    before = [(await db.execute(select(table))).mappings().all() for table in tables]
+    assert [len(rows) for rows in before] == [1, 1, 1]
+
+    deleted = await client.delete(f"/sales/deal-items/{item_id}")
+    assert deleted.status_code == 204, deleted.text
+    assert await db.get(DealItem, item_id, populate_existing=True) is None
+    replay = await client.post(path, json=command)
+    assert replay.status_code == 201, replay.text
+    assert replay.json() == {**first.json(), "replayed": True}
+
+    new = await client.post(path, json={**command, "request_key": str(uuid4()), "qty": "1.00"})
+    assert new.status_code == 409, new.text
+    assert new.json()["detail"] == "Confirm the organization, CRM deal, deal item and SKU"
+    changed = await client.post(path, json={**command, "qty": "1.00"})
+    assert changed.status_code == 409, changed.text
+    assert changed.json()["detail"] == "Allocation request key identifies another command"
+    after = [(await db.execute(select(table))).mappings().all() for table in tables]
+    assert after == before
