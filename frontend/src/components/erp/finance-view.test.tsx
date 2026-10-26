@@ -46,6 +46,7 @@ const SUMMARY = {
 };
 
 const LEDGER_REPORT = {
+  trial_balance: [{ account: "51", title: "Банк", off_balance: false, currency: "BYN", dimensions: {}, opening: "0.00", debit: "20.00", credit: "0.00", closing: "20.00" }],
   organization_id: 7,
   from: "2026-09-01",
   to: "2026-09-30",
@@ -229,7 +230,7 @@ describe("FinanceView", () => {
     render(<FinanceView />);
     expect(screen.getByRole("heading", { name: "Финансы" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Бухгалтерии" })).toHaveAttribute("href", "/erp/accounting");
-    expect(screen.getByText(/1С остаётся архивом истории и источником сверки до приёмки пилота/)).toBeInTheDocument();
+    expect(screen.getByText(/Сейчас основной учёт ведётся в 1С/)).toBeInTheDocument();
     for (const label of ["Касса и маржа", "Платежи", "Aging", "Cash-flow", "P&L", "Баланс", "Сверка 1С"]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }

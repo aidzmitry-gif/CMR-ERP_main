@@ -1,6 +1,7 @@
 """Review-only source binding for VAT-only receipt correction drafts."""
 import hashlib
 import json
+import os
 from copy import deepcopy
 from datetime import date
 from uuid import uuid4
@@ -137,7 +138,7 @@ async def test_vat_correction_workpaper_preview_replay_history_and_read_only(
         client, db, book, tmp_path, monkeypatch):
     receipt_id, entry_id = await seed_workpaper_source(db, book)
     storage = tmp_path / "private-accounting-evidence"
-    storage.mkdir()
+    storage.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_ACCOUNTING_EVIDENCE_DATA_DIR", str(storage.resolve()))
     first_file = await upload_file(client, book[0], receipt_id)
     pdf_file = await upload_file(
@@ -313,7 +314,7 @@ async def test_vat_correction_workpaper_closed_period_changed_basis_and_bad_scop
         client, db, book, tmp_path, monkeypatch):
     receipt_id, _ = await seed_workpaper_source(db, book)
     storage = tmp_path / "private-accounting-evidence"
-    storage.mkdir()
+    storage.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_ACCOUNTING_EVIDENCE_DATA_DIR", str(storage.resolve()))
     await upload_file(client, book[0], receipt_id)
     base = f"/accounting/organizations/{book[0]}/inbound-vat-correction-workpapers"
@@ -359,7 +360,7 @@ async def test_vat_correction_workpaper_requires_vat_only_current_revision_and_v
         db, book, correction_changes={"warehouse": "other warehouse"},
     )
     storage = tmp_path / "private-accounting-evidence"
-    storage.mkdir()
+    storage.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_ACCOUNTING_EVIDENCE_DATA_DIR", str(storage.resolve()))
     url = f"/accounting/organizations/{book[0]}/inbound-vat-correction-workpapers/preview"
     physical = await client.post(url, json={
@@ -388,7 +389,7 @@ async def test_vat_correction_workpaper_requires_account_18_source_line_and_curr
     assert no_evidence.status_code == 409 and "current correction evidence" in no_evidence.text
 
     storage = tmp_path / "private-accounting-evidence"
-    storage.mkdir()
+    storage.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_ACCOUNTING_EVIDENCE_DATA_DIR", str(storage.resolve()))
     zero_vat_id, _ = await seed_zero_vat_workpaper_source(db, book)
     await upload_file(client, book[0], zero_vat_id)

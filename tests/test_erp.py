@@ -37,6 +37,17 @@ async def erp_organization(api):
     return response.json()["id"]
 
 
+@pytest_asyncio.fixture
+async def erp_logistics_actor(session):
+    """Persist the existing role in this isolated test database before role-gated HTTP."""
+    from core.domain.models import User
+
+    session.add(User(username="erp-test-logistics", full_name="Synthetic logistics actor",
+                     role="logistics", status="active"))
+    await session.commit()
+    return {"X-User": "erp-test-logistics", "X-User-Roles": "logistics"}
+
+
 async def test_procurement(api, erp_organization):
     from decimal import Decimal
 
@@ -83,7 +94,7 @@ async def test_production(api):
     assert [s["id"] for s in board["stages"]][0] == "queue"
 
 
-async def test_wms(api, erp_organization):
+async def test_wms(api, session, erp_organization, erp_logistics_actor):
     warehouse = await api.post(f"/wms/organizations/{erp_organization}/warehouses",
                                json={"name": "Главный", "title": "Synthetic ERP warehouse"})
     assert warehouse.status_code == 201, warehouse.text
@@ -91,22 +102,34 @@ async def test_wms(api, erp_organization):
     assert r.status_code == 201
     movements = (await api.get("/wms/movements")).json()
     assert movements[0]["sku_code"] == "AKB-60" and movements[0]["kind"] == "in"
-    # воронка складских операций
-    op = await api.post("/wms/ops", json={"counterparty": "ООО Поставка", "title": "Металл", "items_count": 12, "amount": 500000})
-    assert op.status_code == 201 and op.json()["stage"] == "inbound"
-    moved = await api.patch(f"/wms/ops/{op.json()['id']}", json={"stage": "receiving"})
-    assert moved.json()["stage"] == "receiving"
-    assert len((await api.get("/wms/ops")).json()) >= 1
-    assert (await api.patch("/wms/ops/999999", json={"stage": "qc"})).status_code == 404
+    # Legacy operations are read-only; writes must use owned warehouse tasks.
+    from sqlalchemy import select
+
+    from modules.wms.models import WarehouseOp
+
+    op = WarehouseOp(counterparty="Synthetic legacy supplier", title="Synthetic legacy goods",
+                     items_count=12, amount=500000, stage="receiving")
+    session.add(op)
+    await session.commit()
+    before = (await session.execute(select(WarehouseOp.__table__))).all()
+    created = await api.post("/wms/ops", json={"title": "Synthetic blocked legacy write"})
+    assert created.status_code == 409 and "устаревшие" in created.json()["detail"]
+    moved = await api.patch(f"/wms/ops/{op.id}", json={"stage": "qc"})
+    assert moved.status_code == 409 and "устаревшие" in moved.json()["detail"]
+    assert (await session.execute(select(WarehouseOp.__table__))).all() == before
+    await session.refresh(op)
+    assert op.stage == "receiving"
+    assert len((await api.get("/wms/ops")).json()) == 1
+    assert (await api.patch("/wms/ops/999999", json={"stage": "qc"})).status_code == 409
     board = (await api.get("/wms/board")).json()
     assert [s["id"] for s in board["stages"]][0] == "inbound"
     # на приёмке карточка получает soft-панель пересчёта и кнопку-действие
     recv = next(s for s in board["stages"] if s["id"] == "receiving")
     assert recv["cards"][0]["details"] and recv["cards"][0]["action"] == "Завершить приёмку"
-    # RBAC воронки операций: чтение — wms.read (логистика ок), запись — wms.count (логистика 403)
-    assert (await api.get("/wms/ops", headers={"X-User-Roles": "logistics"})).status_code == 200
-    assert (await api.post("/wms/ops", json={"title": "x"},
-                           headers={"X-User-Roles": "logistics"})).status_code == 403
+    # The persisted logistics actor can read, but lacks the warehouse write permission.
+    assert (await api.get("/wms/ops", headers=erp_logistics_actor)).status_code == 200
+    denied = await api.post("/wms/ops", json={"title": "x"}, headers=erp_logistics_actor)
+    assert denied.status_code == 403 and denied.json()["detail"] == "Недостаточно прав: wms.count"
 
 
 async def test_wms_stock_mirror(api, session):
@@ -200,10 +223,21 @@ async def test_wms_inventory(api, session, erp_organization):
     assert blocked.json()["detail"] == "Недостаточно прав: wms.count"
 
 
-async def test_wms_operational(api, session, erp_organization):
+async def test_wms_operational(api, session, erp_organization, erp_logistics_actor):
     """Операции склада поверх начального остатка → движения и оперативный остаток."""
 
     from modules.wms.events import on_stock_released
+
+    warehouse = await api.post(f"/wms/organizations/{erp_organization}/warehouses",
+                               json={"name": "Минск", "title": "Synthetic ERP warehouse"})
+    assert warehouse.status_code == 201, warehouse.text
+    catalogue = warehouse.json()
+    assert catalogue["organization_id"] == erp_organization and catalogue["is_active"] is True
+    assert catalogue["wms_enabled"] is False and catalogue["prohibit_negative_stock"] is True
+    mode = await api.patch(f"/wms/organizations/{erp_organization}/warehouses/{catalogue['id']}/execution-mode",
+                           json={"expected_wms_enabled": False, "wms_enabled": True})
+    assert mode.status_code == 200, mode.text
+    assert mode.json()["wms_enabled"] is True and mode.json()["prohibit_negative_stock"] is True
 
     loc1 = (await api.post("/wms/locations", json={"warehouse": "Минск", "zone": "A", "code": "A-01"})).json()
     loc2 = (await api.post("/wms/locations", json={"warehouse": "Минск", "zone": "A", "code": "A-02"})).json()
@@ -255,9 +289,10 @@ async def test_wms_operational(api, session, erp_organization):
     assert (await api.get("/wms/movements?reason=release")).json() == []
     assert (await api.get("/wms/balances?sku=AKB-60")).json() == bal
 
-    # RBAC: операции (wms.count) только у склада; логистика (wms.read) — 403
-    assert (await api.post("/wms/adjustment", json={**base, "qty": 1},
-            headers={"X-User-Roles": "logistics"})).status_code == 403
+    # Check read permission first, so the denied write belongs to the actual logistics role.
+    assert (await api.get("/wms/ops", headers=erp_logistics_actor)).status_code == 200
+    denied = await api.post("/wms/adjustment", json={**base, "qty": 1}, headers=erp_logistics_actor)
+    assert denied.status_code == 403 and denied.json()["detail"] == "Недостаточно прав: wms.count"
 
 
 async def test_wms_inventory_adjustment_movements(api, session, erp_organization):
@@ -471,32 +506,51 @@ async def test_wms_outbound(api, session, erp_organization):
                            headers={"X-User-Roles": "logistics"})).status_code == 403
 
 
-async def test_wms_reconciliation(api, session, erp_organization):
-    """Сверка теневого остатка WMS с зеркалом 1С: diff и его денежная оценка."""
+async def test_wms_reconciliation(api, session, erp_organization, monkeypatch):
+    """Own physical quantity; unqualified 1C comparison and valuation remain unknown."""
     from decimal import Decimal
+    from unittest.mock import AsyncMock
 
     from core.domain.models import Sku
     from modules.integrations.models import StockItem
+    from modules.integrations.stock import StockService
+
+    unqualified_read = AsyncMock(side_effect=AssertionError("Unqualified global mirror must not be read"))
+    monkeypatch.setattr(StockService, "stock_by_sku", unqualified_read)
+
+    warehouse = await api.post(f"/wms/organizations/{erp_organization}/warehouses",
+                               json={"name": "Минск", "title": "Synthetic ERP warehouse"})
+    assert warehouse.status_code == 201, warehouse.text
 
     session.add(Sku(code="LFP-12-100", title="LFP АКБ", unit="шт"))
-    session.add(StockItem(sku_code="LFP-12-100", warehouse="Минск",
-                          qty_available=Decimal(14), cost=Decimal(1850)))
+    item = StockItem(sku_code="LFP-12-100", warehouse="Минск",
+                     qty_available=Decimal(14), cost=Decimal(1850))
+    session.add(item)
     await session.commit()
     await seed_opening_stock(session, erp_organization, "LFP-12-100", 10, "Минск")
 
-    rec = (await api.get("/wms/reconciliation")).json()
-    assert rec["gateway"] is True
+    response = await api.get("/wms/reconciliation", params={"organization_id": erp_organization})
+    assert response.status_code == 200, response.text
+    rec = response.json()
+    assert rec["organization_id"] == erp_organization and rec["gateway"] is False
+    assert rec["source_unavailable_reason"] == "organization_stock_source_unverified"
     row = next(r for r in rec["rows"] if r["sku_code"] == "LFP-12-100" and r["warehouse"] == "Минск")
-    assert row["wms_qty"] == 10.0 and row["onec_qty"] == 14.0 and row["diff"] == -4.0
-    assert row["diff_value"] == -7400.0  # −4 × 1850
-    assert rec["total_abs_diff_value"] >= 7400.0
+    assert row["wms_qty"] == 10.0
+    assert row["onec_qty"] is None and row["diff"] is None and row["diff_value"] is None
+    assert rec["total_abs_diff_value"] is None
+    unqualified_read.assert_not_awaited()
+    await session.refresh(item)
+    assert item.qty_available == Decimal(14) and item.cost == Decimal(1850)
 
 
-async def test_wms_reconciliation_no_gateway(api_no_gateways):
-    """Шлюз 1С выключен → честный пустой ответ (gateway=False), не 500."""
-    rec = (await api_no_gateways.get("/wms/reconciliation")).json()
-    assert rec["gateway"] is False and rec["rows"] == []
-
+async def test_wms_reconciliation_no_gateway(api_no_gateways, erp_organization):
+    """Missing gateway is explicit; an empty journal has unknown valuation."""
+    api_no_gateways.headers["X-User"] = "erp-test-owner"
+    response = await api_no_gateways.get("/wms/reconciliation", params={"organization_id": erp_organization})
+    assert response.status_code == 200, response.text
+    rec = response.json()
+    assert rec["organization_id"] == erp_organization and rec["gateway"] is False and rec["rows"] == []
+    assert rec["total_abs_diff_value"] is None and rec["source_unavailable_reason"] == "stock_gateway_unavailable"
 
 async def test_wms_alerts(api, session):
     """Low-stock: свободный остаток 1С ниже порога → дефицит + severity."""
@@ -683,16 +737,21 @@ async def test_wms_ops_funnel_rbac(api):
     assert (await api.get("/wms/ops", headers={"X-User-Roles": "sales"})).status_code == 403
 
 
-async def test_wms_reconciliation_does_not_overwrite_1c(api, session, erp_organization):
-    """Сверка отдаёт diff, но НЕ перетирает 1С (истина склада): StockItem не меняется.
-
-    Падал бы, если бы сверка писала обратно в зеркало 1С (синхронизировала остаток),
-    нарушив инвариант «1С = истина, фаза 1» — данные/деньги.
-    """
+async def test_wms_reconciliation_does_not_overwrite_1c(api, session, erp_organization, monkeypatch):
+    """Unqualified legacy mirror stays unchanged and is never used as company stock."""
     from decimal import Decimal
+    from unittest.mock import AsyncMock
 
     from core.domain.models import Sku
     from modules.integrations.models import StockItem
+    from modules.integrations.stock import StockService
+
+    unqualified_read = AsyncMock(side_effect=AssertionError("Unqualified global mirror must not be read"))
+    monkeypatch.setattr(StockService, "stock_by_sku", unqualified_read)
+
+    warehouse = await api.post(f"/wms/organizations/{erp_organization}/warehouses",
+                               json={"name": "Минск", "title": "Synthetic ERP warehouse"})
+    assert warehouse.status_code == 201, warehouse.text
 
     session.add(Sku(code="LFP-24-200", title="LFP 24-200", unit="шт"))
     item = StockItem(sku_code="LFP-24-200", warehouse="Минск",
@@ -701,13 +760,21 @@ async def test_wms_reconciliation_does_not_overwrite_1c(api, session, erp_organi
     await session.commit()
     await seed_opening_stock(session, erp_organization, "LFP-24-200", 10, "Минск")
 
-    rec = (await api.get("/wms/reconciliation")).json()
+    response = await api.get("/wms/reconciliation", params={"organization_id": erp_organization})
+    assert response.status_code == 200, response.text
+    rec = response.json()
+    assert rec["organization_id"] == erp_organization and rec["gateway"] is False
+    assert rec["source_unavailable_reason"] == "organization_stock_source_unverified"
     row = next(r for r in rec["rows"] if r["sku_code"] == "LFP-24-200")
-    assert row["wms_qty"] == 10.0 and row["onec_qty"] == 14.0 and row["diff"] == -4.0
+    assert row["wms_qty"] == 10.0
+    assert row["onec_qty"] is None and row["diff"] is None and row["diff_value"] is None
+    assert rec["total_abs_diff_value"] is None
+    unqualified_read.assert_not_awaited()
 
-    # 1С-зеркало осталось 14 — сверка ничего не записала обратно
+    # The legacy reference remains unchanged; no comparison source was qualified.
     await session.refresh(item)
     assert float(item.qty_available) == 14.0
+    assert item.cost == Decimal(1850)
 
 
 async def test_wms_cycle_count_correcting_movement_unknown_cost(api, session, erp_organization):

@@ -2,6 +2,7 @@
 import base64
 import copy
 import hashlib
+import os
 from datetime import date
 from uuid import uuid4
 
@@ -82,7 +83,7 @@ async def test_inbound_vat_file_replay_current_download_and_byte_integrity(
         client, db, book, tmp_path, monkeypatch):
     receipt_id = await seed_vat_correction(db, book)
     root = tmp_path / "accounting-evidence"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_ACCOUNTING_EVIDENCE_DATA_DIR", str(root.resolve()))
     url = f"/accounting/organizations/{book[0]}/receipt-correction-evidence-files"
 
@@ -153,7 +154,7 @@ async def test_inbound_vat_file_requires_private_root_scope_and_vat_only_open_so
     assert (await client.post(url, json=command)).status_code == 503
 
     root = tmp_path / "private"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_ACCOUNTING_EVIDENCE_DATA_DIR", str(root.resolve()))
     invalid_xml = await client.post(url, json=payload(receipt_id, data=b"not XML"))
     assert invalid_xml.status_code == 422

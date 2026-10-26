@@ -1,5 +1,7 @@
 "use client";
 
+import { LedgerReportData, ledgerReportDataState } from "./ledger-report-data";
+
 import { businessDate } from "@/lib/business-date";
 
 import { useRef, useState } from "react";
@@ -14,7 +16,7 @@ type PnlMovement = {
   dimensions: Record<string, string>; category: "income" | "expense";
 };
 type ReviewItem = { code: string; count: number; message: string };
-type Report = {
+type Report = { trial_balance?: unknown;
   organization_id: number; from: string; to: string; status: "preliminary" | "closed_periods" | string;
   pending_documents: number; review_items?: ReviewItem[];
   pnl: { income: string; expenses: string; profit: string };
@@ -31,6 +33,7 @@ function csvCell(value: unknown) {
 }
 
 export function pnlCsv(report: Report, applied: Applied) {
+  if (ledgerReportDataState(report, applied) !== "populated") throw new Error("Нет подтверждённых строк бухгалтерской книги для выгрузки.");
   const header = ["Организация", "С", "По", "Статус", "Доходы", "Расходы", "Финансовый результат", "Источник", "Дата", "Проводка", "Счёт", "Наименование", "Категория", "Сторона", "Сумма BYN", "Валюта позиции или строки", "Валюта строки при переоценке", "Оценка", "Аналитика"];
   const summary = [applied.org, applied.start, applied.end, report.status, report.pnl.income, report.pnl.expenses, report.pnl.profit, "", "", "", "", "", "", "", "", "", "", "", ""];
   const rows = report.pnl_movements.map((row) => [
@@ -123,7 +126,7 @@ function FinanceLedgerPnlReport({ org }: { org: string }) {
   }
 
   function downloadCsv() {
-    if (!report || !applied) return;
+    if (!report || !applied || ledgerReportDataState(report, applied) !== "populated") return;
     const blob = new Blob(["\uFEFF" + pnlCsv(report, applied)], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -140,7 +143,7 @@ function FinanceLedgerPnlReport({ org }: { org: string }) {
       <div className="self-end"><Button variant="secondary" aria-busy={loading} onClick={() => void apply()}>Применить</Button></div>
     </div>
     {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-    {report && applied && <div className="space-y-4">
+    {report && applied && <LedgerReportData report={report} scope={applied}>{() => <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm text-muted">Применено: организация {applied.org}, {applied.start} — {applied.end}</p><Button size="sm" variant="secondary" onClick={downloadCsv}>Скачать CSV</Button></div>
       <p className={`rounded-lg p-3 text-sm ${report.status === "closed_periods" ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800"}`}>{report.status === "closed_periods" ? "Периоды закрыты; регламентированная отчётность не подтверждена." : "Предварительный отчёт; закрытие периодов и регламентированная отчётность не подтверждены."}</p>
       <div className="grid gap-3 sm:grid-cols-3"><Metric label="Доходы" value={report.pnl.income} tone="text-emerald-700" /><Metric label="Расходы" value={report.pnl.expenses} tone="text-rose-700" /><Metric label="Финансовый результат" value={report.pnl.profit} tone="text-ink" /></div>
@@ -149,7 +152,7 @@ function FinanceLedgerPnlReport({ org }: { org: string }) {
       {detailLoading && <p role="status" className="text-sm text-muted">Загрузка операции…</p>}
       {detailError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{detailError}</p>}
       {detail && <div className="rounded-lg border border-line p-3 text-sm"><h3 className="font-semibold text-ink">Операция № {detail.id}</h3><p className="text-muted">{detail.posting_date} · {detail.source} · {detail.operation}</p><p className="mt-1">{detail.explanation}</p><ul className="mt-2 list-disc pl-5">{detail.lines.map((line) => <li key={line.id}>{line.account_code} · {line.account_title}: {line.side === "debit" ? "Дебет" : "Кредит"} {line.amount} BYN{line.currency !== "BYN" ? ` · валюта строки: ${line.currency}` : ""}</li>)}</ul></div>}
-    </div>}
+    </div>}</LedgerReportData>}
   </section>;
 }
 

@@ -22,6 +22,18 @@ from tests.test_wms_organization import _prepare_warehouse, book
 # ===========================================================================
 
 
+@pytest.fixture
+def unqualified_stock_read(monkeypatch):
+    """The global legacy mirror is not a company-qualified source."""
+    from unittest.mock import AsyncMock
+
+    from modules.integrations.stock import StockService
+
+    read = AsyncMock(side_effect=AssertionError("Unqualified global mirror must not be read"))
+    monkeypatch.setattr(StockService, "stock_by_sku", read)
+    return read
+
+
 async def test_qc_gate_no_movement_before_accept(api, session):
     """pending_qc НЕ создаёт StockMovement: движение прихода до accept отсутствует.
 
@@ -254,12 +266,10 @@ async def test_wms_funnel_rbac_write_logistics_403(api):
 # ===========================================================================
 
 
-async def test_reconciliation_shows_diff_not_silent(api, session):
-    """Расхождение ERP↔1С явно отдаётся в rows, не схлопывается в пустой список.
+async def test_reconciliation_shows_physical_row_when_source_is_unverified(api, session, unqualified_stock_read):
+    """Keep own physical rows and immutable legacy references; comparison stays unknown."""
+    from sqlalchemy import select
 
-    Падал бы, если бы reconciliation молчал при diff!=0 (напр. фильтровал строки
-    с diff==0 и заодно прочие). Инвариант: дифф есть → строка в ответе.
-    """
     from core.domain.models import Sku
     from modules.integrations.models import StockItem
 
@@ -269,92 +279,103 @@ async def test_reconciliation_shows_diff_not_silent(api, session):
                   qty_available=Decimal(20), cost=Decimal(500)),
     ])
     await session.commit()
-
-    # WMS: зафиксировано 12, 1С: 20 доступно → diff = 12 − 20 = −8
     organization_id = await book(api)
-    response = await api.post("/wms/adjustment",
-                   json={"organization_id": organization_id, "sku_code": "R5-DIFF", "qty": 12, "warehouse": "Минск"})
-    assert response.status_code == 201, response.text
+    await _prepare_warehouse(api, organization_id, "Минск", wms_enabled=False)
+    created = await api.post("/wms/adjustment",
+                            json={"organization_id": organization_id, "sku_code": "R5-DIFF",
+                                  "qty": 12, "warehouse": "Минск"})
+    assert created.status_code == 201, created.text
+    response = await api.get("/wms/reconciliation", params={"organization_id": organization_id})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["organization_id"] == organization_id and result["gateway"] is False
+    assert result["source_unavailable_reason"] == "organization_stock_source_unverified"
+    assert len(result["rows"]) == 1
+    row = result["rows"][0]
+    assert row["sku_code"] == "R5-DIFF" and row["warehouse"] == "Минск"
+    assert row["wms_qty"] == 12.0
+    assert row["onec_qty"] is None and row["diff"] is None and row["diff_value"] is None
+    assert result["total_abs_diff_value"] is None
+    unqualified_stock_read.assert_not_awaited()
+    item = await session.scalar(select(StockItem).where(StockItem.sku_code == "R5-DIFF"))
+    assert item is not None
+    await session.refresh(item)
+    assert item.qty_available == Decimal(20)
+    assert item.cost == Decimal(500)
 
-    rec = (await api.get("/wms/reconciliation")).json()
-    assert rec["gateway"] is True
-    assert len(rec["rows"]) >= 1, "Строки расхождения не должны молчать"
-    row = next((r for r in rec["rows"] if r["sku_code"] == "R5-DIFF"), None)
-    assert row is not None, "Строка R5-DIFF должна быть в ответе"
-    assert row["diff"] == -8.0
-    assert row["diff_value"] == -4000.0  # −8 × 500
-    assert rec["total_abs_diff_value"] >= 4000.0
+async def test_reconciliation_unqualified_cost_does_not_become_zero(api, session, unqualified_stock_read):
+    """Keep own physical rows and immutable legacy references; comparison stays unknown."""
+    from sqlalchemy import select
 
-
-async def test_reconciliation_no_cost_diff_value_is_none(api, session):
-    """Расхождение без себеса 1С → diff_value=null, не 0 и не 500.
-
-    Падал бы, если бы diff_value вычислялся с float-нулём вместо None: скрытое
-    «ноль рублей расхождения» при реальном количественном расхождении.
-    """
     from core.domain.models import Sku
     from modules.integrations.models import StockItem
 
     session.add_all([
         Sku(code="R5-NOCOST", title="Тест-без-себеса", unit="шт"),
         StockItem(sku_code="R5-NOCOST", warehouse="Минск",
-                  qty_available=Decimal(10), cost=None),  # нет себеса
+                  qty_available=Decimal(10), cost=None),
     ])
     await session.commit()
-
-    # WMS: зафиксировано 5, 1С: 10 → diff = −5, но cost=None → diff_value должен быть null
     organization_id = await book(api)
-    response = await api.post("/wms/adjustment",
-                   json={"organization_id": organization_id, "sku_code": "R5-NOCOST", "qty": 5, "warehouse": "Минск"})
-    assert response.status_code == 201, response.text
+    await _prepare_warehouse(api, organization_id, "Минск", wms_enabled=False)
+    created = await api.post("/wms/adjustment",
+                            json={"organization_id": organization_id, "sku_code": "R5-NOCOST",
+                                  "qty": 5, "warehouse": "Минск"})
+    assert created.status_code == 201, created.text
+    response = await api.get("/wms/reconciliation", params={"organization_id": organization_id})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["organization_id"] == organization_id and result["gateway"] is False
+    assert result["source_unavailable_reason"] == "organization_stock_source_unverified"
+    assert len(result["rows"]) == 1
+    row = result["rows"][0]
+    assert row["sku_code"] == "R5-NOCOST" and row["warehouse"] == "Минск"
+    assert row["wms_qty"] == 5.0
+    assert row["onec_qty"] is None and row["diff"] is None and row["diff_value"] is None
+    assert result["total_abs_diff_value"] is None
+    unqualified_stock_read.assert_not_awaited()
+    item = await session.scalar(select(StockItem).where(StockItem.sku_code == "R5-NOCOST"))
+    assert item is not None
+    await session.refresh(item)
+    assert item.qty_available == Decimal(10)
+    assert item.cost is None
 
-    rec = (await api.get("/wms/reconciliation")).json()
-    row = next((r for r in rec["rows"] if r["sku_code"] == "R5-NOCOST"), None)
-    assert row is not None
-    assert row["diff"] == -5.0
-    assert row["diff_value"] is None, (
-        f"diff_value должен быть null при отсутствии себеса, получено {row['diff_value']!r}"
-    )
+async def test_reconciliation_does_not_write_to_1c(api, session, unqualified_stock_read):
+    """Keep own physical rows and immutable legacy references; comparison stays unknown."""
+    from sqlalchemy import select
 
-
-async def test_reconciliation_does_not_write_to_1c(api, session):
-    """Сверка НЕ модифицирует данные 1С (StockItem) — только читает diff.
-
-    Падал бы, если бы reconciliation «синхронизировал» WMS→1С, нарушив
-    контракт «1С = истина склада, фаза 1» (необратимая порча мастер-данных).
-    """
     from core.domain.models import Sku
     from modules.integrations.models import StockItem
 
-    original_qty = Decimal(25)
     session.add_all([
         Sku(code="R5-NOWRITE", title="Тест-нет-записи", unit="шт"),
         StockItem(sku_code="R5-NOWRITE", warehouse="Минск",
-                  qty_available=original_qty, cost=Decimal(1000)),
+                  qty_available=Decimal(25), cost=Decimal(1000)),
     ])
     await session.commit()
-
-    # WMS: 15 ≠ 1С: 25
     organization_id = await book(api)
+    await _prepare_warehouse(api, organization_id, "Минск", wms_enabled=False)
     created = await api.post("/wms/adjustment",
-                   json={"organization_id": organization_id, "sku_code": "R5-NOWRITE", "qty": 15, "warehouse": "Минск"})
+                            json={"organization_id": organization_id, "sku_code": "R5-NOWRITE",
+                                  "qty": 15, "warehouse": "Минск"})
     assert created.status_code == 201, created.text
-    result = await api.get("/wms/reconciliation")
-    assert result.status_code == 200, result.text
-    difference = next(row for row in result.json()["rows"] if row["sku_code"] == "R5-NOWRITE")
-    assert difference["diff"] == -10.0
-
-    # StockItem в БД не изменился
-    from sqlalchemy import select
-    item = (await session.execute(
-        select(StockItem).where(StockItem.sku_code == "R5-NOWRITE")
-    )).scalars().first()
+    response = await api.get("/wms/reconciliation", params={"organization_id": organization_id})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["organization_id"] == organization_id and result["gateway"] is False
+    assert result["source_unavailable_reason"] == "organization_stock_source_unverified"
+    assert len(result["rows"]) == 1
+    row = result["rows"][0]
+    assert row["sku_code"] == "R5-NOWRITE" and row["warehouse"] == "Минск"
+    assert row["wms_qty"] == 15.0
+    assert row["onec_qty"] is None and row["diff"] is None and row["diff_value"] is None
+    assert result["total_abs_diff_value"] is None
+    unqualified_stock_read.assert_not_awaited()
+    item = await session.scalar(select(StockItem).where(StockItem.sku_code == "R5-NOWRITE"))
     assert item is not None
     await session.refresh(item)
-    assert item.qty_available == original_qty, (
-        f"1С-зеркало изменилось: ожидалось {original_qty}, получено {item.qty_available}"
-    )# ===========================================================================
-# Кейс 5 — Физический пересчёт юрлица; неподтверждённая стоимость неизвестна
+    assert item.qty_available == Decimal(25)
+    assert item.cost == Decimal(1000)# Кейс 5 — Физический пересчёт юрлица; неподтверждённая стоимость неизвестна
 # ===========================================================================
 
 

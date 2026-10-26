@@ -1,3 +1,4 @@
+import { businessDate } from "@/lib/business-date";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -32,7 +33,8 @@ it("opens shipment profit with the selected accounting organization", async () =
   expect(await screen.findByText("За выбранный период проведённых отгрузок нет.")).toBeInTheDocument();
 });
 
-const report = { organization_id: 1, status: "preliminary", pending_documents: 0,
+const reportDate = businessDate();
+const report = { from: `${reportDate.slice(0, 7)}-01`, to: reportDate, organization_id: 1, status: "preliminary", pending_documents: 0,
   trial_balance: [{ account: "41", title: "Товары", currency: "BYN", dimensions: {}, opening: "0.00", debit: "100.00", credit: "0.00", closing: "100.00", off_balance: false }],
   movements: [{ entry_id: 5, source: "Поступление 1", date: "2026-09-01", account: "41", side: "debit", amount: "100.00" }],
   balance: { equity: "1000.00", difference: "0.00" }, pnl: { income: "180.00", expenses: "100.00", profit: "80.00" }, cashflow: { closing: "1080.00" } };
@@ -106,7 +108,7 @@ beforeEach(() => {
     if (input.includes("/accounts?")) return respond([{ id: 1, code: "41", title: "Товары", cash: false, required_dimensions: [] }, { id: 2, code: "60", title: "Поставщики", cash: false, required_dimensions: [] }]);
     if (input.endsWith("/policies")) return respond([{ id: 1, effective_from: "2020-01-01", reference: "Test", normative_verified: false }]);
     if (input.endsWith("/fixed-assets")) return respond({ organization_id: 1, rows: [registeredAsset], statutory_certified: false });
-    if (input.includes("/reports?")) return respond(input.includes("/2/") ? { ...report, organization_id: 2, trial_balance: [], movements: [] } : report);
+    if (input.includes("/reports?")) { const period = new URL(input, "http://synthetic-local").searchParams; return respond({ ...(input.includes("/2/") ? { ...report, organization_id: 2, trial_balance: [], movements: [] } : report), from: period.get("start"), to: period.get("end") }); }
     if (input.endsWith("/preview")) { const body = JSON.parse(String(init?.body)); return respond({ digest, explanation: body.explanation, lines: body.lines, normative_verified: false }); }
     if (input.endsWith("/manual-documents")) {
       if (!init?.body) return respond({ organization_id: 1, items: manualDraft ? [{ ...manualDraft, revisions: undefined }] : [], next_before_id: null });
@@ -1008,7 +1010,7 @@ describe("AccountingView", () => {
     await screen.findByText(/включительно: 0\./);
     openPage("Отчёты", "ОСВ и отчёты");
     await waitFor(() => expect(screen.queryByText("№ 5 · Поступление 1")).not.toBeInTheDocument());
-    expect(await screen.findByText("За выбранный период нет проводок.")).toBeInTheDocument();
+    expect(await screen.findByText("Нет учётных данных ERP")).toBeInTheDocument();
   });
   it("keeps the in-flight accounts response after rerendering the same configured instance", async () => {
     const original = fetchMock.getMockImplementation()!;
@@ -1340,4 +1342,53 @@ it("ignores an old fixed asset response after a fresh configured instance", asyn
   expect(screen.getByRole("option", { name: "ОС-002 · Пресс · asset:equipment:002" })).toBeInTheDocument();
   expect(screen.queryByRole("option", { name: "ОС-001 · Станок · asset:equipment:001" })).not.toBeInTheDocument();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+it.each(["empty", "missing", "malformed", "malformed-title", "malformed-dimensions", "malformed-off-balance", "populated-zero"] as const)("guards AccountingView report data for %s without blocking manual entry", async (state) => {
+  const original = fetchMock.getMockImplementation()!;
+  const data: Record<string, unknown> = { ...report, balance: { equity: "0.00", difference: "0.00" },
+    pnl: { income: "0.00", expenses: "0.00", profit: "0.00" }, cashflow: { closing: "0.00" }, movements: [], opening_movements: [] };
+  data.trial_balance = state === "empty" ? [] : state === "missing" ? undefined : state === "malformed" ? [null]
+    : [{ ...report.trial_balance[0], opening: "0.00", debit: "0.00", credit: "0.00", closing: "0.00" }];
+  if (state === "malformed-title") data.trial_balance = [{ ...report.trial_balance[0], title: {} }];
+  if (state === "malformed-dimensions") data.trial_balance = [{ ...report.trial_balance[0], dimensions: { warehouse: {} } }];
+  if (state === "malformed-off-balance") data.trial_balance = [{ ...report.trial_balance[0], off_balance: "false" }];
+  fetchMock.mockImplementation((input: string, init?: RequestInit) => {
+    if (!input.includes("/reports?")) return original(input, init);
+    const period = new URL(input, "http://synthetic-local").searchParams;
+    return respond({ ...data, from: period.get("start"), to: period.get("end") });
+  });
+  render(<AccountingView />);
+  await screen.findByText(/включительно: 0\./);
+  openPage("Отчёты", "ОСВ и отчёты");
+  if (state === "populated-zero") {
+    expect((await screen.findAllByText("0.00 BYN")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Скачать ОСВ CSV" })).toBeInTheDocument();
+  } else {
+    await screen.findByText(state === "empty" ? "Нет учётных данных ERP" : "Данные отчёта пока не подтверждены");
+    expect(screen.queryAllByText("0.00 BYN")).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: "Скачать ОСВ CSV" })).not.toBeInTheDocument();
+  }
+  openPage("Документы", "Ручная операция");
+  expect(screen.getByLabelText("Основание")).not.toBeDisabled();
+  expect(screen.getByRole("button", { name: "Проверить проводки" })).toBeInTheDocument();
+});
+
+it("hides the old financial snapshot immediately when the accounting period changes", async () => {
+  const original = fetchMock.getMockImplementation()!;
+  let release!: () => void;
+  fetchMock.mockImplementation((input: string, init?: RequestInit) => {
+    if (!input.includes("/reports?") || !input.includes("end=2026-11-30")) return original(input, init);
+    return new Promise(resolve => { release = () => resolve({ ok: true, json: async () => ({ ...report, from: new URL(input, "http://synthetic-local").searchParams.get("start"), to: "2026-11-30", pnl: { ...report.pnl, profit: "91.00" } }) }); });
+  });
+  render(<AccountingView />);
+  await screen.findByText(/включительно: 0\./);
+  openPage("Отчёты", "ОСВ и отчёты");
+  expect(await screen.findByText("80.00 BYN")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Конец периода"), { target: { value: "2026-11-30" } });
+  expect(screen.queryByText("80.00 BYN")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Скачать ОСВ CSV" })).not.toBeInTheDocument();
+  await waitFor(() => expect(release).toBeDefined());
+  release();
+  expect(await screen.findByText("91.00 BYN")).toBeInTheDocument();
 });

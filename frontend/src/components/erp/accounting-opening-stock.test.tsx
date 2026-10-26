@@ -100,3 +100,27 @@ it("can check a saved document even when new opening entry is now blocked", asyn
   await screen.findByText("Результат проверки");
   expect(JSON.parse(String(api.mock.calls[0][1]?.body)).policy_id).toBe(9);
 });
+
+it("keeps the selected date and policy when earlier context arrives last", async () => {
+  const api = mockApi();
+  let august!: (response: unknown) => void;
+  let september!: (response: unknown) => void;
+  vi.stubGlobal("fetch", vi.fn((url: string, options?: RequestInit) => {
+    if (url.includes("context?on=2026-08-01")) return new Promise(done => { august = done; });
+    if (url.includes("context?on=2026-09-01")) return new Promise(done => { september = done; });
+    return api(url, options);
+  }));
+  render(<OpeningWorkspace org={1} />); await screen.findByLabelText("Счёт запасов");
+  fireEvent.change(screen.getByLabelText("Дата остатков"), { target: { value: "2026-08-01" } });
+  expect(screen.queryByLabelText("Счёт запасов")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Дата остатков"), { target: { value: "2026-09-01" } });
+  september({ ok: true, json: async () => ({ ...context, opening_date: "2026-09-01", policy_id: 3 }) });
+  await screen.findByLabelText("Счёт запасов");
+  august({ ok: true, json: async () => ({ ...context, opening_date: "2026-08-01", policy_id: 2 }) });
+  await fill();
+  fireEvent.click(screen.getByRole("button", { name: "Проверить документ" }));
+  await screen.findByText("Результат проверки");
+  const preview = api.mock.calls.find(([url]) => url.endsWith("preview"));
+  expect(JSON.parse(String(preview?.[1]?.body))).toMatchObject({ opening_date: "2026-09-01", policy_id: 3 });
+  expect(screen.getByLabelText("Дата остатков")).toHaveValue("2026-09-01");
+});

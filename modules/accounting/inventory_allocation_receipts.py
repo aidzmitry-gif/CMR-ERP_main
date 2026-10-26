@@ -8,7 +8,10 @@ from pydantic import ValidationError
 from modules.accounting.sales import SaleDocument
 from modules.accounting.schemas import InventoryIssueDocument, PostingInput
 from modules.accounting.service import AccountingError, digest
-from modules.accounting.zero_value_disposals import InventoryDispositionAllocation
+from modules.accounting.zero_value_disposals import (
+    InventoryDispositionAllocation,
+    compatible_document_snapshot,
+)
 
 
 def validate_inventory_disposition_binding(entry, receipt, document, allocation, *, organization_id: int) -> None:
@@ -30,7 +33,7 @@ def validate_inventory_disposition_binding(entry, receipt, document, allocation,
         raise AccountingError("Allocation receipt organization differs from entry")
     if not isinstance(receipt.actor, str) or not receipt.actor.strip() or receipt.actor != receipt.actor.strip() or entry.actor != receipt.actor or entry.digest != receipt.digest:
         raise AccountingError("Allocation receipt actor or digest differs from entry")
-    if receipt.command != document.model_dump(mode="json"):
+    if not isinstance(receipt.command, dict) or receipt.command != compatible_document_snapshot(document, receipt.command):
         raise AccountingError("Allocation receipt command differs from document")
 
     expected_operation = "inventory_sale" if isinstance(document, SaleDocument) else "inventory_issue"

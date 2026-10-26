@@ -16,7 +16,9 @@ export function AccountingOpeningStock() {
 
 export function OpeningWorkspace({ org }: { org: number }) {
   const [date, setDate] = useState("2026-07-01");
-  const [context, setContext] = useState<OpeningContext | null>(null);
+  const [contextState, setContextState] = useState<{
+    org: number; date: string; attempt: number; value: OpeningContext;
+  } | null>(null);
   const [doc, setDoc] = useState<OpeningDocument>(() => ({ request_key: crypto.randomUUID(), opening_date: date,
     policy_id: 0, inventory_account: "", counter_account: "", evidence: "", rows: [emptyRow()] }));
   const [result, setResult] = useState<OpeningResult | null>(null);
@@ -35,14 +37,21 @@ export function OpeningWorkspace({ org }: { org: number }) {
   const [loaded, setLoaded] = useState(false);
   const generation = useRef(0);
   const searchGeneration = useRef(0);
+  const context = contextState?.org === org && contextState.date === date && contextState.attempt === attempt
+    ? contextState.value : null;
   const frozen = busy || fileLoading || uncertain || result?.confirmed === true;
   useEffect(() => {
     let active = true;
-    setContext(null);
+    const operationGeneration = generation;
+    const lookupGeneration = searchGeneration;
     void openingRequest<OpeningContext>(org, `context?on=${date}`).then(value => {
-      if (active) { setContext(value); setDoc(d => ({ ...d, opening_date: date, policy_id: d.policy_id || value.policy_id || 0 })); }
+      if (active) {
+        setContextState({ org, date, attempt, value });
+        setDoc(d => d.opening_date === date && d.policy_id === 0
+          ? { ...d, policy_id: value.policy_id ?? 0 } : d);
+      }
     }).catch((e: Error) => { if (active) setError(e.message); });
-    return () => { active = false; generation.current++; searchGeneration.current++; };
+    return () => { active = false; operationGeneration.current++; lookupGeneration.current++; };
   }, [org, date, attempt]);
   useUnsavedDocumentGuard(dirty || uncertain);
   const edit = (change: Partial<OpeningDocument>) => {

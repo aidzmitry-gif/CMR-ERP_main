@@ -30,7 +30,7 @@ from modules.sales.accounting_ownership import DealOwnership
 from modules.sales.models import Deal, DealDocument
 from modules.wms.events import on_stock_reserved
 from modules.wms.invoice_reservations import ReserveInput, reserve
-from modules.wms.models import ReservationVersion, StockMovement, Task
+from modules.wms.models import ReservationVersion, StockMovement, Task, WarehouseDirectory
 from modules.wms.reservation_events import ReservationEventState, ReservationPick
 from tests.accounting.test_postgres import pg_factory  # noqa: F401
 
@@ -87,6 +87,8 @@ async def pg(pg_factory, tmp_path, monkeypatch):  # noqa: F811
         session.add(Organization(id=1, name="Synthetic", unp="999999981"))
         session.add(Deal(id=1, number="PG-D1", title="Synthetic", counterparty="Synthetic"))
         await session.flush()
+        session.add(WarehouseDirectory(organization_id=1, name="W", title="Synthetic relay warehouse",
+            is_active=True, wms_enabled=True, prohibit_negative_stock=True, created_by=actor.username))
         session.add(AccessGrant(organization_id=1, subject=actor.username, role="chief"))
         session.add(DealOwnership(deal_id=1, organization_id=1, snapshot={}, evidence="Synthetic", actor=actor.username))
         session.add(DealDocument(id=1, deal_id=1, number="PG-I1", kind="invoice", status="paid",

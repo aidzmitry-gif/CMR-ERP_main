@@ -18,6 +18,85 @@ from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 pytestmark = pytest.mark.integration
 
 
+@pytest.mark.parametrize("pg_factory", ["registered_head"], indirect=True)
+async def test_opening_stock_pg_http_access_preview_confirm_and_replay(pg_factory, pg_book, monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    from core.domain.models import OutboxEvent, User
+    from core.runtime.deps import get_session
+    from core.services.eventbus import OutboxEventBus
+    from modules.accounting import routes
+    from modules.accounting.models import AccessGrant, OpeningImportReceipt
+
+    document = (await _stock_document(pg_factory, pg_book)).model_dump(mode="json")
+    document["rows"] = document["rows"][:1]
+    async with pg_factory() as session:
+        session.add_all([User(username=name, full_name="Synthetic opening user", role="director", status=status)
+                         for name, status in (("tester", "active"), ("opening-reader", "active"),
+                                              ("opening-outside", "active"), ("opening-inactive", "blocked"))])
+        next_id = (await session.scalar(select(func.max(AccessGrant.id)))) + 1
+        session.add_all([AccessGrant(id=next_id + offset, organization_id=pg_book[0], subject=name, role=role)
+                         for offset, (name, role) in enumerate((("opening-reader", "reader"),
+                                                                ("opening-inactive", "chief")))])
+        await session.commit()
+    settings = SimpleNamespace(auth_mode="dev")
+    monkeypatch.setattr("core.services.auth.get_settings", lambda: settings)
+    monkeypatch.setattr(routes, "get_settings", lambda: settings)
+    app = FastAPI()
+    app.include_router(routes.router, prefix="/accounting")
+    app.state.core = SimpleNamespace(services=SimpleNamespace(event_bus=OutboxEventBus()))
+
+    async def sessions():
+        async with pg_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = sessions
+    url = f"/accounting/organizations/{pg_book[0]}/opening-stock/"
+    chief = {"X-User": "tester", "X-User-Roles": "director"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://synthetic-local") as client:
+        context = await client.get(url + "context?on=2026-07-01", headers=chief)
+        assert context.status_code == 200, context.text
+        assert context.headers["cache-control"] == "private, no-store"
+        preview = await client.post(url + "preview", json=document, headers=chief)
+        assert preview.status_code == 200, preview.text
+        assert preview.headers["cache-control"] == "private, no-store"
+        command = {"document": document, "preview_digest": preview.json()["preview_digest"],
+                   "acknowledge_addition": True}
+        for name, get_detail, post_detail in (
+            ("opening-reader", "Chief accountant access required", "Read-only accounting access"),
+            ("opening-outside", "No access to this organization's books", "No access to this organization's books"),
+            ("opening-inactive", "Accounting access denied", "Accounting access denied"),
+        ):
+            headers = {"X-User": name, "X-User-Roles": "director"}
+            denied = await client.get(url + "context?on=2026-07-01", headers=headers)
+            assert denied.status_code == 403 and denied.json()["detail"] == get_detail
+            for suffix, payload in (("preview", document), ("confirm", command)):
+                denied = await client.post(url + suffix, json=payload, headers=headers)
+                assert denied.status_code == 403 and denied.json()["detail"] == post_detail
+        async with pg_factory() as session:
+            assert await session.scalar(select(func.count()).select_from(Entry)) == 0
+            assert await session.scalar(select(func.count()).select_from(Line)) == 0
+        confirmed = await client.post(url + "confirm", json=command, headers=chief)
+        assert confirmed.status_code == 200, confirmed.text
+        assert confirmed.headers["cache-control"] == "private, no-store"
+        assert confirmed.json()["confirmed"] is True and len(confirmed.json()["entry_ids"]) == 1
+        assert confirmed.json()["physical_stock_updated"] is confirmed.json()["cutover_finalized"] is False
+        async with pg_factory() as session:
+            events = await session.scalar(select(func.count()).select_from(OutboxEvent))
+        replay = await client.post(url + "confirm", json=command, headers=chief)
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["entry_ids"] == confirmed.json()["entry_ids"]
+        async with pg_factory() as session:
+            assert await session.scalar(select(func.count()).select_from(Entry)) == 1
+            assert await session.scalar(select(func.count()).select_from(Line)) == 2
+            assert await session.scalar(select(func.count()).select_from(OutboxEvent)) == events
+            assert await session.scalar(select(func.count()).select_from(StockMovement)) == 0
+            assert await session.scalar(select(func.count()).select_from(OpeningImportReceipt)) == 0
+
+
 async def _stock_document(factory, book):
     async with factory() as session:
         await service.lock_organization(session, book[0])

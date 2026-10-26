@@ -1,5 +1,6 @@
 import hashlib
 import json
+from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
@@ -83,6 +84,37 @@ def test_fifo_mixed_zero_and_positive_allocation_binds_only_positive_credit():
     assert posting.rule_version.endswith(":a1")
 
 
+@pytest.mark.parametrize("missing_fields", [
+    ("warehouse_identity",), ("sku_identity",), ("warehouse_identity", "sku_identity"),
+], ids=["warehouse", "sku", "both"])
+def test_omitted_optional_identity_fields_preserve_issue_receipt(missing_fields):
+    entry, receipt, document, allocation = binding()
+    for field in missing_fields:
+        receipt.command.pop(field)
+    original = deepcopy(receipt.command)
+    check(entry, receipt, document, allocation)
+    assert receipt.command == original
+
+
+@pytest.mark.parametrize("command", [None, []], ids=["null", "list"])
+def test_nonobject_saved_command_is_rejected(command):
+    entry, receipt, document, allocation = binding()
+    receipt.command = command
+    with pytest.raises(AccountingError, match="command differs"):
+        check(entry, receipt, document, allocation)
+
+
+@pytest.mark.parametrize("field, identity", [
+    ("warehouse_identity", InventoryWarehouseIdentity(id=4, name="W", title="Warehouse W")),
+    ("sku_identity", InventorySkuIdentity(id=8, code="S", title="Item S", unit="pcs")),
+])
+def test_nonempty_directory_identity_cannot_be_ignored(field, identity):
+    entry, receipt, document, allocation = binding()
+    document = document.model_copy(update={field: identity})
+    with pytest.raises(AccountingError, match="command differs"):
+        check(entry, receipt, document, allocation)
+
+
 @pytest.mark.parametrize("marker", [None, True, 1.0, "1", 2])
 def test_explicit_builder_rejects_noncanonical_marker(marker):
     _, receipt, document, _ = binding()
@@ -144,7 +176,10 @@ def test_rejects_entryless_zero_value_flow():
         check(None, receipt, document, allocation)
 
 
-def test_sale_document_binds_its_inventory_account_credits():
+@pytest.mark.parametrize("missing_fields", [
+    (), ("warehouse_identity",), ("sku_identity",), ("warehouse_identity", "sku_identity"),
+], ids=["explicit-null", "warehouse", "sku", "both"])
+def test_sale_document_binds_its_inventory_account_credits(missing_fields):
     document = SaleDocument(source="issue:1", source_version=1, document_date="2026-01-01", operation_date="2026-01-01",
         posting_date="2026-01-01", policy_id=1, account="41", warehouse="W", sku="S", lot="L", quantity="2",
         expense_account="90.4", explanation="sale", net_amount="20", vat_rate="20", vat_basis="standard",
@@ -162,7 +197,11 @@ def test_sale_document_binds_its_inventory_account_credits():
         rule_version=posting.rule_version, explanation=document.explanation, opening=False, correction_of=None)
     receipt = SimpleNamespace(entry_id=9, organization_id=1, actor="a", digest=digest(posting),
         command=document.model_dump(mode="json"), posting=posting.model_dump(mode="json"), cost=cost)
+    for field in missing_fields:
+        receipt.command.pop(field)
+    original = deepcopy(receipt.command)
     check(entry, receipt, document, allocation)
+    assert receipt.command == original
     assert posting.rule_version.endswith(":a1")
 
 

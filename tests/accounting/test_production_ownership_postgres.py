@@ -2,6 +2,7 @@
 import asyncio
 
 import pytest
+import pytest_asyncio
 from fastapi import HTTPException
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
@@ -15,8 +16,19 @@ from modules.production.accounting_ownership import (
     order_snapshot,
 )
 from modules.production.models import ProductionOrder
+from modules.wms.models import WarehouseDirectory
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
+
+
+@pytest_asyncio.fixture
+async def production_main_warehouse(pg_factory, pg_book):
+    async with pg_factory() as session:
+        session.add(WarehouseDirectory(
+            organization_id=pg_book[0], name='Main', title='Synthetic production warehouse',
+            is_active=True, wms_enabled=True, prohibit_negative_stock=True, created_by='tester',
+        ))
+        await session.commit()
 
 
 async def test_output_accounting_source_sql_binding(issuance_pg, pg_book):
@@ -474,6 +486,7 @@ async def test_production_creation_public_replay(issuance_pg, pg_book):
         for model in (ProductionOrder, ProductionOrderOwnership, OrderCreationReceipt):
             assert await session.scalar(select(func.count()).select_from(model)) == 1
 
+@pytest.mark.usefixtures("production_main_warehouse")
 async def test_production_receipt_unknown_sku_cannot_enter_stock(issuance_pg, pg_book):
     from modules.wms.models import Receipt, ReceiptLine, StockMovement, Task
 
@@ -493,6 +506,7 @@ async def test_production_receipt_unknown_sku_cannot_enter_stock(issuance_pg, pg
         for model in (StockMovement, Task):
             assert await session.scalar(select(func.count()).select_from(model)) == 0
 
+@pytest.mark.usefixtures("production_main_warehouse")
 async def test_production_receipt_explicit_qc_partial_acceptance(issuance_pg, pg_book):
     from core.domain.models import Sku
     from modules.wms.models import Receipt, ReceiptLine, StockMovement, Task
@@ -655,6 +669,7 @@ def test_output_command_serializes_exact_quantity_for_sql(value, expected):
     assert command.model_dump(mode='json')['quantity'] == expected
 
 
+@pytest.mark.usefixtures("production_main_warehouse")
 async def test_output_public_prepare_readback_and_principal_isolation(issuance_pg, pg_book):
     from uuid import uuid4
 
@@ -931,6 +946,7 @@ async def test_output_public_prepare_readback_and_principal_isolation(issuance_p
 
 
 @pytest.mark.parametrize('fully_rejected', [True, False])
+@pytest.mark.usefixtures("production_main_warehouse")
 async def test_production_output_final_qc_and_completion(issuance_pg, pg_book, fully_rejected):
     from uuid import uuid4
 

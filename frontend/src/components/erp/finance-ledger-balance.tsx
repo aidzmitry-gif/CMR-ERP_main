@@ -1,5 +1,7 @@
 "use client";
 
+import { LedgerReportData, ledgerReportDataState } from "./ledger-report-data";
+
 import { businessDate } from "@/lib/business-date";
 
 import { useRef, useState } from "react";
@@ -18,7 +20,7 @@ type Movement = {
   amount: string; dimensions: Record<string, string>; category: Category; period_bucket: PeriodBucket;
 };
 type ReviewItem = { code: string; count: number; message: string };
-type Report = {
+type Report = { trial_balance?: unknown;
   organization_id: number; from: string; to: string; status: string; pending_documents: number;
   review_items?: ReviewItem[]; balance: Balance; balance_movements: Movement[];
 };
@@ -43,6 +45,7 @@ const errorText = (value: unknown, fallback: string) => typeof (value as { detai
   ? (value as { detail: string }).detail : fallback;
 
 export function balanceCsv(report: Report, applied: Applied) {
+  if (ledgerReportDataState(report, applied) !== "populated") throw new Error("Нет подтверждённых строк бухгалтерской книги для выгрузки.");
   const rows: unknown[][] = [
     ["Организация", applied.org], ["С", applied.start], ["По", applied.end], ["Статус", report.status],
     ["Необработанные документы", report.pending_documents], ["Активы", report.balance.assets],
@@ -144,7 +147,7 @@ function FinanceLedgerBalanceReport({ org }: { org: string }) {
   }
 
   function downloadCsv() {
-    if (!report || !applied) return;
+    if (!report || !applied || ledgerReportDataState(report, applied) !== "populated") return;
     const blob = new Blob(["\uFEFF" + balanceCsv(report, applied)], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -165,7 +168,7 @@ function FinanceLedgerBalanceReport({ org }: { org: string }) {
       <div className="self-end"><Button variant="secondary" onClick={() => void apply()}>Применить</Button></div>
     </div>
     {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-    {report && applied && balance && <div className="space-y-4">
+    {report && applied && balance && <LedgerReportData report={report} scope={applied}>{() => <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm text-muted">Применено: организация {applied.org}, {applied.start} — {applied.end}</p><Button size="sm" variant="secondary" onClick={downloadCsv}>Скачать CSV</Button></div>
       <p className={`rounded-lg p-3 text-sm ${report.status === "closed_periods" ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800"}`}>{report.status === "closed_periods" ? "Периоды закрыты; регламентированная отчётность не подтверждена." : "Предварительный отчёт; закрытие периодов и регламентированная отчётность не подтверждены."}</p>
       <div className="rounded-lg border border-line p-3 text-sm"><p>Необработанные документы: <strong>{report.pending_documents}</strong></p>{report.review_items?.length ? <ul className="mt-2 list-disc pl-5">{report.review_items.map(item => <li key={item.code}>{item.message} ({item.count})</li>)}</ul> : <p className="mt-2 text-muted">Замечаний проверки нет.</p>}</div>
@@ -174,7 +177,7 @@ function FinanceLedgerBalanceReport({ org }: { org: string }) {
       <div className="overflow-x-auto"><table className="min-w-full text-left text-sm"><caption className="mb-2 text-left font-semibold text-ink">Строки, вошедшие в баланс</caption><thead className="border-b border-line text-muted"><tr><th>Период</th><th>Категория</th><th>Дата</th><th>Источник</th><th>Счёт</th><th>Сторона</th><th>Сумма</th><th>Аналитика</th><th>Операция</th></tr></thead><tbody>{report.balance_movements.map(row => <tr key={row.line_id} className="border-b border-line"><td>{row.period_bucket === "opening" ? "Остаток на начало" : "Движение периода"}</td><td>{categoryLabels[row.category]}</td><td>{row.date}</td><td>{row.source} · №{row.entry_id}</td><td>{row.account} · {row.title}</td><td>{row.side === "debit" ? "Дебет" : "Кредит"}</td><td>{movementAmount(row)}</td><td>{Object.entries(row.dimensions).map(([key, value]) => `${key}: ${value}`).join(", ") || "—"}</td><td><Button size="sm" variant="ghost" onClick={() => void openEntry(row)}>Открыть</Button></td></tr>)}</tbody></table>{!report.balance_movements.length && <p className="py-3 text-sm text-muted">До конца выбранного периода нет балансовых строк.</p>}</div>
       {detailError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{detailError}</p>}
       {detail && <div className="rounded-lg border border-line p-3 text-sm"><h3 className="font-semibold text-ink">Операция № {detail.id}</h3><p className="text-muted">{detail.posting_date} · {detail.source} · {detail.operation}</p><p className="mt-1">{detail.explanation}</p><ul className="mt-2 list-disc pl-5">{detail.lines.map(line => <li key={line.id}>{line.account_code} · {line.account_title}: {line.side === "debit" ? "Дебет" : "Кредит"} {line.amount} BYN{line.currency !== "BYN" ? ` · валюта строки: ${line.currency}` : ""}</li>)}</ul></div>}
-    </div>}
+    </div>}</LedgerReportData>}
   </section>;
 }
 

@@ -45,6 +45,7 @@ from modules.wms.production_material_issues import (
 )
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_zero_value_output_cost_postgres import run_migration
+from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 pytestmark = pytest.mark.integration
 
@@ -57,8 +58,9 @@ class SyntheticProduction:
 @pytest.mark.parametrize("method,wip_delta,remaining_delta", [
     ("fifo", "2.00", "3.00"), ("weighted_average", "1.25", "3.75"),
 ])
-@pytest.mark.parametrize("with_output", [False, True])
-async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg_factory, pg_book, method, wip_delta, remaining_delta, with_output, monkeypatch):
+@pytest.mark.parametrize("with_output,pg_factory", [(False, None), (True, "registered_head")], indirect=["pg_factory"])
+async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg_factory, pg_book, method, wip_delta, remaining_delta, with_output, monkeypatch, issuance_pg):
+    from core.domain.models import Sku
     from modules.accounting import late_pool_cost, production_output_cost_workflow
     from modules.accounting.closing_controls import snapshot as closing_snapshot
     from modules.accounting.inventory_cost import issue_result
@@ -68,6 +70,7 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
     from modules.accounting.late_cost_receipts import verify_receipt as verify_late_cost
     from modules.accounting.schemas import InventoryIssuePreviewInput, LateCostPreviewInput
     from modules.procurement.additional_expenses import AdditionalExpenseCreate, save_document
+    from modules.procurement.models import Supplier
     from modules.procurement.receipt_documents import (
         ReceiptAccounts,
         ReceiptConfirm,
@@ -77,26 +80,34 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
         preview_document,
     )
     from modules.procurement.source_gateway import ProcurementSourceService
+    from modules.wms.models import WarehouseDirectory
 
     policy_id, order_id = await seed_book(pg_factory, pg_book, method, late_cost=True)
     gateway, procurement = AccountingService(), ProcurementSourceService()
     user = CurrentUser("tester", ["director"])
     async with pg_factory() as session:
-        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
-                         "0142_zero_value_command_dates.py", "0143_zero_value_sales.py",
-                         "0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py",
-                         "0146_zero_value_allocation_basis.py", "0147_zero_value_allocation_runtime.py",
-                         "0148_zero_value_allocated_sales.py", "0149_production_material_allocations.py"):
-            await run_migration(session, revision, "upgrade")
+        supplier = (await session.scalars(select(Supplier).where(Supplier.name == "supplier1"))).one()
+        sku = Sku(code="MAT-1", title="Synthetic pool material", unit="pcs", is_active=True)
+        warehouse = await session.scalar(select(WarehouseDirectory).where(
+            WarehouseDirectory.organization_id == pg_book[0], WarehouseDirectory.name == "Main"))
+        if warehouse is None:
+            warehouse = WarehouseDirectory(organization_id=pg_book[0], name="Main",
+                title="Synthetic pool warehouse", created_by="tester")
+            session.add(warehouse)
+        session.add_all([supplier, sku])
+        await session.flush()
         receipts = []
         for index, (quantity, amount) in enumerate((("5", "31.25"), ("3", "30.00")), 1):
             day = f"2026-10-0{index}"
             primary = ReceiptCreate.model_validate({"key": f"pool-origin-{index}", "document": {
                 "currency": "BYN", "invoice_reference": f"pool-origin-{index}",
                 "document_date": day, "operation_date": day,
-                "supplier": "supplier", "contract": "contract", "warehouse": "Main",
+                "supplier": supplier.name, "supplier_id": supplier.id, "supplier_unp": supplier.unp,
+                "contract": "contract", "contract_basis": "Synthetic purchase without a registered contract",
+                "warehouse": warehouse.name, "warehouse_id": warehouse.id, "warehouse_title": warehouse.title,
                 "explanation": "Synthetic pool purchase", "items": [{
-                    "sku": "MAT-1", "lot": "LOT-1", "quantity": quantity, "net_amount": amount,
+                    "sku": sku.code, "sku_id": sku.id, "sku_title": sku.title, "unit": sku.unit,
+                    "lot": "LOT-1", "quantity": quantity, "net_amount": amount,
                     "vat_rate": "0", "vat_amount": "0", "vat_basis": "Synthetic"}]}})
             receipt = await create_document(pg_book[0], primary, (session, "tester"), (session, gateway, user))
             options = ReceiptAccounts(expected_version=1, posting_date=day, policy_id=policy_id,
@@ -122,24 +133,58 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
                 confirm_output_transfer,
                 prepare_output_transfer,
             )
-            from tests.accounting.test_production_output_transfer_postgres import (
-                SyntheticProduction as OutputProduction,
+            from modules.production.output_documents import (
+                OutputCommand,
+                confirm_output,
+                prepare_output,
             )
+            from modules.wms.models import Location, Receipt, ReceiptLine
             from tests.accounting.test_production_output_transfer_postgres import transfer_input
 
-            for revision in ("0150_zero_material_allocations.py", "0151_late_material_output_cost.py",
-                             "0152_signed_prospective_wip.py"):
-                await run_migration(session, revision, "upgrade")
+            await session.commit()
+            source_api, _ = issuance_pg
+            source_api.headers["X-User"] = "tester"
+            source_core = source_api._transport.app.state.core
+            output_production = source_core.services.production_output
+            output_warehouse = source_core.services.wms_reservations
+            output_place = Location(warehouse="Main", code="SYN-POOL-OUTPUT")
+            session.add_all([output_place, Sku(code="SYN-WIDGET", title="Synthetic pool output", unit="pcs")])
+            await session.flush()
+            order = await session.get(ProductionOrder, order_id)
+            physical_output = await prepare_output(session, gateway, pg_book[0], user, OutputCommand(
+                request_id=uuid4(), order_id=order_id, expected_order_digest=order_snapshot(order)[1],
+                operation_date=date(2026, 10, 10), sku_code="SYN-WIDGET", quantity="2.00", warehouse="Main",
+                location_id=output_place.id, lot="LOT-1", evidence="Synthetic reviewed pool output"),
+                warehouse_gateway=output_warehouse)
+            await confirm_output(session, gateway, pg_book[0], user, physical_output.id, physical_output.digest,
+                                 warehouse_gateway=output_warehouse)
+            await session.commit()
+            assert await source_core.event_bus.relay_pending(pg_factory, source_core.services,
+                event_types=("production.output.confirmed",)) == 1
+            receipt_id, receipt_line_id = (await session.execute(select(Receipt.id, ReceiptLine.id).join(
+                ReceiptLine, ReceiptLine.receipt_id == Receipt.id).where(
+                    Receipt.organization_id == pg_book[0],
+                    Receipt.entity_ref == f"production_output:{physical_output.id}"))).one()
+            receipt_path = f"/wms/receipts/{receipt_id}"
+            receipt_detail = await source_api.get(receipt_path)
+            assert receipt_detail.status_code == 200, receipt_detail.text
+            qc = await source_api.post(receipt_path + "/qc", json={
+                "expected_revision": receipt_detail.json()["qc_revision"], "decisions": [{
+                    "line_id": receipt_line_id, "accepted_qty": "2.00", "rejected_qty": "0.00"}]})
+            assert qc.status_code == 200, qc.text
+            accepted = await source_api.post(receipt_path + "/accept")
+            assert accepted.status_code == 200, accepted.text
             output_data = transfer_input(policy_id).model_copy(update={
                 "order_id": order_id,
                 "posting_date": date(2026, 10, 10),
+                "output_document_ids": [physical_output.id],
             })
             output_preview = await prepare_output_transfer(
-                session, pg_book[0], "2026-10", output_data, OutputProduction(), object())
+                session, pg_book[0], "2026-10", output_data, output_production, output_warehouse)
             output = await confirm_output_transfer(session, pg_book[0], "2026-10",
                 ProductionOutputTransferConfirmInput.model_validate({**output_data.model_dump(mode="json"),
                     "basis_digest": output_preview["basis_digest"], "digest": output_preview["digest"]}),
-                "tester", production=OutputProduction(), warehouse_gateway=object())
+                "tester", production=output_production, warehouse_gateway=output_warehouse)
             output_id = output.id
             from modules.accounting.closing_commands import actual_posting
             from modules.accounting.models import ProductionOutputTransferReceipt
@@ -226,13 +271,6 @@ async def test_late_pool_reads_actual_multiple_purchases_and_material_receipt(pg
             assert pool_package["wip_origins"][0]["order_id"] == order_id
             assert Decimal(pool_package["wip_origins"][0]["amount_byn"]) == Decimal(wip_delta)
         assert await session.scalar(select(func.count()).select_from(Entry)) == before
-        revisions = (("0153_late_pool_atomic_package.py", "0154_late_pool_actual_output_evidence.py",
-                      "0155_late_pool_inventory_value_links.py") if with_output else (
-                "0150_zero_material_allocations.py", "0151_late_material_output_cost.py",
-                "0152_signed_prospective_wip.py", "0153_late_pool_atomic_package.py",
-                "0154_late_pool_actual_output_evidence.py", "0155_late_pool_inventory_value_links.py"))
-        for revision in revisions:
-            await run_migration(session, revision, "upgrade")
         await session.commit()
         from httpx import ASGITransport, AsyncClient
 
@@ -578,7 +616,6 @@ async def test_material_issue_posts_one_reviewed_wip_package(pg_factory, pg_book
     production = SyntheticProduction()
 
     async with pg_factory() as session:
-        await run_migration(session, "0140_zero_value_disposals.py", "upgrade")
         await session.commit()
         preview = await prepare_material_issue_posting(
             session, pg_book[0], "2026-10", data, production

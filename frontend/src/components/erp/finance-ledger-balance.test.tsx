@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { balanceCsv, FinanceLedgerBalance } from "./finance-ledger-balance";
 
 const context = { configuration: "AIOS_SELLER_UNP", organization: { id: 7, name: "Компания установки", unp: "987654321" } };
-const report = {
+const report = { trial_balance: [{ account: "51", title: "Банк", off_balance: false, currency: "BYN", dimensions: {}, opening: "0.00", debit: "20.00", credit: "0.00", closing: "20.00" }],
   organization_id: 7, from: "2026-09-01", to: "2026-09-30", status: "preliminary", pending_documents: 2,
   review_items: [{ code: "check", count: 1, message: "Нужна проверка" }],
   balance: { assets: "31.67", liabilities: "14.00", equity: "0.00", current_result: "16.67", difference: "1.00" },
@@ -63,4 +63,29 @@ it("exports the displayed response and rejects malformed balance totals", async 
   fireEvent.click(screen.getByRole("button", { name: "Применить" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("неверный формат");
   await waitFor(() => expect(screen.queryByText("NaN BYN")).not.toBeInTheDocument());
+});
+
+it.each(["empty", "missing", "malformed", "populated-zero"] as const)("guards FinanceLedgerBalance financial display and CSV for %s ledger data", async (state) => {
+  const data: Record<string, unknown> = structuredClone(report);
+  data.trial_balance = state === "empty" ? [] : state === "missing" ? undefined : state === "malformed" ? [null]
+    : [{ account: "51", title: "Банк", off_balance: false, currency: "BYN", dimensions: {}, opening: "0.00", debit: "0.00", credit: "0.00", closing: "0.00" }];
+  data.balance = { assets: "0.00", liabilities: "0.00", equity: "0.00", current_result: "0.00", difference: "0.00" }; data.balance_movements = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes("instance-organization") ? context : data })));
+  render(<FinanceLedgerBalance />);
+  await screen.findByRole("button", { name: "Применить" });
+  fireEvent.change(screen.getByLabelText("Начало периода баланса"), { target: { value: "2026-09-01" } });
+  fireEvent.change(screen.getByLabelText("Конец периода баланса"), { target: { value: "2026-09-30" } });
+  fireEvent.click(screen.getByRole("button", { name: "Применить" }));
+  const applied = { org: "7", start: "2026-09-01", end: "2026-09-30" };
+  if (state === "populated-zero") {
+    expect((await screen.findAllByText("0.00 BYN")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Скачать CSV" })).toBeInTheDocument();
+    expect(balanceCsv(data as unknown as Parameters<typeof balanceCsv>[0], applied)).toContain("0.00");
+  } else {
+    await screen.findByText(state === "empty" ? "Нет учётных данных ERP" : "Данные отчёта пока не подтверждены");
+    expect(screen.queryByRole("button", { name: "Скачать CSV" })).not.toBeInTheDocument();
+    expect(screen.queryAllByText("0.00 BYN")).toHaveLength(0);
+    expect(screen.queryByText(/Расхождений баланса нет/)).not.toBeInTheDocument();
+    expect(() => balanceCsv(data as unknown as Parameters<typeof balanceCsv>[0], applied)).toThrow(/Нет подтверждённых строк/);
+  }
 });

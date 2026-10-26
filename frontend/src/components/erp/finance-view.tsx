@@ -240,7 +240,7 @@ function financePath(path: string, organizationId: number | null): string | null
 function FinanceOrganizationPanel({ children }: { children: ReactNode }) {
   return <InstanceOrganizationGate>{organization => (
       <FinanceOrganizationContext.Provider key={organization.id} value={organization.id}>
-        <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">Операционные записи выбранной организации. Полнота источников пока не подтверждена; итоговые факты учёта проверяйте в отчётах бухгалтерской книги.</p>
+        <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">Операционные записи компании из настроек установки. Полнота источников пока не подтверждена; бухгалтерские отчёты содержат только проводки ERP и требуют сверки с основным учётом в 1С.</p>
         {children}
       </FinanceOrganizationContext.Provider>
     )}</InstanceOrganizationGate>;
@@ -265,7 +265,7 @@ export function FinanceView({ initialTab }: { initialTab?: string } = {}) {
           Регламентированный учёт и регистры НДС ведутся в{" "}
           <Link className="text-accent underline" href="/erp/accounting">Бухгалтерии</Link>.
           ЭСЧФ и интеграция с 1С сохраняют переходный статус до отдельных проверок;
-          1С остаётся архивом истории и источником сверки до приёмки пилота.
+          Сейчас основной учёт ведётся в 1С. Показатели ERP охватывают только внесённые документы и проводки; полнота переноса ещё не подтверждена.
         </p>
       </div>
 
