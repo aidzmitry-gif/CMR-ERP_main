@@ -930,7 +930,7 @@ describe("DealsWorkspace (канбан)", () => {
     const row = (await screen.findByText("ООО Завис")).closest("tr")!;
     expect(within(row).getByText("10%")).toBeInTheDocument(); // STAGE_PROBABILITY.new
     expect(within(row).getByText("≈ 10 ₽")).toBeInTheDocument(); // 100 × 10%
-    expect(within(row).getByText(/· \d+ дн · висяк/)).toBeInTheDocument();
+    expect(await within(row).findByText(/· \d+ дн · висяк/)).toBeInTheDocument();
   });
 
   it("список: показывает причину отказа сделки (SALES-40)", () => {
