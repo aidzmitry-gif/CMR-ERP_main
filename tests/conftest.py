@@ -161,3 +161,15 @@ def pytest_collection_modifyitems(items) -> None:
             item.add_marker("integration")
         else:
             item.add_marker("api")
+
+
+@pytest_asyncio.fixture
+async def synthetic_sales_party(session):
+    """A complete local MDM buyer for API tests unrelated to party selection."""
+    from core.domain.models import Counterparty
+
+    party = Counterparty(name="c", legal_name="Synthetic buyer", unp="100000001",
+                         requisites={"legal_address": "Synthetic test address"})
+    session.add(party)
+    await session.commit()
+    return party

@@ -55,13 +55,13 @@ async def test_telegram_approve_arg_validation(api):
     assert "не найдено" in missing.json()["text"]
 
 
-async def test_telegram_module_command_and_already_decided(api):
+async def test_telegram_module_command_and_already_decided(api, synthetic_sales_party):
     # команда, объявленная модулем sales (/deals) — исполняется хендлер модуля
     deals = await api.post("/telegram/webhook", json={"message": {"text": "/deals", "chat": {"id": 1}}})
     assert deals.json()["text"]
 
     deal = (
-        await api.post("/sales/deals", json={"number": "TG-X", "title": "t", "counterparty": "c"})
+        await api.post("/sales/deals", json={"number": "TG-X", "title": "t", "counterparty": "c", "counterparty_id": synthetic_sales_party.id})
     ).json()
     appr = (
         await api.post(f"/sales/deals/{deal['id']}/request-approval", json={"kind": "deal.contract"})
@@ -115,9 +115,9 @@ async def test_approval_approve_404(api):
     assert (await api.post("/approvals/999999/approve", json={"by": "X"})).status_code == 404
 
 
-async def test_approval_reject_endpoint(api):
+async def test_approval_reject_endpoint(api, synthetic_sales_party):
     deal = (
-        await api.post("/sales/deals", json={"number": "RJ-1", "title": "t", "counterparty": "c"})
+        await api.post("/sales/deals", json={"number": "RJ-1", "title": "t", "counterparty": "c", "counterparty_id": synthetic_sales_party.id})
     ).json()
     appr = (
         await api.post(f"/sales/deals/{deal['id']}/request-approval", json={"kind": "deal.contract"})
@@ -129,8 +129,8 @@ async def test_approval_reject_endpoint(api):
 # --- Системные роуты: журнал событий и аудита ---
 
 
-async def test_system_events_and_audit(api):
-    await api.post("/sales/deals", json={"number": "SE-1", "title": "t", "counterparty": "c"})
+async def test_system_events_and_audit(api, synthetic_sales_party):
+    await api.post("/sales/deals", json={"number": "SE-1", "title": "t", "counterparty": "c", "counterparty_id": synthetic_sales_party.id})
     assert isinstance((await api.get("/system/events")).json(), list)
     assert isinstance((await api.get("/system/audit")).json(), list)
     assert (await api.get("/health")).json() == {"status": "ok"}

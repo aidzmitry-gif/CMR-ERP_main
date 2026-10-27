@@ -542,3 +542,27 @@ async def test_own_outcomes_can_read_stage_and_reason_metadata_but_cannot_edit(a
         response = await api.request(method, path, json=body, headers=headers)
         assert response.status_code == 403, response.text
     assert (await api.get("/sales/stages", headers=headers)).json() == stages.json()
+
+
+@pytest.mark.parametrize("outcome", ["win", "lose"])
+async def test_foreign_outcomes_hide_deal_before_book_lookup(api, session, monkeypatch, outcome):
+    from uuid import uuid4
+
+    from modules.sales.models import Deal
+
+    session.add(User(username="outcome-foreign", full_name="Synthetic foreign", employee_id=932,
+                     department="Sales", role="sales", status="active", deal_visibility="own"))
+    deal = Deal(number="SYN-HIDDEN-OUTCOME", title="Synthetic private deal", counterparty="Synthetic", owner_id=933)
+    session.add(deal)
+    await session.commit()
+    core = api._transport.app.state.core
+
+    async def unexpected_book_lookup(*args, **kwargs):
+        pytest.fail("Foreign deal must be rejected before organization authorization")
+
+    monkeypatch.setattr(core.services.accounting, "source_member", unexpected_book_lookup)
+    response = await api.post(f"/sales/deals/{deal.id}/{outcome}",
+        headers={**_sales_headers("outcome-foreign"), "X-Expected-Principal": "outcome-foreign"},
+        json={"organization_id": 999, "request_key": str(uuid4()), "expected_composition_digest": "a" * 64,
+              "reason_code": "synthetic", "comment": None, "finalize_if_empty": False})
+    assert response.status_code == 404, response.text

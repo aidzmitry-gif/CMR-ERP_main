@@ -242,7 +242,8 @@ for (const mode of ['stock', 'on_order'] as const) {
       await page.goto(`/crm/deals/${deal.id}`);
       await expect(page.getByText(`Проверить ${nonce}`, { exact: true })).toBeVisible();
       const money = page.getByRole('region', { name: 'Оплата и деньги', exact: true });
-      await expect(money.getByText('Нет данных', { exact: true })).toHaveCount(2);
+      await expect(money.getByRole('term')).toHaveText(['Сумма счёта (с НДС)', 'Оплачено', 'Остаток к оплате']);
+      await expect(money.getByRole('definition')).toHaveText(['Нет данных', 'Нет данных', 'Нет данных']);
       await page.screenshot({ path: test.info().outputPath(`outcome-${mode}.png`), fullPage: true });
       const foreign = await browser.newContext({ baseURL });
       try {
