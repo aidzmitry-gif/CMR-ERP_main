@@ -11,8 +11,9 @@
 """
 from __future__ import annotations
 
+from config.access import ACCESS_MATRIX
 from core.domain import reference as _reference_models  # noqa: F401  (регистрация таблиц)
-from core.runtime.contract import Reference, ReferenceColumn
+from core.runtime.contract import Permission, Reference, ReferenceColumn, Role
 from core.runtime.core import Core
 
 # --- частые колонки ---
@@ -327,5 +328,10 @@ def register_system_references(core: Core) -> None:
     Идёт публичным путём ``Core.register_owned_reference`` — без приватного ``_current``
     и без добавления ``core`` в ``loaded_modules``.
     """
+    core.declare_permissions([Permission("refs.view", "Просмотр справочников")])
+    # Сохраняем чтение для ролей, которым уже разрешён раздел справочников.
+    for name, slugs in ACCESS_MATRIX.items():
+        if "spravochniki" in slugs:
+            core.declare_role(Role(name, permissions=("refs.view",)))
     for reference in SYSTEM_REFERENCES:
         core.register_owned_reference("core", reference)

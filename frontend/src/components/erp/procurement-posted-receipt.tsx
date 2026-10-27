@@ -114,7 +114,6 @@ export function ProcurementPostedReceipt({ org, entry }: { org: string; entry: s
   const busyCorrection = useRef(false);
   const current = result?.key === key ? result : null;
   const source = current?.source, error = current?.error;
-  const sourceReceiptId = source?.receipt_id;
   const correctionView = correction.context === key ? correction : { context: key, busy: false, uncertain: false, blocked: false };
 
   useEffect(() => {
@@ -124,30 +123,25 @@ export function ProcurementPostedReceipt({ org, entry }: { org: string; entry: s
       return await response.json() as unknown;
     }).then((value) => {
       if (!validSource(value, org, entry)) throw new Error("Сервер вернул накладную или проводку другого юрлица либо неполные исходные данные.");
-      if (active) setResult({ key, source: value });
+      if (active) {
+        pendingCorrection.current = null;
+        busyCorrection.current = false;
+        try {
+          const saved = readPendingCorrection(org, value.receipt_id);
+          pendingCorrection.current = saved;
+          setCorrection({ context: key, command: saved ?? undefined, busy: false, uncertain: Boolean(saved), blocked: false,
+            error: saved ? "Восстановлен неподтверждённый запрос. Повтор использует тот же ключ и те же реквизиты." : undefined });
+        } catch (cause) {
+          setCorrection({ context: key, busy: false, uncertain: true, blocked: true,
+            error: cause instanceof Error ? cause.message : "Не удалось прочитать журнал исправления." });
+        }
+        setResult({ key, source: value });
+      }
     }).catch((e: Error) => { if (active) setResult({ key, error: e.message }); });
     return () => { active = false; };
   }, [org, entry, key]);
 
-  useEffect(() => {
-    if (sourceReceiptId === undefined) return;
-    let active = true;
-    queueMicrotask(() => {
-      if (!active) return;
-      pendingCorrection.current = null;
-      busyCorrection.current = false;
-      try {
-        const saved = readPendingCorrection(org, sourceReceiptId);
-        pendingCorrection.current = saved;
-        setCorrection({ context: key, command: saved ?? undefined, busy: false, uncertain: Boolean(saved), blocked: false,
-          error: saved ? "Восстановлен неподтверждённый запрос. Повтор использует тот же ключ и те же реквизиты." : undefined });
-      } catch (cause) {
-        setCorrection({ context: key, busy: false, uncertain: true, blocked: true,
-          error: cause instanceof Error ? cause.message : "Не удалось прочитать журнал исправления." });
-      }
-    });
-    return () => { active = false; };
-  }, [org, key, sourceReceiptId]);
+
 
   async function submitCorrection(command: CorrectionCommand, wasUnknown: boolean) {
     if (busyCorrection.current) return;

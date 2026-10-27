@@ -48,7 +48,7 @@ test("own: клиент → контакт → сделка → задача/и�
   const dealForm = page.locator('form.shadow-pop');
   await dealForm.getByPlaceholder("CRM-2024-0200").fill(`OWN-${Date.now()}`);
   await dealForm.getByPlaceholder("Поставка ...").fill("Контрольный заказ");
-  await expect(dealForm.getByPlaceholder("ООО ...")).toBeDisabled();
+  await expect(dealForm.getByLabel("Компания", { exact: true })).toBeDisabled();
   const createdDeal = page.waitForResponse((r) => r.url().endsWith('/api/sales/deals') && r.request().method() === 'POST');
   await dealForm.getByRole("button", { name: "Создать", exact: true }).click();
   const dealResponse = await createdDeal;

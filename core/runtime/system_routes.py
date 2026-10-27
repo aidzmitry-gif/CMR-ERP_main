@@ -902,7 +902,7 @@ async def system_owner(
     }
 
 
-@router.get("/system/owner/insight")
+@router.get("/system/owner/insight", dependencies=[Depends(require_permission(SYSTEM_WRITE))])
 async def system_owner_insight(
     request: Request, session: AsyncSession = Depends(get_session)
 ) -> dict:

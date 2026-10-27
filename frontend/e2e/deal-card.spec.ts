@@ -6,6 +6,11 @@ import { expect, test } from "@playwright/test";
 // Самодостаточно (на пустой доске CI карточек нет — создаём свою).
 test("карточка сделки: выпуск счёта ERP с резервом", async ({ page }, testInfo) => {
   const clientName = `ООО E2E-Документ ${Date.now()}`;
+  const syntheticUnp = String(100_000_000 + (Date.now() % 8_000_000) * 100 + (test.info().workerIndex % 100));
+  const counterparty = await page.request.post("/api/system/mdm/counterparty", { data: {
+    manual: { name: clientName, unp: syntheticUnp, legal_address: "Synthetic E2E buyer address" },
+  } });
+  expect(counterparty.status(), await counterparty.text()).toBe(201);
   await page.goto("/crm/deals");
   // Кнопка SSR-видима до подключения React onClick; ждём завершения гидрации.
   await expect(page.getByTestId("deals-client-ready")).toBeVisible();
@@ -14,7 +19,14 @@ test("карточка сделки: выпуск счёта ERP с резерв
   const form = page.locator("form.shadow-pop");
   await expect(form).toBeVisible();
   await form.getByPlaceholder("CRM-2024-0200").fill(`E2E-DOC-${Date.now()}`);
-  await form.getByPlaceholder("ООО ...").fill(clientName);
+  await form.getByPlaceholder("Название или УНП").fill(clientName);
+  await form.getByRole("button", { name: "Найти", exact: true }).click();
+  await form.getByRole("list", { name: "Доступные контрагенты" }).getByRole("button", { name: new RegExp(clientName) }).click();
+  await expect(form.getByLabel("Компания", { exact: true })).toHaveValue(clientName);
+  const owner = form.getByLabel("Ответственный", { exact: true });
+  await expect(owner.getByRole("option", { name: "Контрольный менеджер E2E", exact: true })).toHaveAttribute("value", "2901");
+  await owner.selectOption("2901");
+  await expect(owner).toHaveValue("2901");
   await form.getByPlaceholder("Поставка ...").fill("Поставка для E2E");
   await form.getByRole("button", { name: "Создать" }).click();
 
@@ -60,7 +72,7 @@ test("карточка сделки: выпуск счёта ERP с резерв
   expect(invoices[0]).toMatchObject({ status: "issued", reserve_status: "reserved", onec_ref: null, amount: 240 });
   const original = await page.request.get(`/api/sales/documents/${invoices[0].id}/render`);
   expect(original.ok()).toBeTruthy();
-  expect(await original.text()).toContain("E2E invoice buyer");
+  expect(await original.text()).toContain(clientName);
   await page.goto(`/crm/deals/${dealId}?org=${fixture.organization}&invoice=${invoices[0].id}#document-register`);
   const dealRegister = page.getByRole("region", { name: "Реестр документов сделки", exact: true });
   await expect(dealRegister.getByRole("button", { name: "Аннулирование счёта", exact: true })).toBeVisible();
@@ -136,6 +148,11 @@ test("документы: ошибка загрузки отличается о�
 test("счёт под заказ: потерянный ответ, повтор и неизменяемый оригинал", async ({ page }) => {
   test.setTimeout(120_000);
   const clientName = `ООО E2E-Документ ${Date.now()}`;
+  const syntheticUnp = String(100_000_000 + (Date.now() % 8_000_000) * 100 + (test.info().workerIndex % 100));
+  const counterparty = await page.request.post("/api/system/mdm/counterparty", { data: {
+    manual: { name: clientName, unp: syntheticUnp, legal_address: "Synthetic E2E buyer address" },
+  } });
+  expect(counterparty.status(), await counterparty.text()).toBe(201);
   await page.goto("/crm/deals");
   // Кнопка SSR-видима до подключения React onClick; ждём завершения гидрации.
   await expect(page.getByTestId("deals-client-ready")).toBeVisible();
@@ -144,7 +161,14 @@ test("счёт под заказ: потерянный ответ, повтор 
   const form = page.locator("form.shadow-pop");
   await expect(form).toBeVisible();
   await form.getByPlaceholder("CRM-2024-0200").fill(`E2E-DOC-${Date.now()}`);
-  await form.getByPlaceholder("ООО ...").fill(clientName);
+  await form.getByPlaceholder("Название или УНП").fill(clientName);
+  await form.getByRole("button", { name: "Найти", exact: true }).click();
+  await form.getByRole("list", { name: "Доступные контрагенты" }).getByRole("button", { name: new RegExp(clientName) }).click();
+  await expect(form.getByLabel("Компания", { exact: true })).toHaveValue(clientName);
+  const owner = form.getByLabel("Ответственный", { exact: true });
+  await expect(owner.getByRole("option", { name: "Контрольный менеджер E2E", exact: true })).toHaveAttribute("value", "2901");
+  await owner.selectOption("2901");
+  await expect(owner).toHaveValue("2901");
   await form.getByPlaceholder("Поставка ...").fill("Поставка для E2E");
   await form.getByRole("button", { name: "Создать" }).click();
 

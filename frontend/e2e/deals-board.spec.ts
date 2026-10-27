@@ -18,14 +18,28 @@ test.describe("deals board", () => {
     const form = page.locator("form.shadow-pop");
     await expect(form).toBeVisible();
     const number = `DND-${Date.now()}`;
+    const syntheticUnp = String(100_000_000 + (Date.now() % 8_000_000) * 100 + (test.info().workerIndex % 100));
+    const counterparty = await page.request.post("/api/system/mdm/counterparty", { data: {
+      manual: { name: number, unp: syntheticUnp, legal_address: "Synthetic E2E buyer address" },
+    } });
+    expect(counterparty.status(), await counterparty.text()).toBe(201);
     await form.getByPlaceholder("CRM-2024-0200").fill(number);
-    await form.getByPlaceholder("ООО ...").fill(number);
+    await form.getByPlaceholder("Название или УНП").fill(number);
+    await form.getByRole("button", { name: "Найти", exact: true }).click();
+    await form.getByRole("list", { name: "Доступные контрагенты" }).getByRole("button", { name: new RegExp(number) }).click();
+    await expect(form.getByLabel("Компания", { exact: true })).toHaveValue(number);
+    const owner = form.getByLabel("Ответственный", { exact: true });
+    await expect(owner.getByRole("option", { name: "Контрольный менеджер E2E", exact: true })).toHaveAttribute("value", "2901");
+    await owner.selectOption("2901");
+    await expect(owner).toHaveValue("2901");
     await form.getByPlaceholder("Поставка ...").fill("DnD тест");
     const created = page.waitForResponse((r) => r.url().endsWith("/api/sales/deals") && r.request().method() === "POST");
     await form.getByRole("button", { name: "Создать" }).click();
     const response = await created;
     expect(response.status()).toBe(201);
     const deal = await response.json();
+    expect(deal.owner_id).toBe(2901);
+    expect(deal.counterparty_id).toBe((await counterparty.json()).id);
     await expect(form).not.toBeVisible();
     await page.getByPlaceholder("Поиск сделок...").fill(number);
 

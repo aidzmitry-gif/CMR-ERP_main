@@ -84,7 +84,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install deps
-        run: pip install -r requirements-dev.txt
+        run: pip install --require-hashes -r requirements-dev.lock.txt
       - name: Native dependencies for immutable document PDFs
         run: sudo apt-get update && sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 fonts-dejavu-core
       - name: Invitation release gate (offline, secret-safe)
@@ -152,7 +152,7 @@ jobs:
         with:
           node-version: "20"
       - name: Install deps
-        run: npm install
+        run: npm ci
       - name: Typecheck (tsc --noEmit)
         run: npm run typecheck
       - name: Lint (eslint, храповик — потолок не поднимать, только опускать)
@@ -182,13 +182,13 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install backend deps
-        run: pip install -r requirements-dev.txt
+        run: pip install --require-hashes -r requirements-dev.lock.txt
       - uses: actions/setup-node@v5
         with:
           node-version: "20"
       - name: Install frontend deps
         working-directory: frontend
-        run: npm install
+        run: npm ci
       - name: Install Playwright (chromium)
         working-directory: frontend
         run: npx playwright install --with-deps chromium

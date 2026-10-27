@@ -4,7 +4,7 @@ import { lineKey, loadPending, parsePreview, prepare, savePending, type Preview 
 const hash = "a".repeat(64);
 const scope = { organization_id: 1, document_id: 2, deal_id: 3 };
 const preview: Preview = { identity: { organization_id: 1, document_id: 2, document_version: 1, content_sha256: hash }, reservation_digest: hash, remaining_digest: hash, physical_digest: hash,
-  lines: [{ line_no: 1, sku_code: "A", warehouse: "W", original_qty: "2.00", remaining_qty: "2.00", physical: "5.00", reserved: "2.00", free: "3.00", blocking_reason: null, execution_mode: "document" }] };
+  lines: [{ line_no: 1, sku_code: "A", warehouse: "W", original_qty: "2.00", remaining_qty: "2.00", physical: "5.00", reserved: "2.00", free: "3.00", blocking_reason: null, execution_mode: "document", prohibit_negative_stock: true, stock_issue: null }] };
 beforeEach(() => { vi.stubGlobal("crypto", webcrypto); sessionStorage.clear(); });
 afterEach(() => vi.unstubAllGlobals());
 it("freezes document mode for recovery of the same manually entered waybill", () => {

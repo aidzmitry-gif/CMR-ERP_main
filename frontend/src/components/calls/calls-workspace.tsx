@@ -86,7 +86,7 @@ export function CallsWorkspace({ initialCounterpartyId, initialCallId }: { initi
           Без привязанной сделки
         </label>
 
-        <div className="overflow-hidden rounded-2xl bg-surface shadow-card">
+        <div className="overflow-x-auto rounded-2xl bg-surface shadow-card">
           <table className="w-full text-sm">
             <thead className="border-b border-line text-left text-[11px] uppercase tracking-wide text-faint">
               <tr>
@@ -153,7 +153,7 @@ export function CallsWorkspace({ initialCounterpartyId, initialCallId }: { initi
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-muted">{c.result || "—"}</td>
-                    <td className="px-4 py-2.5 text-muted">
+                    <td className="whitespace-nowrap px-4 py-2.5 text-muted">
                       {c.started_at.slice(0, 16).replace("T", " ")}
                     </td>
                   </tr>

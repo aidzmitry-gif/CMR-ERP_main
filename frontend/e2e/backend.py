@@ -59,6 +59,7 @@ os.environ.update(AIOS_ENVIRONMENT='dev', AIOS_AUTH_MODE='dev',
 from config.access import USERS  # noqa: E402
 from core.domain.models import Counterparty, Sku, User  # noqa: E402
 from core.runtime.app import create_app  # noqa: E402
+from modules.hr.models import Employee  # noqa: E402
 from modules.integrations.models import StockItem  # noqa: E402
 from modules.sales.models import PriceQuote  # noqa: E402
 
@@ -96,7 +97,11 @@ async def seed():
                      department='Продажи', role='sales', status='active', deal_visibility='own')
         foreign = User(username='e2e_foreign', full_name='Чужой менеджер E2E', employee_id=2902,
                        department='Продажи', role='sales', status='active', deal_visibility='own')
-        session.add_all([buyer, stocked, ordered, owner, foreign])
+        owner_employee = Employee(id=2901, full_name=owner.full_name, department='Продажи',
+                                  position='E2E sales', status='active')
+        foreign_employee = Employee(id=2902, full_name=foreign.full_name, department='Продажи',
+                                    position='E2E sales', status='active')
+        session.add_all([buyer, stocked, ordered, owner_employee, foreign_employee, owner, foreign])
         await session.flush()
         session.add_all([StockItem(sku_code=stocked.code, qty_available=10, qty_reserved=0),
                          StockItem(sku_code=ordered.code, qty_available=0, qty_reserved=0),

@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.runtime.core import Core
 from core.runtime.deps import get_core, get_session
 from core.runtime.funnel import FunnelBoardOut, FunnelCard, build_board
-from core.services.auth import get_current_user
+from core.services.auth import get_current_user, require_permission
 from modules.office import events
 from modules.office.carriers import CARRIERS
 from modules.office.models import LegalClaim, LegalContract, OfficeDoc
@@ -77,7 +77,7 @@ async def list_carriers() -> list[dict]:
     return CARRIERS
 
 
-@router.post("/docs", response_model=OfficeDocOut, status_code=201)
+@router.post("/docs", response_model=OfficeDocOut, status_code=201, dependencies=[Depends(require_permission('office.doc.write'))])
 async def create_doc(
     payload: OfficeDocCreate,
     session: AsyncSession = Depends(get_session),
@@ -100,7 +100,7 @@ async def create_doc(
     return obj
 
 
-@router.patch("/docs/{doc_id}", response_model=OfficeDocOut)
+@router.patch("/docs/{doc_id}", response_model=OfficeDocOut, dependencies=[Depends(require_permission('office.stage.move'))])
 async def update_doc(
     doc_id: int,
     payload: StageUpdate,
@@ -128,7 +128,7 @@ async def update_doc(
     return obj
 
 
-@router.post("/docs/{doc_id}/carrier-request")
+@router.post("/docs/{doc_id}/carrier-request", dependencies=[Depends(require_permission('office.carrier.request'))])
 async def carrier_request(doc_id: int, payload: RequestInput,
     session: AsyncSession = Depends(shipping_transaction), core: Core = Depends(get_core),
     user=Depends(get_current_user)):
@@ -157,7 +157,7 @@ async def list_contracts(
     return (await session.execute(q)).scalars().all()
 
 
-@router.post("/contracts", response_model=LegalContractOut, status_code=201)
+@router.post("/contracts", response_model=LegalContractOut, status_code=201, dependencies=[Depends(require_permission('office.contract.write'))])
 async def create_contract(
     payload: LegalContractCreate,
     session: AsyncSession = Depends(get_session),
@@ -185,7 +185,7 @@ async def get_contract(contract_id: int, session: AsyncSession = Depends(get_ses
     return obj
 
 
-@router.patch("/contracts/{contract_id}", response_model=LegalContractOut)
+@router.patch("/contracts/{contract_id}", response_model=LegalContractOut, dependencies=[Depends(require_permission('office.contract.write'))])
 async def patch_contract(
     contract_id: int,
     payload: LegalContractPatch,
@@ -221,7 +221,7 @@ async def list_claims(
     return (await session.execute(q)).scalars().all()
 
 
-@router.post("/claims", response_model=LegalClaimOut, status_code=201)
+@router.post("/claims", response_model=LegalClaimOut, status_code=201, dependencies=[Depends(require_permission('office.claim.write'))])
 async def create_claim(
     payload: LegalClaimCreate,
     session: AsyncSession = Depends(get_session),
@@ -249,7 +249,7 @@ async def get_claim(claim_id: int, session: AsyncSession = Depends(get_session))
     return obj
 
 
-@router.patch("/claims/{claim_id}", response_model=LegalClaimOut)
+@router.patch("/claims/{claim_id}", response_model=LegalClaimOut, dependencies=[Depends(require_permission('office.claim.write'))])
 async def patch_claim(
     claim_id: int,
     payload: LegalClaimPatch,

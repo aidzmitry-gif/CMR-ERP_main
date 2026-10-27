@@ -7,6 +7,16 @@ import { ProcurementReceipts } from "./procurement-receipts";
 
 afterEach(() => { vi.unstubAllGlobals(); sessionStorage.clear(); });
 
+function evidenceUploadFile(text: string, filename: string) {
+  const file = new File([text], filename, { type: "application/xml" });
+  // jsdom File returns a different-realm ArrayBuffer; Node WebCrypto requires its native buffer.
+  // FileReader remains real, and this method exposes the exact bytes of the same fixture.
+  const bytes = Buffer.from(text, "utf8");
+  Object.defineProperty(file, "arrayBuffer", { value: async () =>
+    bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) });
+  return file;
+}
+
 async function selectReceiptSku() {
   fireEvent.change(screen.getByLabelText("Поиск номенклатуры накладной"), { target: { value: "AKB" } });
   await screen.findByRole("option", { name: "AKB · Аккумулятор · шт · ID 31" });
@@ -512,7 +522,7 @@ it("sends the current file id as supersedes_id and checks uploaded bytes and rec
   fireEvent.change(screen.getByLabelText("Основание документа: supplier_eschf_xml"), { target: { value: "ЭСЧФ-2026-09" } });
   fireEvent.change(screen.getByLabelText("Налоговый период: supplier_eschf_xml"), { target: { value: "2026-09" } });
   fireEvent.change(screen.getByLabelText("Комментарий к загрузке: supplier_eschf_xml"), { target: { value: "Исправленный счёт-фактура поставщика" } });
-  const file = new File(["<Invoice/>"], "invoice-new.xml", { type: "application/xml" });
+  const file = evidenceUploadFile("<Invoice/>", "invoice-new.xml");
   fireEvent.change(screen.getByLabelText("Файл доказательства: supplier_eschf_xml"), { target: { files: [file] } });
   fireEvent.click(screen.getByRole("button", { name: "Загрузить новую редакцию" }));
 
@@ -593,7 +603,7 @@ it("ignores an old upload response after selecting A, then B, then A again", asy
   fireEvent.change(screen.getByLabelText("Основание документа: supplier_eschf_xml"), { target: { value: "ЭСЧФ-A" } });
   fireEvent.change(screen.getByLabelText("Налоговый период: supplier_eschf_xml"), { target: { value: "2026-09" } });
   fireEvent.change(screen.getByLabelText("Комментарий к загрузке: supplier_eschf_xml"), { target: { value: "Старая загрузка для проверки гонки" } });
-  const file = new File(["<Invoice>A</Invoice>"], "old-a.xml", { type: "application/xml" });
+  const file = evidenceUploadFile("<Invoice>A</Invoice>", "old-a.xml");
   fireEvent.change(screen.getByLabelText("Файл доказательства: supplier_eschf_xml"), { target: { files: [file] } });
   const uploadButton = screen.getAllByRole("button", { name: "Загрузить документ" })
     .find((button) => !button.hasAttribute("disabled"));
@@ -661,7 +671,7 @@ it("ignores an old upload response after refreshing and reopening the same recei
   fireEvent.change(screen.getByLabelText("Основание документа: supplier_eschf_xml"), { target: { value: "ЭСЧФ-новый" } });
   fireEvent.change(screen.getByLabelText("Налоговый период: supplier_eschf_xml"), { target: { value: "2026-09" } });
   fireEvent.change(screen.getByLabelText("Комментарий к загрузке: supplier_eschf_xml"), { target: { value: "Проверка повторного открытия накладной" } });
-  const file = new File(["<Invoice>new</Invoice>"], "invoice-new.xml", { type: "application/xml" });
+  const file = evidenceUploadFile("<Invoice>new</Invoice>", "invoice-new.xml");
   fireEvent.change(screen.getByLabelText("Файл доказательства: supplier_eschf_xml"), { target: { files: [file] } });
   fireEvent.click(screen.getByRole("button", { name: "Загрузить новую редакцию" }));
   await waitFor(() => expect(posted).not.toBeNull());

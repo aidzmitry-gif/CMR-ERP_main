@@ -17,6 +17,8 @@ PERMISSIONS = [
     Permission("office.doc.write", "Создание и изменение документов"),
     Permission("office.stage.move", "Перевод документа по стадиям воронки"),
     Permission("office.carrier.request", "Создание заявки перевозчику на доставку по РБ"),
+    Permission("office.contract.write", "Создание и изменение договоров"),
+    Permission("office.claim.write", "Создание и изменение претензий"),
     Permission("office.shipping.associate", "Подтверждение связи заявки со счётом"),
     Permission("office.shipping.review.assign", "Назначение reviewer конкретного OfficeDoc"),
     Permission("office.shipping.review.revoke", "Отзыв reviewer конкретного OfficeDoc"),
@@ -43,6 +45,19 @@ class OfficeModule(ModuleContract):
         # organization authority remain mandatory inside the source adapter.
         core.declare_role(Role("assistant", ("office.doc.read", "office.carrier.request")))
         core.declare_role(Role("finance", ("office.doc.read", "office.carrier.request", "office.shipping.associate")))
+
+        # Сохраняем обычный документооборот финансов/помощника, отделяя юридическую запись.
+        for role in ("finance", "assistant"):
+            core.declare_role(
+                Role(
+                    role,
+                    permissions=(
+                        "office.doc.write",
+                        "office.stage.move",
+                        "office.carrier.request",
+                    ),
+                )
+            )
 
         # Входящие связи с отделами — подписки на события шины
         core.subscribe("sales.deal.won", events.on_deal_won)                    # ← CRM/Sales

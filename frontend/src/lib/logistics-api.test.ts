@@ -26,6 +26,8 @@ import {
   fetchTariffs,
   fetchVehicles,
   fetchZones,
+  LogisticsReadError,
+  logisticsReadMessage,
   negotiateBid,
   patchImportStage,
   patchScorecardMetrics,
@@ -62,21 +64,45 @@ describe("logistics-api — доставка/дашборд", () => {
     expect(res).toEqual([{ id: 1, number: "SH-1" }]);
   });
 
-  it("fetchShipments → [] при ошибке сети и при !ok", async () => {
+  it("fetchShipments отличает ошибку чтения от пустого списка", async () => {
     stubReject();
-    expect(await fetchShipments()).toEqual([]);
+    await expect(fetchShipments()).rejects.toThrow("net down");
     stubFetch({}, false);
+    await expect(fetchShipments()).rejects.toBeInstanceOf(LogisticsReadError);
+    stubFetch([]);
     expect(await fetchShipments()).toEqual([]);
   });
 
-  it("fetchDashboard/fetchCosts → null-fallback", async () => {
+  it("fetchDashboard/fetchCosts не скрывают ошибку чтения", async () => {
     const fetchMock = stubFetch({ in_transit: 3 });
     expect((await fetchDashboard())?.in_transit).toBe(3);
     expect(fetchMock).toHaveBeenCalledWith("/api/logistics/dashboard", { cache: "no-store" });
 
     stubReject();
-    expect(await fetchDashboard()).toBeNull();
-    expect(await fetchCosts()).toBeNull();
+    await expect(fetchDashboard()).rejects.toThrow("net down");
+    await expect(fetchCosts()).rejects.toThrow("net down");
+  });
+
+  it.each([
+    [401, {}, "Сессия истекла"],
+    [403, {}, "Недостаточно прав"],
+    [409, { detail: "organization_scope_incomplete" }, "привязка данных логистики"],
+    [503, { detail: "private backend detail" }, "Повторите загрузку позже"],
+  ])("сообщает причину отказа %s без раскрытия ответа сервера", async (status, body, message) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status, json: async () => body }));
+    const error = await fetchDashboard().catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(LogisticsReadError);
+    expect(logisticsReadMessage(error)).toContain(message);
+    expect(logisticsReadMessage(error)).not.toContain("private backend detail");
+  });
+
+  it("сбой JSON и ошибки зон/тарифов не превращаются в пустые данные", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => { throw new SyntaxError("bad json"); } }));
+    await expect(fetchShipments()).rejects.toThrow("bad json");
+    stubReject();
+    await expect(fetchZones()).rejects.toThrow("net down");
+    await expect(fetchTariffs("MSK")).rejects.toThrow("net down");
+    expect(logisticsReadMessage(new Error("private URL"))).not.toContain("private URL");
   });
 
   it("patchShipmentStatus шлёт PATCH с телом {status}", async () => {

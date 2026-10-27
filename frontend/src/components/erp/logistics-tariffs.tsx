@@ -7,6 +7,7 @@ import { quoteTariff } from "@/lib/logistics-domain";
 import {
   fetchTariffs,
   fetchZones,
+  logisticsReadMessage,
   patchTariff,
   seedTariffs,
   seedZones,
@@ -21,6 +22,11 @@ export function LogisticsTariffs() {
   const [zone, setZone] = useState<string>("");
   const [tariffs, setTariffs] = useState<CarrierTariff[]>([]);
   const [loading, setLoading] = useState(true);
+  const [zonesError, setZonesError] = useState<string | null>(null);
+  const [zonesAttempt, setZonesAttempt] = useState(0);
+  const [tariffsLoading, setTariffsLoading] = useState(true);
+  const [tariffsError, setTariffsError] = useState<string | null>(null);
+  const [tariffsAttempt, setTariffsAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const zoneScope = useRef(zone);
   const writing = useRef(false);
@@ -68,8 +74,15 @@ export function LogisticsTariffs() {
       return;
     }
     setEditing(null);
-    const rows = await fetchTariffs(targetZone);
-    if (zoneScope.current === targetZone) setTariffs(rows);
+    try {
+      const rows = await fetchTariffs(targetZone);
+      if (zoneScope.current === targetZone) setTariffs(rows);
+    } catch (error) {
+      if (zoneScope.current === targetZone) {
+        setTariffs([]);
+        setTariffsError(`Тариф сохранён, но список не обновлён. ${logisticsReadMessage(error)}`);
+      }
+    }
     } catch { setTariffError("Сохранение тарифа не подтверждено. Проверьте результат перед повтором."); }
     finally { writing.current = false; setBusy(false); }
   }
@@ -82,37 +95,65 @@ export function LogisticsTariffs() {
 
   async function loadZones() {
     const z = await fetchZones();
+    setZonesError(null);
     setZones(z);
-    if (z.length > 0) setZone((cur) => cur || z[0].code);
+    setZone((cur) => z.some(item => item.code === cur) ? cur : z[0]?.code ?? "");
+    setTariffs([]);
+    setTariffsError(null);
+    setTariffsLoading(true);
+    setTariffsAttempt(n => n + 1);
     setLoading(false);
   }
 
   useEffect(() => {
+    let alive = true;
     void fetchZones().then((z) => {
+      if (!alive) return;
       setZones(z);
-      if (z.length > 0) setZone((cur) => cur || z[0].code);
-      setLoading(false);
+      setZone((cur) => z.some(item => item.code === cur) ? cur : z[0]?.code ?? "");
+      setTariffs([]);
+      setTariffsError(null);
+      setTariffsLoading(true);
+      setTariffsAttempt(n => n + 1);
+    }).catch((error: unknown) => {
+      if (alive) setZonesError(logisticsReadMessage(error));
+    }).finally(() => {
+      if (alive) setLoading(false);
     });
-  }, []);
+    return () => { alive = false; };
+  }, [zonesAttempt]);
 
   useEffect(() => {
     zoneScope.current = zone;
     if (!zone) return;
     let alive = true;
-    void fetchTariffs(zone).then(rows => { if (alive) setTariffs(rows); });
+    void fetchTariffs(zone).then(rows => { if (alive) setTariffs(rows); })
+      .catch((error: unknown) => { if (alive) setTariffsError(logisticsReadMessage(error)); })
+      .finally(() => { if (alive) setTariffsLoading(false); });
     return () => { alive = false; };
-  }, [zone]);
+  }, [zone, tariffsAttempt]);
 
   async function onSeed() {
     setBusy(true);
-    await seedZones();
-    await seedTariffs();
-    await loadZones();
-    if (zone) setTariffs(await fetchTariffs(zone));
-    setBusy(false);
+    setTariffs([]);
+    setTariffsError(null);
+    setTariffsLoading(true);
+    try {
+      await seedZones();
+      await seedTariffs();
+      await loadZones();
+    } catch (error) {
+      setZonesError(logisticsReadMessage(error));
+    } finally { setBusy(false); }
   }
 
   if (loading) return <Loading />;
+  if (zonesError) return (
+    <div className="rounded-xl bg-surface p-6 shadow-card">
+      <p role="alert" className="text-sm text-muted">{zonesError}</p>
+      <GhostButton onClick={() => { setLoading(true); setZonesError(null); setZonesAttempt(n => n + 1); }}>Повторить загрузку</GhostButton>
+    </div>
+  );
   if (zones.length === 0)
     return <EmptyState text="Зоны доставки и тарифы ещё не заданы." onSeed={onSeed} busy={busy} />;
 
@@ -129,14 +170,14 @@ export function LogisticsTariffs() {
     <div className="space-y-4">
       <Card
         title="Зоны доставки"
-        action={<GhostButton onClick={onSeed} busy={busy}>Обновить демо</GhostButton>}
+        action={!tariffsError && !tariffsLoading ? <GhostButton onClick={onSeed} busy={busy}>Обновить демо</GhostButton> : undefined}
       >
         <div className="flex flex-wrap gap-2">
           {zones.map((z) => (
             <button
               key={z.code}
               disabled={busy}
-              onClick={() => { if (writing.current || z.code === zone) return; cancelEdit(); setTariffs([]); setZone(z.code); }}
+              onClick={() => { if (writing.current || z.code === zone) return; cancelEdit(); setTariffs([]); setTariffsLoading(true); setTariffsError(null); setZone(z.code); }}
               className={
                 z.code === zone
                   ? "rounded-lg border border-accent bg-blue-50 px-3 py-2 text-left text-sm"
@@ -156,6 +197,12 @@ export function LogisticsTariffs() {
         title="Калькулятор котировки"
         hint="Цена по тарифам выбранной зоны для заданного веса (страховка и наложенный платёж — опционально)."
       >
+        {tariffsLoading ? <Loading /> : tariffsError ? (
+          <div>
+            <p role="alert" className="text-sm text-muted">{tariffsError}</p>
+            <GhostButton onClick={() => { setTariffsLoading(true); setTariffsError(null); setTariffsAttempt(n => n + 1); }}>Повторить загрузку тарифов</GhostButton>
+          </div>
+        ) : <>
         <div className="flex flex-wrap items-end gap-4">
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-muted">Вес, кг</span>
@@ -273,6 +320,7 @@ export function LogisticsTariffs() {
         {tariffError && (
           <p className="mt-2 text-xs text-red-600">{tariffError}</p>
         )}
+        </>}
       </Card>
     </div>
   );

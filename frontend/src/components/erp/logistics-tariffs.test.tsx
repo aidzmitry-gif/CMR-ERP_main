@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Мокаем ТОЛЬКО сетевой слой логистики; чистую доменную логику (quoteTariff/tariffWeightPrice)
 // и форматирование (formatByn) берём из настоящей реализации — их поведение и проверяем
 // через рендер калькулятора котировки.
-vi.mock("@/lib/logistics-api", () => ({
+vi.mock("@/lib/logistics-api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/logistics-api")>(),
   fetchZones: vi.fn(),
   fetchTariffs: vi.fn(),
   patchTariff: vi.fn(),
@@ -80,6 +81,84 @@ beforeEach(() => {
 });
 
 describe("LogisticsTariffs", () => {
+  it("после отказа зон не возвращает старые котировки при повторном чтении", async () => {
+    (api.fetchZones as Mock).mockResolvedValueOnce(ZONES)
+      .mockRejectedValueOnce(new api.LogisticsReadError(503))
+      .mockResolvedValueOnce(ZONES);
+    (api.fetchTariffs as Mock).mockResolvedValueOnce(TARIFFS)
+      .mockResolvedValueOnce([tariff({ carrier_code: "FRESH" })]);
+    render(<LogisticsTariffs />);
+    await screen.findByText("CARGO");
+    fireEvent.click(screen.getByRole("button", { name: "Обновить демо" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Повторите загрузку позже");
+    expect(screen.queryByText("CARGO")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить загрузку" }));
+    expect(await screen.findByText("FRESH")).toBeInTheDocument();
+    expect(api.fetchTariffs).toHaveBeenCalledTimes(2);
+    expect(api.seedZones).toHaveBeenCalledTimes(1);
+    expect(api.seedTariffs).toHaveBeenCalledTimes(1);
+  });
+
+  it("после обновления демо повторяет отказавшее чтение тарифов без повторных записей", async () => {
+    (api.fetchTariffs as Mock).mockResolvedValueOnce(TARIFFS)
+      .mockRejectedValueOnce(new api.LogisticsReadError(503))
+      .mockResolvedValueOnce([tariff({ carrier_code: "FRESH" })]);
+    render(<LogisticsTariffs />);
+    await screen.findByText("CARGO");
+    fireEvent.click(screen.getByRole("button", { name: "Обновить демо" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Повторите загрузку позже");
+    expect(screen.queryByText("CARGO")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /демо/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить загрузку тарифов" }));
+    expect(await screen.findByText("FRESH")).toBeInTheDocument();
+    expect(api.fetchTariffs).toHaveBeenCalledTimes(3);
+    expect(api.seedZones).toHaveBeenCalledTimes(1);
+    expect(api.seedTariffs).toHaveBeenCalledTimes(1);
+    expect(api.patchTariff).not.toHaveBeenCalled();
+  });
+
+  it("ошибка зон не выглядит как пустые данные и повторяет только чтение", async () => {
+    (api.fetchZones as Mock).mockRejectedValueOnce(new api.LogisticsReadError(403));
+    render(<LogisticsTariffs />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Недостаточно прав");
+    expect(screen.queryByText("Зоны доставки и тарифы ещё не заданы.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /демо/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить загрузку" }));
+    expect(await screen.findByText("CARGO")).toBeInTheDocument();
+    expect(api.seedZones).not.toHaveBeenCalled();
+    expect(api.seedTariffs).not.toHaveBeenCalled();
+  });
+
+  it("отказ тарифов не даёт пустую котировку и не предлагает демо", async () => {
+    (api.fetchTariffs as Mock).mockRejectedValueOnce(new api.LogisticsReadError(503));
+    render(<LogisticsTariffs />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Повторите загрузку позже");
+    expect(screen.queryByText("Для этой зоны тарифов нет.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /демо/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить загрузку тарифов" }));
+    expect(await screen.findByText("CARGO")).toBeInTheDocument();
+    expect(api.seedZones).not.toHaveBeenCalled();
+    expect(api.seedTariffs).not.toHaveBeenCalled();
+  });
+
+  it("успешный пустой список тарифов сохраняет честное пустое состояние", async () => {
+    (api.fetchTariffs as Mock).mockResolvedValue([]);
+    render(<LogisticsTariffs />);
+    expect(await screen.findByText("Для этой зоны тарифов нет.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("подтверждённое сохранение не объявляется неуспешным при сбое перечитывания", async () => {
+    (api.fetchTariffs as Mock).mockResolvedValueOnce(TARIFFS).mockRejectedValueOnce(new api.LogisticsReadError(503));
+    render(<LogisticsTariffs />);
+    const row = (await screen.findByText("CARGO")).closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "✏" }));
+    fireEvent.click(within(row).getByRole("button", { name: "✓" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Тариф сохранён, но список не обновлён");
+    expect(api.patchTariff).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/Сохранение тарифа не подтверждено/)).not.toBeInTheDocument();
+  });
+
   it("drops an old zone draft and ignores a delayed old-zone response", async () => {
     let old!: (value: CarrierTariff[]) => void;
     (api.fetchTariffs as Mock).mockResolvedValueOnce(TARIFFS)

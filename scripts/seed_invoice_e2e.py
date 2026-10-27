@@ -41,12 +41,13 @@ async def main():
                 raise RuntimeError("Refusing to modify a non-E2E deal")
             token = uuid4().hex
             org = Organization(name="E2E invoice seller", unp=str(100000000 + int(token[:8], 16) % 400000000))
-            buyer = Counterparty(name="E2E invoice buyer", unp=str(500000000 + int(token[8:16], 16) % 400000000), requisites={"address": "Synthetic buyer address"})
+            buyer = await session.get(Counterparty, deal.counterparty_id) if deal.counterparty_id else None
+            if buyer is None or not buyer.name.startswith("ООО E2E-Документ "):
+                raise RuntimeError("Invoice E2E requires its existing selected synthetic counterparty")
             sku = Sku(code="E2E-INV-" + token, title="E2E invoice goods", unit="шт")
-            session.add_all([org, buyer, sku])
+            session.add_all([org, sku])
             await session.flush()
-            # Select the same exact buyer in CRM before its accounting confirmation.
-            deal.counterparty_id, deal.branch_id = buyer.id, None
+            # Keep the exact legal buyer already selected through the CRM directory.
             item = DealItem(deal_id=deal.id, sku_id=sku.id, qty=Decimal("2"))
             session.add_all([item, AccessGrant(organization_id=org.id, subject=actor, role="chief"), DealOwnership(deal_id=deal.id, organization_id=org.id, snapshot={}, evidence="Synthetic E2E ownership", actor=actor)])
             await session.flush()

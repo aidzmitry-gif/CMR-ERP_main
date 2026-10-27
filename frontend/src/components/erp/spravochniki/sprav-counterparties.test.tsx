@@ -96,6 +96,7 @@ describe("SpravCounterparties", () => {
     expect(await screen.findByText(/Источник: МНС \(ГРП\)/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать Юридическое наименование" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать УНП" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать Юридический адрес" }));
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
     await waitFor(() => expect(navigation.push).toHaveBeenCalledWith(
@@ -106,8 +107,8 @@ describe("SpravCounterparties", () => {
     expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual({
       registry: {
         unp: "190000001",
-        fields: ["name", "unp"],
-        preview: { name: "ООО Новая Ромашка", unp: "190000001" },
+        fields: ["name", "unp", "legal_address"],
+        preview: { name: "ООО Новая Ромашка", unp: "190000001", legal_address: "Новый адрес, 1" },
       },
     });
   });

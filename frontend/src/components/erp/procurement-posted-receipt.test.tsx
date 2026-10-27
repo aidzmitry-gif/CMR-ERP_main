@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { ProcurementPostedReceipt } from "./procurement-posted-receipt";
@@ -129,4 +129,46 @@ it("fails closed before rendering malformed receipt lines", async () => {
   render(<ProcurementPostedReceipt org="7" entry="42" />);
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("неполные исходные данные"));
   expect(screen.queryByRole("button", { name: "Создать черновик исправления" })).not.toBeInTheDocument();
+});
+
+
+it("recovers the saved command before exposing a create action and only retries its exact body", async () => {
+  const journalKey = "procurement-receipt-correction:v1:7:81";
+  const savedKey = crypto.randomUUID();
+  const body = JSON.stringify({ key: savedKey, expected_version: 3, expected_entry_id: 42 });
+  sessionStorage.setItem(journalKey, JSON.stringify({ org: "7", originalReceiptId: 81,
+    expectedVersion: 3, expectedEntryId: 42, key: savedKey, body }));
+  let resolveSource!: (value: typeof source) => void;
+  const sourceReply = new Promise<typeof source>((resolve) => { resolveSource = resolve; });
+  const bodies: string[] = [];
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === postedPath) return { ok: true, status: 200, json: () => sourceReply };
+    if (url === correctionPath && init?.method === "POST") {
+      bodies.push(String(init.body));
+      return response(correction(95, savedKey));
+    }
+    throw new Error(`Unexpected request ${url}`);
+  });
+  vi.stubGlobal("fetch", fetcher);
+  let createVisibleDuringRecovery: boolean | null = null;
+  const originalGet = Storage.prototype.getItem;
+  const read = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, key: string) {
+    if (key === journalKey && createVisibleDuringRecovery === null)
+      createVisibleDuringRecovery = screen.queryByRole("button", { name: "Создать черновик исправления" }) !== null;
+    return originalGet.call(this, key);
+  });
+  try {
+    render(<ProcurementPostedReceipt org="7" entry="42" />);
+    expect(screen.queryByRole("button", { name: "Создать черновик исправления" })).not.toBeInTheDocument();
+    expect(bodies).toHaveLength(0);
+    await act(async () => { resolveSource(source); });
+    const retry = await screen.findByRole("button", { name: "Повторить тот же запрос" });
+    expect(createVisibleDuringRecovery).toBe(false);
+    expect(screen.queryByRole("button", { name: "Создать черновик исправления" })).not.toBeInTheDocument();
+    expect(bodies).toHaveLength(0);
+    fireEvent.click(retry);
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Черновик исправления № 95"));
+    expect(bodies).toEqual([body]);
+    expect(sessionStorage.getItem(journalKey)).toBeNull();
+  } finally { read.mockRestore(); }
 });
