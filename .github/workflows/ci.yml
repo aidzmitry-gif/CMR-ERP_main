@@ -35,7 +35,7 @@ jobs:
       AIOS_ENVIRONMENT: dev
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
       - uses: actions/setup-python@v6
@@ -84,7 +84,7 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: "20"
@@ -112,7 +112,7 @@ jobs:
     name: E2E (Playwright, критический путь)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
       - uses: actions/setup-python@v6
