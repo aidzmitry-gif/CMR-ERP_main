@@ -1219,9 +1219,9 @@ pydantic-settings==2.15.0 \
     # via
     #   -c requirements.constraints.txt
     #   -r requirements.txt
-pydyf==0.12.1 \
-    --hash=sha256:ea25b4e1fe7911195cb57067560daaa266639184e8335365cc3ee5214e7eaadc \
-    --hash=sha256:fbd7e759541ac725c29c506612003de393249b94310ea78ae44cb1d04b220095
+pydyf==0.13.0 \
+    --hash=sha256:3c1bd536c7161d9f472b82a8aaa27d3359a9058ec12de15302d92b3690dae7f5 \
+    --hash=sha256:85b28a3af8c35e6fe1415f2b3f1d6851cb3b52f53592c2cda4db9a00a8979677
     # via
     #   -c requirements.constraints.txt
     #   weasyprint

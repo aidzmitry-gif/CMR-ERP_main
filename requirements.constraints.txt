@@ -29,7 +29,7 @@ pycparser==3.0
 pydantic==2.13.5
 pydantic-settings==2.15.0
 pydantic_core==2.46.5
-pydyf==0.12.1
+pydyf==0.13.0
 pyphen==0.18.1
 python-dotenv==1.2.3
 PyYAML==6.0.3
