@@ -3,9 +3,10 @@
 from modules.sales.models import DealDocument
 
 
-async def test_draft_terms_save_and_history(api, session):
+async def test_draft_terms_save_and_history(api, session, synthetic_sales_party):
     deal = (await api.post("/sales/deals", json={
         "number": "HIST-DOC-1", "title": "Поставка", "counterparty": "Покупатель",
+        "counterparty_id": synthetic_sales_party.id,
     })).json()
     doc = DealDocument(deal_id=deal["id"], kind="contract", number="DOG-HIST-DOC-1",
                        status="draft")

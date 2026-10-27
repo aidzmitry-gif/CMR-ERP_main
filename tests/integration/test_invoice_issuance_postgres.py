@@ -272,3 +272,12 @@ async def test_pg_concurrent_expiry_ticks_emit_one_reminder(issuance_pg, monkeyp
             OutboxEvent.event_type == "sales.invoice.expiring")) == 1
         doc = await check.get(DealDocument, doc_id)
         assert doc.status == "issued" and doc.reserve_status == "reserved" and doc.reminded_at is not None
+
+
+async def test_pg_concurrent_cancelled_replacement_replay_uses_current_original(issuance_pg, monkeypatch):
+    from tests.test_document_concurrency import test_concurrent_revision_and_issue_cannot_duplicate
+
+    api, factory = issuance_pg
+    async with factory() as session:
+        ids, base = await seed(api, session)
+    await test_concurrent_revision_and_issue_cannot_duplicate((api, factory, ids, base), monkeypatch)

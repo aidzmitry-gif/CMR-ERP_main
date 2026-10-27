@@ -27,9 +27,12 @@ async def make_invoice(api, session):
     session.add(PriceQuote(sku_code=sku.code, counterparty=cp.name, price=Decimal('100')))
     session.add(StockItem(sku_code=sku.code, qty_available=100, qty_reserved=0))
     await session.commit()
-    deal = (await api.post('/sales/deals', json={
-        'number': 'ORIG', 'title': 'Original deal', 'counterparty': cp.name, 'amount': 200,
-    })).json()
+    created = await api.post('/sales/deals', json={
+        'number': 'ORIG', 'title': 'Original deal', 'counterparty': cp.name,
+        'counterparty_id': cp.id, 'amount': 200,
+    })
+    assert created.status_code == 201, created.text
+    deal = created.json()
     item = (await api.post(f"/sales/deals/{deal['id']}/items", json={'sku_id': sku.id, 'qty': 2, 'unit_price': '100.00'})).json()
     # Historical persisted fixture: new invoice API deliberately no longer accepts
     # this legacy payload. These tests exercise already-saved originals/consumers.

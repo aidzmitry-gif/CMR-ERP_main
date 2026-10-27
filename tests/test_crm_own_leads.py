@@ -5,8 +5,12 @@ import pytest
 from sqlalchemy import func, select
 
 from core.domain.models import Counterparty, OutboxEvent, Sku
+from modules.accounting.models import AccessGrant, Organization
 from modules.leads.models import Lead
-from modules.sales.models import Deal, DealItem
+from modules.sales.accounting_ownership import DealOwnership
+from modules.sales.client_document_register import DealClientBinding, preview_snapshot
+from modules.sales.invoice_issuance import verified_receipt
+from modules.sales.models import CrmClient, Deal, DealDocument, DealItem
 from tests.test_crm_client_create import FOREIGN, OWN, seed
 
 
@@ -18,7 +22,59 @@ async def client(api, session):
     return response.json()['id']
 
 
-async def test_own_numeric_cycle_replay_and_no_mdm(api, session):
+async def issue_converted_invoice(api, session, deal, client_id):
+    """Bind explicit synthetic ERP prerequisites after conversion, never by name."""
+    deal_id = deal.id
+    org = Organization(name="Synthetic lead seller", unp="100000011")
+    buyer = Counterparty(name="Own lead buyer", legal_name="Own lead buyer", unp="500000011",
+                         requisites={"legal_address": "Synthetic buyer address"})
+    session.add_all([org, buyer])
+    await session.flush()
+    crm_client = await session.get(CrmClient, client_id)
+    deal.counterparty_id = buyer.id
+    crm_client.counterparty_id = buyer.id
+    session.add_all([
+        AccessGrant(organization_id=org.id, subject=OWN["X-User"], role="chief"),
+        AccessGrant(organization_id=org.id, subject="lead-approver", role="chief"),
+        DealOwnership(deal_id=deal.id, organization_id=org.id, snapshot={},
+                      evidence="Synthetic lead book", actor=OWN["X-User"]),
+    ])
+    await session.flush()
+    session.add(DealClientBinding(deal_id=deal.id, organization_id=org.id, counterparty_id=buyer.id,
+        snapshot=await preview_snapshot(session, org.id, deal, buyer.id),
+        evidence="Synthetic explicit buyer binding", actor=OWN["X-User"]))
+    await session.commit()
+    org_id = org.id
+    seller = await api.post(f"/accounting/organizations/{org_id}/seller-profiles",
+                           headers={"X-User": "lead-approver"}, json={
+        "source_key": "synthetic-lead-seller", "expected_revision": 0, "effective_from": "2026-01-01",
+        "currency": "BYN", "address": "Synthetic seller address", "account": "TEST ACCOUNT",
+        "bank": "TEST BANK", "bik": "TEST BIK", "director": "Synthetic director",
+        "evidence": "Approved synthetic profile", "confirmed": True,
+    })
+    assert seller.status_code == 201, seller.text
+    items = (await session.scalars(select(DealItem).where(DealItem.deal_id == deal_id)
+                                   .order_by(DealItem.id))).all()
+    body = {"organization_id": org_id, "reserve_mode": "on_order", "currency": "BYN",
+        "document_date": "2026-09-01", "valid_until": "2026-09-06",
+        "pricing": [{"item_id": row.id, "unit_price_net": str(row.unit_price), "vat_rate": "20.00"}
+                    for row in items], "pricing_evidence": "Exact converted synthetic line prices"}
+    preview = await api.post(f"/sales/deals/{deal_id}/invoice-preview", headers=OWN, json=body)
+    assert preview.status_code == 200, preview.text
+    invoice = await api.post(f"/sales/deals/{deal_id}/documents", headers=OWN, json={
+        "kind": "invoice", **body, "request_key": "own-lead-invoice",
+        "expected_document_version": preview.json()["document_version"],
+        "expected_basis_digest": preview.json()["basis_digest"],
+        "allocations": [], "unreserved_confirmed": True,
+    })
+    assert invoice.status_code == 201, invoice.text
+    doc = await session.get(DealDocument, invoice.json()["document"]["id"])
+    assert doc.status == "issued" and doc.reserve_status == "unreserved"
+    assert float(doc.amount) == 150.60
+    assert await verified_receipt(session, doc, org_id) is not None
+
+
+async def test_own_numeric_cycle_replay_without_implicit_mdm_and_explicit_invoice_binding(api, session):
     client_id = await client(api, session)
     contact = await api.post(f'/sales/clients/{client_id}/contacts', headers=OWN,
                             json={'full_name': 'Buyer contact', 'phone': '+375291112233',
@@ -57,8 +113,11 @@ async def test_own_numeric_cycle_replay_and_no_mdm(api, session):
     assert list(map(float, prices)) == [125.5, 0]
     invoice = await api.post(f'/sales/deals/{deal_id}/documents', headers=OWN,
                              json={'kind': 'invoice', 'reserve_mode': 'on_order'})
-    assert invoice.status_code == 201, invoice.text
+    assert invoice.status_code == 422, invoice.text
+    assert await session.scalar(select(func.count()).select_from(DealDocument)) == 0
     assert await session.scalar(select(func.count()).select_from(Counterparty)) == 0
+    await issue_converted_invoice(api, session, deal, client_id)
+    assert await session.scalar(select(func.count()).select_from(Counterparty)) == 1
     events = (await session.scalars(select(OutboxEvent).where(OutboxEvent.event_type == 'leads.lead.converted'))).all()
     assert len(events) == 1
 
