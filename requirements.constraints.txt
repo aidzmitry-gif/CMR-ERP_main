@@ -41,7 +41,7 @@ tinycss2==1.5.1
 tinyhtml5==2.1.0
 typing-inspection==0.4.4
 typing_extensions==4.16.0
-tzdata==2026.3
+tzdata==2026.5
 uvicorn==0.52.4
 uvloop==0.22.1
 watchfiles==1.2.0
