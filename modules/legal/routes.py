@@ -1,4 +1,5 @@
 """HTTP-API модуля Legal. Монтируется под префиксом ``/legal``."""
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.runtime.deps import get_session
 from core.runtime.funnel import FunnelBoardOut, FunnelCard, build_board
+from core.services.auth import require_permission
 from modules.legal.models import LegalCase
 from modules.legal.schemas import LegalCaseCreate, LegalCaseOut, StageUpdate
 from modules.legal.stages import STAGES
@@ -59,7 +61,12 @@ async def board(session: AsyncSession = Depends(get_session)) -> FunnelBoardOut:
     return build_board(STAGES, rows, _to_card)
 
 
-@router.post("/cases", response_model=LegalCaseOut, status_code=201)
+@router.post(
+    "/cases",
+    response_model=LegalCaseOut,
+    status_code=201,
+    dependencies=[Depends(require_permission("legal.case.write"))],
+)
 async def create_case(payload: LegalCaseCreate, session: AsyncSession = Depends(get_session)):
     """Создать дело. Номер генерируется автоматически, если не задан."""
     data = payload.model_dump()
@@ -74,7 +81,11 @@ async def create_case(payload: LegalCaseCreate, session: AsyncSession = Depends(
     return obj
 
 
-@router.patch("/cases/{case_id}", response_model=LegalCaseOut)
+@router.patch(
+    "/cases/{case_id}",
+    response_model=LegalCaseOut,
+    dependencies=[Depends(require_permission("legal.case.write"))],
+)
 async def update_case(
     case_id: int, payload: StageUpdate, session: AsyncSession = Depends(get_session)
 ):

@@ -2,6 +2,12 @@
   "name": "aios-frontend",
   "version": "0.1.0",
   "private": true,
+  "overrides": {
+    "postcss": "$postcss",
+    "next": {
+      "sharp": "0.35.5"
+    }
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -20,9 +26,9 @@
     "@dnd-kit/core": "^6.3.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.17.0",
-    "next": "^15.0.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "next": "15.5.28",
+    "react": "19.2.9",
+    "react-dom": "19.2.9",
     "react-icons": "^5.6.0"
   },
   "devDependencies": {
@@ -39,7 +45,7 @@
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.2.9",
     "jsdom": "^29.1.1",
-    "postcss": "^8.4.0",
+    "postcss": "8.5.32",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.0.0",
     "vitest": "^4.1.8"

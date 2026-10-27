@@ -5,6 +5,7 @@
 (см. ``events.py``). Каждое изменение стадии порождает событие в той же
 транзакции, что и запись в БД.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.runtime.core import Core
 from core.runtime.deps import get_core, get_session
 from core.runtime.funnel import FunnelBoardOut, FunnelCard, build_board
+from core.services.auth import require_permission
 from modules.office import events
 from modules.office.carriers import CARRIERS, get_carrier
 from modules.office.models import LegalClaim, LegalContract, OfficeDoc
@@ -73,7 +75,12 @@ async def list_carriers() -> list[dict]:
     return CARRIERS
 
 
-@router.post("/docs", response_model=OfficeDocOut, status_code=201)
+@router.post(
+    "/docs",
+    response_model=OfficeDocOut,
+    status_code=201,
+    dependencies=[Depends(require_permission("office.doc.write"))],
+)
 async def create_doc(
     payload: OfficeDocCreate,
     session: AsyncSession = Depends(get_session),
@@ -93,7 +100,11 @@ async def create_doc(
     return obj
 
 
-@router.patch("/docs/{doc_id}", response_model=OfficeDocOut)
+@router.patch(
+    "/docs/{doc_id}",
+    response_model=OfficeDocOut,
+    dependencies=[Depends(require_permission("office.stage.move"))],
+)
 async def update_doc(
     doc_id: int,
     payload: StageUpdate,
@@ -110,19 +121,23 @@ async def update_doc(
     obj.stage = payload.stage
     bus = core.event_bus
     if payload.stage == "ready":
-        events.emit_shipment_requested(bus, session, obj)      # → Склад
+        events.emit_shipment_requested(bus, session, obj)  # → Склад
     elif payload.stage == "docs":
-        events.emit_docs_collected(bus, session, obj)          # → Финансы
+        events.emit_docs_collected(bus, session, obj)  # → Финансы
     elif payload.stage == "await_pay":
-        events.emit_payment_awaiting(bus, session, obj)        # → Финансы (+ кредитный риск)
-        events.escalate_overdue(bus, session, obj)             # лестница 5/15/30/45 (Юрист/РОП)
+        events.emit_payment_awaiting(bus, session, obj)  # → Финансы (+ кредитный риск)
+        events.escalate_overdue(bus, session, obj)  # лестница 5/15/30/45 (Юрист/РОП)
 
     await session.commit()
     await session.refresh(obj)
     return obj
 
 
-@router.post("/docs/{doc_id}/carrier-request", response_model=CarrierRequestOut)
+@router.post(
+    "/docs/{doc_id}/carrier-request",
+    response_model=CarrierRequestOut,
+    dependencies=[Depends(require_permission("office.carrier.request"))],
+)
 async def carrier_request(
     doc_id: int,
     payload: CarrierRequest,
@@ -189,6 +204,7 @@ async def carrier_request(
 #  Реестр юридических договоров
 # --------------------------------------------------------------------------- #
 
+
 @router.get("/contracts", response_model=list[LegalContractOut])
 async def list_contracts(
     status: str | None = None,
@@ -204,7 +220,12 @@ async def list_contracts(
     return (await session.execute(q)).scalars().all()
 
 
-@router.post("/contracts", response_model=LegalContractOut, status_code=201)
+@router.post(
+    "/contracts",
+    response_model=LegalContractOut,
+    status_code=201,
+    dependencies=[Depends(require_permission("office.contract.write"))],
+)
 async def create_contract(
     payload: LegalContractCreate,
     session: AsyncSession = Depends(get_session),
@@ -232,7 +253,11 @@ async def get_contract(contract_id: int, session: AsyncSession = Depends(get_ses
     return obj
 
 
-@router.patch("/contracts/{contract_id}", response_model=LegalContractOut)
+@router.patch(
+    "/contracts/{contract_id}",
+    response_model=LegalContractOut,
+    dependencies=[Depends(require_permission("office.contract.write"))],
+)
 async def patch_contract(
     contract_id: int,
     payload: LegalContractPatch,
@@ -253,6 +278,7 @@ async def patch_contract(
 #  Реестр юридических претензий
 # --------------------------------------------------------------------------- #
 
+
 @router.get("/claims", response_model=list[LegalClaimOut])
 async def list_claims(
     status: str | None = None,
@@ -268,7 +294,12 @@ async def list_claims(
     return (await session.execute(q)).scalars().all()
 
 
-@router.post("/claims", response_model=LegalClaimOut, status_code=201)
+@router.post(
+    "/claims",
+    response_model=LegalClaimOut,
+    status_code=201,
+    dependencies=[Depends(require_permission("office.claim.write"))],
+)
 async def create_claim(
     payload: LegalClaimCreate,
     session: AsyncSession = Depends(get_session),
@@ -296,7 +327,11 @@ async def get_claim(claim_id: int, session: AsyncSession = Depends(get_session))
     return obj
 
 
-@router.patch("/claims/{claim_id}", response_model=LegalClaimOut)
+@router.patch(
+    "/claims/{claim_id}",
+    response_model=LegalClaimOut,
+    dependencies=[Depends(require_permission("office.claim.write"))],
+)
 async def patch_claim(
     claim_id: int,
     payload: LegalClaimPatch,
