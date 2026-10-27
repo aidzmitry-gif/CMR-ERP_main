@@ -72,7 +72,7 @@ jobs:
           PY
       - name: Upload coverage
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-backend
           path: coverage.xml
@@ -103,7 +103,7 @@ jobs:
           { node -e "const s=require('./coverage/coverage-summary.json').total;console.log('Lines: **'+s.lines.pct+'%**, statements: **'+s.statements.pct+'%**, branches: **'+s.branches.pct+'%**')"; } >> "$GITHUB_STEP_SUMMARY" || echo "coverage-summary.json не найден" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload coverage
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-frontend
           path: frontend/coverage/
@@ -134,7 +134,7 @@ jobs:
         run: npm run e2e
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: frontend/playwright-report/
