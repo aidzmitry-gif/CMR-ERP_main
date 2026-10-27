@@ -7,12 +7,17 @@ import { fetchOwnerInsight } from "@/lib/api";
 export function OwnerAiInsight() {
   const [text, setText] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   async function run() {
-    setBusy(true);
-    const res = await fetchOwnerInsight();
-    setBusy(false);
-    setText(res ?? "AI-слой выключен (feature-flag)");
+    if (busy) return;
+    setBusy(true); setError(""); setText(null);
+    try {
+      const res = await fetchOwnerInsight();
+      if (!res) { setError("AI-сводка недоступна. Повторите запрос позже."); return; }
+      setText(res);
+    } catch { setError("AI-сводка недоступна. Повторите запрос позже."); }
+    finally { setBusy(false); }
   }
 
   return (
@@ -30,6 +35,7 @@ export function OwnerAiInsight() {
         </button>
       </div>
       {text && <p className="mt-3 rounded-lg bg-surface p-3 text-sm text-muted">{text}</p>}
+      {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
     </div>
   );
 }

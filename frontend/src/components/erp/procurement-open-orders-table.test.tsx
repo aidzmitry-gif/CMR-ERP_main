@@ -19,6 +19,17 @@ import type { OpenOrder } from "@/lib/procurement-orders";
 
 const fetchOpenOrders = api.fetchOpenOrders as ReturnType<typeof vi.fn>;
 
+it("all-orders view includes received orders and opens their existing cards", async () => {
+  const received: OpenOrder = { id: 99, number: "PO-099", supplier: "Test", status: "received", eta_date: "2020-01-01", freight_byn: 0, lines: [] };
+  fetchOpenOrders.mockResolvedValue([received]);
+  render(<ProcurementOpenOrdersTable initial={[received]} all />);
+  expect(await screen.findByText("Получен")).toBeInTheDocument();
+  expect(fetchOpenOrders).toHaveBeenCalledWith(true);
+  expect(screen.getByRole("link", { name: "PO-099" })).toHaveAttribute("href", "/erp/procurement/orders/99");
+  expect(screen.getByText("Всего заказов")).toBeInTheDocument();
+  expect(screen.queryByText(/просрочено/)).not.toBeInTheDocument();
+});
+
 // Intl.NumberFormat("ru-RU") группирует тысячи неразрывным пробелом (U+00A0); jest-dom
 // нормализует текстовые узлы под обычный пробел — сравниваем после общей нормализации.
 const norm = (s: string) => s.replace(/ /g, " ");

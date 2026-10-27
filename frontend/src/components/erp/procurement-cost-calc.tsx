@@ -259,6 +259,7 @@ export function ProcurementCostCalc() {
 
   return (
     <div className="space-y-4">
+      <p role="note" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">При открытии показан демонстрационный расчёт с примерными курсами и ставками пошлин. Он не загружает текущие цены, курсы или ставки ТН ВЭД. Перед расчётом своего заказа проверьте цену поставщика, курсы, доставку и применимую пошлину на дату закупки. Результат не проводит документы.</p>
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>

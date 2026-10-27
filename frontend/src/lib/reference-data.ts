@@ -88,11 +88,14 @@ export interface AiCatalog {
 }
 
 /** Узкий каталог только ai_exposed: чем «представляется» AI-экран (SSR). */
-export async function fetchAiCatalog(roles?: string): Promise<AiCatalog | null> {
+export async function fetchAiCatalog(
+  roles?: string,
+  authHeaders?: Record<string, string>,
+): Promise<AiCatalog | null> {
   try {
     const res = await fetch(`${BASE}/system/references/ai-catalog`, {
       cache: "no-store",
-      headers: roleHeaders(roles),
+      headers: authHeaders ?? roleHeaders(roles),
     });
     if (!res.ok) throw new Error(String(res.status));
     return (await res.json()) as AiCatalog;
@@ -120,6 +123,67 @@ export interface SkuRow {
   vat_code: string | null;
 }
 
+export interface SkuCatalogPage {
+  rows: SkuRow[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+function isSkuCatalogRow(value: unknown): value is SkuRow {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.code === "string" && typeof row.title === "string" &&
+    isNullableString(row.unit) &&
+    (row.category_id === null || isPositiveId(row.category_id)) &&
+    isNullableString(row.vat_code);
+}
+
+/** Страница активного каталога SKU; strict: HTTP и malformed-ответы остаются ошибками. */
+export async function fetchSkuCatalogPage(
+  input: { search: string; categorySubtreeId: number | null; offset: number },
+  roles?: string,
+  authHeaders?: Record<string, string>,
+): Promise<SkuCatalogPage> {
+  const limit = CATALOG_ROW_LIMIT;
+  if (Array.from(input.search).length > 512 || !Number.isSafeInteger(input.offset) ||
+    input.offset < 0 || input.offset > 2_147_483_647 ||
+    (input.categorySubtreeId !== null && !isPositiveId(input.categorySubtreeId))) {
+    throw new Error("Некорректные параметры каталога номенклатуры.");
+  }
+  const body: Record<string, unknown> = {
+    ref: "core.skus",
+    limit,
+    offset: input.offset,
+    search: input.search,
+  };
+  if (input.categorySubtreeId !== null) body.category_subtree_id = input.categorySubtreeId;
+
+  const res = await fetch(`${BASE}/system/references/query`, {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json", ...(authHeaders ?? roleHeaders(roles)) },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(String(res.status));
+  const payload: unknown = await res.json();
+  if (!payload || typeof payload !== "object") throw new Error("Некорректный ответ каталога номенклатуры.");
+  const result = payload as Record<string, unknown>;
+  if (result.ref !== "core.skus" || !Array.isArray(result.result) ||
+    !result.result.every(isSkuCatalogRow) || result.result.length > limit ||
+    !Number.isSafeInteger(result.total) || (result.total as number) < 0 ||
+    result.offset !== input.offset || result.limit !== limit) {
+    throw new Error("Некорректный ответ каталога номенклатуры.");
+  }
+  const rows = result.result;
+  const total = result.total as number;
+  const expectedRows = Math.min(limit, Math.max(total - input.offset, 0));
+  if (rows.length !== expectedRows || new Set(rows.map((row) => row.code)).size !== rows.length) {
+    throw new Error("Некорректный ответ каталога номенклатуры.");
+  }
+  return { rows, total, offset: input.offset, limit };
+}
+
 /** Товары группы по category_id (клиент, через reference.query). Не-200/ошибка → пусто. */
 export async function fetchSkusByCategory(categoryId: number, limit = 50): Promise<SkuRow[]> {
   const res = await runReferenceQuery({ ref: "core.skus", category_id: categoryId, limit });
@@ -129,17 +193,25 @@ export async function fetchSkusByCategory(categoryId: number, limit = 50): Promi
 /** Все товары номенклатуры (SSR) — каталог SKU (REF-showcase). Сервер отдаёт активные,
  * до `_QUERY_LIMIT_MAX` (see core/runtime/system_routes.py) за один запрос — не пагинация,
  * а защита от DoS большим limit; каталогу проекта (232 позиции) хватает одним запросом. */
-export async function fetchAllSkus(roles?: string, limit = CATALOG_ROW_LIMIT): Promise<SkuRow[]> {
+export async function fetchAllSkus(
+  roles?: string,
+  limit = CATALOG_ROW_LIMIT,
+  strict = false,
+  authHeaders?: Record<string, string>,
+): Promise<SkuRow[]> {
   try {
     const res = await fetch(`${BASE}/system/references/query`, {
       method: "POST",
       cache: "no-store",
-      headers: { "Content-Type": "application/json", ...roleHeaders(roles) },
+      headers: { "Content-Type": "application/json", ...(authHeaders ?? roleHeaders(roles)) },
       body: JSON.stringify({ ref: "core.skus", limit }),
     });
     if (!res.ok) throw new Error(String(res.status));
-    return rowsFromResult(await res.json()) as unknown as SkuRow[];
-  } catch {
+    const payload = await res.json();
+    if (strict && !Array.isArray(payload?.result)) throw new Error("Некорректный ответ каталога номенклатуры.");
+    return rowsFromResult(payload) as unknown as SkuRow[];
+  } catch (error) {
+    if (strict) throw error;
     return [];
   }
 }
@@ -156,6 +228,8 @@ export interface ReferenceQueryResult {
 export interface CounterpartyRow {
   id: number;
   name: string;
+  legal_name?: string | null;
+  branches?: { id: number; name: string }[];
   unp: string | null;
 }
 
@@ -175,6 +249,9 @@ function isCounterpartyRow(value: unknown): value is CounterpartyRow {
   return (
     typeof row.id === "number" && Number.isSafeInteger(row.id) && row.id > 0 &&
     typeof row.name === "string" &&
+    (row.legal_name === undefined || isNullableString(row.legal_name)) &&
+    (row.branches === undefined || (Array.isArray(row.branches) && row.branches.every((b) =>
+      b && isPositiveId(b.id) && typeof b.name === "string"))) &&
     (typeof row.unp === "string" || row.unp === null)
   );
 }
@@ -252,11 +329,14 @@ export interface ApprovalRow {
 }
 
 /** Ожидающие согласования правки справочников (SSR): pending + kind=reference.change. */
-export async function fetchPendingReferenceApprovals(roles?: string): Promise<ApprovalRow[]> {
+export async function fetchPendingReferenceApprovals(
+  roles?: string,
+  authHeaders?: Record<string, string>,
+): Promise<ApprovalRow[]> {
   try {
     const res = await fetch(`${BASE}/approvals?status=pending`, {
       cache: "no-store",
-      headers: roleHeaders(roles),
+      headers: authHeaders ?? roleHeaders(roles),
     });
     if (!res.ok) throw new Error(String(res.status));
     const all = (await res.json()) as ApprovalRow[];
@@ -393,11 +473,14 @@ export interface QualityDetail {
 }
 
 /** Сводка качества по всем справочникам (SSR). Не-200 → пусто. */
-export async function fetchQualitySummary(roles?: string): Promise<QualitySummaryRow[]> {
+export async function fetchQualitySummary(
+  roles?: string,
+  authHeaders?: Record<string, string>,
+): Promise<QualitySummaryRow[]> {
   try {
     const res = await fetch(`${BASE}/system/references/quality`, {
       cache: "no-store",
-      headers: roleHeaders(roles),
+      headers: authHeaders ?? roleHeaders(roles),
     });
     if (!res.ok) throw new Error(String(res.status));
     return ((await res.json()) as { references: QualitySummaryRow[] }).references;
@@ -575,12 +658,13 @@ export interface VatRateRow {
 export async function fetchCurrencyRates(
   key?: string,
   roles?: string,
+  authHeaders?: Record<string, string>,
 ): Promise<CurrencyRateRow[]> {
   try {
     const q = key ? `?key=${encodeURIComponent(key)}` : "";
     const res = await fetch(`${BASE}/system/refs/currency-rates${q}`, {
       cache: "no-store",
-      headers: roleHeaders(roles),
+      headers: authHeaders ?? roleHeaders(roles),
     });
     if (!res.ok) throw new Error(String(res.status));
     return (await res.json()) as CurrencyRateRow[];
@@ -590,16 +674,38 @@ export async function fetchCurrencyRates(
 }
 
 /** Все версии ставок НДС (SSR); `key` — фильтр по коду. */
-export async function fetchVatRates(key?: string, roles?: string): Promise<VatRateRow[]> {
+export async function fetchVatRates(
+  key?: string,
+  roles?: string,
+  authHeaders?: Record<string, string>,
+  strict = false,
+): Promise<VatRateRow[]> {
   try {
     const q = key ? `?key=${encodeURIComponent(key)}` : "";
     const res = await fetch(`${BASE}/system/refs/vat-rates${q}`, {
       cache: "no-store",
-      headers: roleHeaders(roles),
+      headers: authHeaders ?? roleHeaders(roles),
     });
     if (!res.ok) throw new Error(String(res.status));
-    return (await res.json()) as VatRateRow[];
-  } catch {
+    const rows: unknown = await res.json();
+    if (!strict) return rows as VatRateRow[];
+    if (!Array.isArray(rows)) throw new Error("Некорректный ответ ставок НДС.");
+    return rows.map((value) => {
+      if (!value || typeof value !== "object") throw new Error("Некорректный ответ ставок НДС.");
+      const row = value as Record<string, unknown>;
+      const rateText = typeof row.rate === "string" && row.rate.trim() === row.rate &&
+        /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(row.rate)
+        ? row.rate
+        : null;
+      const rate = typeof row.rate === "number" ? row.rate : rateText === null ? Number.NaN : Number(rateText);
+      if (!isPositiveId(row.id) || typeof row.code !== "string" || typeof row.title !== "string" ||
+        !Number.isFinite(rate) || typeof row.start_date !== "string" || !isNullableString(row.end_date)) {
+        throw new Error("Некорректный ответ ставок НДС.");
+      }
+      return { ...row, rate } as VatRateRow;
+    });
+  } catch (error) {
+    if (strict) throw error;
     return [];
   }
 }
@@ -652,11 +758,14 @@ export interface DuplicateCluster {
 }
 
 /** Кластеры дублей контрагентов (SSR) — экран дедупликации/MDM. */
-export async function fetchDuplicateClusters(roles?: string): Promise<DuplicateCluster[]> {
+export async function fetchDuplicateClusters(
+  roles?: string,
+  authHeaders?: Record<string, string>,
+): Promise<DuplicateCluster[]> {
   try {
     const res = await fetch(`${BASE}/system/mdm/duplicates`, {
       cache: "no-store",
-      headers: roleHeaders(roles),
+      headers: authHeaders ?? roleHeaders(roles),
     });
     if (!res.ok) throw new Error(String(res.status));
     return ((await res.json()) as { clusters: DuplicateCluster[] }).clusters;
@@ -744,6 +853,9 @@ export interface TouchSummary {
 export interface CounterpartyCard {
   id: number;
   name: string;
+  display_name?: string | null;
+  legal_name?: string | null;
+  branches?: CounterpartyBranch[];
   unp: string | null;
   is_active: boolean;
   merged_into_id: number | null;
@@ -767,10 +879,49 @@ export interface CounterpartyRequisites {
   bank_bic?: string | null;
 }
 
+export interface CounterpartyBranch {
+  id: number;
+  legal_entity_id: number;
+  name: string;
+  address: string | null;
+  tax_mode: "unknown" | "shared" | "independent";
+  portal_branch_code: string | null;
+  is_active: boolean;
+  revision: number;
+  contacts?: CounterpartyCard["contacts"];
+}
+
+export interface CounterpartyBranchWrite {
+  expected_legal_entity_revision: number;
+  expected_revision?: number;
+  manual: Pick<CounterpartyBranch, "name" | "address" | "tax_mode" | "portal_branch_code" | "is_active">;
+  contacts?: CounterpartyWriteInput["contacts"];
+}
+
+function isCounterpartyBranch(value: unknown, parentId: number): value is CounterpartyBranch {
+  if (!value || typeof value !== "object") return false;
+  const b = value as Record<string, unknown>;
+  return isPositiveId(b.id) && b.legal_entity_id === parentId && isPositiveId(b.revision) &&
+    typeof b.name === "string" && isNullableString(b.address) && typeof b.is_active === "boolean" &&
+    (b.contacts === undefined || (Array.isArray(b.contacts) && b.contacts.every((c) => c && isPositiveId(c.id) && typeof c.full_name === "string" && isNullableString(c.phone) && isNullableString(c.email) && typeof c.is_primary === "boolean"))) &&
+    ["unknown", "shared", "independent"].includes(String(b.tax_mode)) &&
+    (b.portal_branch_code === null || (typeof b.portal_branch_code === "string" && /^[0-9]{4}$/.test(b.portal_branch_code)));
+}
+
+export function saveCounterpartyBranch(parentId: number, branchId: number | null, input: CounterpartyBranchWrite): Promise<CounterpartySaveResult> {
+  if (!isPositiveId(parentId) || !isPositiveId(input.expected_legal_entity_revision) ||
+    (branchId !== null && (!isPositiveId(branchId) || !isPositiveId(input.expected_revision))) ||
+    (branchId === null && input.expected_revision !== undefined)) {
+    return Promise.resolve({ status: "validation-error", message: "Нужны корректные ID и версии головного предприятия и филиала" });
+  }
+  return writeCounterparty(`/api/system/mdm/counterparty/${parentId}/branches${branchId === null ? "" : `/${branchId}`}`,
+    branchId === null ? "POST" : "PATCH", input);
+}
+
 export type CounterpartyRegistryField = "name" | "unp" | "legal_address" | "registry_status";
 export interface CounterpartyWriteInput {
   expected_revision?: number;
-  manual?: CounterpartyRequisites & { name?: string; unp?: string | null };
+  manual?: CounterpartyRequisites & { name?: string; display_name?: string; legal_name?: string; unp?: string | null };
   contacts?: { id?: number; full_name?: string; phone?: string | null; email?: string | null; is_primary?: boolean }[];
   registry?: { unp: string; fields: CounterpartyRegistryField[]; preview: Partial<Record<CounterpartyRegistryField, string>> };
 }
@@ -780,7 +931,7 @@ export type CounterpartySaveResult =
   | { status: "conflict"; code: string; message: string; ids?: number[] }
   | { status: "unauthorized" | "forbidden" | "not-found" | "validation-error" | "service-error"; code?: string; message: string };
 
-async function writeCounterparty(path: string, method: "POST" | "PATCH", input: CounterpartyWriteInput): Promise<CounterpartySaveResult> {
+async function writeCounterparty(path: string, method: "POST" | "PATCH", input: CounterpartyWriteInput | CounterpartyBranchWrite): Promise<CounterpartySaveResult> {
   try {
     const response = await fetch(path, {
       method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(input), cache: "no-store",
@@ -842,6 +993,9 @@ function isCounterpartyCardPayload(value: unknown, requestedId: number): value i
     card.id !== requestedId ||
     !isPositiveId(card.id) ||
     typeof card.name !== "string" ||
+    (card.display_name !== undefined && !isNullableString(card.display_name)) ||
+    (card.legal_name !== undefined && !isNullableString(card.legal_name)) ||
+    (card.branches !== undefined && (!Array.isArray(card.branches) || !card.branches.every((b) => isCounterpartyBranch(b, requestedId)))) ||
     !isNullableString(card.unp) ||
     typeof card.is_active !== "boolean" ||
     !(card.merged_into_id === null || isPositiveId(card.merged_into_id)) ||
@@ -998,11 +1152,14 @@ export interface SyncJournalEntry {
 }
 
 /** Журнал исходящей выгрузки ERP → 1С (SSR). Под правом integrations.sync. */
-export async function fetchSyncJournal(roles?: string): Promise<SyncJournalEntry[]> {
+export async function fetchSyncJournal(
+  roles?: string,
+  authHeaders?: Record<string, string>,
+): Promise<SyncJournalEntry[]> {
   try {
     const res = await fetch(`${BASE}/integrations/1c/sync-journal`, {
       cache: "no-store",
-      headers: roleHeaders(roles),
+      headers: authHeaders ?? roleHeaders(roles),
     });
     if (!res.ok) throw new Error(String(res.status));
     return ((await res.json()) as { entries: SyncJournalEntry[] }).entries;
@@ -1135,11 +1292,15 @@ export interface SkuCard {
 }
 
 /** Карточка одной номенклатуры по коду (SSR). `null` — нет записи/нет доступа. */
-export async function fetchSkuCard(code: string, roles?: string): Promise<SkuCard | null> {
+export async function fetchSkuCard(
+  code: string,
+  roles?: string,
+  authHeaders?: Record<string, string>,
+): Promise<SkuCard | null> {
   try {
     const res = await fetch(`${BASE}/system/sku/${encodeURIComponent(code)}`, {
       cache: "no-store",
-      headers: roleHeaders(roles),
+      headers: authHeaders ?? roleHeaders(roles),
     });
     if (!res.ok) throw new Error(String(res.status));
     return (await res.json()) as SkuCard;
@@ -1231,12 +1392,13 @@ export interface SurvivorshipRule {
 export async function fetchSurvivorshipRules(
   entityType?: string,
   roles?: string,
+  authHeaders?: Record<string, string>,
 ): Promise<SurvivorshipRule[]> {
   try {
     const q = entityType ? `?entity_type=${encodeURIComponent(entityType)}` : "";
     const res = await fetch(`${BASE}/system/mdm/rules${q}`, {
       cache: "no-store",
-      headers: roleHeaders(roles),
+      headers: authHeaders ?? roleHeaders(roles),
     });
     if (!res.ok) throw new Error(String(res.status));
     return ((await res.json()) as { rules: SurvivorshipRule[] }).rules;
@@ -1272,17 +1434,26 @@ export interface CategoryTreeNode extends NomenclatureGroup {
 
 /** Плоский список групп (SSR); `archived` — включая архивные. Дерево строит {@link buildCategoryTree}. */
 export async function fetchNomenclatureGroups(
-  opts: { archived?: boolean; roles?: string } = {},
+  opts: { archived?: boolean; roles?: string; strict?: boolean } = {},
+  authHeaders?: Record<string, string>,
 ): Promise<NomenclatureGroup[]> {
   try {
     const q = opts.archived ? "?archived=true" : "";
     const res = await fetch(`${BASE}/system/refs/nomenclature-groups${q}`, {
       cache: "no-store",
-      headers: roleHeaders(opts.roles),
+      headers: authHeaders ?? roleHeaders(opts.roles),
     });
     if (!res.ok) throw new Error(String(res.status));
-    return (await res.json()) as NomenclatureGroup[];
-  } catch {
+    const rows: unknown = await res.json();
+    if (opts.strict && (!Array.isArray(rows) || !rows.every((value) => {
+      if (!value || typeof value !== "object") return false;
+      const row = value as Record<string, unknown>;
+      return isPositiveId(row.id) && typeof row.code === "string" && typeof row.name === "string" &&
+        (row.parent_id === null || isPositiveId(row.parent_id)) && typeof row.is_active === "boolean";
+    }))) throw new Error("Некорректный ответ групп номенклатуры.");
+    return rows as NomenclatureGroup[];
+  } catch (error) {
+    if (opts.strict) throw error;
     return [];
   }
 }

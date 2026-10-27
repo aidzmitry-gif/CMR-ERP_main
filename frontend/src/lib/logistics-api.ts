@@ -1,16 +1,41 @@
 // Клиентский API-слой логистики: тонкие типизированные обёртки над `/api/logistics/*`
-// (прокси добавляет роль и переадресует на backend). Все фетчи graceful: при недоступном
-// или пустом backend возвращают безопасный fallback ([] / null), чтобы UI не падал.
+// (прокси добавляет роль и переадресует на backend). Доставка и тарифы различают
+// отказ чтения и успешный пустой ответ; остальные потребители сохраняют fallback.
 // Деньги в ответах — BYN (форматируются в компонентах через `formatByn`).
 
 import type { Bid as DomainBid, ScoreMetrics } from "@/lib/logistics-domain";
 import type { FunnelStage } from "@/lib/types";
 
+export class LogisticsReadError extends Error {
+  constructor(readonly status: number, detail?: string) {
+    super(status === 401 ? "Сессия истекла. Войдите в ERP снова."
+      : status === 403 ? "Недостаточно прав для просмотра этих данных логистики."
+      : status === 409 && detail === "organization_scope_incomplete"
+        ? "Сводка недоступна: привязка данных логистики к организации ещё не завершена."
+        : "Не удалось загрузить данные логистики. Повторите загрузку позже.");
+    this.name = "LogisticsReadError";
+  }
+}
+
+export function logisticsReadMessage(error: unknown): string {
+  return error instanceof LogisticsReadError ? error.message
+    : "Не удалось загрузить данные логистики. Проверьте подключение и повторите загрузку.";
+}
+
+async function getRequiredJson<T>(path: string): Promise<T> {
+  const res = await fetch(`/api${path}`, { cache: "no-store" });
+  if (!res.ok) {
+    const body: unknown = await res.json().catch(() => null);
+    const detail = body && typeof body === "object" && "detail" in body && typeof body.detail === "string"
+      ? body.detail : undefined;
+    throw new LogisticsReadError(res.status, detail);
+  }
+  return (await res.json()) as T;
+}
+
 async function getJson<T>(path: string, fallback: T): Promise<T> {
   try {
-    const res = await fetch(`/api${path}`, { cache: "no-store" });
-    if (!res.ok) return fallback;
-    return (await res.json()) as T;
+    return await getRequiredJson<T>(path);
   } catch {
     return fallback;
   }
@@ -91,9 +116,9 @@ export interface Costs {
   by_carrier: CostByCarrier[];
 }
 
-export const fetchShipments = () => getJson<Shipment[]>("/logistics/shipments", []);
-export const fetchDashboard = () => getJson<Dashboard | null>("/logistics/dashboard", null);
-export const fetchCosts = () => getJson<Costs | null>("/logistics/costs", null);
+export const fetchShipments = () => getRequiredJson<Shipment[]>("/logistics/shipments");
+export const fetchDashboard = () => getRequiredJson<Dashboard | null>("/logistics/dashboard");
+export const fetchCosts = () => getRequiredJson<Costs | null>("/logistics/costs");
 
 /** Сменить главный статус доставки (planned/assigned/in_transit/delivered). */
 export const patchShipmentStatus = (id: number, status: string) =>
@@ -174,10 +199,10 @@ export interface CarrierTariff {
   effective_from?: string;
 }
 
-export const fetchZones = () => getJson<Zone[]>("/logistics/zones", []);
+export const fetchZones = () => getRequiredJson<Zone[]>("/logistics/zones");
 export const seedZones = () => postJson<Zone[]>("/logistics/zones/seed", undefined, []);
 export const fetchTariffs = (zone: string) =>
-  getJson<CarrierTariff[]>(`/logistics/carrier-tariffs?zone=${encodeURIComponent(zone)}`, []);
+  getRequiredJson<CarrierTariff[]>(`/logistics/carrier-tariffs?zone=${encodeURIComponent(zone)}`);
 export const seedTariffs = () =>
   postJson<CarrierTariff[]>("/logistics/carrier-tariffs/seed", undefined, []);
 

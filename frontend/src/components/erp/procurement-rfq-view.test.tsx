@@ -1,201 +1,139 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// API домена RFQ — мок только сетевых функций; statusLabel/bestBidId/типы оставляем
-// настоящими (чистая логика без I/O — пусть считает по-настоящему).
 vi.mock("@/lib/procurement-rfq", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/procurement-rfq")>(
-    "@/lib/procurement-rfq",
-  );
-  return {
-    ...actual,
-    fetchRfqs: vi.fn(),
-    createRfq: vi.fn(),
-    addBid: vi.fn(),
-    awardRfq: vi.fn(),
-  };
+  const actual = await vi.importActual<typeof import("@/lib/procurement-rfq")>("@/lib/procurement-rfq");
+  return { ...actual, fetchRfqs: vi.fn(), createRfq: vi.fn(), addBid: vi.fn(), awardRfq: vi.fn() };
 });
 
 import { ProcurementRfqView } from "@/components/erp/procurement-rfq-view";
-import * as pr from "@/lib/procurement-rfq";
+import * as api from "@/lib/procurement-rfq";
 import type { Rfq } from "@/lib/procurement-rfq";
 
-const rfqOpen: Rfq = {
-  id: 1,
-  item: "Сталь листовая",
-  sku_code: "СТ-3",
-  qty: 100,
-  request_id: null,
-  status: "open",
-  due_date: null,
-  best_bid_id: 20,
-  bids: [
-    { id: 10, rfq_id: 1, supplier_id: 5, price_byn: 250, lead_time_days: 30, incoterms: "FOB", note: "", is_winner: false },
-    { id: 20, rfq_id: 1, supplier_id: 7, price_byn: 180, lead_time_days: 45, incoterms: "CIF", note: "", is_winner: false },
-  ],
-};
-
-const rfqAwarded: Rfq = {
-  id: 2,
-  item: "Провод медный",
-  sku_code: "",
-  qty: 50,
-  request_id: null,
-  status: "awarded",
-  due_date: null,
-  best_bid_id: 30,
-  bids: [
-    { id: 30, rfq_id: 2, supplier_id: 9, price_byn: 500, lead_time_days: 20, incoterms: "DAP", note: "", is_winner: true },
-  ],
-};
-
-const newRfq: Rfq = {
-  id: 3,
-  item: "Кабель ВВГ",
-  sku_code: "",
-  qty: 0,
-  request_id: null,
-  status: "open",
-  due_date: null,
-  best_bid_id: null,
-  bids: [],
-};
-
-const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
+const rfq: Rfq = { id: 3, number: "RFQ-000003", organization_id: 1, request_key: "key", request_id: 9,
+  item: "Сталь листовая", sku_code: "", qty: 10, status: "open", due_date: null,
+  best_bid_id: 20, bids: [{ id: 20, rfq_id: 3, supplier_id: 7, price_byn: 180,
+    lead_time_days: 5, incoterms: "", note: "", is_winner: false }] };
+const page = { organization_id: 1, items: [rfq], next_after_id: null };
+const mocked = (value: unknown) => value as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // по умолчанию поллинг на маунте возвращает null → SSR-данные не затираются.
-  mock(pr.fetchRfqs).mockResolvedValue(null);
+  sessionStorage.clear();
+  vi.stubGlobal("fetch", vi.fn((url: string) => {
+    if (url.endsWith("/receipt-organizations")) return Promise.resolve({ ok: true,
+      json: async () => [{ id: 1, name: "ООО А", unp: "111" }, { id: 2, name: "ООО Б", unp: "222" }] });
+    if (url.includes("owned-sources")) return Promise.resolve({ ok: true,
+      json: async () => ({ organization_id: Number(url.split("/")[4]), items: [{ id: 9, number: "ЗАК-9", item: "Сталь листовая" }] }) });
+    if (url.endsWith("supplier-options")) return Promise.resolve({ ok: true,
+      json: async () => ({ organization_id: Number(url.split("/")[4]), items: [{ id: 7, name: "Поставщик 7", unp: "777" }] }) });
+    if (url.endsWith("/rfq/3/history")) return Promise.resolve({ ok: true,
+      json: async () => ({ organization_id: Number(url.split("/")[4]), rfq_id: 3,
+        items: [{ id: 1, action: "create", actor: "tester", created_at: "2026-09-24T10:00:00Z",
+          before: null, after: { request_id: 9, item: "Сталь листовая", quantity: "10" } }] }) });
+    throw new Error(url);
+  }));
+  mocked(api.fetchRfqs).mockImplementation(async (org: number) => org === 1 ? page : { organization_id: 2, items: [], next_after_id: null });
 });
 
+async function chooseOrg() {
+  render(<ProcurementRfqView />);
+  await screen.findByRole("option", { name: "ООО А · 111" });
+  fireEvent.change(screen.getByLabelText("Юрлицо RFQ"), { target: { value: "1" } });
+  await screen.findByRole("button", { name: /RFQ-000003.*Сталь листовая.*1 пред/ });
+}
+
 describe("ProcurementRfqView", () => {
-  it("рендерит список запросов, счётчики предложений и по умолчанию открывает первый", () => {
-    render(<ProcurementRfqView initial={[rfqOpen, rfqAwarded]} />);
-    // оба запроса в списке слева
-    expect(screen.getAllByText("Сталь листовая").length).toBeGreaterThan(0);
-    expect(screen.getByText("Провод медный")).toBeInTheDocument();
-    // счётчики предложений на карточках списка
-    expect(screen.getByText("2 пред.")).toBeInTheDocument();
-    expect(screen.getByText("1 пред.")).toBeInTheDocument();
-    // первый выбран по умолчанию → его статус-бейдж в правой карточке
-    expect(screen.getByText("Открыт")).toBeInTheDocument();
+  it("does not expose RFQs before choosing a company and clears them on company switch", async () => {
+    render(<ProcurementRfqView />);
+    expect(screen.getByText("Выберите юрлицо, чтобы открыть его запросы цен.")).toBeInTheDocument();
+    expect(api.fetchRfqs).not.toHaveBeenCalled();
+    await screen.findByRole("option", { name: "ООО А · 111" });
+    fireEvent.change(screen.getByLabelText("Юрлицо RFQ"), { target: { value: "1" } });
+    expect(await screen.findByText("Поставщик 7")).toBeInTheDocument();
+    expect(await screen.findByText("Создан запрос")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Юрлицо RFQ"), { target: { value: "2" } });
+    expect(screen.queryByText("Поставщик 7")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Запросов нет")).toBeInTheDocument());
   });
 
-  it("пустой список показывает «Запросов нет» и подсказку выбрать запрос", () => {
-    render(<ProcurementRfqView initial={[]} />);
-    expect(screen.getByText("Запросов нет")).toBeInTheDocument();
-    expect(screen.getByText("Выберите запрос слева")).toBeInTheDocument();
+  it("creates RFQ from an owned request with a repeatable key", async () => {
+    mocked(api.createRfq).mockResolvedValue(rfq);
+    await chooseOrg();
+    fireEvent.change(screen.getByLabelText("Заявка на закупку"), { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: "Создать RFQ" }));
+    await waitFor(() => expect(api.createRfq).toHaveBeenCalledWith(1, {
+      request_key: expect.any(String), request_id: 9,
+    }));
+    expect(screen.getByLabelText("Заявка на закупку")).toHaveValue("");
   });
 
-  it("клик по другому запросу в списке открывает его карточку", async () => {
-    render(<ProcurementRfqView initial={[rfqOpen, rfqAwarded]} />);
-    // до клика открыт первый (open) — метки завершённого тендера ещё нет
-    expect(screen.queryByText("Победитель выбран")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /Провод медный/ }));
-
-    expect(await screen.findByText("Победитель выбран")).toBeInTheDocument();
+  it("keeps the same create key and company after an unknown response", async () => {
+    mocked(api.createRfq).mockResolvedValueOnce(null).mockResolvedValueOnce(rfq);
+    await chooseOrg();
+    fireEvent.change(screen.getByLabelText("Заявка на закупку"), { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: "Создать RFQ" }));
+    expect(await screen.findByText(/Исход создания не подтверждён/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Юрлицо RFQ")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Создать RFQ" }));
+    await waitFor(() => expect(api.createRfq).toHaveBeenCalledTimes(2));
+    expect(mocked(api.createRfq).mock.calls[1]).toEqual(mocked(api.createRfq).mock.calls[0]);
   });
 
-  it("лучшее предложение подсвечено «лучшая», цена и поставщик видны", () => {
-    render(<ProcurementRfqView initial={[rfqOpen]} />);
-    // best_bid_id=20 (цена 180) → метка «лучшая»
-    expect(screen.getByText("лучшая")).toBeInTheDocument();
-    expect(screen.getByText("180")).toBeInTheDocument();
-    expect(screen.getByText("#7")).toBeInTheDocument();
-    expect(screen.getByText("#5")).toBeInTheDocument();
+  it("restores the pending RFQ after remount without generating a new key", async () => {
+    mocked(api.createRfq).mockResolvedValueOnce(null).mockResolvedValueOnce(rfq);
+    const view = render(<ProcurementRfqView />);
+    await screen.findByRole("option", { name: "ООО А · 111" });
+    fireEvent.change(screen.getByLabelText("Юрлицо RFQ"), { target: { value: "1" } });
+    await screen.findByRole("option", { name: "ЗАК-9 · Сталь листовая" });
+    fireEvent.change(screen.getByLabelText("Заявка на закупку"), { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: "Создать RFQ" }));
+    expect(await screen.findByText(/Исход создания не подтверждён/)).toBeInTheDocument();
+    expect(sessionStorage.getItem("procurement-rfq:pending:v1")).toContain('"requestId":9');
+    view.unmount();
+    render(<ProcurementRfqView />);
+    await waitFor(() => expect(screen.getByLabelText("Юрлицо RFQ")).toHaveValue("1"));
+    expect(screen.getByLabelText("Юрлицо RFQ")).toBeDisabled();
+    await screen.findByRole("option", { name: "ЗАК-9 · Сталь листовая" });
+    fireEvent.click(screen.getByRole("button", { name: "Создать RFQ" }));
+    await waitFor(() => expect(api.createRfq).toHaveBeenCalledTimes(2));
+    expect(mocked(api.createRfq).mock.calls[1]).toEqual(mocked(api.createRfq).mock.calls[0]);
+    expect(sessionStorage.getItem("procurement-rfq:pending:v1")).toBeNull();
   });
 
-  it("победитель отмечен «победитель», а форма и «Выбрать» скрыты у завершённого тендера", () => {
-    render(<ProcurementRfqView initial={[rfqAwarded]} />);
-    expect(screen.getByText("победитель")).toBeInTheDocument();
-    // тендер разыгран (status !== open) → нет ни кнопки выбора, ни формы предложения
-    expect(screen.queryByRole("button", { name: /Выбрать/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Предложение/ })).not.toBeInTheDocument();
-    expect(screen.queryByPlaceholderText("Цена, BYN")).not.toBeInTheDocument();
-  });
-
-  it("создание с пустым полем даёт ошибку и не зовёт API", () => {
-    render(<ProcurementRfqView initial={[rfqOpen]} />);
-    const createRow = screen.getByPlaceholderText("Новый запрос: позиция").closest("div") as HTMLElement;
-    fireEvent.click(within(createRow).getByRole("button"));
-
-    expect(screen.getByText("Укажите позицию запроса")).toBeInTheDocument();
-    expect(pr.createRfq).not.toHaveBeenCalled();
-  });
-
-  it("создание запроса зовёт createRfq и показывает новую карточку после обновления", async () => {
-    mock(pr.fetchRfqs).mockResolvedValueOnce(null); // маунт: не трогаем SSR-данные
-    mock(pr.createRfq).mockResolvedValue(newRfq);
-    mock(pr.fetchRfqs).mockResolvedValueOnce([rfqOpen, newRfq]); // refresh после создания
-
-    render(<ProcurementRfqView initial={[rfqOpen]} />);
-    const input = screen.getByPlaceholderText("Новый запрос: позиция");
-    fireEvent.change(input, { target: { value: "Кабель ВВГ" } });
-    const createRow = input.closest("div") as HTMLElement;
-    fireEvent.click(within(createRow).getByRole("button"));
-
-    await waitFor(() => expect(pr.createRfq).toHaveBeenCalledWith({ item: "Кабель ВВГ" }));
-    // список пополнился созданным запросом, поле ввода очищено
-    expect((await screen.findAllByText("Кабель ВВГ")).length).toBeGreaterThan(0);
-    expect((input as HTMLInputElement).value).toBe("");
-  });
-
-  it("сбой создания показывает ошибку, а не молчит", async () => {
-    mock(pr.createRfq).mockResolvedValue(null); // сетевая ошибка / отказ бэка
-    render(<ProcurementRfqView initial={[rfqOpen]} />);
-    const input = screen.getByPlaceholderText("Новый запрос: позиция");
-    fireEvent.change(input, { target: { value: "Кабель ВВГ" } });
-    fireEvent.click(within(input.closest("div") as HTMLElement).getByRole("button"));
-
-    expect(await screen.findByText("Не удалось создать запрос")).toBeInTheDocument();
-  });
-
-  it("добавление предложения без цены даёт ошибку и не зовёт addBid", () => {
-    render(<ProcurementRfqView initial={[rfqOpen]} />);
+  it("uses catalog supplier ID and exact price, then awards within the same company", async () => {
+    mocked(api.addBid).mockResolvedValue(rfq);
+    mocked(api.awardRfq).mockResolvedValue({ ...rfq, status: "awarded" });
+    await chooseOrg();
+    fireEvent.change(screen.getByLabelText("Поставщик предложения"), { target: { value: "7" } });
+    fireEvent.change(screen.getByPlaceholderText("Цена, BYN"), { target: { value: "100.50" } });
     fireEvent.click(screen.getByRole("button", { name: /Предложение/ }));
-
-    expect(screen.getByText("Укажите цену предложения")).toBeInTheDocument();
-    expect(pr.addBid).not.toHaveBeenCalled();
+    await waitFor(() => expect(api.addBid).toHaveBeenCalledWith(1, 3, expect.objectContaining({
+      supplier_id: 7, price_byn: "100.50", bid_key: expect.any(String),
+    })));
+    fireEvent.click(screen.getByRole("button", { name: "Выбрать" }));
+    await waitFor(() => expect(api.awardRfq).toHaveBeenCalledWith(1, 3, 20));
   });
 
-  it("добавление предложения парсит числа и зовёт addBid ожидаемыми полями", async () => {
-    mock(pr.addBid).mockResolvedValue(rfqOpen);
-    render(<ProcurementRfqView initial={[rfqOpen]} />);
-
-    fireEvent.change(screen.getByPlaceholderText("ID поставщика"), { target: { value: "9" } });
-    fireEvent.change(screen.getByPlaceholderText("Цена, BYN"), { target: { value: "199" } });
-    fireEvent.change(screen.getByPlaceholderText("Срок, дн"), { target: { value: "12" } });
-    fireEvent.change(screen.getByPlaceholderText("Incoterms"), { target: { value: "DAP" } });
+  it("restores a pending supplier bid with the same key after remount", async () => {
+    mocked(api.addBid).mockResolvedValueOnce(null).mockResolvedValueOnce(rfq);
+    const view = render(<ProcurementRfqView />);
+    await screen.findByRole("option", { name: "ООО А · 111" });
+    fireEvent.change(screen.getByLabelText("Юрлицо RFQ"), { target: { value: "1" } });
+    await screen.findByLabelText("Поставщик предложения");
+    fireEvent.change(screen.getByLabelText("Поставщик предложения"), { target: { value: "7" } });
+    fireEvent.change(screen.getByPlaceholderText("Цена, BYN"), { target: { value: "100.50" } });
     fireEvent.click(screen.getByRole("button", { name: /Предложение/ }));
-
-    await waitFor(() =>
-      expect(pr.addBid).toHaveBeenCalledWith(1, {
-        supplier_id: 9,
-        price_byn: 199,
-        lead_time_days: 12,
-        incoterms: "DAP",
-      }),
-    );
-  });
-
-  it("«Выбрать» зовёт awardRfq с id соответствующего предложения", async () => {
-    mock(pr.awardRfq).mockResolvedValue({ ...rfqOpen, status: "awarded" });
-    render(<ProcurementRfqView initial={[rfqOpen]} />);
-
-    const awardButtons = screen.getAllByRole("button", { name: /Выбрать/ });
-    expect(awardButtons).toHaveLength(2); // по одной на предложение открытого тендера
-    fireEvent.click(awardButtons[0]); // первая строка = предложение id=10
-
-    await waitFor(() => expect(pr.awardRfq).toHaveBeenCalledWith(1, 10));
-  });
-
-  it("поллинг на маунте подтягивает свежий список поверх SSR-данных", async () => {
-    mock(pr.fetchRfqs).mockResolvedValueOnce([rfqOpen, rfqAwarded]);
-    render(<ProcurementRfqView initial={[rfqOpen]} />);
-
-    // второй запрос пришёл только из fetchRfqs (в initial его не было)
-    expect(await screen.findByText("Провод медный")).toBeInTheDocument();
+    expect(await screen.findByText(/Исход предложения не подтверждён/)).toBeInTheDocument();
+    view.unmount();
+    render(<ProcurementRfqView />);
+    await waitFor(() => expect(screen.getByLabelText("Юрлицо RFQ")).toHaveValue("1"));
+    expect(screen.getByLabelText("Юрлицо RFQ")).toBeDisabled();
+    await screen.findByLabelText("Поставщик предложения");
+    expect(screen.getByLabelText("Поставщик предложения")).toHaveValue("7");
+    fireEvent.click(screen.getByRole("button", { name: /Предложение/ }));
+    await waitFor(() => expect(api.addBid).toHaveBeenCalledTimes(2));
+    expect(mocked(api.addBid).mock.calls[1]).toEqual(mocked(api.addBid).mock.calls[0]);
+    expect(sessionStorage.getItem("procurement-rfq:pending:v1")).toBeNull();
   });
 });

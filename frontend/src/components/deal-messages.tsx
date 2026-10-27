@@ -1,7 +1,7 @@
 "use client";
 
-import { Mail, MessageCircle, Phone, Send, Sparkles } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Mail, MessageCircle, Phone, Save, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FaTelegramPlane, FaViber, FaWhatsapp } from "react-icons/fa";
 import { aiDraftReply, type DealMsg, fetchMessages, sendMessage } from "@/lib/api";
 
@@ -23,36 +23,78 @@ function fmtTime(iso: string): string {
 }
 
 export function DealMessages({ dealId }: { dealId: string }) {
+  return <DealMessagesBody key={dealId} dealId={dealId} />;
+}
+
+function DealMessagesBody({ dealId }: { dealId: string }) {
   const [items, setItems] = useState<DealMsg[]>([]);
   const [text, setText] = useState("");
   const [channel, setChannel] = useState("whatsapp");
   const [busy, setBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiNote, setAiNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const saving = useRef(false);
+  const requestKey = useRef<string | null>(null);
+  const mounted = useRef(false);
+  const generation = useRef(0);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadMessages = useCallback(() => {
+    const version = ++generation.current;
+    return fetchMessages(dealId).then((rows) => {
+      if (mounted.current && version === generation.current) setItems(rows);
+    }).catch(() => {
+      if (mounted.current && version === generation.current) setLoadError("Не удалось загрузить историю. Повторите попытку.");
+    }).finally(() => {
+      if (mounted.current && version === generation.current) setLoading(false);
+    });
+  }, [dealId]);
 
   async function refresh() {
-    setItems(await fetchMessages(dealId));
+    setLoading(true);
+    setLoadError(null);
+    await loadMessages();
   }
 
   useEffect(() => {
-    void fetchMessages(dealId).then(setItems);
-  }, [dealId]);
+    mounted.current = true;
+    void loadMessages();
+    return () => { mounted.current = false; generation.current += 1; };
+  }, [loadMessages]);
 
   async function onSend() {
-    if (!text.trim()) return;
+    if (!text.trim() || saving.current || aiBusy) return;
+    saving.current = true;
     setBusy(true);
-    await sendMessage(dealId, channel, text.trim());
-    setText("");
-    await refresh();
-    setBusy(false);
+    setError(null);
+    requestKey.current ??= crypto.randomUUID();
+    try {
+      const saved = await sendMessage(dealId, channel, text.trim(), requestKey.current);
+      if (!mounted.current) return;
+      if (!saved) {
+        setError("Не удалось сохранить запись. Повторите попытку.");
+        return;
+      }
+      setText("");
+      requestKey.current = null;
+      await refresh();
+    } catch {
+      if (mounted.current) setError("Не удалось сохранить запись. Повторите попытку.");
+    } finally {
+      saving.current = false;
+      if (mounted.current) setBusy(false);
+    }
   }
 
   async function onAiDraft() {
     setAiBusy(true);
     setAiNote(null);
     const draft = await aiDraftReply(dealId);
+    if (!mounted.current) return;
     setAiBusy(false);
-    if (draft) setText(draft);
+    if (draft) { requestKey.current = null; setText(draft); }
     else setAiNote("AI-слой выключен (feature-flag)");
   }
 
@@ -61,11 +103,12 @@ export function DealMessages({ dealId }: { dealId: string }) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 font-semibold text-ink">
           <MessageCircle size={18} className="text-accent-ink" /> Сообщения
-          <span className="text-sm font-medium text-muted">({items.length})</span>
+          <span className="text-sm font-medium text-muted">({loading || loadError ? "—" : items.length})</span>
         </div>
         <select
           value={channel}
-          onChange={(e) => setChannel(e.target.value)}
+          disabled={busy || aiBusy}
+          onChange={(e) => { requestKey.current = null; setChannel(e.target.value); }}
           className="rounded-lg border border-line bg-surface px-2 py-1 text-xs text-muted outline-none focus:border-accent"
         >
           {CHANNELS.map((c) => (
@@ -76,9 +119,13 @@ export function DealMessages({ dealId }: { dealId: string }) {
         </select>
       </div>
 
+      <p className="mt-3 text-xs text-muted">Запись в историю общения. Клиенту сообщение не отправляется. Для отправки документов используйте «Email документов».</p>
+      {error && <p role="alert" className="mt-2 text-sm text-red-600">{error}</p>}
+      {loading && <p role="status" className="mt-2 text-sm text-muted">Загрузка истории…</p>}
+      {loadError && <div role="alert" className="mt-2 text-sm text-red-600">{loadError} <button type="button" className="underline" onClick={() => void refresh()}>Повторить загрузку истории</button></div>}
       <div className="mt-3 space-y-3">
-        {items.length === 0 && <p className="text-sm text-muted">Переписки пока нет</p>}
-        {items.map((m) => {
+        {!loading && !loadError && items.length === 0 && <p className="text-sm text-muted">Переписки пока нет</p>}
+        {!loading && !loadError && items.map((m) => {
           const meta = CHANNEL_META[m.channel] ?? CHANNEL_META.whatsapp;
           const Icon = meta.Icon;
           const out = m.direction === "out";
@@ -106,7 +153,7 @@ export function DealMessages({ dealId }: { dealId: string }) {
       <div className="mt-3 flex items-center justify-between">
         <button
           onClick={onAiDraft}
-          disabled={aiBusy}
+          disabled={busy || aiBusy}
           className="inline-flex items-center gap-1.5 text-xs font-medium text-accent-ink hover:text-accent-ink disabled:opacity-60"
         >
           <Sparkles size={14} /> {aiBusy ? "Генерация…" : "AI-черновик ответа"}
@@ -117,7 +164,8 @@ export function DealMessages({ dealId }: { dealId: string }) {
       <div className="mt-2 flex items-center gap-2">
         <input
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          disabled={busy || aiBusy}
+          onChange={(e) => { requestKey.current = null; setText(e.target.value); }}
           onKeyDown={(e) => {
             if (e.key === "Enter") void onSend();
           }}
@@ -126,10 +174,11 @@ export function DealMessages({ dealId }: { dealId: string }) {
         />
         <button
           onClick={onSend}
-          disabled={busy}
+          disabled={busy || aiBusy || !text.trim()}
+          aria-label="Сохранить запись в историю"
           className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-white disabled:opacity-60"
         >
-          <Send size={16} />
+          <Save size={16} />
         </button>
       </div>
     </div>

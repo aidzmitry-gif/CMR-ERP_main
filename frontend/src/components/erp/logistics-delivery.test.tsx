@@ -2,7 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Изолируем компонент от сети: три фетча логистики — моки (значения задаём в тестах).
-vi.mock("@/lib/logistics-api", () => ({
+vi.mock("@/lib/logistics-api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/logistics-api")>(),
   fetchShipments: vi.fn(),
   fetchDashboard: vi.fn(),
   fetchCosts: vi.fn(),
@@ -26,7 +27,7 @@ vi.mock("@/components/erp/logistics-shipment-drawer", () => ({
 }));
 
 import { LogisticsDelivery } from "@/components/erp/logistics-delivery";
-import { fetchCosts, fetchDashboard, fetchShipments, type Costs, type Dashboard, type Shipment } from "@/lib/logistics-api";
+import { fetchCosts, fetchDashboard, fetchShipments, LogisticsReadError, type Costs, type Dashboard, type Shipment } from "@/lib/logistics-api";
 
 const mockShipments = fetchShipments as ReturnType<typeof vi.fn>;
 const mockDashboard = fetchDashboard as ReturnType<typeof vi.fn>;
@@ -115,10 +116,9 @@ describe("LogisticsDelivery", () => {
     expect(kpiValue(grid, "Затраты на логистику")).toBe("500 BYN");
   });
 
-  it("считает KPI из списка доставок, когда дашборд недоступен (fallback)", async () => {
+  it("сохраняет список, но не подменяет недоступную сводку локальными KPI", async () => {
     mockDashboard.mockResolvedValue(null);
     mockCosts.mockResolvedValue(null);
-    // два in_transit + один delivered → summary: inTransit=2, delivered=1, atCustoms=0
     mockShipments.mockResolvedValue([
       makeShipment({ id: 1, status: "in_transit" }),
       makeShipment({ id: 2, status: "assigned", tracking_status: undefined }),
@@ -129,29 +129,50 @@ describe("LogisticsDelivery", () => {
     const grid = (await screen.findByText("Отгрузки и доставки")).closest(".space-y-4")
       ?.querySelector(".grid") as HTMLElement;
 
-    // status !== planned и !== delivered → inTransit: in_transit + assigned = 2
-    expect(kpiValue(grid, "В пути")).toBe("2");
-    expect(kpiValue(grid, "Доставлено")).toBe("1");
+    expect(kpiValue(grid, "В пути")).toBe("—");
+    expect(kpiValue(grid, "Доставлено")).toBe("—");
     // без дашборда числовые метрики недоступны → прочерк
     expect(kpiValue(grid, "В срок")).toBe("—");
     expect(kpiValue(grid, "Затраты на логистику")).toBe("—");
   });
 
-  it("показывает ошибку связи, когда всё пусто (дашборд+затраты null, список пуст)", async () => {
+  it("отличает успешный пустой список от недоступных сводки и затрат", async () => {
     mockShipments.mockResolvedValue([]);
     mockDashboard.mockResolvedValue(null);
     mockCosts.mockResolvedValue(null);
 
     render(<LogisticsDelivery />);
-    expect(await screen.findByText(/Не удалось загрузить рейсы и дашборд/)).toBeInTheDocument();
-    // таблицы/KPI при провале нет
-    expect(screen.queryByText("Отгрузки и доставки")).not.toBeInTheDocument();
+    expect(await screen.findByText("Сводка логистики недоступна.")).toBeInTheDocument();
+    expect(screen.getByText("Отгрузки и доставки")).toBeInTheDocument();
+    expect(screen.getByText(/Доставок пока нет/)).toBeInTheDocument();
   });
 
-  it("показывает ошибку связи при отказе промиса (catch-ветка)", async () => {
+  it("не показывает пустой список после отказа чтения доставок", async () => {
     mockShipments.mockRejectedValue(new Error("network down"));
     render(<LogisticsDelivery />);
-    expect(await screen.findByText(/Проверьте подключение к сервису логистики/)).toBeInTheDocument();
+    expect(await screen.findByText(/Проверьте подключение и повторите загрузку/)).toBeInTheDocument();
+    expect(screen.queryByText("Отгрузки и доставки")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Доставок пока нет/)).not.toBeInTheDocument();
+  });
+
+  it("показывает конкретный отказ scope, сохраняя успешно загруженные доставки", async () => {
+    mockDashboard.mockRejectedValue(new LogisticsReadError(409, "organization_scope_incomplete"));
+    mockCosts.mockRejectedValue(new LogisticsReadError(409, "organization_scope_incomplete"));
+    render(<LogisticsDelivery />);
+    expect(await screen.findByText(/привязка данных логистики к организации/)).toBeInTheDocument();
+    expect(screen.getByText("SH-001")).toBeInTheDocument();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    const grid = screen.getByText("В срок").closest(".grid") as HTMLElement;
+    expect(kpiValue(grid, "В пути")).toBe("—");
+    expect(kpiValue(grid, "Затраты на логистику")).toBe("—");
+  });
+
+  it("сохраняет подтверждённые нулевые показатели", async () => {
+    mockDashboard.mockResolvedValue({ ...dashboard, in_transit: 0, at_customs: 0, delivered_total: 0, logistics_cost: 0 });
+    render(<LogisticsDelivery />);
+    const grid = (await screen.findByText("В срок")).closest(".grid") as HTMLElement;
+    expect(kpiValue(grid, "В пути")).toBe("0");
+    expect(kpiValue(grid, "Затраты на логистику")).toBe("0 BYN");
   });
 
   it("рендерит строку доставки: получатель, маршрут, сумма BYN и русский трекинг-статус", async () => {

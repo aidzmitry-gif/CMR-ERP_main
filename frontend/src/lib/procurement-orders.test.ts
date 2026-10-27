@@ -9,7 +9,7 @@ describe("statusLabel", () => {
     expect(statusLabel("customs")).toBe("Таможня");
   });
   it("неизвестный статус — как есть", () => {
-    expect(statusLabel("received")).toBe("received");
+    expect(statusLabel("future-status")).toBe("future-status");
   });
 });
 

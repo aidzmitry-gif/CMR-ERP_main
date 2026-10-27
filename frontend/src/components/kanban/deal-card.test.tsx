@@ -380,8 +380,8 @@ describe("DealCard", () => {
     expect(screen.getByText("💳 Выставить счёт")).toBeInTheDocument();
   });
 
-  it("D: клик «Выставить счёт» → issueDocument; ok → onNextStep «Проверить оплату…»; окно открыто СИНХРОННО (about:blank) и переведено на renderUrl", async () => {
-    // окно-пустышка до await — иначе popup-блокировщик съел бы печать счёта (ревью f4f825d)
+  it("D: клик «Выставить счёт» → issueDocument; ok → onNextStep «Проверить оплату…»; печать доступна из диалога выпуска", async () => {
+    // Выбор оригинала выполняется в общем диалоге после подтверждения выпуска.
     const fakeWin = { location: { href: "" }, close: vi.fn() };
     vi.stubGlobal("open", vi.fn(() => fakeWin));
     vi.stubGlobal("alert", vi.fn());
@@ -394,7 +394,7 @@ describe("DealCard", () => {
     render(<DealCard deal={deal} onUpdate={vi.fn()} onNextStep={onNextStep} stageId="qual" />);
     fireEvent.click(screen.getByRole("button", { name: "Меню карточки" }));
     fireEvent.click(screen.getByText("💳 Выставить счёт"));
-    expect(window.open).toHaveBeenCalledWith("about:blank", "_blank");
+    expect(window.open).not.toHaveBeenCalled();
     await waitFor(() => expect(api.issueDocument).toHaveBeenCalledWith("1", "invoice"));
     await waitFor(() =>
       expect(onNextStep).toHaveBeenCalledWith(
@@ -404,12 +404,12 @@ describe("DealCard", () => {
         }),
       ),
     );
-    expect(fakeWin.location.href).toBe("/api/sales/documents/9/render");
+    expect(fakeWin.location.href).toBe("");
     expect(fakeWin.close).not.toHaveBeenCalled();
     expect(window.alert).toHaveBeenCalledWith("✅ Счёт СЧ-1 выставлен");
   });
 
-  it("D: неуспех (ok=false) — onNextStep НЕ вызван, окно-пустышка закрыто", async () => {
+  it("D: неуспех (ok=false) — onNextStep НЕ вызван, окно печати не создаётся", async () => {
     const fakeWin = { location: { href: "" }, close: vi.fn() };
     vi.stubGlobal("open", vi.fn(() => fakeWin));
     vi.stubGlobal("alert", vi.fn());
@@ -420,7 +420,8 @@ describe("DealCard", () => {
     fireEvent.click(screen.getByText("💳 Выставить счёт"));
     await waitFor(() => expect(api.issueDocument).toHaveBeenCalled());
     expect(onNextStep).not.toHaveBeenCalled();
-    expect(fakeWin.close).toHaveBeenCalled();
+    expect(window.open).not.toHaveBeenCalled();
+    expect(fakeWin.close).not.toHaveBeenCalled();
     expect(fakeWin.location.href).toBe("");
   });
 

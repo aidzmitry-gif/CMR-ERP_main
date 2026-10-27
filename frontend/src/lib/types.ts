@@ -106,6 +106,7 @@ export interface DealItemView {
 
 export interface DealDetail {
   number: string;
+  editToken?: string;
   company: string;
   description: string;
   amount: number;
@@ -245,6 +246,9 @@ export interface Manager {
 }
 
 export interface Lead {
+  ownerId?: number | null;
+  crmClientId?: number | null;
+  crmContactId?: number | null;
   id: number;
   source: string; // site|telegram|whatsapp|email|phone|tender
   name: string;

@@ -1,0 +1,239 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
+import { AccountingChart } from "./accounting-chart";
+
+const fetchMock = vi.fn();
+const respond = (data: unknown, ok = true, status = ok ? 200 : 500) => Promise.resolve({ ok, status, json: async () => data });
+let adoptionRows: Record<string, unknown[]>;
+let adoptionPost: ((url: string, init?: RequestInit) => Promise<unknown>) | null;
+const adoption = (organizationId: number, requestKey = "00000000-0000-4000-8000-000000000001") => ({
+  catalog_adoption_id: organizationId, organization_id: organizationId, effective_from: "2026-01-01",
+  evidence: "Synthetic accountant catalogue adoption evidence", catalog_version: "current-chart",
+  catalog_source: "https://example.test/catalog", catalog_review_state: { status: "review-required" },
+  current_normative_verified: false, request_key: requestKey, digest: "a".repeat(64), actor: "tester",
+});
+beforeEach(() => {
+  adoptionRows = {};
+  adoptionPost = null;
+  vi.stubGlobal("crypto", { randomUUID: () => "00000000-0000-4000-8000-000000000099" });
+  vi.stubGlobal("fetch", fetchMock);
+  fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+    if (url.endsWith("/catalog")) return respond({ version: "historical-chart", source: "https://www.minfin.gov.by/upload/accounting/acts/postmf_290611_50.pdf", verified_through: "2022-12-28", current_normative_verified: false, chart_codes_verified: false, normative_review: { status: "official_source_through_2022_current_primary_review_required", checked_at: "2026-09-21", verified_through: "2022-12-28" }, known_amendments: [{ document: "Постановление Минфина № 126", date: "2025-10-31", effective_from: "не подтверждено первичным источником", status: "candidate_primary_source_required", impact_on_chart: "unknown", chart_appendix_verified: false, full_text_verified: false, checked_at: "2026-09-21", evidence: "Влияние на план счетов первичным источником не подтверждено." }], accounts: [{ code: "41", title: "Товары", parent: null }, { code: "41.1", title: "Товары на складах", parent: "41" }] });
+    if (url.endsWith("/organizations")) return respond([{ id: 1, name: "Первая книга", unp: "999999999" }, { id: 2, name: "Вторая книга", unp: "888888888" }]);
+    if (url.includes("/catalog-adoptions")) return init?.method === "POST" && adoptionPost ? adoptionPost(url, init) : respond(adoptionRows[url.includes("/2/") ? "2" : "1"] ?? []);
+    if (url.includes("/accounts?")) return respond(url.includes("/2/") ? [] : [{ code: "41.1", title: "Рабочие товары", valid_from: "2026-01-01", required_dimensions: ["warehouse", "sku"], quantity_tracking: true }]);
+    return respond([]);
+  });
+});
+afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
+
+it("shows a searchable historical chart without implying current certification", async () => {
+  render(<AccountingChart />);
+  await screen.findByText("Товары на складах");
+  expect(screen.getByText(/Доступный официальный текст подтверждает исторический справочник/)).toBeInTheDocument();
+  expect(screen.getByText(/Проверка сведений: 2026-09-21/)).toBeInTheDocument();
+  expect(screen.getByText(/влияние на план счетов не установлено/)).toBeInTheDocument();
+  expect(screen.queryByText(/Приложение 1 сверено/)).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Поиск счетов"), { target: { value: "41.1" } });
+  expect(screen.queryByText("Товары", { exact: true })).not.toBeInTheDocument();
+  expect(screen.getByText("Субсчёт")).toBeInTheDocument();
+});
+
+it("separates organization working accounts with historical date and analytics", async () => {
+  render(<AccountingChart />);
+  await screen.findByText("Товары на складах");
+  fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
+  expect(await screen.findByText("Рабочие товары")).toBeInTheDocument();
+  expect(screen.getByText("Склад · Номенклатура")).toBeInTheDocument();
+  expect(screen.getByText("Количественный")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Юридическое лицо"), { target: { value: "2" } });
+  expect(screen.queryByText("Рабочие товары")).not.toBeInTheDocument();
+  await screen.findByText("Рабочие счета на эту дату не настроены.");
+  fireEvent.change(screen.getByLabelText("Дата рабочего плана"), { target: { value: "2025-12-31" } });
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.includes("/2/accounts?on=2025-12-31"))).toBe(true));
+});
+
+it("isolates catalog adoptions by organization and selected date, including empty and uncertified states", async () => {
+  adoptionRows = { "1": [adoption(1)] };
+  render(<AccountingChart />);
+  await screen.findByText("Товары на складах");
+  fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
+  expect(await screen.findByText(/Регламентированная готовность не подтверждена/)).toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([url]) => url.includes("/1/catalog-adoptions"))).toBe(true);
+  fireEvent.change(screen.getByLabelText("Дата рабочего плана"), { target: { value: "2025-12-31" } });
+  expect(await screen.findByText(/На выбранную дату запись о рассмотрении нормативного каталога не найдена/)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Юридическое лицо"), { target: { value: "2" } });
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.includes("/2/catalog-adoptions"))).toBe(true));
+  expect(await screen.findByText(/На выбранную дату запись о рассмотрении нормативного каталога не найдена/)).toBeInTheDocument();
+});
+
+it("submits only explicit adoption data and shows the server-confirmed uncertified result", async () => {
+  const posts: Record<string, unknown>[] = [];
+  adoptionPost = async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, string>;
+    posts.push(body);
+    return respond({ ...adoption(1, body.request_key), effective_from: body.effective_from, evidence: body.evidence });
+  };
+  render(<AccountingChart />);
+  await screen.findByText("Товары на складах");
+  fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
+  await screen.findByText(/запись о рассмотрении нормативного каталога не найдена/i);
+  fireEvent.change(screen.getByLabelText("Дата рабочего плана"), { target: { value: "2026-10-01" } });
+  fireEvent.change(screen.getByLabelText("Дата рассмотрения каталога"), { target: { value: "2026-10-01" } });
+  fireEvent.change(screen.getByLabelText("Основание рассмотрения каталога"), { target: { value: "Явное evidence бухгалтера" } });
+  fireEvent.click(screen.getByText("Зафиксировать рассмотрение каталога"));
+  expect(await screen.findByText("Запись о рассмотрении каталога сохранена сервером.")).toBeInTheDocument();
+  expect(posts).toHaveLength(1);
+  expect(posts[0]).toMatchObject({ effective_from: "2026-10-01", evidence: "Явное evidence бухгалтера" });
+  expect(Object.keys(posts[0])).toEqual(["request_key", "effective_from", "evidence"]);
+  expect(screen.getByText(/Регламентированная готовность не подтверждена/)).toBeInTheDocument();
+});
+
+it("retries one frozen adoption body after an unknown POST result", async () => {
+  const posts: string[] = [];
+  adoptionPost = async (_url, init) => {
+    posts.push(String(init?.body));
+    if (posts.length === 1) throw new Error("network lost");
+    const body = JSON.parse(posts[0]) as { request_key: string };
+    return respond({ ...adoption(1, body.request_key), effective_from: "2026-10-01", evidence: "Явное evidence для повторного запроса" });
+  };
+  render(<AccountingChart />);
+  await screen.findByText("Товары на складах");
+  fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
+  await screen.findByText(/запись о рассмотрении нормативного каталога не найдена/i);
+  fireEvent.change(screen.getByLabelText("Дата рабочего плана"), { target: { value: "2026-10-01" } });
+  fireEvent.change(screen.getByLabelText("Дата рассмотрения каталога"), { target: { value: "2026-10-01" } });
+  fireEvent.change(screen.getByLabelText("Основание рассмотрения каталога"), { target: { value: "Явное evidence для повторного запроса" } });
+  fireEvent.click(screen.getByText("Зафиксировать рассмотрение каталога"));
+  expect(await screen.findByRole("alert")).toHaveTextContent(/Статус принятия неизвестен/);
+  expect(screen.getByLabelText("Дата рассмотрения каталога")).toBeDisabled();
+  expect(screen.getByLabelText("Основание рассмотрения каталога")).toBeDisabled();
+  expect(screen.getByRole("status")).toHaveTextContent(/Явное evidence для повторного запроса/);
+  fireEvent.click(screen.getByText("Повторить фиксацию рассмотрения"));
+  expect(await screen.findByText("Запись о рассмотрении каталога сохранена сервером.")).toBeInTheDocument();
+  expect(posts).toHaveLength(2);
+  expect(posts[1]).toBe(posts[0]);
+});
+
+it("treats a 5xx adoption result as unknown and retries its frozen body", async () => {
+  const posts: string[] = [];
+  adoptionPost = async (_url, init) => {
+    posts.push(String(init?.body));
+    if (posts.length === 1) return respond({ detail: "Temporary upstream failure" }, false, 503);
+    const body = JSON.parse(posts[0]) as { request_key: string };
+    return respond({ ...adoption(1, body.request_key), effective_from: "2026-10-01", evidence: "5xx retry evidence" });
+  };
+  render(<AccountingChart />);
+  await screen.findByText("Товары на складах");
+  fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
+  await screen.findByText(/запись о рассмотрении нормативного каталога не найдена/i);
+  fireEvent.change(screen.getByLabelText("Дата рабочего плана"), { target: { value: "2026-10-01" } });
+  fireEvent.change(screen.getByLabelText("Дата рассмотрения каталога"), { target: { value: "2026-10-01" } });
+  fireEvent.change(screen.getByLabelText("Основание рассмотрения каталога"), { target: { value: "5xx retry evidence" } });
+  fireEvent.click(screen.getByText("Зафиксировать рассмотрение каталога"));
+  expect(await screen.findByRole("alert")).toHaveTextContent(/Статус принятия неизвестен/);
+  expect(screen.getByText("Повторить фиксацию рассмотрения")).toBeInTheDocument();
+  expect(screen.getByLabelText("Дата рассмотрения каталога")).toBeDisabled();
+  fireEvent.click(screen.getByText("Повторить фиксацию рассмотрения"));
+  expect(await screen.findByText("Запись о рассмотрении каталога сохранена сервером.")).toBeInTheDocument();
+  expect(posts).toHaveLength(2);
+  expect(posts[1]).toBe(posts[0]);
+});
+
+it("keeps an unknown adoption in its original organization across a switch and exact retry", async () => {
+  const posts: { url: string; body: string }[] = [];
+  adoptionPost = async (url, init) => {
+    posts.push({ url, body: String(init?.body) });
+    if (posts.length === 1) throw new Error("network lost");
+    const body = JSON.parse(posts[0].body) as { request_key: string; effective_from: string; evidence: string };
+    return respond({ ...adoption(1, body.request_key), ...body });
+  };
+  render(<AccountingChart />);
+  await screen.findByText("Товары на складах");
+  fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
+  await screen.findByText(/запись о рассмотрении нормативного каталога не найдена/i);
+  fireEvent.change(screen.getByLabelText("Дата рассмотрения каталога"), { target: { value: "2026-10-01" } });
+  fireEvent.change(screen.getByLabelText("Основание рассмотрения каталога"), { target: { value: "Original organization evidence" } });
+  fireEvent.click(screen.getByText("Зафиксировать рассмотрение каталога"));
+  expect(await screen.findByRole("alert")).toHaveTextContent(/Статус принятия неизвестен/);
+
+  fireEvent.change(screen.getByLabelText("Юридическое лицо"), { target: { value: "2" } });
+  fireEvent.click(screen.getByText("Повторить фиксацию рассмотрения"));
+  expect(await screen.findByRole("alert")).toHaveTextContent(/для другого юрлица/);
+  expect(posts).toHaveLength(1);
+  expect(screen.getByLabelText("Дата рассмотрения каталога")).toBeDisabled();
+  expect(screen.getByLabelText("Основание рассмотрения каталога")).toBeDisabled();
+  expect(screen.getByRole("status")).toHaveTextContent("Original organization evidence");
+
+  fireEvent.change(screen.getByLabelText("Юридическое лицо"), { target: { value: "1" } });
+  fireEvent.click(screen.getByText("Повторить фиксацию рассмотрения"));
+  await screen.findByText("Запись о рассмотрении каталога сохранена сервером.");
+  expect(posts).toHaveLength(2);
+  expect(posts[1]).toEqual(posts[0]);
+  expect(posts[0].url).toBe("/api/accounting/organizations/1/catalog-adoptions");
+  expect(screen.getByLabelText("Дата рассмотрения каталога")).toBeEnabled();
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+});
+
+it("unlocks a known rejected adoption and sends a new explicit command with a new key", async () => {
+  const keys = ["00000000-0000-4000-8000-000000000011", "00000000-0000-4000-8000-000000000012"];
+  vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValueOnce(keys[0]).mockReturnValueOnce(keys[1]) });
+  const posts: { request_key: string; effective_from: string; evidence: string }[] = [];
+  adoptionPost = async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as typeof posts[number];
+    posts.push(body);
+    return posts.length === 1 ? respond({ detail: "Explicit rejection" }, false, 400) : respond({ ...adoption(1, body.request_key), ...body });
+  };
+  render(<AccountingChart />);
+  await screen.findByText("Товары на складах");
+  fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
+  await screen.findByText(/запись о рассмотрении нормативного каталога не найдена/i);
+  fireEvent.change(screen.getByLabelText("Дата рассмотрения каталога"), { target: { value: "2026-10-01" } });
+  fireEvent.change(screen.getByLabelText("Основание рассмотрения каталога"), { target: { value: "Rejected evidence" } });
+  fireEvent.click(screen.getByText("Зафиксировать рассмотрение каталога"));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Explicit rejection");
+  expect(screen.getByLabelText("Дата рассмотрения каталога")).toBeEnabled();
+  expect(screen.getByLabelText("Основание рассмотрения каталога")).toBeEnabled();
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Дата рассмотрения каталога"), { target: { value: "2026-10-02" } });
+  fireEvent.change(screen.getByLabelText("Основание рассмотрения каталога"), { target: { value: "Corrected evidence" } });
+  fireEvent.click(screen.getByText("Зафиксировать рассмотрение каталога"));
+  await screen.findByText("Запись о рассмотрении каталога сохранена сервером.");
+  expect(posts).toEqual([
+    { request_key: keys[0], effective_from: "2026-10-01", evidence: "Rejected evidence" },
+    { request_key: keys[1], effective_from: "2026-10-02", evidence: "Corrected evidence" },
+  ]);
+});
+
+it("locks the organization selector while an adoption POST is pending and unlocks after completion", async () => {
+  let finishPost!: () => void;
+  const posts: string[] = [];
+  adoptionPost = async (url, init) => {
+    posts.push(url);
+    const body = JSON.parse(String(init?.body)) as { request_key: string; effective_from: string; evidence: string };
+    await new Promise<void>((resolve) => { finishPost = resolve; });
+    return respond({ ...adoption(1, body.request_key), ...body });
+  };
+  render(<AccountingChart />);
+  await screen.findByText("Товары на складах");
+  fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
+  await screen.findByText(/запись о рассмотрении нормативного каталога не найдена/i);
+  fireEvent.change(screen.getByLabelText("Дата рассмотрения каталога"), { target: { value: "2026-10-01" } });
+  fireEvent.change(screen.getByLabelText("Основание рассмотрения каталога"), { target: { value: "Deferred organization evidence" } });
+  fireEvent.click(screen.getByText("Зафиксировать рассмотрение каталога"));
+  const organization = screen.getByLabelText("Юридическое лицо");
+  expect(organization).toBeDisabled();
+  await userEvent.setup().selectOptions(organization, "2");
+  expect(organization).toHaveValue("1");
+  expect(posts).toEqual(["/api/accounting/organizations/1/catalog-adoptions"]);
+  finishPost();
+  await screen.findByText("Запись о рассмотрении каталога сохранена сервером.");
+  expect(organization).toBeEnabled();
+  await userEvent.setup().selectOptions(organization, "2");
+  expect(organization).toHaveValue("2");
+  await screen.findByText(/запись о рассмотрении нормативного каталога не найдена/i);
+  expect(screen.queryByText("Основание: Deferred organization evidence")).not.toBeInTheDocument();
+  expect(posts).toHaveLength(1);
+});

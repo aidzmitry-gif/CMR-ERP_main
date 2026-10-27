@@ -271,7 +271,15 @@ export function SpravCounterparties({ initialName = "", initialUnp = "" }: Props
                           {row.id}
                         </Link>
                       </td>
-                      <td className="px-4 py-2.5 text-ink">{row.name}</td>
+                      <td className="px-4 py-2.5 text-ink">
+                        <div>{row.name}</div>
+                        {row.legal_name && row.legal_name !== row.name && <div className="text-xs text-muted">{row.legal_name}</div>}
+                        {(row.branches ?? []).map((branch) => <div key={branch.id} className="mt-1 text-xs">
+                          <Link className="text-accent hover:underline" href={`${cardUrl(row.id, submittedQuery)}#branch-${branch.id}`}>
+                            Филиал: {branch.name}
+                          </Link>
+                        </div>)}
+                      </td>
                       <td className="px-4 py-2.5 font-mono text-[12px] text-muted">{row.unp ?? "—"}</td>
                     </tr>
                   ))}

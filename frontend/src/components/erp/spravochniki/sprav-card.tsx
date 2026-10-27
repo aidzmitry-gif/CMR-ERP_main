@@ -7,6 +7,7 @@ import type { CounterpartyCard } from "@/lib/reference-data";
 import { formatAuditDate, formatTouchTs, provenanceCounts, touchKindMeta } from "@/lib/spravochniki-card";
 
 import { Field, ProvenanceBadge } from "./provenance-badge";
+import { SpravBranches } from "./sprav-branches";
 
 /** Происхождение эталона по алиасам: синк из 1С → mdm/1c, из Bitrix → bitrix, иначе MDM/ERP. */
 function counterpartyOrigin(aliases: { source: string }[]): string {
@@ -24,7 +25,7 @@ function plural(n: number, forms: [string, string, string]): string {
   return forms[2];
 }
 
-export function SpravCard({ card }: { card: CounterpartyCard }) {
+export function SpravCard({ card, showContacts = true }: { card: CounterpartyCard; showContacts?: boolean }) {
   const sourceCount = card.aliases.length;
   const prov = card.provenance ?? {};
   const counts = provenanceCounts(prov);
@@ -39,7 +40,7 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
         {/* Header */}
         <div className="rounded-2xl bg-surface p-5 shadow-card">
           <div className="flex flex-wrap items-start gap-3">
-            <h1 className="text-xl font-bold text-ink">{card.name}</h1>
+            <h1 className="text-xl font-bold text-ink">{card.display_name || card.name}</h1>
             <Star className="mt-1 h-4 w-4 fill-accent text-accent" />
             {card.unp && (
               <span className="mt-0.5 font-mono text-[13px] text-muted">УНП {card.unp}</span>
@@ -63,6 +64,7 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
         </div>
 
         {/* Two-column grid */}
+        <SpravBranches card={card} />
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
 
           {/* Left — Реквизиты + Контакты */}
@@ -80,10 +82,11 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <Field
                   className="sm:col-span-2"
-                  label="Наименование"
-                  value={card.name}
-                  prov={prov.name}
+                  label="Название в системе"
+                  value={card.display_name || card.name}
+                  prov={prov.display_name ?? prov.name}
                 />
+                <Field className="sm:col-span-2" label="Юридическое наименование для документов" value={card.legal_name || "Не заполнено"} prov={prov.legal_name} />
                 <Field label="УНП" value={card.unp ?? "—"} prov={prov.unp} mono />
                 <Field
                   label="Статус"
@@ -118,7 +121,7 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
               </div>
             </div>
 
-            <div className="rounded-2xl bg-surface p-5 shadow-card">
+            {showContacts && <div className="rounded-2xl bg-surface p-5 shadow-card">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Контакты</p>
                 <ProvenanceBadge prov={prov.contacts} />
@@ -158,7 +161,7 @@ export function SpravCard({ card }: { card: CounterpartyCard }) {
                   ))}
                 </div>
               )}
-            </div>
+            </div>}
           </div>
 
           {/* Right — Доверие к данным + Golden record + Слитые дубли */}

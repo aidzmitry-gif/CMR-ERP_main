@@ -5,9 +5,11 @@ import { RefreshCw, Search, ShoppingCart, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { requestApproval, type SkuOption } from "@/lib/api";
-import { marginOf, srokOf, type SkuStock, type SkuWarehouseStock } from "@/lib/stock";
+import { marginOf, type SkuStock } from "@/lib/stock";
 import { useCurrency } from "./currency-context";
-import { catalogEmptyMessage, type ProductPickerState } from "./product-picker";
+import { catalogEmptyMessage, type PickerRow, type ProductPickerState } from "./product-picker";
+import { orderedPickerColumns, compactSkuCode, pickerWarehouseViews, type PickerWarehouseView } from "@/lib/catalog-picker-table";
+import { PickerColumnsControl, usePickerColumns } from "./catalog-picker-columns";
 
 /**
  * Компактная модалка подбора товара (порт sales-catalog-picker-compact.html —
@@ -41,7 +43,10 @@ export function CatalogPickerModal({
   counterparty = "",
   onClose,
   onCommitted,
+  onItemsCommitted,
   state,
+  errorMessage,
+  saving = false,
 }: {
   /** Реальная сделка — есть у deal-drawer и у звонка по СУЩЕСТВУЮЩЕЙ сделке. Для звонка по
    *  лиду/новому клиенту (сделки ещё нет) — не передаётся: «Перенести в документ» тогда не
@@ -52,26 +57,41 @@ export function CatalogPickerModal({
   counterparty?: string;
   onClose: () => void;
   onCommitted?: () => void;
+  /** Отдельный readback для подтверждённых строк, даже при частичном переносе/ошибке согласования. */
+  onItemsCommitted?: (dealId: string) => void;
   /** Общий стейт подбора — переиспользуем из вызывающей стороны (окно звонка уже держит
    *  свой `useProductPicker`; drawer создаёт новый). Не дублируем fetch внутри модалки. */
   state: ProductPickerState;
+  errorMessage?: string | null;
+  saving?: boolean;
 }) {
   const picker = state;
-  const { skus, catalogStatus, stock, warehouseStock, rows, addSkuWithQty, setRowPrice, removeRow } =
+  const { skus, catalogStatus, stock, rows, addSkuWithQty, removeRow } =
     picker;
   const { fmt } = useCurrency();
+  const columnSettings = usePickerColumns();
+  const visibleColumns = orderedPickerColumns(columnSettings.columns).filter((c) => columnSettings.columns[c.id].visible);
+  const warehouseViews = useMemo(() => pickerWarehouseViews(picker.stockSnapshot ?? []), [picker.stockSnapshot]);
 
   const [query, setQuery] = useState("");
   const [exact, setExact] = useState(false);
   const [inStockOnly, setInStockOnly] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [pageSelection, setPageSelection] = useState({ key: "", index: 0 });
+  const [committing, setBusy] = useState(false);
+  const busy = committing || saving;
   const [toast, setToast] = useState<string | null>(null);
   const [kbdIndex, setKbdIndex] = useState(-1);
-  const [popoverSku, setPopoverSku] = useState<SkuOption | null>(null);
+  const [popover, setPopover] = useState<{ sku: SkuOption; row?: PickerRow } | null>(null);
+  const popoverSku = popover?.sku;
+  function setPopoverSku(sku: SkuOption | null, row = rows.find((r) => r.skuId === sku?.id)) {
+    setPopover(sku ? { sku, row } : null);
+  }
   // «Мягкий» гардрейл маржи: скидка ниже порога не блокирует перенос, но требует ОДНОГО
   // подтверждения — по нему уходит запрос на согласование скидки (kind=deal.discount, тот
   // же контракт, что и DealApprovals на полной карточке сделки).
   const [confirmingDiscount, setConfirmingDiscount] = useState(false);
+  const [pendingApproval, setPendingApproval] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const blendedMarginPct =
@@ -79,11 +99,13 @@ export function CatalogPickerModal({
       ? (picker.orderMargin / picker.costedRevenue) * 100
       : null;
   const belowFloor = blendedMarginPct != null && blendedMarginPct < MIN_MARGIN_FLOOR_PCT;
-  const transferLabel = confirmingDiscount
-    ? "Да, перенести (на согласование)"
-    : belowFloor
-      ? "🔒 Перенести → согласовать скидку"
-      : "Перенести в документ";
+  const transferLabel = pendingApproval && !picker.pickedRows.length
+    ? "Повторить согласование"
+    : confirmingDiscount
+      ? "Да, перенести (на согласование)"
+      : belowFloor || pendingApproval
+        ? "🔒 Перенести → согласовать скидку"
+        : "Перенести в документ";
 
   function flash(msg: string) {
     setToast(msg);
@@ -91,7 +113,9 @@ export function CatalogPickerModal({
   }
 
   const q = query.trim().toLowerCase();
-  const rowBySkuId = new Map(rows.map((r) => [r.skuId, r]));
+  // Каталог показывает первую строку SKU; каждую повторённую строку правят в корзине.
+  const rowBySkuId = new Map<number, PickerRow>();
+  for (const row of rows) if (!rowBySkuId.has(row.skuId)) rowBySkuId.set(row.skuId, row);
 
   const filtered: RowVm[] = useMemo(() => {
     return skus
@@ -104,6 +128,9 @@ export function CatalogPickerModal({
       })
       .filter(({ st }) => !inStockOnly || (st?.free ?? 0) > 0);
   }, [skus, stock, q, exact, inStockOnly]);
+  const filterKey = JSON.stringify([q, exact, inStockOnly]);
+  const page = pageSelection.key === filterKey ? Math.min(pageSelection.index, Math.max(0, Math.ceil(filtered.length / 100) - 1)) : 0;
+  const pageRows = filtered.slice(page * 100, (page + 1) * 100);
 
   // группировка — без category в SKU группировать некуда, единая секция «Все товары»
   const groupLabel = "Все товары";
@@ -142,13 +169,14 @@ export function CatalogPickerModal({
    *  WarehousePickerModal раньше).
    *
    *  Маржа ниже порога (belowFloor) — НЕ блокирует перенос: первый клик показывает inline-
-   *  подтверждение (banner ниже), второй — коммитит как обычно И параллельно уходит запрос
+   *  подтверждение (banner ниже), второй — коммитит позиции, затем отправляет запрос
    *  на согласование скидки (requestApproval, kind=deal.discount) — тот же путь, что и
    *  DealApprovals на полной карточке. Жёсткий блок «не пускать в 1С» — не делаем: см. ROP-
    *  решение в памяти сессии (мягкий гейт, не хард-блок). */
   async function transfer() {
-    if (!picker.pickedRows.length) return flash("Отметьте хотя бы одну позицию");
-    if (belowFloor && !confirmingDiscount) {
+    if (busy) return;
+    if (!picker.pickedRows.length && !pendingApproval) return flash("Отметьте хотя бы одну позицию");
+    if (belowFloor && !confirmingDiscount && !pendingApproval) {
       setConfirmingDiscount(true);
       return;
     }
@@ -157,18 +185,38 @@ export function CatalogPickerModal({
       return;
     }
     setBusy(true);
-    const tasks: Promise<unknown>[] = [picker.commitToDeal(dealId, counterparty)];
-    if (belowFloor) tasks.push(requestApproval(dealId, "deal.discount"));
-    const [committed] = await Promise.all(tasks);
-    const { ok, total } = committed as { ok: number; total: number };
-    setBusy(false);
-    setConfirmingDiscount(false);
-    flash(
-      belowFloor
-        ? `✅ Перенесено: ${ok}/${total} · скидка отправлена на согласование РОПу`
-        : `✅ Перенесено в документ позиций: ${ok}/${total}`,
-    );
-    onCommitted?.();
+    setTransferError(null);
+    setToast(null);
+    const needsApproval = pendingApproval || belowFloor;
+    setPendingApproval(needsApproval);
+    try {
+      const { ok, total, successfulRows } = picker.pickedRows.length
+        ? await picker.commitToDeal(dealId, counterparty)
+        : { ok: 0, total: 0, successfulRows: [] };
+      picker.removeCommittedRows(successfulRows);
+      if (ok > 0) onItemsCommitted?.(dealId);
+      if (ok !== total) {
+        setTransferError(`Перенесено позиций: ${ok}/${total}. Не удалось перенести остальные позиции; они оставлены для повторной попытки.`);
+        return;
+      }
+      if (needsApproval) {
+        const approved = await requestApproval(dealId, "deal.discount").catch(() => false);
+        if (!approved) {
+          setTransferError("Позиции сохранены, но не удалось отправить скидку на согласование. Повторите согласование без повторного переноса товаров.");
+          return;
+        }
+        setPendingApproval(false);
+      }
+      setConfirmingDiscount(false);
+      flash(needsApproval
+        ? "✅ Позиции сохранены · скидка отправлена на согласование РОПу"
+        : `✅ Перенесено в документ позиций: ${ok}/${total}`);
+      onCommitted?.();
+    } catch {
+      setTransferError("Не удалось перенести позиции. Подбор оставлен для повторной попытки.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   // Корзину поправили после того, как показали подтверждение согласования скидки — сбрасываем,
@@ -178,32 +226,32 @@ export function CatalogPickerModal({
   }, [rows]);
 
   function onSearchKey(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (!filtered.length) return;
+    if (!pageRows.length) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setKbdIndex((i) => Math.min(filtered.length - 1, i + 1));
+      setKbdIndex((i) => Math.min(pageRows.length - 1, i + 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setKbdIndex((i) => Math.max(0, i - 1));
     } else if (e.key === "Enter") {
-      if (kbdIndex >= 0 && filtered[kbdIndex]) {
+      if (kbdIndex >= 0 && pageRows[kbdIndex]) {
         e.preventDefault();
-        setPopoverSku(filtered[kbdIndex].sku);
+        setPopoverSku(pageRows[kbdIndex].sku);
       }
     }
   }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (busy) return;
       if (e.key === "Escape") {
-        if (popoverSku) setPopoverSku(null);
+        if (popoverSku) setPopover(null);
         else onClose();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [popoverSku]);
+  }, [onClose, popoverSku, busy]);
 
   // Автофокус на поиск при открытии — клавиатура ↑↓/Enter работает сразу без лишнего клика.
   useEffect(() => {
@@ -217,12 +265,14 @@ export function CatalogPickerModal({
       role="dialog"
       aria-modal
       aria-label="Подбор товара"
+      aria-busy={busy}
+      inert={busy}
       className="fixed inset-0 z-[70] flex items-center justify-center bg-ink/45 p-4"
-      onClick={onClose}
+      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex h-[86vh] max-h-[660px] w-[1180px] max-w-[96vw] flex-col overflow-hidden rounded-2xl bg-surface shadow-pop"
+        className="flex h-[90vh] max-h-[900px] w-[1600px] max-w-[96vw] flex-col overflow-hidden rounded-2xl bg-surface shadow-pop"
       >
         {/* header */}
         <header className="flex items-center gap-3 border-b border-line px-4 py-2.5">
@@ -230,10 +280,10 @@ export function CatalogPickerModal({
             <div className="truncate text-[14px] font-bold text-ink">
               🛒 Подбор товара · {counterparty || "Контрагент не указан"}
             </div>
-            <div className="text-[11px] text-faint">открывается поверх сделки — без перехода на другой экран</div>
+            <div className="text-[11px] text-faint">Выберите товары и количество → добавьте в подбор → перенесите в документ</div>
           </div>
           <div className="flex-1" />
-          <Button variant="primary" size="sm" onClick={transfer} disabled={busy || !pickedCount} icon={<ShoppingCart size={13} />}>
+          <Button variant="primary" size="sm" onClick={transfer} disabled={busy || (!pickedCount && !pendingApproval)} icon={<ShoppingCart size={13} />}>
             {transferLabel}
           </Button>
           <button
@@ -245,6 +295,9 @@ export function CatalogPickerModal({
             <X size={16} />
           </button>
         </header>
+
+        {errorMessage && <p role="alert" className="border-b border-line px-4 py-2 text-sm text-danger">{errorMessage}</p>}
+        {transferError && <p role="alert" className="border-b border-line px-4 py-2 text-sm text-danger">{transferError}</p>}
 
         {/* toolbar */}
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-3.5 py-2">
@@ -290,42 +343,40 @@ export function CatalogPickerModal({
             <RefreshCw size={11} className="mr-1 inline" /> Прошлый заказ
           </button>
           {/* «🧰 Комплект ТО» — нет данных о комплектах в API, честно не рендерим (не выдумываем) */}
+          <PickerColumnsControl {...columnSettings} />
+          <span className="text-[11px] text-muted">{filtered.length ? page * 100 + 1 : 0}–{Math.min((page + 1) * 100, filtered.length)} из {filtered.length}</span>
+          <button type="button" aria-label="Предыдущие товары" disabled={page === 0} className="px-1 disabled:opacity-40"
+            onClick={() => { setPageSelection({ key: filterKey, index: page - 1 }); setKbdIndex(-1); }}>←</button>
+          <button type="button" aria-label="Следующие товары" disabled={(page + 1) * 100 >= filtered.length} className="px-1 disabled:opacity-40"
+            onClick={() => { setPageSelection({ key: filterKey, index: page + 1 }); setKbdIndex(-1); }}>→</button>
           <span className="ml-auto whitespace-nowrap text-[11px] text-faint">↑↓ · Enter — подобрать</span>
         </div>
 
         {/* body: left tree (honest-empty) + right table */}
         <div className="flex min-h-0 flex-1">
-          <aside className="w-[190px] shrink-0 overflow-auto border-r border-line bg-surface p-2">
-            <div className="px-2 pb-1.5 pt-1 text-[10.5px] font-bold uppercase tracking-wide text-faint">Разделы</div>
-            <div className="flex items-center gap-1.5 rounded-lg bg-accent/10 px-2 py-1.5 text-[12.5px] font-semibold text-accent-ink">
-              {groupLabel}
-              <span className="ml-auto rounded bg-surface px-1.5 text-[10.5px] font-semibold text-faint">
-                {skus.length}
-              </span>
-            </div>
-            <p className="mt-3 px-2 text-[10.5px] leading-snug text-faint">
-              Дерево категорий и параметры (Напряжение/Ёмкость) появятся, когда номенклатура
-              будет отдавать группу/атрибуты — сейчас в API их нет.
-            </p>
-          </aside>
-
           <div className="min-w-0 flex-1 overflow-auto">
-            <table className="w-full text-[12.5px]">
+            <table aria-label="Товары по складам" className="table-fixed text-[12.5px]"
+              style={{ width: visibleColumns.reduce((sum, c) => sum + columnSettings.columns[c.id].width, 0) }}>
+              <colgroup>{visibleColumns.map((c) => <col key={c.id} style={{ width: columnSettings.columns[c.id].width }} />)}</colgroup>
               <thead className="sticky top-0 z-[1] bg-sunken text-left text-[10px] font-bold uppercase tracking-wide text-muted">
                 <tr>
-                  <th className="px-2.5 py-2">Наименование</th>
-                  <th className="px-2 py-2">Артикул</th>
-                  <th className="px-2 py-2 text-right">Цена</th>
-                  <th className="px-2 py-2 text-right">Своб.</th>
-                  <th className="px-2 py-2">Доступно</th>
-                  <th className="px-2 py-2 text-center">Маржа</th>
-                  <th className="px-2 py-2 text-center">Кол-во</th>
+                  {visibleColumns.map((c) => <th key={c.id} scope="col" aria-label={c.label} className="relative px-2 py-2">
+                    {c.label}
+                    <span role="separator" aria-label={`Ширина: ${c.label}`} aria-orientation="vertical"
+                      aria-valuemin={c.min} aria-valuemax={c.max} aria-valuenow={columnSettings.columns[c.id].width}
+                      tabIndex={0} onPointerDown={(e) => columnSettings.startResize(c.id, e)}
+                      onKeyDown={(e) => {
+                        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+                          e.preventDefault(); columnSettings.resize(c.id, columnSettings.columns[c.id].width + (e.key === "ArrowRight" ? 10 : -10));
+                        }
+                      }} className="absolute bottom-0 right-0 top-0 w-2 cursor-col-resize touch-none border-r border-line hover:bg-accent/20 focus:bg-accent/20" />
+                  </th>)}
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-9 text-center text-faint">
+                    <td colSpan={visibleColumns.length} className="px-4 py-9 text-center text-faint">
                       {catalogEmptyMessage(catalogStatus, skus.length > 0)}
                       {catalogStatus === "auth" && (
                         <div className="mt-3">
@@ -340,18 +391,14 @@ export function CatalogPickerModal({
                 {filtered.length > 0 && (
                   <>
                     <tr>
-                      <td colSpan={7} className="px-2.5 pb-0.5 pt-2 text-[10.5px] font-bold uppercase tracking-wide text-faint">
-                        {groupLabel}
+                      <td colSpan={visibleColumns.length} className="px-2.5 pb-0.5 pt-2 text-[10.5px] font-bold uppercase tracking-wide text-faint">
+                        {groupLabel} · {filtered.length}. Остаток — всего; свободно — за вычетом резерва. — = нет подтверждённых данных.
                       </td>
                     </tr>
-                    {filtered.map(({ sku, st }, i) => {
+                    {pageRows.map(({ sku }, i) => {
                       const row = rowBySkuId.get(sku.id);
-                      const sk = srokOf(st);
-                      // Цена клиенту: отредактированная в попапе — приоритетнее цены со склада;
-                      // маржа считается ОТ НЕЁ ЖЕ (иначе бейдж соврёт зелёным при уже данной скидке).
-                      const effPrice = row?.priceOverride ?? st?.price;
-                      const m = st ? marginOf({ ...st, price: effPrice ?? st.price }) : null;
-                      const low = (st?.free ?? 0) > 0 && (st?.free ?? 0) <= 5;
+                      const warehouses = warehouseViews[sku.code] ?? [];
+                      const dataRows = warehouses.length ? warehouses : [{ warehouse: "—", on: null, reserved: null, free: null, prices: [] }];
                       return (
                         <tr
                           key={sku.id}
@@ -363,52 +410,13 @@ export function CatalogPickerModal({
                             kbdIndex === i && "bg-accent/10",
                           )}
                         >
-                          <td className="px-2.5 py-1.5 font-semibold text-ink">{highlight(sku.title)}</td>
-                          <td className="px-2 py-1.5 whitespace-nowrap text-[11px] text-muted">{sku.code}</td>
-                          <td className="px-2 py-1.5 text-right font-bold text-ink">
-                            {effPrice ? fmt(effPrice) : "—"}
-                            {row?.priceOverride != null && (
-                              <span className="ml-1 text-[10px] font-semibold text-accent-ink" title="Цена отредактирована вручную">
-                                ✎
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-2 py-1.5 text-right">
-                            <span className={clsx("font-bold", low ? "text-danger" : "text-money")}>
-                              {st?.free ?? 0}
-                              {low ? " ⚠" : ""}
-                            </span>
-                          </td>
-                          <td className="px-2 py-1.5 whitespace-nowrap text-muted">
-                            <span className={sk.cls}>{sk.label}</span>
-                            {st?.forecast ? <span className="ml-1 font-semibold text-amber-600">🚚+{st.forecast}</span> : null}
-                          </td>
-                          <td className="px-2 py-1.5 text-center">
-                            {m ? (
-                              <span
-                                className={clsx(
-                                  "rounded px-1.5 py-0.5 text-[11px] font-bold",
-                                  m.pct >= 25
-                                    ? "bg-money-soft text-money"
-                                    : m.pct >= MIN_MARGIN_FLOOR_PCT
-                                      ? "bg-amber-50 text-amber-600 dark:bg-amber-500/10"
-                                      : "bg-red-50 text-danger dark:bg-red-500/10",
-                                )}
-                              >
-                                GP {Math.round(m.pct)}%
-                              </span>
-                            ) : (
-                              <span className="rounded bg-sunken px-1.5 py-0.5 text-[11px] font-semibold text-faint">
-                                маржа —
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-2 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
+                          {visibleColumns.map((c) => c.id === "quantity" ? (
+                          <td key={c.id} className="px-2 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
                             {row ? (
                               <div className="inline-flex items-center gap-1">
                                 <button
                                   type="button"
-                                  onClick={() => (row.qty > 1 ? picker.setRowQty(sku.id, row.qty - 1) : removeRow(sku.id))}
+                                  onClick={() => (row.qty > 1 ? picker.setRowQty(row, row.qty - 1) : removeRow(row))}
                                   className="flex h-6 w-6 items-center justify-center rounded-md border border-line bg-surface text-ink hover:bg-sunken"
                                 >
                                   −
@@ -421,7 +429,7 @@ export function CatalogPickerModal({
                                 </span>
                                 <button
                                   type="button"
-                                  onClick={() => picker.setRowQty(sku.id, row.qty + 1)}
+                                  onClick={() => picker.setRowQty(row, row.qty + 1)}
                                   className="flex h-6 w-6 items-center justify-center rounded-md border border-line bg-surface text-ink hover:bg-sunken"
                                 >
                                   +
@@ -437,6 +445,23 @@ export function CatalogPickerModal({
                               </button>
                             )}
                           </td>
+                          ) : (
+                            <td key={c.id} className="overflow-hidden px-2 py-1.5 align-top text-ink">
+                              {c.id === "title" ? <div className="whitespace-normal break-words font-semibold" title={sku.title}>
+                                {highlight(sku.title)}<span className="ml-1 text-[10px] font-normal text-muted">{sku.unit}</span>
+                                {row?.priceOverride != null && <div className="mt-1 text-[11px] font-semibold text-accent-ink">Цена в подборе: {fmt(row.priceOverride)} ✎</div>}
+                              </div> : c.id === "code" ? <span title={sku.code} className="block truncate font-mono text-[11px] text-muted">{compactSkuCode(sku.code)}</span>
+                                : <>
+                                  {dataRows.map((wh) => <div key={wh.warehouse}
+                                    style={{ minHeight: Math.max(1, wh.prices.length) * 20 + 4 }}
+                                    className="tabular-nums" title={wh.warehouse === "—" ? "Нет подтверждённых данных по складам" : wh.warehouse}>
+                                    {c.id === "warehouse" ? <span className="block truncate text-muted">{wh.warehouse}</span>
+                                      : c.id === "price" ? wh.prices.length ? wh.prices.map((price) => <div key={price} className="whitespace-nowrap font-semibold">{fmt(price)}</div>) : <span title="Цена не подтверждена">—</span>
+                                      : (c.id === "on" || c.id === "reserved" || c.id === "free") && (wh[c.id] == null ? <span title="Количество неизвестно">—</span> : <span className={c.id === "free" ? "font-bold text-money" : ""}>{wh[c.id]}</span>)}
+                                  </div>)}
+                                </>}
+                            </td>
+                          ))}
                         </tr>
                       );
                     })}
@@ -447,7 +472,7 @@ export function CatalogPickerModal({
           </div>
 
           {/* Корзина — что подобрано; тут же правим (кол-во / убрать / исключить из счёта) без ухода из окна */}
-          <aside className="flex w-[272px] shrink-0 flex-col border-l border-line bg-surface">
+          <aside className="flex w-[220px] max-w-[30vw] shrink-0 flex-col border-l border-line bg-surface">
             <div className="flex items-center gap-2 border-b border-line px-3 py-2">
               <ShoppingCart size={13} className="text-muted" />
               <span className="text-[11px] font-bold uppercase tracking-wide text-faint">Корзина</span>
@@ -459,15 +484,15 @@ export function CatalogPickerModal({
                   Пусто. Добавляйте товар из таблицы — он появится здесь, и его можно поправить до переноса в счёт.
                 </p>
               ) : (
-                rows.map((r) => {
-                  const price = r.priceOverride ?? stock[r.code]?.price ?? 0;
+                rows.map((r, rowIndex) => {
+                  const price = picker.agreedPriceOf(r);
                   return (
-                    <div key={r.skuId} className={clsx("border-b border-line px-3 py-2", !r.picked && "opacity-45")}>
+                    <div key={`${r.skuId}-${rowIndex}`} className={clsx("border-b border-line px-3 py-2", !r.picked && "opacity-45")}>
                       <div className="flex items-start gap-2">
                         <input
                           type="checkbox"
                           checked={r.picked}
-                          onChange={() => picker.toggleRow(r.skuId)}
+                          onChange={() => picker.toggleRow(r)}
                           aria-label="Включить в счёт"
                           title="Включить/исключить из счёта (не удаляя)"
                           className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-accent"
@@ -475,7 +500,7 @@ export function CatalogPickerModal({
                         <div className="min-w-0 flex-1 text-[12px] font-semibold leading-tight text-ink">{r.title}</div>
                         <button
                           type="button"
-                          onClick={() => picker.removeRow(r.skuId)}
+                          onClick={() => picker.removeRow(r)}
                           aria-label="Убрать из корзины"
                           className="shrink-0 text-faint hover:text-danger"
                         >
@@ -485,7 +510,7 @@ export function CatalogPickerModal({
                       <div className="mt-1.5 flex items-center gap-1.5 pl-6">
                         <button
                           type="button"
-                          onClick={() => (r.qty > 1 ? picker.setRowQty(r.skuId, r.qty - 1) : picker.removeRow(r.skuId))}
+                          onClick={() => (r.qty > 1 ? picker.setRowQty(r, r.qty - 1) : picker.removeRow(r))}
                           className="flex h-5 w-5 items-center justify-center rounded border border-line bg-surface text-ink hover:bg-sunken"
                         >
                           −
@@ -493,21 +518,21 @@ export function CatalogPickerModal({
                         <span className="min-w-[24px] text-center text-[12px] font-bold tabular-nums text-ink">{r.qty}</span>
                         <button
                           type="button"
-                          onClick={() => picker.setRowQty(r.skuId, r.qty + 1)}
+                          onClick={() => picker.setRowQty(r, r.qty + 1)}
                           className="flex h-5 w-5 items-center justify-center rounded border border-line bg-surface text-ink hover:bg-sunken"
                         >
                           +
                         </button>
                         <button
                           type="button"
-                          onClick={() => setPopoverSku({ id: r.skuId, code: r.code, title: r.title, unit: r.unit })}
+                          onClick={() => setPopoverSku({ id: r.skuId, code: r.code, title: r.title, unit: r.unit }, r)}
                           title="Изменить количество/цену"
                           className="text-[10.5px] text-faint underline decoration-dotted underline-offset-2 hover:text-accent-ink"
                         >
-                          × {price ? fmt(price) : "—"}
+                          × {price != null ? fmt(price) : "Цена не подтверждена"}
                           {r.priceOverride != null ? " ✎" : ""}
                         </button>
-                        <span className="ml-auto text-[12px] font-bold text-ink">{price ? fmt(price * r.qty) : "—"}</span>
+                        <span className="ml-auto text-[12px] font-bold text-ink">{price != null ? fmt(price * r.qty) : "—"}</span>
                       </div>
                     </div>
                   );
@@ -517,7 +542,7 @@ export function CatalogPickerModal({
             <div className="border-t border-line px-3 py-2 text-[12px]">
               <div className="flex items-center justify-between">
                 <span className="text-muted">Итого{pickedCount < rows.length ? ` (${pickedCount} в счёт)` : ""}</span>
-                <b className="text-ink">{fmt(picker.orderTotal)}</b>
+                <b className="text-ink">{picker.pickedRows.some((r) => picker.agreedPriceOf(r) == null) ? "Цена не подтверждена" : fmt(picker.orderTotal)}</b>
               </div>
               {picker.costedRows.length > 0 && picker.costedRevenue > 0 && (
                 <div className="mt-0.5 flex items-center justify-between">
@@ -545,7 +570,7 @@ export function CatalogPickerModal({
               {pickedCount > 0 && (
                 <>
                   {" "}
-                  · сумма <b className="text-ink">{fmt(picker.orderTotal)}</b>
+                  · сумма <b className="text-ink">{picker.pickedRows.some((r) => picker.agreedPriceOf(r) == null) ? "Цена не подтверждена" : fmt(picker.orderTotal)}</b>
                   {picker.costedRows.length > 0 && picker.costedRevenue > 0 && (
                     <>
                       {" "}
@@ -573,7 +598,7 @@ export function CatalogPickerModal({
               variant="primary"
               size="sm"
               onClick={transfer}
-              disabled={busy || !pickedCount}
+              disabled={busy || (!pickedCount && !pendingApproval)}
               icon={<ShoppingCart size={13} />}
             >
               {transferLabel}
@@ -592,24 +617,18 @@ export function CatalogPickerModal({
         <QtyPricePopover
           sku={popoverSku}
           st={stock[popoverSku.code]}
-          whSt={warehouseStock[popoverSku.code]}
-          existingQty={rowBySkuId.get(popoverSku.id)?.qty}
-          existingPrice={rowBySkuId.get(popoverSku.id)?.priceOverride}
+          warehouseRows={warehouseViews[popoverSku.code]}
+          existingQty={popover?.row?.qty}
+          basePrice={stock[popoverSku.code]?.unitPrice ?? null}
+          existingPrice={popover?.row ? picker.agreedPriceOf(popover.row) : undefined}
           onCancel={() => setPopoverSku(null)}
           onOk={(qty, price) => {
-            // Попап показывает и правит АБСОЛЮТНОЕ количество строки (не «сколько добавить»):
-            // для уже существующей строки — setRowQty (перезаписать), для новой — addSkuWithQty
-            // (создать). addSkuWithQty суммирует qty только когда его вызывают ПОВТОРНО с ДОБАВКОЙ
-            // (напр. клавиатурный ⏎ по кандидату) — здесь так не делаем, чтобы не задвоить.
-            if (rowBySkuId.has(popoverSku.id)) {
-              picker.setRowQty(popoverSku.id, qty);
+            // Количество и цена меняются атомарно у выбранного снимка строки.
+            if (popover?.row) {
+              picker.setRowQty(popover.row, qty, price);
             } else {
-              addSkuWithQty(popoverSku, qty);
+              addSkuWithQty(popoverSku, qty, price);
             }
-            // Цену пишем ТОЛЬКО если она реально отличается от цены со склада — иначе строка
-            // навсегда помечена «✎ отредактировано», хотя пользователь просто подтвердил цену как есть.
-            const base = stock[popoverSku.code]?.price;
-            setRowPrice(popoverSku.id, base != null && price !== base ? price : undefined);
             setPopoverSku(null);
             flash(`✓ Подобрано: ${popoverSku.title.slice(0, 28)}`);
           }}
@@ -628,43 +647,53 @@ export function CatalogPickerModal({
 function QtyPricePopover({
   sku,
   st,
-  whSt,
+  warehouseRows,
   existingQty,
   existingPrice,
+  basePrice,
   onCancel,
   onOk,
 }: {
   sku: SkuOption;
   st?: SkuStock;
-  whSt?: SkuWarehouseStock;
+  warehouseRows?: PickerWarehouseView[];
   existingQty?: number;
   /** Уже отредактированная ранее цена строки (PickerRow.priceOverride) — при повторном
    *  открытии попапа показываем ЕЁ, а не сбрасываем на цену со склада. */
-  existingPrice?: number;
+  existingPrice?: number | null;
+  basePrice: number | null;
   onCancel: () => void;
-  onOk: (qty: number, price: number) => void;
+  onOk: (qty: number, price: number | null) => void;
 }) {
-  const basePrice = st?.price ?? 0;
   const [qty, setQty] = useState(existingQty ?? 1);
-  const [price, setPrice] = useState(existingPrice ?? basePrice);
+  const initialPrice = existingPrice !== undefined ? existingPrice : basePrice;
+  const [priceText, setPriceText] = useState(initialPrice == null ? "" : String(initialPrice));
+  const price = priceText.trim() === "" ? null : Number(priceText.replace(/\s/g, "").replace(",", "."));
+  const priceValid = price == null || (Number.isFinite(price) && price >= 0);
   const [discount, setDiscount] = useState(
-    existingPrice != null && basePrice > 0 ? Math.round((1 - existingPrice / basePrice) * 100 * 10) / 10 : 0,
+    existingPrice != null && basePrice != null && basePrice > 0 ? Math.round((1 - existingPrice / basePrice) * 100 * 10) / 10 : 0,
   );
 
   const cost = st?.cost ?? null;
-  const maxDiscount = cost != null && basePrice > 0 ? Math.max(0, (1 - cost / (1 - MIN_MARGIN_FLOOR_PCT / 100) / basePrice) * 100) : null;
-  const currentDiscount = basePrice > 0 ? (1 - price / basePrice) * 100 : 0;
+  const maxDiscount = cost != null && basePrice != null && basePrice > 0 ? Math.max(0, (1 - cost / (1 - MIN_MARGIN_FLOOR_PCT / 100) / basePrice) * 100) : null;
+  const currentDiscount = priceValid && price != null && basePrice != null && basePrice > 0 ? (1 - price / basePrice) * 100 : 0;
   const overFloor = maxDiscount != null && currentDiscount > maxDiscount + 0.5;
-  const m = marginOf({ ...(st ?? { price: 0, cost: null, free: 0, forecast: 0, warehouses: [] }), price });
+  const m = priceValid && price != null ? marginOf({ ...(st ?? { price: 0, cost: null, free: 0, forecast: 0, warehouses: [] }), price }) : null;
 
   function applyDiscount(pct: number) {
+    if (basePrice == null) return;
     setDiscount(pct);
-    setPrice(Math.round(basePrice * (1 - pct / 100)));
+    const cents = basePrice * (100 - pct);
+    // HALF_UP до копеек; компенсация двоичной погрешности на границе вроде 1.005.
+    setPriceText(String(Math.round(cents + Number.EPSILON * Math.abs(cents)) / 100));
   }
 
   return (
-    <div className="fixed inset-0 z-[80]" onClick={onCancel}>
+    <div className="fixed inset-0 z-[80]" onClick={(event) => event.stopPropagation()}>
       <div
+        role="dialog"
+        aria-modal
+        aria-label={`Количество и цена: ${sku.title}`}
         onClick={(e) => e.stopPropagation()}
         className="absolute left-1/2 top-1/2 w-[388px] max-w-[94vw] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-line-strong bg-surface p-3.5 shadow-pop"
       >
@@ -681,6 +710,7 @@ function QtyPricePopover({
         <div className="mt-2.5 flex items-center gap-2">
           <span className="w-[74px] shrink-0 text-[11.5px] text-muted">Количество</span>
           <input
+            aria-label="Количество товара"
             value={qty}
             onChange={(e) => setQty(Math.max(1, parseInt(e.target.value.replace(/\D/g, ""), 10) || 1))}
             inputMode="numeric"
@@ -689,7 +719,7 @@ function QtyPricePopover({
           <span className="text-[11.5px] text-muted">{sku.unit}</span>
         </div>
 
-        {whSt && whSt.rows.length > 0 ? (
+        {warehouseRows && warehouseRows.length > 0 ? (
           <table className="mt-2.5 w-full border-collapse text-[11.5px]">
             <thead>
               <tr>
@@ -700,18 +730,19 @@ function QtyPricePopover({
               </tr>
             </thead>
             <tbody>
-              {whSt.rows.map((r) => (
+              {warehouseRows.map((r) => (
                 <tr key={r.warehouse}>
                   <td className="border-b border-line px-1.5 py-1">{r.warehouse}</td>
-                  <td className="border-b border-line px-1.5 py-1 text-right font-semibold text-amber-600">{r.reserved || "—"}</td>
-                  <td className="border-b border-line px-1.5 py-1 text-right font-bold text-money">{r.free}</td>
+                  <td className="border-b border-line px-1.5 py-1 text-right font-semibold text-amber-600">{r.reserved ?? "—"}</td>
+                  <td className="border-b border-line px-1.5 py-1 text-right font-bold text-money">{r.free ?? "—"}</td>
                   <td className="border-b border-line px-1.5 py-1 text-right">
                     <button
                       type="button"
-                      onClick={() => setQty(r.free || 1)}
+                      disabled={r.free == null || r.free <= 0}
+                      onClick={() => { if (r.free != null && r.free > 0) setQty(r.free); }}
                       className="rounded border border-line bg-surface px-1.5 font-bold text-accent-ink hover:bg-accent/10"
                     >
-                      {Math.min(qty, r.free)} →
+                      {r.free == null ? "—" : Math.min(qty, r.free)} →
                     </button>
                   </td>
                 </tr>
@@ -726,11 +757,13 @@ function QtyPricePopover({
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-muted">Цена</span>
             <input
-              value={price}
+              aria-label="Цена за единицу"
+              value={priceText}
               onChange={(e) => {
-                const v = parseFloat(e.target.value.replace(/\s/g, "").replace(",", ".")) || 0;
-                setPrice(v);
-                setDiscount(basePrice > 0 ? Math.round((1 - v / basePrice) * 100 * 10) / 10 : 0);
+                const text = e.target.value;
+                const v = text.trim() === "" ? null : Number(text.replace(/\s/g, "").replace(",", "."));
+                setPriceText(text);
+                setDiscount(v != null && Number.isFinite(v) && basePrice != null && basePrice > 0 ? Math.round((1 - v / basePrice) * 100 * 10) / 10 : 0);
               }}
               className="w-[74px] rounded-lg border border-line bg-surface px-2 py-1.5 text-right text-[12.5px] text-ink outline-none focus:border-accent"
             />
@@ -739,6 +772,8 @@ function QtyPricePopover({
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-muted">Скидка</span>
             <input
+              aria-label="Скидка, %"
+              disabled={basePrice == null || basePrice <= 0}
               value={discount}
               onChange={(e) => applyDiscount(parseFloat(e.target.value.replace(",", ".")) || 0)}
               className="w-[74px] rounded-lg border border-line bg-surface px-2 py-1.5 text-right text-[12.5px] text-ink outline-none focus:border-accent"
@@ -759,6 +794,9 @@ function QtyPricePopover({
           </span>
         </div>
 
+        {price == null && <p className="mt-1.5 text-[11px] text-faint">Цена не подтверждена</p>}
+        {!priceValid && <p role="alert" className="mt-1.5 text-[11px] text-danger">Укажите цену не меньше нуля или оставьте поле пустым.</p>}
+
         {overFloor && (
           <p className="mt-1.5 text-[11px] text-danger">
             ⚠ Скидка ниже порога маржи {MIN_MARGIN_FLOOR_PCT}% — на согласование РОПу.
@@ -776,9 +814,10 @@ function QtyPricePopover({
           <button
             type="button"
             onClick={() => onOk(qty, price)}
-            className="rounded-lg bg-accent px-3.5 py-2 text-[12.5px] font-bold text-white hover:bg-accent-ink"
+            disabled={!priceValid}
+            className="rounded-lg bg-accent px-3.5 py-2 text-[12.5px] font-bold text-white hover:bg-accent-ink disabled:opacity-60"
           >
-            ОК
+            {existingQty == null ? "Добавить в подбор" : "Сохранить в подборе"}
           </button>
         </div>
       </div>

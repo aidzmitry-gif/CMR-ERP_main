@@ -313,7 +313,7 @@ function FunnelAnalyticsPanel({ funnel, owner }: { funnel: string; owner: string
               <div className="mt-1 text-lg font-bold text-ink tabular-nums">
                 {stuck != null ? stuck : "—"}
               </div>
-              <div className="text-[11px] text-faint">сделки в стадии дольше 14 дней (?stuck_days=14)</div>
+              <div className="text-[11px] text-faint">сделки в стадии дольше 14 дней</div>
             </div>
           </div>
 

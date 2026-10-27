@@ -3,16 +3,38 @@ export interface EmailAttempt {
   number: number; status: EmailStatus; reason: string | null; smtp_code: number | null;
   started_at: string; finished_at: string | null; recipients: Record<string, number>;
 }
-export interface DocumentEmail {
-  id: string; sender: string; to: string[]; cc: string[]; subject: string; body: string;
-  attachments: { document_id: number; version: number; number: string; filename: string; size: number; sha256: string }[];
-  status: EmailStatus; created_at: string; accepted_at: string | null; next_attempt_at: string | null;
-  attempt_count: number; last_reason: string | null; message_id: string;
+
+export interface OutgoingAttachment {
+  document_id: number | null;
+  version: number | null;
+  number: string;
+  filename: string;
+  content_type?: string | null;
+  size: number | null;
+  sha256: string | null;
+  blocked_reason?: string | null;
+  downloadable?: boolean;
 }
+
+export interface DocumentEmail {
+  id: string; direction?: "outgoing"; deal_id?: number; sender: string; to: string[]; cc: string[];
+  subject: string; body: string; attachments: OutgoingAttachment[];
+  status: EmailStatus; created_at: string; confirmed_at?: string | null; accepted_at: string | null;
+  next_attempt_at: string | null; attempt_count: number; last_reason: string | null;
+  message_id: string; reply_to_receipt_id?: string | null; can_confirm: boolean; can_retry: boolean;
+}
+
 export interface EmailOptions {
   sender: string | null; configuration_error: string | null; enabled: boolean;
+  signature_preview?: string | null; signature_configuration_error?: string | null;
   documents: { id: number; kind: string; number: string; version: number | null; status: string;
     available: boolean; superseded_by_id: number | null }[];
+}
+
+export interface UploadPayload {
+  filename: string;
+  content_type: string;
+  content_base64: string;
 }
 export const EMAIL_STATUS: Record<EmailStatus, string> = {
   prepared: "Подготовлено — не отправлено", queued: "В очереди", sending: "Передаётся почтовому серверу",

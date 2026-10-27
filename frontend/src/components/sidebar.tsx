@@ -57,8 +57,8 @@ const MODULES: ModuleItem[] = [
     sub: [
       { label: "Продажи", href: "/crm/sales" },
       { label: "Лиды", href: "/crm/leads" },
-      { label: "Клиенты" },
-      { label: "Контакты" },
+      { label: "Клиенты", href: "/crm/clients" },
+      { label: "Контакты", href: "/crm/contacts" },
       { label: "Сделки", href: "/crm/deals" },
       { label: "Звонки", href: "/crm/calls" },
       { label: "Каталог · подбор", href: "/crm/catalog" },
@@ -83,13 +83,19 @@ const MODULES: ModuleItem[] = [
     Icon: ShoppingCart,
     href: "/erp/procurement",
     sub: [
-      { label: "Воронка закупок", href: "/erp/procurement" },
-      { label: "Поставщики" },
+      { label: "Обзор и воронка", href: "/erp/procurement" },
+      { label: "План закупок", href: "/erp/procurement/planning" },
+      { label: "Заказы и машины", href: "/erp/procurement/orders" },
+      { label: "Накладные на поступление", href: "/erp/procurement/receipts" },
+      { label: "Запросы цен (RFQ)", href: "/erp/procurement/rfq" },
+      { label: "Поставщики", href: "/erp/procurement/suppliers" },
       { label: "Претензии поставщикам", href: "/erp/procurement/claims" },
-      { label: "Номенклатура · SKU" },
-      { label: "Документы" },
-      { label: "AI-агенты" },
-      { label: "Аналитика" },
+      { label: "Номенклатура · SKU", href: "/erp/spravochniki/sku" },
+      { label: "Калькулятор себестоимости", href: "/erp/procurement/cost-calc" },
+      { label: "Дополнительные расходы", href: "/erp/procurement/additional-expenses" },
+      { label: "Документы юрлица", href: "/erp/procurement/company-documents" },
+      { label: "Юрлица и связи", href: "/erp/procurement/ownership" },
+      { label: "AI-агенты (планируется)" },
     ],
   },
   {
@@ -121,6 +127,7 @@ const MODULES: ModuleItem[] = [
       { label: "Приёмка (QC)", href: "/erp/wms/receipts" },
       { label: "Задачи (подбор/размещение)", href: "/erp/wms/tasks" },
       { label: "Движения", href: "/erp/wms/movements" },
+      { label: "Резервы", href: "/erp/wms/reservations" },
       { label: "Размещение (ячейки)", href: "/erp/wms/locations" },
       { label: "Остатки 1С", href: "/erp/wms/stock" },
       { label: "Остаток (движения)", href: "/erp/wms/balances" },
@@ -133,6 +140,7 @@ const MODULES: ModuleItem[] = [
   },
   { slug: "logistics", label: "Логистика", Icon: Truck, href: "/erp/logistics" },
   { slug: "finance", label: "Финансы", Icon: Wallet, href: "/erp/finance" },
+  { slug: "accounting", label: "Бухгалтерия", Icon: Wallet, href: "/erp/accounting" },
   {
     slug: "marketing",
     label: "Маркетинг",
@@ -203,6 +211,7 @@ const MODULES: ModuleItem[] = [
     href: "/erp/spravochniki",
     sub: [
       { label: "Каталог", href: "/erp/spravochniki" },
+      { label: "План счетов", href: "/erp/spravochniki/accounts" },
       { label: "Контрагенты", href: "/erp/spravochniki/counterparty" },
       { label: "Курсы валют · НДС", href: "/erp/spravochniki/rates" },
       { label: "Дедупликация", href: "/erp/spravochniki/merge" },
@@ -368,6 +377,8 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
     pathname.startsWith("/crm/sales") ||
     pathname.startsWith("/crm/deals") ||
     pathname.startsWith("/crm/leads") ||
+    pathname.startsWith("/crm/clients") ||
+    pathname.startsWith("/crm/contacts") ||
     pathname.startsWith("/crm/calls") ||
     pathname.startsWith("/crm/catalog") ||
     pathname.startsWith("/crm/docs") ||

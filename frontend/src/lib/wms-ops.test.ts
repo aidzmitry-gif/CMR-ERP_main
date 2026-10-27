@@ -12,7 +12,6 @@ import {
   fetchMovementsServer,
   locationLabel,
   reasonLabel,
-  receipt,
   shipment,
   type StockMovement,
   transfer,
@@ -95,6 +94,28 @@ describe("locationLabel", () => {
 });
 
 describe("SSR fetch*Server", () => {
+  it("fetchBalancesServer forwards trusted identity headers", async () => {
+    const fn = stubFetch({ rows: [], sku_count: 0 });
+    const headers = { Authorization: "Bearer synthetic-test-only" };
+    await fetchBalancesServer("admin", headers);
+    expect(fn).toHaveBeenCalledWith("http://127.0.0.1:8000/wms/balances", { cache: "no-store", headers });
+  });
+  it("fetchLocationsServer forwards trusted identity headers", async () => {
+    const fn = stubFetch([location]);
+    const headers = { Authorization: "Bearer synthetic-test-only" };
+    await fetchLocationsServer("admin", headers);
+    expect(fn).toHaveBeenCalledWith("http://127.0.0.1:8000/wms/locations", {
+      cache: "no-store", headers,
+    });
+  });
+  it("fetchMovementsServer forwards trusted identity headers", async () => {
+    const fn = stubFetch([movement]);
+    const headers = { Authorization: "Bearer synthetic-test-only" };
+    await fetchMovementsServer("admin", headers);
+    expect(fn).toHaveBeenCalledWith("http://127.0.0.1:8000/wms/movements", {
+      cache: "no-store", headers,
+    });
+  });
   it("fetchMovementsServer: URL, no-store, роли в заголовке, маппинг ответа", async () => {
     const fn = stubFetch([movement]);
     const rows = await fetchMovementsServer("sales,admin");
@@ -114,14 +135,14 @@ describe("SSR fetch*Server", () => {
     });
   });
 
-  it("fetchMovementsServer: ok:false → пустой массив", async () => {
+  it("fetchMovementsServer: HTTP failure rejects", async () => {
     stubFetch(null, false);
-    expect(await fetchMovementsServer()).toEqual([]);
+    await expect(fetchMovementsServer()).rejects.toThrow();
   });
 
-  it("fetchMovementsServer: сеть упала → пустой массив", async () => {
+  it("fetchMovementsServer: network failure rejects", async () => {
     stubFetchThrow();
-    expect(await fetchMovementsServer()).toEqual([]);
+    await expect(fetchMovementsServer()).rejects.toThrow();
   });
 
   it("fetchBalancesServer: URL и маппинг", async () => {
@@ -135,14 +156,14 @@ describe("SSR fetch*Server", () => {
     expect(res).toEqual(data);
   });
 
-  it("fetchBalancesServer: ok:false → пустой дефолт с sku_count 0", async () => {
+  it("fetchBalancesServer: HTTP error rejects", async () => {
     stubFetch(null, false);
-    expect(await fetchBalancesServer()).toEqual({ rows: [], sku_count: 0 });
+    await expect(fetchBalancesServer()).rejects.toThrow();
   });
 
-  it("fetchBalancesServer: сеть упала → пустой дефолт", async () => {
+  it("fetchBalancesServer: network error rejects", async () => {
     stubFetchThrow();
-    expect(await fetchBalancesServer()).toEqual({ rows: [], sku_count: 0 });
+    await expect(fetchBalancesServer()).rejects.toThrow();
   });
 
   it("fetchLocationsServer: URL и маппинг", async () => {
@@ -174,14 +195,14 @@ describe("клиентские fetch* через /api", () => {
     expect(rows).toEqual([movement]);
   });
 
-  it("fetchMovements: ok:false → пустой массив", async () => {
+  it("fetchMovements: HTTP failure rejects", async () => {
     stubFetch(null, false);
-    expect(await fetchMovements()).toEqual([]);
+    await expect(fetchMovements()).rejects.toThrow();
   });
 
-  it("fetchMovements: сеть упала → пустой массив", async () => {
+  it("fetchMovements: network failure rejects", async () => {
     stubFetchThrow();
-    expect(await fetchMovements()).toEqual([]);
+    await expect(fetchMovements()).rejects.toThrow();
   });
 
   it("fetchBalances: URL /api/wms/balances, маппинг", async () => {
@@ -192,14 +213,14 @@ describe("клиентские fetch* через /api", () => {
     expect(res).toEqual(data);
   });
 
-  it("fetchBalances: ok:false → пустой дефолт", async () => {
+  it("fetchBalances: HTTP error rejects", async () => {
     stubFetch(null, false);
-    expect(await fetchBalances()).toEqual({ rows: [], sku_count: 0 });
+    await expect(fetchBalances()).rejects.toThrow();
   });
 
-  it("fetchBalances: сеть упала → пустой дефолт", async () => {
+  it("fetchBalances: network error rejects", async () => {
     stubFetchThrow();
-    expect(await fetchBalances()).toEqual({ rows: [], sku_count: 0 });
+    await expect(fetchBalances()).rejects.toThrow();
   });
 
   it("fetchLocations: URL /api/wms/locations, маппинг", async () => {
@@ -222,27 +243,6 @@ describe("клиентские fetch* через /api", () => {
 
 describe("операции записи (POST /api/wms/*)", () => {
   const input = { sku_code: "AKB-60", qty: 5, warehouse: "Минск", location_id: 3, batch_ref: "B-1", note: "прим" };
-
-  it("receipt: URL, метод, заголовки, тело — true при ok", async () => {
-    const fn = stubFetch({ ok: true });
-    const result = await receipt(input);
-    expect(fn).toHaveBeenCalledWith("/api/wms/receipt", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    });
-    expect(result).toBe(true);
-  });
-
-  it("receipt: ok:false → false", async () => {
-    stubFetch(null, false);
-    expect(await receipt(input)).toBe(false);
-  });
-
-  it("receipt: сеть упала → false", async () => {
-    stubFetchThrow();
-    expect(await receipt(input)).toBe(false);
-  });
 
   it("shipment: правильный путь /api/wms/shipment", async () => {
     const fn = stubFetch({});

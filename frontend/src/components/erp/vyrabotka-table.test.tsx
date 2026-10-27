@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Мокаем ТОЛЬКО сетевые функции домена; чистые хелперы (formatByn/formatNh/
@@ -30,6 +30,9 @@ const payroll: Payroll = {
   total_base: 800,
   total_premium: 400,
   total_payroll: 1200,
+  calculation_scope: "management_estimate",
+  accounting_posting_available: false,
+  statutory_payroll_certified: false,
 };
 
 const emptyPayroll: Payroll = {
@@ -38,6 +41,9 @@ const emptyPayroll: Payroll = {
   total_base: 0,
   total_premium: 0,
   total_payroll: 0,
+  calculation_scope: "management_estimate",
+  accounting_posting_available: false,
+  statutory_payroll_certified: false,
 };
 
 const workers: Worker[] = [
@@ -54,6 +60,48 @@ beforeEach(() => {
 });
 
 describe("VyrabotkaTable", () => {
+  it.each(["success", "failure"])("ignores late mount %s after a successful create refresh", async outcome => {
+    let done!: (value: Payroll) => void;
+    let fail!: (error: Error) => void;
+    fn(vyr.fetchPayroll).mockReturnValueOnce(new Promise((resolve, reject) => { done = resolve; fail = reject; }))
+      .mockResolvedValue(payroll);
+    render(<VyrabotkaTable initial={emptyPayroll} />);
+    expect(screen.getByRole("button", { name: "Обновить табель" })).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText("Имя сборщика"), { target: { value: "Михаил" } });
+    fireEvent.click(screen.getByRole("button", { name: /Добавить/ }));
+    await screen.findByText("Иванов");
+    await act(async () => { if (outcome === "success") done(emptyPayroll); else fail(new Error("late 503")); });
+    expect(screen.getByText("Иванов")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("shows unknown output rather than a zero payroll and can retry", async () => {
+    fn(vyr.fetchPayroll).mockRejectedValueOnce(new Error("503")).mockResolvedValue(payroll);
+    render(<VyrabotkaTable initial={null} />);
+    expect(await screen.findByText(/Итоги и список сборщиков неизвестны/)).toBeInTheDocument();
+    expect(screen.queryByText("0 BYN")).not.toBeInTheDocument();
+    expect(screen.queryByText("Табель пуст — добавьте сборщика")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Обновить табель" }));
+    expect(await screen.findByText("Иванов")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("preserves worker fields on unconfirmed creation and suppresses double submission", async () => {
+    let done!: (value: null) => void;
+    fn(vyr.createWorker).mockReturnValue(new Promise(resolve => { done = resolve; }));
+    render(<VyrabotkaTable initial={emptyPayroll} />);
+    await waitFor(() => expect(vyr.fetchPayroll).toHaveBeenCalled());
+    const name = screen.getByPlaceholderText("Имя сборщика");
+    fireEvent.change(name, { target: { value: "Михаил" } });
+    fireEvent.change(screen.getByPlaceholderText("Оклад BYN"), { target: { value: "1200" } });
+    const add = screen.getByRole("button", { name: /Добавить/ });
+    fireEvent.click(add); fireEvent.click(add);
+    expect(name).toBeDisabled();
+    await act(async () => done(null));
+    expect(vyr.createWorker).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert")).toHaveTextContent("Поля сохранены");
+    expect(name).toHaveValue("Михаил");
+    expect(screen.getByPlaceholderText("Оклад BYN")).toHaveValue("1200");
+  });
   it("рендерит строки табеля и долю вклада (contributionShare) из данных", async () => {
     fn(vyr.fetchPayroll).mockResolvedValue(payroll);
     fn(vyr.fetchWorkers).mockResolvedValue(workers);
@@ -67,6 +115,7 @@ describe("VyrabotkaTable", () => {
     // Доли вклада: 250/400 и 150/400 → сломай contributionShare и эти числа поедут.
     expect(screen.getByText("62.5%")).toBeInTheDocument();
     expect(screen.getByText("37.5%")).toBeInTheDocument();
+    expect(screen.getByRole("note")).toHaveTextContent("не является начислением зарплаты");
   });
 
   it("показывает пустое состояние, когда табель пуст", async () => {

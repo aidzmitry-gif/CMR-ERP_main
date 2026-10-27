@@ -150,7 +150,8 @@ export function CallWindow({
   // инлайн-поиска ProductPicker; отдельная модалка, чтобы не грузить остатки по складам
   // до явного запроса менеджера.
   const [warehousePickerOpen, setWarehousePickerOpen] = useState(false);
-  const [reserve, setReserve] = useState(true);
+  const [onOrder, setOnOrder] = useState(false);
+  const invoiceRequestKey = useRef<string | null>(null);
   const [unp, setUnp] = useState("");
   const [req, setReq] = useState<RegistryInfo | null>(null);
   const [reqBusy, setReqBusy] = useState(false);
@@ -178,7 +179,8 @@ export function CallWindow({
     setPhase("dialing");
     setSeconds(0);
     picker.reset();
-    setReserve(true);
+    setOnOrder(false);
+    invoiceRequestKey.current = null;
     setUnp("");
     setReq(null);
     setReqBusy(false);
@@ -321,7 +323,11 @@ export function CallWindow({
     const win = window.open("about:blank", "_blank");
     setBusy(true);
     try {
-      const { ok, message, renderUrl } = await issueDocument(ctx.dealId, "invoice");
+      const requestKey = onOrder ? (invoiceRequestKey.current ??= crypto.randomUUID()) : null;
+      const { ok, message, renderUrl } = requestKey
+        ? await issueDocument(ctx.dealId, "invoice", { reserve_mode: "on_order", request_key: requestKey })
+        : await issueDocument(ctx.dealId, "invoice");
+      if (ok && invoiceRequestKey.current === requestKey) invoiceRequestKey.current = null;
       if (win && ok && renderUrl) win.location.href = renderUrl;
       else win?.close();
       if (ok) {
@@ -570,17 +576,17 @@ export function CallWindow({
                 </button>
               </div>
 
-              {/* Резерв + условия оплаты */}
-              <label className="flex items-center gap-2 rounded-lg border border-amber-300/60 bg-amber-50 px-2.5 py-2 text-[12.5px] font-semibold text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
+              {/* Режим счёта + условия оплаты */}
+              {ctx.kind === "deal" && <label className="flex items-center gap-2 rounded-lg border border-amber-300/60 bg-amber-50 px-2.5 py-2 text-[12.5px] font-semibold text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
                 <input
                   type="checkbox"
-                  checked={reserve}
-                  onChange={(e) => setReserve(e.target.checked)}
+                  checked={onOrder}
+                  disabled={busy}
+                  onChange={(e) => { setOnOrder(e.target.checked); invoiceRequestKey.current = null; }}
                   className="h-4 w-4 accent-amber-500"
                 />
-                📦 Зарезервировать под счёт
-                <span className="ml-auto text-[11px] font-normal text-faint">SALES-51</span>
-              </label>
+                Под заказ — без резерва
+              </label>}
 
               <div>
                 <div className="mb-1 text-[12px] font-bold uppercase tracking-wide text-muted">
@@ -618,7 +624,7 @@ export function CallWindow({
                 </div>
               </div>
 
-              <ProductPickerTotals state={picker} fmt={fmt} reserve={reserve} />
+              <ProductPickerTotals state={picker} fmt={fmt} reserve={ctx.kind === "deal" && !onOrder} />
 
               {/* CTA по контексту */}
               <div className="space-y-2 pt-1">

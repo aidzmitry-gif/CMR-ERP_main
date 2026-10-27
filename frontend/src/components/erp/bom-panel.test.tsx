@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Мокаем только сетевые функции домена BOM; чистые (статусы/обеспеченность/счётчики)
@@ -52,6 +52,133 @@ beforeEach(() => {
 });
 
 describe("BomPanel", () => {
+  it("unknown SSR and failed client reads never announce an empty BOM catalog", async () => {
+    asMock(bom.fetchBoms).mockRejectedValue(new Error("503"));
+    render(<BomPanel initial={null} />);
+    expect(await screen.findByText(/Данные неизвестны/)).toBeInTheDocument();
+    expect(screen.queryByText("Спецификаций пока нет")).not.toBeInTheDocument();
+    expect(screen.getByText("Спецификаций").parentElement).toHaveTextContent("—");
+    asMock(bom.fetchBoms).mockResolvedValue([]);
+    fireEvent.click(screen.getByRole("button", { name: "Обновить спецификации" }));
+    expect(await screen.findByText("Спецификаций пока нет")).toBeInTheDocument();
+  });
+
+  it("requires an explicit norm while preserving signed warehouse readings", async () => {
+    render(<BomPanel initial={boms} />);
+    fireEvent.click(screen.getByText("Стеллаж СТ-1"));
+    await screen.findByText("Состав изделия");
+    fireEvent.change(screen.getByPlaceholderText("Комплектующее"), { target: { value: "Ячейка" } });
+    fireEvent.click(screen.getByRole("button", { name: /Позиция/ }));
+    expect(bom.addBomItem).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByPlaceholderText("Норма"), { target: { value: "2" } });
+    fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "-1" } });
+    fireEvent.click(screen.getByRole("button", { name: /Позиция/ }));
+    await waitFor(() => expect(bom.addBomItem).toHaveBeenCalledWith(1, expect.objectContaining({ norm_qty: 2, stock: -1 })));
+  });
+  it("does not reopen A after a delayed list refresh while B is selected", async () => {
+    let done!: (value: Bom[]) => void;
+    asMock(bom.fetchBom).mockImplementation(async (id: number) => id === 1 ? detail1 : { ...boms[1], items: [] });
+    render(<BomPanel initial={boms} />);
+    await waitFor(() => expect(bom.fetchBoms).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByText("Стеллаж СТ-1"));
+    await screen.findByText("Стойка 2м");
+    asMock(bom.fetchBoms).mockReturnValueOnce(new Promise(resolve => { done = resolve; }));
+    fireEvent.click(screen.getByRole("button", { name: "Обновить спецификации" }));
+    fireEvent.click(screen.getByText("Тумба ТБ-2"));
+    await screen.findByText("Состав пуст — добавьте комплектующее");
+    await act(async () => done(boms));
+    expect(bom.fetchBom).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Состав пуст — добавьте комплектующее")).toBeInTheDocument();
+    expect(screen.queryByText("Загрузка состава…")).not.toBeInTheDocument();
+  });
+
+  it("ignores a late mount-list rejection after a successful manual refresh", async () => {
+    let fail!: (reason: Error) => void;
+    asMock(bom.fetchBoms).mockReturnValueOnce(new Promise((_, reject) => { fail = reject; })).mockResolvedValue(boms);
+    render(<BomPanel initial={boms} />);
+    fireEvent.click(screen.getByRole("button", { name: "Обновить спецификации" }));
+    await waitFor(() => expect(bom.fetchBoms).toHaveBeenCalledTimes(2));
+    await act(async () => fail(new Error("late 503")));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText("Тумба ТБ-2")).toBeInTheDocument();
+  });
+  it("keeps the new BOM draft and prevents duplicate writes while acknowledgement is pending", async () => {
+    let done!: (value: null) => void;
+    asMock(bom.createBom).mockReturnValue(new Promise(resolve => { done = resolve; }));
+    render(<BomPanel initial={boms} />);
+    await waitFor(() => expect(bom.fetchBoms).toHaveBeenCalled());
+    const input = screen.getByPlaceholderText("Изделие новой спецификации");
+    fireEvent.change(input, { target: { value: "Сборка 24В" } });
+    fireEvent.change(screen.getByPlaceholderText("Версия (v1)"), { target: { value: "v4" } });
+    const submit = screen.getByRole("button", { name: /Спецификация/ });
+    fireEvent.click(submit); fireEvent.click(submit);
+    expect(input).toBeDisabled();
+    await act(async () => done(null));
+    expect(bom.createBom).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert")).toHaveTextContent("не подтверждено");
+    expect(input).toHaveValue("Сборка 24В");
+    expect(screen.getByPlaceholderText("Версия (v1)")).toHaveValue("v4");
+  });
+
+  it("keeps a component draft after a failed write and rejects an invalid norm", async () => {
+    asMock(bom.addBomItem).mockResolvedValue(false);
+    render(<BomPanel initial={boms} />);
+    fireEvent.click(screen.getByText("Стеллаж СТ-1"));
+    await screen.findByText("Состав изделия");
+    const component = screen.getByPlaceholderText("Комплектующее");
+    const norm = screen.getByPlaceholderText("Норма");
+    fireEvent.change(component, { target: { value: "Ячейка 18650" } });
+    fireEvent.change(norm, { target: { value: "-2" } });
+    fireEvent.click(screen.getByRole("button", { name: /Позиция/ }));
+    expect(bom.addBomItem).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("числами");
+    fireEvent.change(norm, { target: { value: "2,5" } });
+    fireEvent.click(screen.getByRole("button", { name: /Позиция/ }));
+    await screen.findByText(/Изменение спецификации не подтверждено/);
+    expect(component).toHaveValue("Ячейка 18650");
+    expect(norm).toHaveValue("2,5");
+  });
+
+  it.each(["approve", "delete"])("shows failed %s acknowledgement and preserves the BOM", async action => {
+    asMock(action === "approve" ? bom.approveBom : bom.deleteBom).mockResolvedValue(false);
+    render(<BomPanel initial={boms} />);
+    fireEvent.click(screen.getAllByTitle(action === "approve" ? "Утвердить спецификацию" : "Удалить спецификацию")[0]);
+    expect(await screen.findByRole("alert")).toHaveTextContent("не подтверждено");
+    expect(screen.getByText("Стеллаж СТ-1")).toBeInTheDocument();
+    expect(screen.getByText("Черновик")).toBeInTheDocument();
+  });
+
+  it("reports unavailable composition and reloads it instead of permanent loading", async () => {
+    asMock(bom.fetchBom).mockResolvedValueOnce(null).mockResolvedValue(detail1);
+    render(<BomPanel initial={boms} />);
+    fireEvent.click(screen.getByText("Стеллаж СТ-1"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("состав");
+    expect(screen.queryByText("Загрузка состава…")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Обновить спецификации" }));
+    expect(await screen.findByText("Стойка 2м")).toBeInTheDocument();
+  });
+
+  it("does not mix a late composition A with the selected BOM B", async () => {
+    let done!: (value: BomDetail) => void;
+    asMock(bom.fetchBom).mockReturnValueOnce(new Promise(resolve => { done = resolve; }))
+      .mockResolvedValue({ ...boms[1], items: [{ ...detail1.items[0], component: "Компонент B", bom_id: 2 }] });
+    render(<BomPanel initial={boms} />);
+    fireEvent.click(screen.getByText("Стеллаж СТ-1"));
+    fireEvent.click(screen.getByText("Тумба ТБ-2"));
+    await screen.findByText("Компонент B");
+    await act(async () => done(detail1));
+    expect(screen.queryByText("Стойка 2м")).not.toBeInTheDocument();
+    expect(screen.getByText("Компонент B")).toBeInTheDocument();
+  });
+
+  it("keeps the loaded list during read failure and searches product and version", async () => {
+    asMock(bom.fetchBoms).mockRejectedValue(new Error("BOM API unavailable"));
+    render(<BomPanel initial={boms} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("ранее загруженные");
+    fireEvent.change(screen.getByLabelText("Поиск спецификации"), { target: { value: "v2" } });
+    expect(screen.getByText("Тумба ТБ-2")).toBeInTheDocument();
+    expect(screen.queryByText("Стеллаж СТ-1")).not.toBeInTheDocument();
+  });
   it("рендерит KPI, строки спецификаций, статусы и обеспеченность", async () => {
     render(<BomPanel initial={boms} />);
     await waitFor(() => expect(bom.fetchBoms).toHaveBeenCalled());

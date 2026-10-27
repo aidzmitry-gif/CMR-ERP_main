@@ -1,8 +1,6 @@
-// Домен «RFQ / тендер закупки» поверх backend-API `/procurement/rfq`.
+// Домен «RFQ / тендер закупки» поверх API выбранного юрлица.
 // Запрос цен → предложения поставщиков (цена/срок/incoterms) → выбор победителя (award).
 // Бэкенд сортирует предложения по цене и помечает лучшую (best_bid_id) + эмитит rfq.awarded.
-
-const BASE = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 export interface RfqBid {
   id: number;
@@ -17,6 +15,9 @@ export interface RfqBid {
 
 export interface Rfq {
   id: number;
+  number: string;
+  organization_id: number;
+  request_key: string;
   item: string;
   sku_code: string;
   qty: number;
@@ -26,6 +27,8 @@ export interface Rfq {
   bids: RfqBid[];
   best_bid_id: number | null;
 }
+
+export interface RfqPage { organization_id: number; items: Rfq[]; next_after_id: number | null }
 
 const STATUS_LABEL: Record<string, string> = {
   open: "Открыт",
@@ -43,75 +46,68 @@ export function bestBidId(bids: RfqBid[]): number | null {
   return bids.reduce((best, b) => (b.price_byn < best.price_byn ? b : best)).id;
 }
 
-function roleHeaders(roles?: string): Record<string, string> | undefined {
-  return roles ? { "X-User-Roles": roles } : undefined;
-}
-
-export async function fetchRfqsServer(roles?: string): Promise<Rfq[]> {
-  try {
-    const res = await fetch(`${BASE}/procurement/rfq`, { cache: "no-store", headers: roleHeaders(roles) });
-    if (!res.ok) return [];
-    return (await res.json()) as Rfq[];
-  } catch {
-    return [];
-  }
-}
-
 /** `null` при ошибке — чтобы не затереть SSR-данные пустым списком. */
-export async function fetchRfqs(): Promise<Rfq[] | null> {
+export async function fetchRfqs(organizationId: number, afterId = 0): Promise<RfqPage | null> {
   try {
-    const res = await fetch("/api/procurement/rfq", { cache: "no-store" });
+    const res = await fetch(`/api/procurement/organizations/${organizationId}/rfq?after_id=${afterId}`, { cache: "no-store" });
     if (!res.ok) return null;
-    return (await res.json()) as Rfq[];
+    const page = await res.json() as RfqPage;
+    if (page.organization_id !== organizationId || !Array.isArray(page.items) ||
+        page.items.some((row) => row.organization_id !== organizationId) ||
+        (page.next_after_id !== null && (!Number.isSafeInteger(page.next_after_id) || page.next_after_id <= afterId))) return null;
+    return page;
   } catch {
     return null;
   }
 }
 
-export async function createRfq(input: {
-  item: string;
-  sku_code?: string;
-  qty?: number;
+export async function createRfq(organizationId: number, input: {
+  request_key: string;
+  request_id: number;
 }): Promise<Rfq | null> {
   try {
-    const res = await fetch("/api/procurement/rfq", {
+    const res = await fetch(`/api/procurement/organizations/${organizationId}/rfq`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     });
     if (!res.ok) return null;
-    return (await res.json()) as Rfq;
+    const row = await res.json() as Rfq;
+    return row.organization_id === organizationId ? row : null;
   } catch {
     return null;
   }
 }
 
 export async function addBid(
+  organizationId: number,
   rfqId: number,
-  bid: { supplier_id?: number | null; price_byn: number; lead_time_days?: number | null; incoterms?: string; note?: string },
+  bid: { bid_key: string; supplier_id: number; price_byn: string; lead_time_days?: number | null; incoterms?: string; note?: string },
 ): Promise<Rfq | null> {
   try {
-    const res = await fetch(`/api/procurement/rfq/${rfqId}/bids`, {
+    const res = await fetch(`/api/procurement/organizations/${organizationId}/rfq/${rfqId}/bids`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(bid),
     });
     if (!res.ok) return null;
-    return (await res.json()) as Rfq;
+    const row = await res.json() as Rfq;
+    return row.organization_id === organizationId && row.id === rfqId ? row : null;
   } catch {
     return null;
   }
 }
 
-export async function awardRfq(rfqId: number, bidId: number): Promise<Rfq | null> {
+export async function awardRfq(organizationId: number, rfqId: number, bidId: number): Promise<Rfq | null> {
   try {
-    const res = await fetch(`/api/procurement/rfq/${rfqId}/award`, {
+    const res = await fetch(`/api/procurement/organizations/${organizationId}/rfq/${rfqId}/award`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ bid_id: bidId }),
     });
     if (!res.ok) return null;
-    return (await res.json()) as Rfq;
+    const row = await res.json() as Rfq;
+    return row.organization_id === organizationId && row.id === rfqId ? row : null;
   } catch {
     return null;
   }

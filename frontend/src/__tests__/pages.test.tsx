@@ -1,5 +1,9 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { fetchDashboardServer } from "@/lib/wms-warehouse";
+vi.mock("@/lib/auth-headers-server", () => ({
+  backendAuthHeaders: vi.fn().mockResolvedValue({ Authorization: "Bearer synthetic-token" }),
+}));
 
 // Страницы App Router — тонкие обёртки: дочерние компоненты и API мокаем,
 // проверяем, что страница собирает данные и монтирует нужный компонент.
@@ -14,7 +18,7 @@ vi.mock("next/font/google", () => ({ Inter: () => ({ variable: "mock-font", clas
 vi.mock("@/components/app-shell", () => ({
   AppShell: ({ children }: { children: React.ReactNode }) => <div data-testid="shell">{children}</div>,
 }));
-vi.mock("@/lib/role-server", () => ({ currentRole: async () => "director", currentAccessToken: async () => null, currentUserName: async () => "Тест" }));
+vi.mock("@/lib/role-server", () => ({ currentRole: async () => "director", currentAccessToken: async () => null, currentUserName: async () => "Тест", currentDevUsername: async () => "test" }));
 vi.mock("@/components/erp/module-board", () => ({
   ModuleBoard: ({ title }: { title: string }) => <div>board:{title}</div>,
 }));
@@ -30,6 +34,10 @@ vi.mock("@/components/kanban/deals-workspace", () => ({ DealsWorkspace: () => <d
 vi.mock("@/components/leads/leads-workspace", () => ({ LeadsWorkspace: () => <div>leads-workspace</div> }));
 vi.mock("@/components/owner-ai-insight", () => ({ OwnerAiInsight: () => <div>owner-ai-insight</div> }));
 vi.mock("@/components/channels", () => ({ ChannelButtons: () => <div>channels</div> }));
+vi.mock("@/components/kanban/lose-deal-modal", () => ({ DealLossControl: () => <div>loss-control</div> }));
+vi.mock("@/components/erp/procurement-request-plan", () => ({ ProcurementRequestPlan: ({ suggestedOrg }: { suggestedOrg?: string }) => <div>procurement-plan:{suggestedOrg ?? ""}</div> }));
+vi.mock("@/components/erp/procurement-kanban", () => ({ ProcurementKanban: ({ suggestedOrg }: { suggestedOrg?: string }) => <div>procurement-kanban:{suggestedOrg ?? ""}</div> }));
+vi.mock("@/components/erp/procurement-nav", () => ({ ProcurementNav: () => <div>procurement-nav</div> }));
 vi.mock("@/components/deal-actions", () => ({ DealActions: () => <div>actions</div> }));
 vi.mock("@/components/deal-ai-assistant", () => ({ DealAiAssistant: () => <div>ai</div> }));
 vi.mock("@/components/deal-approvals", () => ({ DealApprovals: () => <div>approvals</div> }));
@@ -53,6 +61,7 @@ vi.mock("@/components/erp/office-view", () => ({
   OfficeView: ({ board }: { board: React.ReactNode }) => <div>{board}</div>,
 }));
 vi.mock("@/components/erp/finance-view", () => ({ FinanceView: () => <div>finance-view</div> }));
+vi.mock("@/components/erp/accounting-view", () => ({ AccountingView: ({ suggestedOrg }: { suggestedOrg?: string }) => <div>accounting-view:{suggestedOrg ?? ""}</div> }));
 // MarketingPage рендерит ModuleBoard + отдельный async-board кампаний — мокаем последний.
 vi.mock("@/components/erp/marketing-campaign-board", () => ({
   MarketingCampaignBoard: () => <div>campaign-board</div>,
@@ -88,6 +97,7 @@ import LeadsPage from "@/app/crm/leads/page";
 import OwnerPage from "@/app/crm/owner/page";
 import AnalyticsPage from "@/app/erp/analytics/page";
 import FinancePage from "@/app/erp/finance/page";
+import AccountingPage from "@/app/erp/accounting/page";
 import HrPage from "@/app/erp/hr/page";
 import LogisticsPage from "@/app/erp/logistics/page";
 import MarketingPage from "@/app/erp/marketing/page";
@@ -133,6 +143,22 @@ describe("страницы (src/app)", () => {
     expect(screen.getByText("deal-calls")).toBeInTheDocument();
   });
 
+  it("DealDetailPage не выдаёт сумму сделки за счёт и не показывает технические заглушки", async () => {
+    const detail = await api.fetchDealDetail("1");
+    mock(api.fetchDealDetail).mockResolvedValueOnce({ ...detail, amount: 300 });
+    const { container } = render(await DealDetailPage({ params: Promise.resolve({ id: "1" }) }));
+    expect(screen.queryByText("К оплате")).toBeNull();
+    expect(screen.queryByText("из счёта ERP")).toBeNull();
+    expect(container.textContent).not.toMatch(/pay\.|ship\.|memory|invoice-1c|MDM|WMS|logistics|procurement|sales\.deal|d\.regular|бэкенд|API/);
+    expect(screen.queryByText("Постоянный клиент")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Самовывоз" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Доставка по адресу" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Наша машина" })).toBeNull();
+    expect(screen.getByText("Сведения о рейсе и отгрузке пока недоступны.")).toBeInTheDocument();
+    expect(screen.getByText("Способ, адрес и дата доставки пока не получены.")).toBeInTheDocument();
+    expect(screen.getAllByText("documents")).toHaveLength(1);
+  });
+
   it("DealDetailPage stops before rendering a denied or missing card", async () => {
     mock(api.fetchDealDetail).mockResolvedValueOnce(null);
     await expect(DealDetailPage({ params: Promise.resolve({ id: "1" }) })).rejects.toThrow("NEXT_NOT_FOUND");
@@ -162,23 +188,32 @@ describe("страницы (src/app)", () => {
     expect(screen.getByText(/Нет данных/)).toBeInTheDocument();
   });
 
-  it("OwnerPage с пустыми KPI показывает 0% плана", async () => {
+  it("OwnerPage с пустыми KPI показывает отсутствие данных о плане", async () => {
     mock(api.fetchOwnerDashboard).mockResolvedValue({
       metrics: { approvals_pending: 0, approvals_total: 0, audit_count: 0, events_count: 0, counterparties: 0, skus: 0, modules: [], widgets: [] },
       stages: [],
       kpis: [],
     });
     render(await OwnerPage());
-    expect(screen.getByText("0%")).toBeInTheDocument();
+    expect(screen.getByText("Нет данных")).toBeInTheDocument();
+    expect(screen.queryByText("0%")).not.toBeInTheDocument();
   });
 
   it("ERP-воронки монтируют FunnelBoard", () => {
     // WMS больше не воронка (bespoke-дашборд, async) — вынесен в отдельный тест ниже.
-    for (const Page of [ProcurementPage, ProductionPage, HrPage, OfficePage, LegalPage, KnowledgePage]) {
+    for (const Page of [ProductionPage, HrPage, OfficePage, LegalPage, KnowledgePage]) {
       const { unmount } = render(<Page />);
       expect(screen.getByText(/^funnel:/)).toBeInTheDocument();
       unmount();
     }
+  });
+
+  it("Закупки передают только строковый org в канбан закупок", async () => {
+    const { unmount } = render(await ProcurementPage({ searchParams: Promise.resolve({ org: "2" }) }));
+    expect(screen.getByText("procurement-kanban:2")).toBeInTheDocument();
+    unmount();
+    render(await ProcurementPage({ searchParams: Promise.resolve({ org: ["1", "2"] }) }));
+    expect(screen.getByText("procurement-kanban:")).toBeInTheDocument();
   });
 
   it("ERP-таблицы монтируют ModuleBoard", () => {
@@ -192,12 +227,21 @@ describe("страницы (src/app)", () => {
 
   it("WmsPage монтирует дашборд склада (bespoke, async)", async () => {
     render(await WmsPage());
+    expect(fetchDashboardServer).toHaveBeenCalledWith("director", { Authorization: "Bearer synthetic-token" });
     expect(screen.getByText("wms-dashboard")).toBeInTheDocument();
   });
 
-  it("FinancePage монтирует финансовый view (bespoke)", () => {
-    render(<FinancePage />);
+  it("FinancePage монтирует финансовый view (bespoke, async)", async () => {
+    render(await FinancePage({}));
     expect(screen.getByText("finance-view")).toBeInTheDocument();
+  });
+
+  it("AccountingPage передаёт только одиночный строковый org", async () => {
+    render(await AccountingPage({ searchParams: Promise.resolve({ org: "2" }) }));
+    expect(screen.getByText("accounting-view:2")).toBeInTheDocument();
+
+    render(await AccountingPage({ searchParams: Promise.resolve({ org: ["1", "2"] }) }));
+    expect(screen.getByText("accounting-view:")).toBeInTheDocument();
   });
 
   it("LogisticsPage монтирует вкладки логистики", () => {

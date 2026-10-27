@@ -16,6 +16,12 @@ import { rowsSource, sortedDepartments } from "@/lib/spravochniki-catalog";
 // Hub cards — shortcuts to the other reference screens.
 const HUB_LINKS = [
   {
+    href: "/erp/spravochniki/accounts",
+    label: "План счетов",
+    badge: "№",
+    desc: "Счета и субсчета Беларуси, рабочий план по юрлицам и аналитика",
+  },
+  {
     href: "/erp/spravochniki/sku",
     label: "Номенклатура (SKU)",
     badge: "📦",

@@ -21,6 +21,7 @@ const SOURCE_LABELS: Record<string, string> = {
 export function WmsReceipts({ initial }: { initial: Receipt[] }) {
   return (
     <div className="flex-1 overflow-auto p-6">
+      <Link href="/erp/wms/receipts/reconciliation" className="mb-3 inline-block text-sm text-accent-ink underline">Сопоставить приёмки без юрлица</Link>
       <p className="text-sm text-muted">
         Документы приёмки. Приход на остаток пишется только после QC-приёмки (брак не идёт
         на свободный остаток). Источник прихода — закупка/производство/вручную.

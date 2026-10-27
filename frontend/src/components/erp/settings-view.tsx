@@ -12,6 +12,10 @@ interface SystemInfo {
   widgets: { key: string; title: string }[];
 }
 
+const WORKSPACE_MODULES: Record<string, { label: string; href: string }> = {
+  accounting: { label: "Бухгалтерия", href: "/erp/accounting" },
+};
+
 export function SettingsView() {
   const [sys, setSys] = useState<SystemInfo | null>(null);
 
@@ -51,14 +55,26 @@ export function SettingsView() {
               Подключённые модули ({sys.loaded_modules.length})
             </h2>
             <div className="mt-3 flex flex-wrap gap-2">
-              {sys.loaded_modules.map((m) => (
-                <span
-                  key={m}
-                  className="rounded-lg bg-blue-50 px-3 py-1 text-sm font-medium text-accent-ink"
-                >
-                  {m}
-                </span>
-              ))}
+              {sys.loaded_modules.map((m) => {
+                const workspace = WORKSPACE_MODULES[m];
+                return workspace ? (
+                  <Link
+                    key={m}
+                    href={workspace.href}
+                    aria-label={`Открыть ${workspace.label}`}
+                    className="rounded-lg bg-blue-50 px-3 py-1 text-sm font-medium text-accent-ink underline decoration-accent/40 underline-offset-2 hover:bg-blue-100"
+                  >
+                    {workspace.label} <span className="text-xs text-muted">· {m}</span>
+                  </Link>
+                ) : (
+                  <span
+                    key={m}
+                    className="rounded-lg bg-blue-50 px-3 py-1 text-sm font-medium text-accent-ink"
+                  >
+                    {m}
+                  </span>
+                );
+              })}
             </div>
           </section>
 

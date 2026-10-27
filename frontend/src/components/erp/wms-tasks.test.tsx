@@ -191,4 +191,25 @@ describe("WmsTasks", () => {
     resolveFn(true);
     await waitFor(() => expect(wms.fetchTasks).toHaveBeenCalled());
   });
+
+  it("keeps current tasks and unlocks when mutation fails", async () => {
+    asMock(wms.patchTask).mockResolvedValue(false);
+    render(<WmsTasks initial={tasks} />);
+    fireEvent.click(screen.getByRole("button", { name: "В работу" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось изменить задание");
+    expect(wms.fetchTasks).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "В работу" })).not.toBeDisabled();
+    expect(screen.queryByText("Задач нет")).not.toBeInTheDocument();
+  });
+
+  it("retains the list on refresh failure and allows a read-only retry", async () => {
+    asMock(wms.fetchTasks).mockRejectedValueOnce(new Error("Недоступно"));
+    render(<WmsTasks initial={tasks} />);
+    fireEvent.click(screen.getByRole("button", { name: "Обновить задания" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Недоступно");
+    expect(screen.queryByText("Задач нет")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Обновить задания" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(wms.patchTask).not.toHaveBeenCalled();
+  });
 });

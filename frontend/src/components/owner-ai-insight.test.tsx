@@ -1,27 +1,31 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, expect, it, vi } from "vitest";
 vi.mock("@/lib/api", () => ({ fetchOwnerInsight: vi.fn() }));
+import { fetchOwnerInsight } from "@/lib/api";
+import { OwnerAiInsight } from "./owner-ai-insight";
+beforeEach(() => vi.mocked(fetchOwnerInsight).mockReset());
 
-import { OwnerAiInsight } from "@/components/owner-ai-insight";
-import * as api from "@/lib/api";
+it("reports a failed insight as unavailable and supports retry", async () => {
+  vi.mocked(fetchOwnerInsight).mockResolvedValueOnce(null).mockResolvedValueOnce("Проверьте просроченную оплату");
+  render(<OwnerAiInsight />);
+  fireEvent.click(screen.getByRole("button", { name: "Сгенерировать" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("недоступна");
+  expect(screen.queryByText(/feature-flag/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Сгенерировать" }));
+  expect(await screen.findByText("Проверьте просроченную оплату")).toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
 
-const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
-beforeEach(() => vi.clearAllMocks());
-
-describe("OwnerAiInsight", () => {
-  it("генерирует AI-инсайт", async () => {
-    mock(api.fetchOwnerInsight).mockResolvedValue("Здоровье бизнеса в норме");
-    render(<OwnerAiInsight />);
-    fireEvent.click(screen.getByText("Сгенерировать"));
-    await waitFor(() => expect(api.fetchOwnerInsight).toHaveBeenCalled());
-    expect(await screen.findByText("Здоровье бизнеса в норме")).toBeInTheDocument();
-  });
-
-  it("показывает заглушку при выключенном AI", async () => {
-    mock(api.fetchOwnerInsight).mockResolvedValue(null);
-    render(<OwnerAiInsight />);
-    fireEvent.click(screen.getByText("Сгенерировать"));
-    expect(await screen.findByText(/AI-слой выключен/)).toBeInTheDocument();
-  });
+it("hides an old insight during a new request and after a network failure", async () => {
+  let done!: (value: string | null) => void;
+  vi.mocked(fetchOwnerInsight).mockResolvedValueOnce("Старая сводка")
+    .mockReturnValueOnce(new Promise(resolve => { done = resolve; }));
+  render(<OwnerAiInsight />);
+  fireEvent.click(screen.getByRole("button", { name: "Сгенерировать" }));
+  await screen.findByText("Старая сводка");
+  fireEvent.click(screen.getByRole("button", { name: "Сгенерировать" }));
+  expect(screen.queryByText("Старая сводка")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Анализ…" })).toBeDisabled();
+  await act(async () => done(null));
+  expect(screen.getByRole("alert")).toBeInTheDocument();
 });

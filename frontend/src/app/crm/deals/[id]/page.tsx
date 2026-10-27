@@ -1,3 +1,5 @@
+import { DealLossControl } from "@/components/kanban/lose-deal-modal";
+import { DealDocumentRegister } from "@/components/deal-document-register";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -11,29 +13,35 @@ import { DealClient360 } from "@/components/deal-client-360";
 import { DealContacts } from "@/components/deal-contacts";
 import { DealLinkedDeals } from "@/components/deal-linked-deals";
 import { DealEditButton } from "@/components/deal-edit-button";
+import { DealFieldHistory } from "@/components/deal-field-history";
 import { DealDocuments } from "@/components/deal-documents";
+import { DocumentEmailPanel } from "@/components/kanban/document-email-panel";
 import { DealHandoffBlock } from "@/components/deal-handoff";
 import { DealMetrics } from "@/components/deal-metrics";
 import { DealItems } from "@/components/deal-items";
 import { DealTasks } from "@/components/deal-tasks";
 import { DealMessages } from "@/components/deal-messages";
+import { DealTimelineComments } from "@/components/deal-timeline-comments";
 import { PriorityBadge } from "@/components/priority-badge";
 import { SourceTag } from "@/components/source-tag";
-import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { Money } from "@/components/money";
 import { LOSS_REASONS } from "@/lib/board";
 import { fetchDealDetail } from "@/lib/api";
 import { formatNextStep } from "@/lib/format";
-import { currentAccessToken, currentRole } from "@/lib/role-server";
+import { currentAccessToken, currentDevUsername, currentRole } from "@/lib/role-server";
 import { PROGRESSION_STAGES, STAGE_BY_ID } from "@/lib/sales-stages";
 import type { DealDetail } from "@/lib/types";
 
-export default async function DealDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function DealDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<{ org?: string; invoice?: string }> }) {
   const { id } = await params;
+  const query = await searchParams ?? {};
+  const positive = (v: unknown): v is string => typeof v === "string" && /^[1-9]\d*$/.test(v) && Number.isSafeInteger(Number(v));
+  const documentOrg = positive(query.org) ? query.org : undefined;
+  const documentId = documentOrg && positive(query.invoice) ? Number(query.invoice) : undefined;
   const roles = await currentRole();
   const token = (await currentAccessToken()) ?? undefined;
-  const d = await fetchDealDetail(id, roles, token);
+  const username = await currentDevUsername();
+  const d = await fetchDealDetail(id, roles, token, username);
   if (!d) notFound();
   // Активная стадия — из бэка (DealDetail.stage.idx); fallback 0 при отсутствии стадии.
   const stageIdx = d.stage?.idx ?? 0;
@@ -72,7 +80,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
                   />
                 ) : (
                   <span className="inline-flex items-center rounded-md bg-sunken px-1.5 py-0.5 text-[11px] font-semibold text-faint">
-                    контрагент · не найден в MDM-витрине
+                    Данные контрагента не получены
                   </span>
                 )}
               </div>
@@ -116,6 +124,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             <div className="flex flex-wrap gap-2">
               <DealEditButton
                 dealId={id}
+                editToken={d.editToken}
                 title={d.description}
                 amount={d.amount}
                 nextStep={d.nextStep}
@@ -125,6 +134,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
                 penaltyCapPct={d.penaltyCapPct ?? null}
                 penaltyTerms={d.penaltyTerms ?? ""}
               />
+              <DealFieldHistory dealId={id} />
             </div>
           </div>
 
@@ -149,20 +159,23 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             <NextStepStub nextStep={d.nextStep} datetime={d.datetime} contact={d.contact} />
             <ShipStub />
             <DealCalls dealId={id} roles={roles} accessToken={token} />
-            <PayStub amount={d.amount} />
             <DeliveryStub />
             <DealItems dealId={id} />
             <DealTasks dealId={id} />
             <DealDocuments dealId={id} />
+            <div id="document-register"><DealDocumentRegister dealId={id} org={documentOrg} initialDocumentId={documentId} /></div>
+            <DocumentEmailPanel dealId={id} />
           </div>
 
           {/* RIGHT — клиент / постоянный / переписка / связанные / действия */}
           <div className="min-w-0 space-y-4">
-            <DealClient360 company={d.company} roles={roles} />
+            <DealClient360 counterpartyId={d.counterparty?.id} roles={roles} />
             <DealContacts dealId={id} />
-            <RegStub />
             <DealMessages dealId={id} />
-            <DealLinkedDeals company={d.company} currentId={id} roles={roles} />
+            <DealLossControl dealId={id} dealLabel={`№ ${d.number} · ${d.company}`} />
+            <DealTimelineComments dealId={id} />
+            <DealLinkedDeals key={`related-deals:${d.counterparty?.id ?? "none"}:${id}`}
+              counterpartyId={d.counterparty?.id} currentId={id} />
             <DealApprovals dealId={id} />
             <DealActions dealId={id} starred={d.starred} priority={d.priority} />
             <Card className="px-[18px] py-[14px]">
@@ -295,109 +308,23 @@ function NextStepStub({
 }
 
 function ShipStub() {
-  // STUB: «🚚 Сквозная машина / отгрузка» — три источника данных:
-  //   logistics (рейс / ETA / route), 1С OData (резерв / статус склада),
-  //   procurement/ZAK (сквозной груз нескольких сделок одним рейсом).
   return (
     <Card>
       <PanelHeader icon="🚚" title="Сквозная машина / отгрузка" />
       <CardBody className="space-y-2">
-        <ul className="space-y-1 text-[12px] text-muted">
-          <li>
-            <span aria-hidden>🚚</span>{" "}
-            <b className="text-ink">Рейс / ETA / маршрут</b> — модуль <code>logistics</code>
-          </li>
-          <li>
-            <span aria-hidden>📦</span>{" "}
-            <b className="text-ink">Резерв / статус склада</b> — 1С OData (источник истины, см.
-            memory <code>invoice-1c-reserve-shipment</code>)
-          </li>
-          <li>
-            <span aria-hidden>🔗</span>{" "}
-            <b className="text-ink">Сквозной груз нескольких сделок</b> — модуль{" "}
-            <code>procurement</code> (ZAK)
-          </li>
-        </ul>
-        <StubNote>
-          подключим, когда бэкенд начнёт отдавать{" "}
-          <code>ship.{`{tripId, eta, route, reserve1cDocId, warehouseStatus, cargoTripDealIds}`}</code>{" "}
-          в DealDetail.
-        </StubNote>
-      </CardBody>
-    </Card>
-  );
-}
-
-function PayStub({ amount }: { amount: number }) {
-  // STUB: «к оплате» — из счёта ERP; «оплачено» — факт из 1С (банк/касса).
-  // Прогресс-бар вернём, когда придёт pay.paid: бессмысленно держать пустой 0%-bar в DOM.
-  return (
-    <Card>
-      <PanelHeader icon="💵" title="Оплата и деньги" />
-      <CardBody className="space-y-2">
-        <div className="grid grid-cols-2 gap-2.5">
-          <div className="rounded-[10px] bg-sunken px-3 py-2.5">
-            <div className="text-[11px] text-muted">К оплате</div>
-            <div className="mt-0.5 text-[16px] font-extrabold tabular-nums text-ink">
-              <Money byn={amount} />
-            </div>
-            <div className="mt-0.5 text-[10px] text-faint">из счёта ERP</div>
-          </div>
-          <div className="rounded-[10px] bg-sunken px-3 py-2.5">
-            <div className="text-[11px] text-muted">Оплачено</div>
-            <div className="mt-0.5 text-[16px] font-extrabold tabular-nums text-faint">—</div>
-            <div className="mt-0.5 text-[10px] text-faint">из 1С (банк/касса)</div>
-          </div>
-        </div>
-        <StubNote>
-          подключим, когда payments появятся в API (<code>pay.invoiced</code> из ERP,{" "}
-          <code>pay.paid</code> из 1С-фида).
-        </StubNote>
+        <StubNote>Сведения о рейсе и отгрузке пока недоступны.</StubNote>
       </CardBody>
     </Card>
   );
 }
 
 function DeliveryStub() {
-  // STUB: без визуально-«выбранной» кнопки (a11y: имитация selected без aria-checked сбивает SR).
   return (
     <Card>
       <PanelHeader icon="📦" title="Доставка" />
       <CardBody className="space-y-2">
-        <div className="flex gap-2">
-          {["Самовывоз", "Доставка по адресу", "Наша машина"].map((opt) => (
-            <Button key={opt} variant="secondary" size="sm" disabled className="flex-1">
-              {opt}
-            </Button>
-          ))}
-        </div>
-        <StubNote>
-          метод / адрес / дата — CRM (ввод продавцом); склад отгрузки — справочник WMS
-          (синхронизирован с 1С, резерв создаётся в 1С); рейс / машина — модуль{" "}
-          <code>logistics</code>.
-        </StubNote>
+        <StubNote>Способ, адрес и дата доставки пока не получены.</StubNote>
       </CardBody>
     </Card>
   );
 }
-
-function RegStub() {
-  // STUB: «★ Постоянный клиент». В прототипе условно рендерится при d.reg=true.
-  // TODO: показывать только при d.regular?.isRegular; пока всегда виден с note.
-  return (
-    <Card>
-      <PanelHeader icon="★" title="Постоянный клиент" />
-      <CardBody className="space-y-2">
-        <div className="text-[11px] text-faint">
-          плашка будет показываться только для постоянных клиентов —{" "}
-          <code>d.regular?.isRegular === true</code>
-        </div>
-        <StubNote>
-          счётчик заказов — из CRM (<code>sales.deal</code>); LTV / средний чек — из 1С (реализации).
-          Подключим, когда LTV-витрина начнёт отдавать regular-флаг.
-        </StubNote>
-      </CardBody>
-    </Card>
-  );
-}
-
