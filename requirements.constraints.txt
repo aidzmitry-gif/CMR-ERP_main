@@ -36,7 +36,7 @@ PyYAML==6.0.3
 requests==2.34.2
 requests-oauthlib==2.0.0
 SQLAlchemy==2.0.52
-starlette==1.6.0
+starlette==1.9.0
 tinycss2==1.5.1
 tinyhtml5==2.1.0
 typing-inspection==0.4.4
