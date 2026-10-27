@@ -149,7 +149,7 @@ def build_simple_ref_router(
     """Роутер простого справочника: list (с архивом), create, patch, archive."""
     router = APIRouter()
 
-    @router.get("")
+    @router.get("", dependencies=[Depends(require_permission("refs.view"))])
     async def list_items(
         archived: bool = False, session: AsyncSession = Depends(get_session)
     ) -> list[dict]:
@@ -306,7 +306,7 @@ def build_versioned_ref_router(
     """Роутер версионного справочника (SCD2): список версий, current, as-of, добавить версию."""
     router = APIRouter()
 
-    @router.get("")
+    @router.get("", dependencies=[Depends(require_permission("refs.view"))])
     async def list_versions(
         key: str | None = None, session: AsyncSession = Depends(get_session)
     ) -> list[dict]:
@@ -316,14 +316,14 @@ def build_versioned_ref_router(
         query = query.order_by(getattr(model, key_field), model.start_date.desc())
         return [_row(o, list_fields) for o in (await session.execute(query)).scalars().all()]
 
-    @router.get("/current")
+    @router.get("/current", dependencies=[Depends(require_permission("refs.view"))])
     async def current_version(key: str, session: AsyncSession = Depends(get_session)) -> dict:
         obj = await scd2.current_version(session, model, key_field, key)
         if obj is None:
             raise HTTPException(status_code=404, detail="нет текущей версии")
         return _row(obj, list_fields)
 
-    @router.get("/as-of")
+    @router.get("/as-of", dependencies=[Depends(require_permission("refs.view"))])
     async def version_as_of(
         key: str, on: date, session: AsyncSession = Depends(get_session)
     ) -> dict:

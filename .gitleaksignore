@@ -1,0 +1,29 @@
+# Reviewed historical false positives only; never suppress a path or a rule.
+# Checksums/request IDs, six idempotency IDs, four documented password placeholders,
+# and one curl GET with no authentication (only a ${TOKEN} placeholder).
+# code checksum
+99214579e0662c48e77e4e9d3f35e5f6bb7035ef:reports/email-send-001/evidence/verification.json:generic-api-key:33
+# operation request key
+dd546243c84d83f9059b7b4742346b7ff10b91ac:.harness/run_email_acceptance.py:generic-api-key:147
+# idempotency operation identifier
+f6e0cfba080bd258cc7f996dacf0d931944fb867:tests/test_identity_invitation.py:generic-api-key:77
+# idempotency operation identifier
+f6e0cfba080bd258cc7f996dacf0d931944fb867:tests/test_identity_invitation.py:generic-api-key:100
+# idempotency operation identifier
+49223b1aa067e9b7e225bcbd35d40f0336b68f51:tests/test_identity_invitation.py:generic-api-key:268
+# idempotency operation identifier
+71793bc6a9a01b48e35a8a60335873b5741ae9c7:tests/test_crm_staff.py:generic-api-key:190
+# idempotency operation identifier
+bbc20250497c932ecb0e79e4dafc1465449a134b:tests/test_identity_invitation.py:generic-api-key:158
+# idempotency operation identifier
+bbc20250497c932ecb0e79e4dafc1465449a134b:tests/test_identity_invitation.py:generic-api-key:212
+# curl GET without credentials; token is a shell variable
+37f23e9e44268c50251cbcacb905b57c4b3867bd:coordination/caddy-telephony-snippet.md:curl-auth-user:34
+# documented placeholder credentials
+2ecfcbad99215190ce833d187255290018abecd5:ТЗ_специалисту_1С_OData.md:curl-auth-user:62
+# documented placeholder credentials
+2ecfcbad99215190ce833d187255290018abecd5:ТЗ_специалисту_1С_OData.md:curl-auth-user:67
+# documented placeholder credentials
+9f2bf3601140affcc4d6eb5eb078d9a52160e7af:connectors/docs/1c-odata-setup.md:curl-auth-user:122
+# documented placeholder credentials
+9f2bf3601140affcc4d6eb5eb078d9a52160e7af:connectors/docs/1c-odata-setup.md:curl-auth-user:129

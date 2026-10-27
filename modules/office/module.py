@@ -5,6 +5,7 @@
 связи модуля (Sales → office, Склад → office, Логистика → office, Финансы → office).
 Исходящие связи office → отделы реализованы emit-ами в ``routes.py``/``events.py``.
 """
+
 from __future__ import annotations
 
 from core.runtime.contract import ModuleContract, Permission, Role, Widget
@@ -17,6 +18,8 @@ PERMISSIONS = [
     Permission("office.doc.write", "Создание и изменение документов"),
     Permission("office.stage.move", "Перевод документа по стадиям воронки"),
     Permission("office.carrier.request", "Создание заявки перевозчику на доставку по РБ"),
+    Permission("office.contract.write", "Создание и изменение договоров"),
+    Permission("office.claim.write", "Создание и изменение претензий"),
 ]
 
 
@@ -33,12 +36,26 @@ class OfficeModule(ModuleContract):
         # RBAC: права и роль офис-менеджера
         core.declare_permissions(PERMISSIONS)
         core.declare_role(Role("Офис-менеджер", permissions=tuple(p.code for p in PERMISSIONS)))
+        # Сохраняем обычный документооборот финансов/помощника, отделяя юридическую запись.
+        for role in ("finance", "assistant"):
+            core.declare_role(
+                Role(
+                    role,
+                    permissions=(
+                        "office.doc.write",
+                        "office.stage.move",
+                        "office.carrier.request",
+                    ),
+                )
+            )
 
         # Входящие связи с отделами — подписки на события шины
-        core.subscribe("sales.deal.won", events.on_deal_won)                    # ← CRM/Sales
+        core.subscribe("sales.deal.won", events.on_deal_won)  # ← CRM/Sales
         core.subscribe("wms.shipment.completed", events.on_shipment_completed)  # ← Склад
         core.subscribe("logistics.delivery.delivered", events.on_delivery_delivered)  # ← Логистика
-        core.subscribe("logistics.delivery.tracking", events.on_delivery_tracking)    # ← Логистика (статус в пути)
+        core.subscribe(
+            "logistics.delivery.tracking", events.on_delivery_tracking
+        )  # ← Логистика (статус в пути)
         core.subscribe("finance.payment.received", events.on_payment_received)  # ← Финансы
 
 

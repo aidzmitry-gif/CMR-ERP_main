@@ -1,4 +1,5 @@
 """HTTP-API модуля Knowledge. Монтируется под префиксом ``/knowledge``."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.runtime.deps import get_session
 from core.runtime.funnel import FunnelBoardOut, FunnelCard, build_board
+from core.services.auth import require_permission
 from modules.knowledge.models import Course, CourseEnrollment
 from modules.knowledge.schemas import (
     CourseCreate,
@@ -56,7 +58,12 @@ async def board(session: AsyncSession = Depends(get_session)) -> FunnelBoardOut:
     return build_board(STAGES, rows, _to_card)
 
 
-@router.post("/courses", response_model=CourseOut, status_code=201)
+@router.post(
+    "/courses",
+    response_model=CourseOut,
+    status_code=201,
+    dependencies=[Depends(require_permission("knowledge.course.write"))],
+)
 async def create_course(payload: CourseCreate, session: AsyncSession = Depends(get_session)):
     """Создать курс. Номер генерируется автоматически, если не задан."""
     obj = Course(**payload.model_dump())
@@ -69,7 +76,11 @@ async def create_course(payload: CourseCreate, session: AsyncSession = Depends(g
     return obj
 
 
-@router.patch("/courses/{course_id}", response_model=CourseOut)
+@router.patch(
+    "/courses/{course_id}",
+    response_model=CourseOut,
+    dependencies=[Depends(require_permission("knowledge.course.write"))],
+)
 async def update_course(
     course_id: int, payload: StageUpdate, session: AsyncSession = Depends(get_session)
 ):
@@ -87,6 +98,7 @@ async def update_course(
 #  Учёт прохождения курсов (назначения сотрудникам)
 # --------------------------------------------------------------------------- #
 
+
 @router.get("/enrollments", response_model=list[CourseEnrollmentOut])
 async def list_enrollments(
     employee_name: str | None = None,
@@ -102,7 +114,12 @@ async def list_enrollments(
     return (await session.execute(q)).scalars().all()
 
 
-@router.post("/enrollments", response_model=CourseEnrollmentOut, status_code=201)
+@router.post(
+    "/enrollments",
+    response_model=CourseEnrollmentOut,
+    status_code=201,
+    dependencies=[Depends(require_permission("knowledge.enrollment.write"))],
+)
 async def create_enrollment(
     payload: CourseEnrollmentCreate,
     session: AsyncSession = Depends(get_session),
@@ -124,7 +141,11 @@ async def get_enrollment(enrollment_id: int, session: AsyncSession = Depends(get
     return obj
 
 
-@router.patch("/enrollments/{enrollment_id}", response_model=CourseEnrollmentOut)
+@router.patch(
+    "/enrollments/{enrollment_id}",
+    response_model=CourseEnrollmentOut,
+    dependencies=[Depends(require_permission("knowledge.enrollment.write"))],
+)
 async def patch_enrollment(
     enrollment_id: int,
     payload: CourseEnrollmentPatch,

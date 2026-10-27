@@ -103,15 +103,19 @@ async def test_deadline_event_without_deal_id_skipped(deadline_app, session):
 # ───────────────────────── обратное планирование от срока + риск ─────────────────────────
 
 
-async def test_plan_auto_derives_target_from_deadline(deadline_app, session, monkeypatch):
-    """План без явной даты: target = самый ранний срок клиента − буфер (3 дня)."""
+@pytest.fixture
+def planning_clock(monkeypatch):
+    """Фиксированные сроки проверяются до начала их планового маршрута."""
     class PlanningClock(datetime):
         @classmethod
         def now(cls, tz=None):
             return cls(2026, 1, 1, tzinfo=tz)
 
-    # Этот сценарий проверяет вывод даты, а не риск уже просроченного старта.
     monkeypatch.setattr(procurement_routes, "datetime", PlanningClock)
+
+
+async def test_plan_auto_derives_target_from_deadline(deadline_app, session, planning_clock):
+    """План без явной даты: target = самый ранний срок клиента − буфер (3 дня)."""
     client, core = deadline_app
     o = await _order(client)
     await _emit_deadline(core, session, ship_deadline="2026-12-31")  # позиция A
@@ -234,7 +238,7 @@ async def test_past_start_is_at_risk(deadline_app, session):
     assert plan["at_risk"] is True
 
 
-async def test_slack_days_exact_both_sides(deadline_app, session):
+async def test_slack_days_exact_both_sides(deadline_app, session, planning_clock):
     """Точный slack: комфортный (+, не риск) и опоздание (−, риск). required_arrival = 2026-12-28."""
     client, core = deadline_app
     o = await _order(client)
