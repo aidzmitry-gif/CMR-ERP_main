@@ -47,6 +47,7 @@ async def downgrade_0140(session):
     await (await session.connection()).run_sync(downgrade)
 
 
+@pytest.mark.parametrize("pg_factory", ["legacy_0139"], indirect=True)
 async def test_migration_0140_up_down_up_isolated(pg_factory):
     async with pg_factory() as session:
         await upgrade_0140(session)

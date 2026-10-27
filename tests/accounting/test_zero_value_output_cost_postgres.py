@@ -41,6 +41,7 @@ async def run_migration(session, revision, action):
     await (await session.connection()).run_sync(run)
 
 
+@pytest.mark.parametrize("pg_factory", ["legacy_0139"], indirect=True)
 async def test_0141_up_down_up_without_zero_history(pg_factory):
     async with pg_factory() as session:
         await run_migration(session, "0140_zero_value_disposals.py", "upgrade")

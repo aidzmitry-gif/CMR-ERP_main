@@ -1,5 +1,6 @@
 """Employer payroll-rule facts stay sourced and provisional across revisions."""
 import base64
+import os
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -44,7 +45,7 @@ def review_command(source_id: int, reference: str, *, decision="unresolved"):
 async def test_organization_review_changes_candidate_without_certifying_payroll(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     org_id = book[0]
     prefix = f"/accounting/organizations/{org_id}"
@@ -110,7 +111,7 @@ async def test_organization_review_changes_candidate_without_certifying_payroll(
 async def test_rate_obligation_mapping_detects_unreviewed_and_conflicting_chief_decision(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     org_id = book[0]
     prefix = f"/accounting/organizations/{org_id}"
@@ -172,7 +173,7 @@ async def test_rate_obligation_mapping_detects_unreviewed_and_conflicting_chief_
 async def test_organization_review_scopes_permissions_period_and_replay(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     org_id = book[0]
     prefix = f"/accounting/organizations/{org_id}"

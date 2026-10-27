@@ -1,6 +1,7 @@
 """A multi-component workpaper must keep every source explicit and stay read-only."""
 import base64
 import hashlib
+import os
 from datetime import date
 from uuid import uuid4
 
@@ -351,7 +352,7 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
         client, db, book, workpaper_sources, tmp_path, monkeypatch):
     binding, deduction, contribution, ruleset = workpaper_sources
     root = tmp_path / "payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     url = f"/accounting/organizations/{book[0]}/payroll-evidence-files"
 
@@ -1157,7 +1158,7 @@ async def test_xlsx_preview_requires_personnel_number_in_employer_binding(
         client, db, book, workpaper_sources, tmp_path, monkeypatch):
     binding, deduction, contribution, ruleset = workpaper_sources
     root = tmp_path / "payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     employer = await client.post(f"/accounting/organizations/{book[0]}/payroll-employments", json={
         "request_key": str(uuid4()), "employee_id": binding["employee_id"],

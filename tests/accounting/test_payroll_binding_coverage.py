@@ -1,5 +1,6 @@
 """A monthly gross receipt must account for each known employer binding."""
 import base64
+import os
 from datetime import date
 from uuid import uuid4
 
@@ -62,7 +63,7 @@ def _file(kind, *, binding_id=None, reference="source"):
 async def test_mixed_accrual_and_individual_zero_cover_all_known_bindings(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     prefix = f"/accounting/organizations/{book[0]}"
     first_employee, first_id = await _binding(client, db, prefix, "First employee")
@@ -100,6 +101,16 @@ async def test_mixed_accrual_and_individual_zero_cover_all_known_bindings(
         "evidence": "Synthetic chief compared both employee sources",
     })
     assert review.status_code == 200, review.text
+    controls = (await client.get(url)).json()
+    assert controls["payroll"]["statutory_source_missing"] is True
+    with pytest.raises(service.AccountingError, match="deductions and contributions source is missing"):
+        await service.validate_close_period(db, book[0], "2026-10", close)
+    statutory = await client.post(prefix + "/payroll-evidence-files", json=_file(
+        "payroll_statutory_zero", reference="synthetic-reviewed-statutory-zero"))
+    assert statutory.status_code == 200, statutory.text
+    controls = (await client.get(url)).json()
+    assert controls["payroll"]["statutory_zero_file_ids"] == [statutory.json()["file_id"]]
+    assert controls["payroll"]["statutory_source_missing"] is False
     await service.validate_close_period(db, book[0], "2026-10", close)
 
     stored = root / str(book[0]) / (zero_command["request_key"].replace("-", "") + ".pdf")

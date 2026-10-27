@@ -1,6 +1,7 @@
 """Private payroll files have server hashes, scoped access and byte-level rechecks."""
 import base64
 import hashlib
+import os
 from uuid import uuid4
 
 import pytest
@@ -30,7 +31,7 @@ def payload(*, request_key=None, data=PDF, **changes):
 async def test_payroll_file_upload_replay_download_and_tamper_block(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     url = f"/accounting/organizations/{book[0]}/payroll-evidence-files"
     command = payload()
@@ -82,7 +83,7 @@ async def test_payroll_file_requires_private_root_scope_and_valid_bytes(
     assert unavailable.status_code == 503
 
     root = tmp_path / "private"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     invalid = await client.post(url, json=payload(data=b"wrong bytes"))
     assert invalid.status_code == 422
@@ -174,7 +175,7 @@ async def test_payroll_file_requires_private_root_scope_and_valid_bytes(
 async def test_zero_activity_file_requires_chief_and_open_month(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     url = f"/accounting/organizations/{book[0]}/payroll-evidence-files"
     command = payload(kind="payroll_zero_activity", month="2026-10")
@@ -192,3 +193,28 @@ async def test_zero_activity_file_requires_chief_and_open_month(
     assert closed.status_code == 422
     assert "closed month" in closed.text.lower()
     assert not list(root.iterdir())
+
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions are not Windows ACLs")
+@pytest.mark.parametrize("broad_directory", ["root", "organization"])
+async def test_payroll_file_rejects_broad_posix_permissions(
+        client, book, tmp_path, monkeypatch, broad_directory):
+    root = tmp_path / "permission-check"
+    root.mkdir(mode=0o700)
+    protected = root
+    if broad_directory == "organization":
+        protected = root / str(book[0])
+        protected.mkdir(mode=0o700)
+    protected.chmod(0o755)
+    monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
+    url = f"/accounting/organizations/{book[0]}/payroll-evidence-files"
+    command = payload()
+    rejected = await client.post(url, json=command)
+    assert rejected.status_code == 503, rejected.text
+    assert protected.stat().st_mode & 0o077 == 0o055
+    assert not list(root.rglob("*.pdf"))
+    protected.chmod(0o700)
+    accepted = await client.post(url, json=command)
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["sha256"] == hashlib.sha256(PDF).hexdigest()

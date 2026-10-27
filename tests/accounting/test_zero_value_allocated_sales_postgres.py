@@ -31,6 +31,7 @@ from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa
 pytestmark = pytest.mark.integration
 
 
+@pytest.mark.parametrize("pg_factory", ["legacy_0139"], indirect=True)
 async def test_allocated_sale_migration_empty_roundtrip(pg_factory):
     async with pg_factory() as session:
         for revision in (
@@ -45,12 +46,30 @@ async def test_allocated_sale_migration_empty_roundtrip(pg_factory):
             await run_migration(session, revision, "upgrade")
         assert await session.scalar(text("SELECT accounting.zero_value_allocated_sale_version()")) == 4
         assert await session.scalar(text("SELECT accounting.production_material_allocation_version()")) == 1
+        assert await session.scalar(text("SELECT accounting.production_material_zero_allocation_version()")) == 5
+        functions_sql = text(
+            "SELECT p.oid::regprocedure::text, pg_get_functiondef(p.oid) "
+            "FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
+            "WHERE n.nspname='accounting' ORDER BY 1"
+        )
+        before = dict((await session.execute(functions_sql)).all())
         await run_migration(session, "0150_zero_material_allocations.py", "downgrade")
         await run_migration(session, "0149_production_material_allocations.py", "downgrade")
         await run_migration(session, "0148_zero_value_allocated_sales.py", "downgrade")
         assert await session.scalar(text("SELECT to_regprocedure('accounting.zero_value_allocated_sale_version()')")) is None
         assert await session.scalar(text("SELECT accounting.zero_value_allocation_runtime_version()")) == 4
-        await run_migration(session, "0148_zero_value_allocated_sales.py", "upgrade")
+        for revision in (
+            "0148_zero_value_allocated_sales.py",
+            "0149_production_material_allocations.py",
+            "0150_zero_material_allocations.py",
+        ):
+            await run_migration(session, revision, "upgrade")
+        await session.commit()
+
+    async with pg_factory() as session:
+        assert dict((await session.execute(functions_sql)).all()) == before
+        for table in ("accounting.inventory_zero_value_disposal_receipt", "wms.production_material_issue"):
+            assert await session.scalar(text(f"SELECT count(*) FROM {table}")) == 0
 
 
 @pytest.mark.parametrize("method", ["fifo", "weighted_average"])

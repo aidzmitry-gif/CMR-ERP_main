@@ -1,4 +1,5 @@
 """The FSZN ceiling preview is monthly, source-scoped and never payroll posting."""
+import os
 from decimal import Decimal
 from uuid import uuid4
 
@@ -120,7 +121,7 @@ def test_article_9_part_time_individual_norm_is_not_the_full_month_denominator()
 async def test_fszn_reference_wage_review_requires_preceding_month_and_current_file(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    root.mkdir(mode=0o700 if os.name != "nt" else 0o777)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     org_id = book[0]
     prefix = f"/accounting/organizations/{org_id}"
