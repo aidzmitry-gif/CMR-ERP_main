@@ -426,11 +426,16 @@ async def test_calls_stream_uses_authenticated_employee_and_rejects_owner_overri
     request = Request({"type": "http", "route": SimpleNamespace(name="calls_stream")})
     await deny_unscoped_own_routes(request, CrmAccess("own", employee_id))
 
+    from unittest.mock import AsyncMock
+
+    stream_session = AsyncMock()
     stream_response = await calls_stream(
         owner=None,
         user=CurrentUser(username="call-stream-owner", roles=["sales"]),
         access=CrmAccess("own", employee_id),
+        session=stream_session,
     )
+    stream_session.close.assert_awaited_once()
     stream = stream_response.body_iterator
     try:
         assert await stream.__anext__() == ": connected\n\n"
@@ -467,3 +472,51 @@ async def test_calls_stream_denies_users_without_employee_link(roles, monkeypatc
         )
 
     assert error.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_calls_stream_releases_shared_access_session_before_stream(api, session):
+    """The router guard and streaming route must not retain an idle DB connection."""
+    from modules.sales.calls import has_subscriber
+
+    employee_id = 615
+    session.add(User(
+        username="call-stream-pool-owner", full_name="Synthetic Owner", employee_id=employee_id,
+        department="Продажи", role="sales", status="active", deal_visibility="own",
+    ))
+    await session.commit()
+    app = api._transport.app
+    body_ready, disconnect = asyncio.Event(), asyncio.Event()
+    messages = []
+    request_delivered = False
+
+    async def receive():
+        nonlocal request_delivered
+        if not request_delivered:
+            request_delivered = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await disconnect.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        messages.append(message)
+        if message["type"] == "http.response.body" and message.get("body"):
+            body_ready.set()
+
+    scope = {
+        "type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1", "method": "GET", "scheme": "http",
+        "path": "/sales/calls/stream", "raw_path": b"/sales/calls/stream", "query_string": b"",
+        "headers": [(b"x-user", b"call-stream-pool-owner"), (b"x-user-roles", b"sales")],
+        "client": ("127.0.0.1", 1), "server": ("127.0.0.1", 80),
+    }
+    task = asyncio.create_task(app(scope, receive, send))
+    try:
+        await asyncio.wait_for(body_ready.wait(), timeout=5)
+        assert next(message["status"] for message in messages if message["type"] == "http.response.start") == 200
+        assert has_subscriber(employee_id)
+        assert not session.in_transaction(), "stream retained the guard access transaction"
+    finally:
+        disconnect.set()
+        await asyncio.wait_for(task, timeout=5)
+    assert not has_subscriber(employee_id)
