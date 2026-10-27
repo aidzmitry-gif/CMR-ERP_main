@@ -45,7 +45,7 @@ from modules.wms.invoice_reservations import (
 )
 from modules.wms.invoice_reservations import _digest as package_digest
 from modules.wms.invoice_shipments import PhysicalShipmentAct, PhysicalShipmentLine
-from modules.wms.models import Location, ReservationVersion, StockMovement, Task
+from modules.wms.models import Location, ReservationVersion, StockMovement, Task, WarehouseDirectory
 from modules.wms.reservation_events import ReservationEventState, ReservationPick, apply
 
 
@@ -66,7 +66,7 @@ class Proof(ProofBase):
 SCOPES = ("wms_issue", "wms_pick", "logistics_shipment", "accounting_issue", "legacy_fulfillment")
 TABLES = [m.__table__ for m in (Organization, Counterparty, CrmClient, CrmClientContact,
     Deal, DealDocument, Stage, DealLossRequest, DealLossResolution,
-    InvoiceIssuanceReceipt, DealOwnership, Location,
+    InvoiceIssuanceReceipt, DealOwnership, Location, WarehouseDirectory,
     StockMovement, Task, ReservationVersion, InvoiceReservation, ReservationEventState,
     ReservationPick, InvoiceReservationRelease, InvoiceReservationReleaseLine, PhysicalShipmentAct, PhysicalShipmentLine, RemainderRelease, RemainderReleaseLine, Proof)]
 
@@ -179,6 +179,8 @@ async def seed(factory, picks=True):
                     content={"decision": "no_shipment", "coverage": "complete", "observed_issue_ids": [],
                              "source_record": f"synthetic-reviewed-{scope}"}))
         for place in ("W", "X"):
+            session.add(WarehouseDirectory(organization_id=1, name=place, title=f"Synthetic {place}",
+                                           created_by="tester", wms_enabled=True))
             session.add(StockMovement(organization_id=1, sku_code="A", warehouse=place, kind="in", qty=20, reason="receipt"))
         await session.flush()
         for doc_id in (1, 2):

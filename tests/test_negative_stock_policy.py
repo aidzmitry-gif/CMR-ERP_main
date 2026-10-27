@@ -74,7 +74,7 @@ async def test_reservation_from_known_zero_respects_policy(api,session,prohibit)
     from modules.wms.invoice_reservations import reserve
     from modules.wms.models import WarehouseDirectory
     from tests.test_invoice_stock_allocation import setup
-    org,facts,data,actor=await setup(api,session)
+    org,facts,data,actor=await setup(api,session,create_warehouse=False)
     session.add(WarehouseDirectory(organization_id=org,name="W",title="Warehouse",created_by=actor,prohibit_negative_stock=prohibit))
     session.add(StockMovement(organization_id=org,sku_code="A",warehouse="W",kind="out",qty="10",reason="shipment"))
     await session.flush()
@@ -91,7 +91,7 @@ async def test_empty_journal_is_structured_unknown_not_zero(api,session):
 
     from modules.wms.invoice_reservations import reserve
     from tests.test_invoice_stock_allocation import setup
-    org,facts,data,actor=await setup(api,session)
+    org,facts,data,actor=await setup(api,session,create_warehouse=False)
     from modules.wms.models import WarehouseDirectory
     session.add(WarehouseDirectory(organization_id=org,name="W",title="Warehouse",created_by=actor))
     await session.flush()
@@ -137,7 +137,7 @@ async def test_negative_exception_is_limited_to_selected_warehouse(api,session):
     from modules.wms.invoice_shipments import guard_free
     from modules.wms.models import WarehouseDirectory
     from tests.test_invoice_stock_allocation import setup
-    org,_,_,actor=await setup(api,session)
+    org,_,_,actor=await setup(api,session,create_warehouse=False)
     session.add_all([WarehouseDirectory(organization_id=org,name="W",title="W",created_by=actor,prohibit_negative_stock=False),WarehouseDirectory(organization_id=org,name="Other",title="Other",created_by=actor)])
     session.add_all([StockMovement(organization_id=org,sku_code="A",warehouse="Other",kind="in",qty=1,reason="receipt"),StockMovement(organization_id=org,sku_code="A",warehouse="Other",kind="out",qty=1,reason="shipment")])
     await session.flush()

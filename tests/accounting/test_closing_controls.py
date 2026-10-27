@@ -19,6 +19,7 @@ from modules.accounting.models import (
 )
 from modules.accounting.schemas import CloseInput
 from modules.hr.models import Employee
+from tests.conftest import make_private_test_dir
 
 
 async def _account(client, prefix, code, category):
@@ -239,7 +240,7 @@ async def test_known_employment_needs_month_payroll_source_before_close(
         await service.validate_close_period(db, book[0], "2026-10", close)
 
     root = tmp_path / "payroll"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     raw = b"%PDF-1.7\nsynthetic chief zero-accrual statement\n"
     command = {
@@ -374,7 +375,7 @@ async def test_gross_payroll_close_requires_statutory_source_or_reviewed_zero(
         await service.validate_close_period(db, book[0], "2026-10", close)
 
     root = tmp_path / "payroll"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     raw = b"%PDF-1.7\nsynthetic reviewed statement: no deductions or contributions\n"
     request_key = str(uuid4())
@@ -465,7 +466,7 @@ async def test_statutory_import_covers_each_gross_binding_or_individual_zero(
         await service.validate_close_period(db, book[0], "2026-10", close)
 
     root = tmp_path / "payroll"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     saved = await client.post(prefix + "/payroll-evidence-files", json={
         "request_key": str(uuid4()), "kind": "payroll_stat_zero_person",

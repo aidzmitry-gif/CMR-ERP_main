@@ -9,6 +9,7 @@ from modules.accounting.payroll_candidate import (
     _monthly_fszn_minimum_rows,
 )
 from tests.accounting.test_payroll_organization_review import file_command
+from tests.conftest import make_private_test_dir
 
 
 def test_monthly_ceiling_aggregates_segments_for_the_same_employee():
@@ -120,7 +121,7 @@ def test_article_9_part_time_individual_norm_is_not_the_full_month_denominator()
 async def test_fszn_reference_wage_review_requires_preceding_month_and_current_file(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     org_id = book[0]
     prefix = f"/accounting/organizations/{org_id}"

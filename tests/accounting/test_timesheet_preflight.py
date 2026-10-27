@@ -18,6 +18,7 @@ from modules.accounting.timesheet_preflight import (
     scan,
 )
 from modules.hr.models import Employee
+from tests.conftest import make_private_test_dir
 
 
 def make_timesheet(path, *, month="2026-06", truncated=False, duplicate=False,
@@ -134,7 +135,7 @@ def test_employee_after_blank_row_is_not_silently_ignored(tmp_path):
 async def test_stored_timesheet_preflight_keeps_scope_and_source_bytes(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     employee = Employee(full_name="Synthetic Workbook Employee", department="repair")
     db.add(employee)

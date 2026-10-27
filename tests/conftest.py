@@ -68,6 +68,17 @@ def tmp_path() -> Path:
     return path
 
 
+def make_private_test_dir(path: Path) -> None:
+    """Use private POSIX modes and inherited Windows ACLs for synthetic file roots."""
+    path.mkdir(mode=0o700 if os.name != "nt" else 0o777)
+
+
+@pytest.fixture
+def accounting_pg_revision(request):
+    """Use current head unless a migration roundtrip explicitly requests history."""
+    return getattr(request, "param", "head")
+
+
 @pytest_asyncio.fixture
 async def session():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)

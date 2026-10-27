@@ -2,12 +2,14 @@
 import base64
 import copy
 import hashlib
+import os
 from datetime import date
 from uuid import uuid4
 
 from modules.accounting.models import Entry, Organization, Period
 from modules.procurement.receipt_documents import ReceiptDocument, ReceiptPosting, ReceiptRevision
 from tests.accounting.test_procurement_receipt_drafts import document
+from tests.conftest import make_private_test_dir
 
 XML = b"<?xml version='1.0' encoding='UTF-8'?><Eschf><Invoice>synthetic</Invoice></Eschf>"
 PDF = b"%PDF-1.7\nsynthetic supporting evidence\n"
@@ -82,7 +84,7 @@ async def test_inbound_vat_file_replay_current_download_and_byte_integrity(
         client, db, book, tmp_path, monkeypatch):
     receipt_id = await seed_vat_correction(db, book)
     root = tmp_path / "accounting-evidence"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_ACCOUNTING_EVIDENCE_DATA_DIR", str(root.resolve()))
     url = f"/accounting/organizations/{book[0]}/receipt-correction-evidence-files"
 
@@ -153,8 +155,15 @@ async def test_inbound_vat_file_requires_private_root_scope_and_vat_only_open_so
     assert (await client.post(url, json=command)).status_code == 503
 
     root = tmp_path / "private"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_ACCOUNTING_EVIDENCE_DATA_DIR", str(root.resolve()))
+    if os.name != "nt":
+        root.chmod(0o755)
+        try:
+            broad = await client.post(url, json=command)
+            assert broad.status_code == 503 and "permissions are too broad" in broad.text
+        finally:
+            root.chmod(0o700)
     invalid_xml = await client.post(url, json=payload(receipt_id, data=b"not XML"))
     assert invalid_xml.status_code == 422
     utf16_dtd = """<?xml version="1.0" encoding="UTF-16"?>

@@ -62,7 +62,7 @@ async def test_pg_long_author_issue_reserve_delivery_and_truncate_guard(issuance
 
     client, factory = issuance_pg
     async with factory() as session:
-        ids, base = await seed(client, session, suffix=uuid4().hex[:8])
+        ids, base = await seed(client, session, suffix=uuid4().hex[:8], wms_enabled=True)
         actor = "issuer-" + "x" * 193
         session.add(AccessGrant(organization_id=ids["org"], subject=actor, role="chief"))
         await session.commit()

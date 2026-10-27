@@ -11,6 +11,7 @@ from alembic.operations import Operations
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from core.db.base import Base
 from modules.accounting import service
 from modules.accounting.models import ProductionOutputTransferReceipt
 from modules.accounting.production_output_cost_workflow import (
@@ -36,11 +37,13 @@ pytestmark = pytest.mark.integration
 async def run_migration(session, revision, action):
     def run(connection):
         migration = runpy.run_path(f"migrations/versions/{revision}")
-        with Operations.context(MigrationContext.configure(connection)):
+        with Operations.context(MigrationContext.configure(
+                connection, opts={"target_metadata": Base.metadata})):
             migration[action]()
     await (await session.connection()).run_sync(run)
 
 
+@pytest.mark.parametrize("accounting_pg_revision", ["0139"], indirect=True)
 async def test_0141_up_down_up_without_zero_history(pg_factory):
     async with pg_factory() as session:
         await run_migration(session, "0140_zero_value_disposals.py", "upgrade")

@@ -177,6 +177,7 @@ async def test_mixed_production_late_cost_confirm_replay_and_historical_cutoff(p
                 await run_migration(session, "0145_inventory_allocation_cost_stream.py", "downgrade")
 
 
+@pytest.mark.parametrize("accounting_pg_revision", ["0139"], indirect=True)
 async def test_0145_empty_roundtrip_retains_legacy_evidence_definitions(pg_factory):
     async with pg_factory() as session:
         for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",

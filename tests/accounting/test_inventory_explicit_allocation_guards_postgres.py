@@ -12,6 +12,7 @@ from tests.accounting.test_zero_value_output_cost_postgres import run_migration
 pytestmark = pytest.mark.integration
 
 
+@pytest.mark.parametrize("accounting_pg_revision", ["0143"], indirect=True)
 async def test_explicit_allocation_guard_empty_roundtrip(pg_factory):
     async with pg_factory() as session:
         await run_migration(session, "0144_inventory_explicit_allocation_guards.py", "upgrade")

@@ -24,6 +24,7 @@ from tests.accounting.test_zero_value_output_cost_postgres import run_migration
 pytestmark = pytest.mark.integration
 
 
+@pytest.mark.parametrize("accounting_pg_revision", ["0139"], indirect=True)
 async def test_allocated_sale_migration_empty_roundtrip(pg_factory):
     async with pg_factory() as session:
         for revision in (

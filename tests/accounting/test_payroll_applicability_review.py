@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from modules.accounting.models import AccessGrant, Organization, PayrollApplicabilityReview, Period
 from modules.hr.models import Employee
+from tests.conftest import make_private_test_dir
 
 
 def source_command(binding_id: int, *, month="2026-10", reference="synthetic-fact-dossier"):
@@ -36,7 +37,7 @@ async def binding(client, db, org_id: int, name: str) -> int:
 async def test_fact_review_is_append_only_and_candidate_checks_current_source(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     org_id = book[0]
     binding_id = await binding(client, db, org_id, "Synthetic Employee")
@@ -111,7 +112,7 @@ async def test_fact_review_is_append_only_and_candidate_checks_current_source(
 async def test_fact_review_rejects_other_book_closed_period_and_non_chief(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     org_id = book[0]
     binding_id = await binding(client, db, org_id, "First Employee")

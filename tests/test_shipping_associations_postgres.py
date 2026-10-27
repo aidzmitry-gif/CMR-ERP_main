@@ -30,8 +30,8 @@ async def test_fresh_database_cleanup_after_schema_setup_failure(monkeypatch):
         raise RuntimeError("synthetic proposal setup failure")
 
     monkeypatch.setattr(fixtures, "create_async_engine", capture_engine)
-    monkeypatch.setattr(fixtures.runpy, "run_path", broken_schema)
-    generator = fixtures.pg_factory.__wrapped__()
+    monkeypatch.setattr(fixtures.subprocess, "run", broken_schema)
+    generator = fixtures.pg_factory.__wrapped__("head")
     with pytest.raises(RuntimeError, match="synthetic proposal setup failure"):
         await anext(generator)
     await generator.aclose()

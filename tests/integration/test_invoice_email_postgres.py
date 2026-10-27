@@ -1,9 +1,11 @@
 """Actual book-lock ordering between invoice cancellation and email confirmation."""
 import asyncio
+from contextvars import ContextVar
 
 import pytest
 from sqlalchemy import text
 
+from tests.accounting.test_postgres import pg_factory  # noqa: F401
 from tests.integration.test_invoice_issuance_postgres import issuance_pg as issuance_pg
 from tests.test_email_cancel_guard_candidate import setup_mail
 from tests.test_invoice_cancellation import cancel_request
@@ -21,12 +23,14 @@ async def test_invoice_mail_and_cancellation_serialize_on_book(issuance_pg, monk
     gateway = api._transport.app.state.core.services.accounting
     acquired, release, started = asyncio.Event(), asyncio.Event(), asyncio.Event()
     waiting_pid = None
+    operation = ContextVar("invoice_mail_operation", default=None)
     member, owner = gateway.source_member, gateway.source_owner_authority
 
     def intercept(original):
         async def call(session, organization_id, user):
             nonlocal waiting_pid
-            task = asyncio.current_task().get_name()
+            # ASGI middleware may create a child task; request context survives.
+            task = operation.get()
             if task == "invoice-mail-loser":
                 waiting_pid = await session.scalar(text("SELECT pg_backend_pid()"))
                 started.set()
@@ -41,7 +45,11 @@ async def test_invoice_mail_and_cancellation_serialize_on_book(issuance_pg, monk
     monkeypatch.setattr(gateway, "source_owner_authority", intercept(owner))
 
     async def command(kind):
-        return await api.post(send_path) if kind == "send" else await api.post(cancel_path, json=cancel_body)
+        token = operation.set(asyncio.current_task().get_name())
+        try:
+            return await api.post(send_path) if kind == "send" else await api.post(cancel_path, json=cancel_body)
+        finally:
+            operation.reset(token)
 
     first = asyncio.create_task(command(winner), name="invoice-mail-winner")
     second = None

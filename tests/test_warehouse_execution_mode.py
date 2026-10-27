@@ -20,7 +20,7 @@ from tests.test_invoice_stock_allocation import setup
 
 
 async def prepared(api, session, enabled):
-    org, facts, allocation, actor = await setup(api, session)
+    org, facts, allocation, actor = await setup(api, session, create_warehouse=False)
     warehouse = WarehouseDirectory(organization_id=org, name="W", title="Warehouse",
                                    created_by=actor, wms_enabled=enabled)
     session.add(warehouse)
@@ -198,7 +198,7 @@ async def test_accounting_source_identity_is_exact_and_crm_remains_closed(api, s
 
 
 async def test_mixed_warehouse_reservation_only_creates_wms_tasks(api, session):
-    org, facts, allocation, actor = await setup(api, session)
+    org, facts, allocation, actor = await setup(api, session, create_warehouse=False)
     session.add_all([WarehouseDirectory(organization_id=org,name="W",title="Off",created_by=actor,wms_enabled=False),
         WarehouseDirectory(organization_id=org,name="Z",title="On",created_by=actor,wms_enabled=True),
         StockMovement(organization_id=org,sku_code="A",warehouse="Z",kind="in",qty="10",reason="receipt")])

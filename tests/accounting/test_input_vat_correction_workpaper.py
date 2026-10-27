@@ -19,6 +19,7 @@ from modules.accounting.models import (
 from modules.procurement.receipt_documents import ReceiptDocument, ReceiptPosting, ReceiptRevision
 from tests.accounting.test_inbound_vat_evidence_files import PDF, XML, payload, seed_vat_correction
 from tests.accounting.test_procurement_receipt_drafts import document
+from tests.conftest import make_private_test_dir
 
 
 def workpaper_command(receipt_id: int, *, key=None, **overrides):
@@ -137,7 +138,7 @@ async def test_vat_correction_workpaper_preview_replay_history_and_read_only(
         client, db, book, tmp_path, monkeypatch):
     receipt_id, entry_id = await seed_workpaper_source(db, book)
     storage = tmp_path / "private-accounting-evidence"
-    storage.mkdir()
+    make_private_test_dir(storage)
     monkeypatch.setenv("AIOS_ACCOUNTING_EVIDENCE_DATA_DIR", str(storage.resolve()))
     first_file = await upload_file(client, book[0], receipt_id)
     pdf_file = await upload_file(
@@ -313,7 +314,7 @@ async def test_vat_correction_workpaper_closed_period_changed_basis_and_bad_scop
         client, db, book, tmp_path, monkeypatch):
     receipt_id, _ = await seed_workpaper_source(db, book)
     storage = tmp_path / "private-accounting-evidence"
-    storage.mkdir()
+    make_private_test_dir(storage)
     monkeypatch.setenv("AIOS_ACCOUNTING_EVIDENCE_DATA_DIR", str(storage.resolve()))
     await upload_file(client, book[0], receipt_id)
     base = f"/accounting/organizations/{book[0]}/inbound-vat-correction-workpapers"
@@ -359,7 +360,7 @@ async def test_vat_correction_workpaper_requires_vat_only_current_revision_and_v
         db, book, correction_changes={"warehouse": "other warehouse"},
     )
     storage = tmp_path / "private-accounting-evidence"
-    storage.mkdir()
+    make_private_test_dir(storage)
     monkeypatch.setenv("AIOS_ACCOUNTING_EVIDENCE_DATA_DIR", str(storage.resolve()))
     url = f"/accounting/organizations/{book[0]}/inbound-vat-correction-workpapers/preview"
     physical = await client.post(url, json={
@@ -388,7 +389,7 @@ async def test_vat_correction_workpaper_requires_account_18_source_line_and_curr
     assert no_evidence.status_code == 409 and "current correction evidence" in no_evidence.text
 
     storage = tmp_path / "private-accounting-evidence"
-    storage.mkdir()
+    make_private_test_dir(storage)
     monkeypatch.setenv("AIOS_ACCOUNTING_EVIDENCE_DATA_DIR", str(storage.resolve()))
     zero_vat_id, _ = await seed_zero_vat_workpaper_source(db, book)
     await upload_file(client, book[0], zero_vat_id)

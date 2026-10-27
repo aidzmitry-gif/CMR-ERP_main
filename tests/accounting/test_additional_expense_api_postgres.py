@@ -149,7 +149,9 @@ async def test_expense_api_atomic_versioned_scoped_documents(issuance_pg, pg_boo
         issue_id = issue_entry.id
         await session.commit()
         issue_receipt = await session.get(InventoryIssueReceipt, issue_id)
-        assert issue_receipt.command == issue.model_dump(mode="json")
+        assert issue.warehouse_identity is None and issue.sku_identity is None
+        assert issue_receipt.command == issue.model_dump(
+            mode="json", exclude={"warehouse_identity", "sku_identity"})
         assert issue_receipt.cost["basis_digest"] == cost["basis_digest"]
         assert issue_receipt.digest == service.digest(posting)
         repeated_issue = await inventory_issues.confirm(session, pg_book[0], issue, cost["basis_digest"], service.digest(posting), "tester")

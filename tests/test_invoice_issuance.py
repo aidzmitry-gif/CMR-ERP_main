@@ -16,7 +16,7 @@ from modules.wms.invoice_reservations import InvoiceReservation
 from modules.wms.models import ReservationVersion, StockMovement, WarehouseDirectory
 
 
-async def seed(api, session, *, qty="2", physical="10", suffix=""):
+async def seed(api, session, *, qty="2", physical="10", suffix="", wms_enabled=False):
     api.headers["X-User"] = "issuer"
     serial = int(sha256(suffix.encode()).hexdigest()[:8], 16) % 400000000
     org = Organization(name="Bound seller" + suffix, unp=str(100000000 + serial))
@@ -55,7 +55,7 @@ async def seed(api, session, *, qty="2", physical="10", suffix=""):
         )
     )
     session.add(WarehouseDirectory(organization_id=org.id, name="W", title="Synthetic warehouse",
-        created_by="issuer", wms_enabled=False, prohibit_negative_stock=True))
+        created_by="issuer", wms_enabled=wms_enabled, prohibit_negative_stock=True))
     session.add(
         StockMovement(
             organization_id=org.id,
