@@ -621,6 +621,7 @@ async def test_parallel_file_sqlite_invoices_cannot_overissue(tmp_path):
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     app = create_app()
+    app.state.core.services.db.session_factory = factory
 
     async def request_session():
         async with factory() as session:
