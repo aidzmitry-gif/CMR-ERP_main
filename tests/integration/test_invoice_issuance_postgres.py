@@ -16,6 +16,7 @@ from modules.accounting.models import AccessGrant
 from modules.sales.accounting_ownership import DealOwnership
 from modules.sales.client_document_register import DealClientBinding, preview_snapshot
 from modules.sales.invoice_issuance import InvoiceIssuanceReceipt
+from modules.sales.mail_models import OutgoingEmail
 from modules.sales.models import Deal, DealDocument, DealItem
 from modules.wms.models import ReservationVersion, StockMovement, Task
 from tests.accounting.test_postgres import pg_factory  # noqa: F401
@@ -27,7 +28,7 @@ async def issuance_pg(pg_factory):  # noqa: F811
     factory = pg_factory
     async with factory() as session:
         conn = await session.connection()
-        tables = {Sku.__table__, DealItem.__table__}
+        tables = {Sku.__table__, DealItem.__table__, OutgoingEmail.__table__}
         pending = list(tables)
         while pending:
             for fk in pending.pop().foreign_keys:

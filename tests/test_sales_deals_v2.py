@@ -506,9 +506,8 @@ async def test_deal_task_source_ref_allows_manual_rows_and_rejects_duplicate_sou
 
 
 async def test_deal_task_fidelity_supports_unbound_tasks_and_ordered_crm_links(api, session):
-    from sqlalchemy import func, select
+    from sqlalchemy import Boolean, Text, func, select
     from sqlalchemy.exc import IntegrityError
-    from sqlalchemy import Boolean, Text
 
     from modules.sales.models import DealTask, DealTaskCrmLink
 

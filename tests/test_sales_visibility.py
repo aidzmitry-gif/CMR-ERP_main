@@ -520,3 +520,25 @@ async def test_calls_stream_releases_shared_access_session_before_stream(api, se
         disconnect.set()
         await asyncio.wait_for(task, timeout=5)
     assert not has_subscriber(employee_id)
+
+
+async def test_own_outcomes_can_read_stage_and_reason_metadata_but_cannot_edit(api, session):
+    session.add(User(username="stage-owner", full_name="Synthetic owner", employee_id=931,
+                     department="Sales", role="sales", status="active", deal_visibility="own"))
+    await session.commit()
+    headers = _sales_headers("stage-owner")
+    stages = await api.get("/sales/stages", headers=headers)
+    assert stages.status_code == 200, stages.text
+    assert {row["kind"] for row in stages.json()} >= {"normal", "won", "lost"}
+    assert all("deals" not in row and "owner_id" not in row for row in stages.json())
+    reasons = await api.get("/sales/loss-reasons", headers=headers)
+    assert reasons.status_code == 200, reasons.text
+    first = stages.json()[0]
+    for method, path, body in [
+        ("POST", "/sales/stages", {"code": "synthetic", "title": "Synthetic", "funnel": first["funnel"]}),
+        ("PATCH", f"/sales/stages/{first['code']}", {"title": "Changed"}),
+        ("DELETE", f"/sales/stages/{first['code']}", None),
+    ]:
+        response = await api.request(method, path, json=body, headers=headers)
+        assert response.status_code == 403, response.text
+    assert (await api.get("/sales/stages", headers=headers)).json() == stages.json()

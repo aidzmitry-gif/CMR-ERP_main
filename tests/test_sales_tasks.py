@@ -62,6 +62,7 @@ async def test_task_overdue_flag(api):
 
 async def test_task_due_at_with_timezone_is_stored_as_utc_before_commit(api, session):
     from sqlalchemy import func, select
+
     from modules.sales.models import DealTask
 
     deal = await _new_deal(api, "TK-TZ")

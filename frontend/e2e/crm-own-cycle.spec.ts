@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
 
 test("own: клиент → контакт → сделка → задача/история → счёт под заказ и чужой доступ", async ({ page, context, browser, baseURL }) => {
   test.setTimeout(180_000);
@@ -92,9 +94,34 @@ test("own: клиент → контакт → сделка → задача/и�
   const addedItem = page.waitForResponse((r) => r.url().endsWith(`/deals/${deal.id}/items`) && r.request().method() === 'POST');
   await page.getByRole("button", { name: "Добавить", exact: true }).first().click();
   expect((await addedItem).status()).toBe(201);
+  const actor = (await context.cookies()).find(cookie => cookie.name === "aios_actor")?.value;
+  expect(actor).toBe("e2e_owner");
+  const fixture = JSON.parse(execFileSync(process.env.E2E_PYTHON ?? "python", ["-m", "scripts.seed_own_cycle_e2e"], {
+    cwd: resolve(process.cwd(), ".."), input: JSON.stringify({ deal_id: deal.id, actor }),
+    env: { ...process.env, AIOS_E2E_SEED: "1" }, encoding: "utf8",
+  })) as { organization: number; item: number };
+  const accounting = await browser.newContext({ baseURL, storageState: "e2e/.auth/state.json" });
+  const profile = await accounting.request.post(`/api/accounting/organizations/${fixture.organization}/seller-profiles`, { data: {
+    source_key: `e2e-cycle-${deal.id}`, expected_revision: 0, effective_from: "2026-01-01", currency: "BYN",
+    address: "Synthetic seller address", account: "TEST ACCOUNT", bank: "TEST BANK", bik: "TEST BIK",
+    director: "Synthetic director", evidence: "Synthetic E2E profile", confirmed: true,
+  } });
+  expect(profile.status(), await profile.text()).toBe(201);
+  await accounting.close();
   await page.getByRole("checkbox", { name: "Под заказ — без резерва" }).check();
-  const issued = page.waitForResponse((r) => r.url().endsWith(`/deals/${deal.id}/documents`) && r.request().method() === 'POST');
   await page.getByRole("button", { name: "Сформировать", exact: true }).click();
+  await page.getByLabel("Юрлицо", { exact: true }).selectOption(String(fixture.organization));
+  await page.getByText("Проверить принадлежность", { exact: true }).click();
+  await page.getByText("Продолжить к счёту", { exact: true }).click();
+  for (const [label, value] of [["Валюта", "BYN"], ["Дата счёта", "2026-09-10"], ["Действителен до", "2026-09-15"],
+    [`Цена строки ${fixture.item}`, "125.50"], [`Ставка строки ${fixture.item}`, "20.00"], ["Основание цен и ставок", "Synthetic price and VAT"]]) {
+    await page.getByLabel(label, { exact: true }).fill(value);
+  }
+  await page.getByText("Получить предпросмотр", { exact: true }).click();
+  await expect(page.getByText("Всего: 301.20 BYN", { exact: true })).toBeVisible();
+  await page.getByRole("checkbox", { name: "Подтверждаю выпуск без резерва и проверенные данные счёта", exact: true }).check();
+  const issued = page.waitForResponse((r) => r.url().endsWith(`/deals/${deal.id}/documents`) && r.request().method() === "POST");
+  await page.getByRole("button", { name: "Выпустить счёт под заказ", exact: true }).click();
   expect((await issued).status()).toBe(201);
   const documents = await (await page.request.get(`/api/sales/deals/${deal.id}/documents`)).json();
   expect(documents).toHaveLength(1);
@@ -139,7 +166,12 @@ test("own: клиент → контакт → сделка → задача/и�
   expect(email.attempt_count).toBe(0);
   expect(email.accepted_at).toBeNull();
   expect(email.attachments).toHaveLength(2);
-  await expect(emailPanel.getByRole('button',{name:'Подтвердить отправку',exact:true})).toBeDisabled();
+  await expect(emailPanel.getByRole('button',{name:'Подтвердить отправку',exact:true})).toHaveCount(0);
+  expect((await page.request.post(`/api/sales/deals/${deal.id}/emails/${email.id}/send`)).status()).toBe(503);
+  const unconfirmed = await (await page.request.get(`/api/sales/deals/${deal.id}/emails/${email.id}`)).json();
+  expect(unconfirmed.status).toBe('prepared');
+  expect(unconfirmed.attempt_count).toBe(0);
+  expect(unconfirmed.accepted_at).toBeNull();
   const pdf = await page.request.get(`/api/sales/deals/${deal.id}/emails/${email.id}/attachments/0`);
   expect(pdf.status()).toBe(200);
   const bytes = await pdf.body();

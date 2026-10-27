@@ -11,12 +11,48 @@ test("срок клиента переносится в черновик пла�
     expect(r.ok(), await r.text()).toBeTruthy(); return r.json();
   };
   const org = await post("/accounting/organizations", { name: `E2E deadlines ${stamp}`, unp: String(stamp).slice(-9) });
-  const deal = await post("/sales/deals", { number: `DL-${stamp}`, title: "Deadline review", counterparty: "Synthetic buyer", amount: 0, ship_deadline: "2026-12-31" });
+  const buyerName = `Synthetic deadline buyer ${stamp}`;
+  const buyerUnp = String(800000000 + Number.parseInt(crypto.randomUUID().slice(0, 7), 16) % 99999999);
+  const buyer = await post("/system/mdm/counterparty", { manual: { name: buyerName, unp: buyerUnp, legal_address: "Synthetic E2E buyer legal address" }, contacts: [] });
+  expect(Number.isSafeInteger(buyer.id) && buyer.id > 0).toBe(true);
+  const deal = await post("/sales/deals", { number: `DL-${stamp}`, title: "Deadline review", counterparty: buyerName, counterparty_id: buyer.id, amount: 0, ship_deadline: "2026-12-31" });
   const ownership = `/sales/organizations/${org.id}/deals/${deal.id}`;
   const preview = await get(`${ownership}/ownership-preview`);
   await post(`${ownership}/ownership`, { expected_snapshot: preview.snapshot, evidence: "Synthetic browser fixture" });
-  const order = await post("/procurement/orders", { supplier: "Synthetic supplier", status: "ordered", lines: [{ sku_code: `DL-${stamp}`, qty: 10, goods_value_byn: 100 }] });
-  await post(`/procurement/organizations/${org.id}/purchase-ownership`, { kind: "order", source_id: order.id, evidence: "Synthetic browser fixture" });
+  const supplierName = `Synthetic deadline supplier ${stamp}`;
+  const supplierUnp = String(800000000 + Number.parseInt(crypto.randomUUID().slice(0, 7), 16) % 99999999);
+  const supplierParty = await post("/system/mdm/counterparty", { manual: { name: supplierName, unp: supplierUnp, legal_address: "Synthetic E2E supplier legal address" }, contacts: [] });
+  expect(Number.isSafeInteger(supplierParty.id) && supplierParty.id > 0).toBe(true);
+  const supplier = await post("/procurement/suppliers", { counterparty_id: supplierParty.id, name: supplierName, unp: supplierUnp, status: "active" });
+  expect(supplier).toMatchObject({ counterparty_id: supplierParty.id, name: supplierName, unp: supplierUnp });
+  const scope = `/procurement/organizations/${org.id}`;
+  const catalog = await get(`${scope}/sku-options?q=QA-ORDER`);
+  expect(catalog.organization_id).toBe(org.id);
+  const matches = catalog.items.filter((row: { code: string }) => row.code === "QA-ORDER");
+  expect(matches).toHaveLength(1);
+  const sku = matches[0];
+  const identity = await get(`${scope}/request-plan-context`);
+  expect(identity).toMatchObject({ organization_id: org.id, can_manage: true });
+  const headers = { "X-Expected-Principal": identity.principal, "X-Expected-Organization": String(org.id) };
+  const requestKey = crypto.randomUUID();
+  const created = await page.request.post(`/api${scope}/orders`, { headers, data: {
+    request_key: requestKey,
+    document: { supplier: supplier.name, supplier_id: supplier.id, supplier_unp: supplier.unp,
+      eta_date: null, freight_byn: "0.00", lines: [{ sku_code: sku.code, sku_id: sku.id,
+        sku_title: sku.title, sku_unit: sku.unit, qty: "10.00", goods_value_byn: "100.00",
+        weight: "0.000", volume: "0.0000" }] },
+    ownership_evidence: "Synthetic browser fixture", request_basis: null,
+  } });
+  expect(created.status(), await created.text()).toBe(201);
+  const receipt = await created.json();
+  expect(receipt).toMatchObject({ organization_id: org.id, principal: identity.principal, request_key: requestKey, outcome: "created", status: "draft" });
+  const order = { id: receipt.order_id };
+  const statusKey = crypto.randomUUID();
+  const ordered = await page.request.post(`/api${scope}/orders/${order.id}/edit-commands`, { headers, data: {
+    version: 1, request_key: statusKey, order_id: order.id, action: "status", payload: { status: "ordered" },
+  } });
+  expect(ordered.status(), await ordered.text()).toBe(200);
+  expect(await ordered.json()).toMatchObject({ organization_id: org.id, order_id: order.id, outcome: "applied", effect: { from: "draft", to: "ordered" } });
   const detail = await get(`/procurement/organizations/${org.id}/orders/${order.id}`);
   await post(`/procurement/organizations/${org.id}/expected-reservations`, { order_id: order.id, order_line_id: detail.lines[0].id, deal_id: deal.id, qty: "5.00", request_key: crypto.randomUUID(), evidence: "Synthetic customer reservation" });
   await page.goto(`/erp/procurement/orders/${order.id}?org=${org.id}`);

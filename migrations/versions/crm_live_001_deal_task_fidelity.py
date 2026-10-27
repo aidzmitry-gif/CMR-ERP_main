@@ -3,7 +3,6 @@
 import sqlalchemy as sa
 from alembic import op
 
-
 revision = "crm_live_deal_task_fidelity_01"
 down_revision = "crm_live_deal_task_source_ref_01"
 branch_labels = None

@@ -8,7 +8,7 @@ test("строка списания проходит из формы выпис�
   });
   expect(created.ok(), await created.text()).toBeTruthy();
   const org = await created.json();
-  execFileSync("python", ["e2e/seed_bank_import.py", String(org.id)], { timeout: 30000 });
+  execFileSync("python", ["e2e/seed_bank_import.py", String(org.id)], { timeout: 30000, env: { ...process.env, AIOS_E2E_SEED: "1" } });
   const account = await page.request.post(`/api/accounting/organizations/${org.id}/accounts`, {
     data: { code: "60", title: "Поставщики", category: "liability", cash: false,
       valid_from: "2026-01-01", required_dimensions: [], currency_tracking: false,
@@ -17,12 +17,13 @@ test("строка списания проходит из формы выпис�
   expect(account.ok(), await account.text()).toBeTruthy();
   await page.goto("/erp/accounting");
   await page.getByLabel("Организация", { exact: true }).selectOption(String(org.id));
+  await page.getByRole("button", { name: "Банк и платежи", exact: true }).click();
   await page.getByRole("button", { name: "Импорт выписки", exact: true }).click();
   await page.getByText("Добавить строку из выписки", { exact: true }).click();
   const reference = `BANK-PAYMENT-${stamp}`;
   const fields = {
     "Банк (одинаковое обозначение во всех выписках)": "Synthetic bank",
-    "Наш банковский счёт": "SYNTHETIC-ACCOUNT",
+    "Наш банковский счёт": `SYNTHETIC-ACCOUNT-${org.id}`,
     "Идентификатор операции в банке": reference,
     "Дата операции": "2026-09-03",
     "Сумма BYN": "125.50",
@@ -41,6 +42,7 @@ test("строка списания проходит из формы выпис�
   await page.getByRole("button", { name: "Сохранить строку выписки", exact: true }).click();
   await expect(page.getByRole("button", { name: "Сохранить строку выписки", exact: true })).toBeEnabled();
   await expect(row).toHaveCount(1);
+  await page.getByLabel("Выбрать счета вручную").check();
   await row.getByRole("button", { name: "Выбрать", exact: true }).click();
   await page.getByLabel("Счёт расчётов импорта").selectOption("60");
   await page.getByRole("button", { name: "Рассчитать проводки", exact: true }).click();

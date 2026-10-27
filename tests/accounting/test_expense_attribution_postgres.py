@@ -19,7 +19,6 @@ from modules.accounting.expense_schemas import (
 from modules.accounting.models import Account, Entry, Line
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 
-
 pytestmark = pytest.mark.integration
 
 

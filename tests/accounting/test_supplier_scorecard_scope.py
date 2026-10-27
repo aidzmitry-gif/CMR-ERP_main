@@ -1,5 +1,5 @@
 """Supplier metrics must not combine company books or unattributed claims."""
-from datetime import datetime, timezone, date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
 

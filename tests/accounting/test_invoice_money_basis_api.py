@@ -63,9 +63,21 @@ async def test_manual_cash_entry_with_invoice_link_invalidates_money_basis(clien
     url = allocations.removesuffix("settlements") + "money-basis"
     before = (await client.get(url)).json()
     assert before["money_state"] == "no_receipts"
+    from modules.sales.client_document_register import DealClientBinding
+    from modules.sales.models import DealDocument
+
+    document = await db.get(DealDocument, doc_id)
+    db.add(DealClientBinding(deal_id=document.deal_id, organization_id=book[0], counterparty_id=1,
+                            snapshot={}, evidence="Synthetic document register binding", actor="tester"))
+    await db.commit()
     data = posting("manual-invoice-money", debit="51", credit="62", amount="25.00").model_dump(mode="json")
     data["lines"][0]["dimensions"] = {"bank_statement": "Synthetic manual statement"}
-    data["lines"][1]["dimensions"] = {"settlement_document": f"sales:document:{doc_id}"}
+    data["lines"][1]["dimensions"] = {
+        "counterparty_id": "1", "counterparty": "supplier1", "counterparty_unp": "190000001",
+        "counterparty_revision": "1", "settlement_document": f"sales:document:{doc_id}",
+        "settlement_document_source": "sales", "settlement_document_id": str(doc_id),
+        "settlement_document_number": document.number, "settlement_document_version": str(document.version),
+    }
     response = await client.post(f"/accounting/organizations/{book[0]}/entries", json=data)
     assert response.status_code == 201, response.text
     after = (await client.get(url)).json()

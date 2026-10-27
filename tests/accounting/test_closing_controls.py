@@ -56,7 +56,8 @@ async def test_closing_controls_report_queues_and_unregistered_vat(client, db, b
                                  "normative_verified": True, "technical_preview_available": True,
                                  "confirmation_available": True}
     assert result["close_blocked_by_queues"] is True
-    assert result["documents"] == {"pending_inbox": 1, "pending_source_controls": 1}
+    assert result["documents"] == {"pending_inbox": 1, "pending_source_controls": 1,
+                                   "pending_manual_documents": 0}
     assert result["vat"]["input_unregistered"] == 1
     assert result["vat"]["output_unregistered"] == 1
     assert {item["code"] for item in result["blockers"]} == {"unposted_inbox", "unposted_source_controls"}

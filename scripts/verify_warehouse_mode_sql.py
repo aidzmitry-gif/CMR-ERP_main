@@ -2,12 +2,12 @@
 import hashlib
 import importlib.util
 import json
-from pathlib import Path
 import subprocess
-import time
 import sys
-from concurrent.futures import ThreadPoolExecutor
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "migrations/versions/crm_rel_001_wms_mode_01.py"

@@ -100,6 +100,12 @@ async def test_mixed_accrual_and_individual_zero_cover_all_known_bindings(
         "evidence": "Synthetic chief compared both employee sources",
     })
     assert review.status_code == 200, review.text
+    # This test isolates gross-binding coverage; satisfy the independent current
+    # statutory-source gate with an explicit, persisted synthetic chief review.
+    statutory = await client.post(prefix + "/payroll-evidence-files", json=_file(
+        "payroll_statutory_zero", reference="synthetic-reviewed-statutory-zero"))
+    assert statutory.status_code == 200, statutory.text
+    assert (await client.get(url)).json()["payroll"]["statutory_source_missing"] is False
     await service.validate_close_period(db, book[0], "2026-10", close)
 
     stored = root / str(book[0]) / (zero_command["request_key"].replace("-", "") + ".pdf")

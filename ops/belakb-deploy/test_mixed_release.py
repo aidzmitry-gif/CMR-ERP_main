@@ -5,9 +5,9 @@ import contextlib
 import io
 import json
 import os
-import sys
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import uuid
@@ -792,7 +792,7 @@ class IntakeQuiescence(unittest.TestCase):
                                                'jobPending', 'processesPresent'})
                 self.assertEqual(len(result['definitionSHA256']), 64)
                 self.assertFalse(result['processesPresent'])
-                old = result['definitionSHA256']
+                _old = result['definitionSHA256']
                 props['OnFailure'] = 'other.service'
                 if unit in package.INTAKE_TIMERS:
                     with self.assertRaisesRegex(package.Blocked, 'INTAKE_STOP_CASCADE'):
@@ -981,11 +981,16 @@ class ApplicationQuiescence(unittest.TestCase):
     def test_arbitrary_target_invalid_baseline_timeout_platform_and_optimize_refuse(self):
         for change in ('target', 'running', 'restart', 'bool-retry', 'bad-id'):
             with self.subTest(change=change), self.prepared() as c:
-                if change == 'target': c.expected['target'] = 'postgres'
-                elif change == 'running': c.expected['running'] = 1
-                elif change == 'restart': c.expected['restartPolicy']['Name'] = 'always'
-                elif change == 'bool-retry': c.expected['restartPolicy']['MaximumRetryCount'] = False
-                else: c.expected['id'] = 'arbitrary'
+                if change == 'target':
+                    c.expected['target'] = 'postgres'
+                elif change == 'running':
+                    c.expected['running'] = 1
+                elif change == 'restart':
+                    c.expected['restartPolicy']['Name'] = 'always'
+                elif change == 'bool-retry':
+                    c.expected['restartPolicy']['MaximumRetryCount'] = False
+                else:
+                    c.expected['id'] = 'arbitrary'
                 with self.assertRaisesRegex(package.Blocked, 'APPLICATION_BASELINE_BINDING'):
                     package.quiesce_application(c.path, c.expected, lease_fd=c.fd)
                 c.command.assert_not_called()
@@ -1004,7 +1009,8 @@ class ApplicationQuiescence(unittest.TestCase):
         for kind in ('empty', 'pending', 'raced'):
             with self.subTest(kind=kind), self.prepared() as c:
                 target = c.path.with_suffix('.pending') if kind == 'pending' else c.path
-                if kind != 'raced': target.write_text('')
+                if kind != 'raced':
+                    target.write_text('')
                 else:
                     def respond(argv, **kwargs):
                         target.write_text('reservation-by-other-caller')
@@ -1018,16 +1024,19 @@ class ApplicationQuiescence(unittest.TestCase):
     def test_wrong_descriptor_or_competing_release_refuses_effects(self):
         for kind in ('bool', 'different-file', 'competing'):
             with self.subTest(kind=kind), self.prepared() as c:
-                other = c.root/'other.lock'; other.touch()
+                other = c.root/'other.lock'
+                other.touch()
                 other_fd = os.open(other, os.O_RDWR)
                 try:
-                    if kind == 'competing': c.flock.side_effect = BlockingIOError()
+                    if kind == 'competing':
+                        c.flock.side_effect = BlockingIOError()
                     fd = True if kind == 'bool' else other_fd if kind == 'different-file' else c.fd
                     with self.assertRaises(package.Blocked):
                         package.quiesce_application(c.path, c.expected, lease_fd=fd)
                     c.command.assert_not_called()
                     self.assertFalse(c.path.exists())
-                finally: os.close(other_fd)
+                finally:
+                    os.close(other_fd)
 
     def test_installed_primitive_seal_mismatch_refuses_before_observation(self):
         with self.prepared() as c, patch.object(package, 'APPLICATION_RUNNER_SHA', '0'*64):
@@ -1041,8 +1050,10 @@ class ApplicationQuiescence(unittest.TestCase):
             with self.subTest(kind=kind), self.prepared() as c:
                 def respond(argv, **kwargs):
                     if argv[:2] == ['docker', 'stop']:
-                        if kind == 'lost': raise package.Blocked('COMMAND_UNAVAILABLE_OR_TIMEOUT')
-                        if kind == 'interrupt': raise KeyboardInterrupt()
+                        if kind == 'lost':
+                            raise package.Blocked('COMMAND_UNAVAILABLE_OR_TIMEOUT')
+                        if kind == 'interrupt':
+                            raise KeyboardInterrupt()
                         c.clock[0] = 31
                     return c.respond(argv, **kwargs)
                 c.command.side_effect = respond
@@ -1066,19 +1077,27 @@ class ApplicationQuiescence(unittest.TestCase):
                 c.command.side_effect = respond
                 with self.assertRaisesRegex(package.Blocked, 'APPLICATION_STOP_TIMEOUT'):
                     package.quiesce_application(c.path, c.expected, lease_fd=c.fd)
-                if phase == 'before': self.assertFalse(c.path.exists())
-                else: self.assertEqual(json.loads(c.path.read_bytes())['status'],
+                if phase == 'before':
+                    self.assertFalse(c.path.exists())
+                else:
+                    self.assertEqual(json.loads(c.path.read_bytes())['status'],
                                        'APPLICATION_QUIESCENCE_UNKNOWN_NO_REOPEN')
 
     def test_postread_same_stopped_identity_and_raw_config_are_required(self):
         for kind in ('running', 'id', 'image', 'dns', 'restart', 'name'):
             with self.subTest(kind=kind), self.prepared() as c:
-                if kind == 'running': c.after['State']['Running'] = True
-                elif kind == 'id': c.after['Id'] = 'c'*64
-                elif kind == 'image': c.after['Image'] = 'sha256:'+'c'*64
-                elif kind == 'dns': c.after['HostConfig']['Dns'] = []
-                elif kind == 'restart': c.after['HostConfig']['RestartPolicy']['Name'] = 'always'
-                else: c.after['Name'] = '/another-app'
+                if kind == 'running':
+                    c.after['State']['Running'] = True
+                elif kind == 'id':
+                    c.after['Id'] = 'c'*64
+                elif kind == 'image':
+                    c.after['Image'] = 'sha256:'+'c'*64
+                elif kind == 'dns':
+                    c.after['HostConfig']['Dns'] = []
+                elif kind == 'restart':
+                    c.after['HostConfig']['RestartPolicy']['Name'] = 'always'
+                else:
+                    c.after['Name'] = '/another-app'
                 with self.assertRaises(package.Blocked):
                     package.quiesce_application(c.path, c.expected, lease_fd=c.fd)
                 self.assertEqual(json.loads(c.path.read_bytes())['status'],
@@ -1088,9 +1107,12 @@ class ApplicationQuiescence(unittest.TestCase):
     def test_all_commands_share_deadline_and_small_budget_does_not_stop(self):
         with self.prepared() as c:
             def respond(argv, **kwargs):
-                if argv[-1] == 'aios-app-1': c.clock[0] = 1
-                elif argv[:2] == ['docker', 'stop']: c.clock[0] = 6
-                else: c.clock[0] = 9
+                if argv[-1] == 'aios-app-1':
+                    c.clock[0] = 1
+                elif argv[:2] == ['docker', 'stop']:
+                    c.clock[0] = 6
+                else:
+                    c.clock[0] = 9
                 return c.respond(argv, **kwargs)
             c.command.side_effect = respond
             package.quiesce_application(c.path, c.expected, lease_fd=c.fd, timeout=10)
@@ -1108,7 +1130,8 @@ class ApplicationQuiescence(unittest.TestCase):
             calls = [0]
             def fail_attempt(path, record):
                 calls[0] += 1
-                if calls[0] == 2: raise OSError('fixture-persistence-error')
+                if calls[0] == 2:
+                    raise OSError('fixture-persistence-error')
                 writer(path, record)
             with patch.object(package, 'write_probe_state', side_effect=fail_attempt):
                 with self.assertRaises(OSError):
