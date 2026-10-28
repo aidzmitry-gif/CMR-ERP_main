@@ -186,7 +186,8 @@ async def test_postgres_mapping_history_and_global_overlap_guards(pg_factory, pg
                 namespace = {}
                 exec(migration.read_text(encoding="utf-8"), namespace)
                 with Operations.context(MigrationContext.configure(connection)):
-                    namespace["upgrade"]()
+                    if connection.scalar(text("SELECT to_regclass('accounting.bank_account_mapping')")) is None:
+                        namespace["upgrade"]()
 
             connection = await session.connection()
             await connection.run_sync(upgrade)
@@ -226,3 +227,34 @@ async def test_postgres_mapping_history_and_global_overlap_guards(pg_factory, pg
             with pytest.raises(DBAPIError, match="immutable"):
                 await session.execute(text(statement), {"id": mapping_id})
             await session.rollback()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("accounting_pg_revision", ["0136"], indirect=True)
+async def test_postgres_mapping_migration_on_predecessor(pg_factory):
+    """Keep actual predecessor DDL evidence alongside current-schema guards."""
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import text
+
+    async with pg_factory() as session:
+        assert await session.scalar(text("SELECT to_regclass('accounting.bank_account_mapping')")) is None
+
+        def upgrade(connection):
+            namespace = {}
+            exec(Path("migrations/versions/0137_bank_account_mapping.py").read_text(encoding="utf-8"), namespace)
+            with Operations.context(MigrationContext.configure(connection)):
+                namespace["upgrade"]()
+                with pytest.raises(RuntimeError, match="requires an explicit data review"):
+                    namespace["downgrade"]()
+
+        await (await session.connection()).run_sync(upgrade)
+        assert await session.scalar(text("SELECT to_regclass('accounting.bank_account_mapping')")) is not None
+        assert await session.scalar(text(
+            "SELECT count(*) FROM pg_constraint WHERE conrelid='accounting.bank_account_mapping'::regclass "
+            "AND contype='x'")) == 1
+        triggers = (await session.scalars(text(
+            "SELECT tgname FROM pg_trigger WHERE tgrelid='accounting.bank_account_mapping'::regclass "
+            "AND NOT tgisinternal ORDER BY tgname"))).all()
+        assert triggers == ["bank_account_mapping_delete_guard", "bank_account_mapping_history_guard"]
+        await session.commit()
