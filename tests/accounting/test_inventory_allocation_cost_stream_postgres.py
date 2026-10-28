@@ -27,7 +27,6 @@ from modules.accounting.schemas import (
     LineInput,
     PostingInput,
 )
-from tests.accounting.test_finished_goods_inventory_postgres import _confirm_output
 from tests.accounting.test_inventory_allocation_loader import save_mixed_weighted_receipt
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_production_output_transfer_postgres import (
@@ -52,7 +51,7 @@ class TwoOutputs(SyntheticProduction):
                 "documents": [{"document_id": order_id + 59, "operation_date": "2026-10-10"}]}
 
 
-async def accepted_production_outputs(api, factory, book, *, same_lot):
+async def accepted_production_outputs(api, factory, book, *, same_lot, order_ids=(42, 43)):
     """Create the physical documents and WMS facts required by a current transfer."""
     from sqlalchemy import select
 
@@ -73,6 +72,7 @@ async def accepted_production_outputs(api, factory, book, *, same_lot):
     warehouse = core.services.wms_reservations
     gateway, user = AccountingService(), CurrentUser("tester", ["director"])
     documents = {}
+    assert order_ids and len(order_ids) == len(set(order_ids))
     async with factory() as session:
         # pg_book copies explicit directory IDs from SQLite into this isolated DB.
         await session.execute(text(
@@ -89,7 +89,7 @@ async def accepted_production_outputs(api, factory, book, *, same_lot):
             "warehouse_identity": {"id": directory.id, "name": directory.name, "title": directory.title},
             "sku_identity": {"id": sku.id, "code": sku.code, "title": sku.title, "unit": sku.unit},
         }
-        for order_id in (42, 43):
+        for order_id in order_ids:
             order = ProductionOrder(id=order_id, number=f"SYN-OUTPUT-{order_id}",
                                     product="Synthetic widget", qty=2)
             session.add(order)
@@ -107,12 +107,12 @@ async def accepted_production_outputs(api, factory, book, *, same_lot):
             documents[order_id] = document.id
         await session.commit()
     assert await core.event_bus.relay_pending(
-        factory, core.services, event_types=("production.output.confirmed",)) == 2
+        factory, core.services, event_types=("production.output.confirmed",)) == len(order_ids)
     async with factory() as session:
         arrivals = (await session.execute(select(Receipt.id, ReceiptLine.id).join(
             ReceiptLine, ReceiptLine.receipt_id == Receipt.id).where(
                 Receipt.organization_id == book[0], Receipt.warehouse == "Main"))).all()
-        assert len(arrivals) == 2
+        assert len(arrivals) == len(order_ids)
     for receipt_id, line_id in arrivals:
         path = f"/wms/receipts/{receipt_id}"
         detail = await api.get(path)
@@ -315,11 +315,19 @@ async def test_0145_keeps_existing_zero_issue_late_cost(pg_factory, pg_book):
         await session.commit()
 
 
-async def test_pool_stream_preserves_real_production_output(pg_factory, pg_book):
-    await _confirm_output(pg_factory, pg_book, method="weighted_average")
+async def test_pool_stream_preserves_real_production_output(pg_factory, pg_book, issuance_pg):
+    policy_id = await _seed_production_book(pg_factory, pg_book, method="weighted_average")
+    await _seed_wip(pg_factory, pg_book, policy_id)
+    production, warehouse, documents, _ = await accepted_production_outputs(
+        issuance_pg[0], pg_factory, pg_book, same_lot=False, order_ids=(42,))
+    command = transfer_input(policy_id).model_copy(update={"output_document_ids": [documents[42]]})
     async with pg_factory() as session:
-        for revision in ("0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py"):
-            await run_migration(session, revision, "upgrade")
+        preview = await prepare_output_transfer(session, pg_book[0], "2026-10", command, production, warehouse)
+        confirmation = ProductionOutputTransferConfirmInput.model_validate({
+            **command.model_dump(mode="json"), "basis_digest": preview["basis_digest"], "digest": preview["digest"]})
+        await confirm_output_transfer(session, pg_book[0], "2026-10", confirmation, "tester",
+                                      production=production, warehouse_gateway=warehouse)
+        await session.commit()
         output_id = await session.scalar(text(
             "SELECT entry_id FROM accounting.production_output_transfer_receipt WHERE organization_id=:org"
         ), {"org": pg_book[0]})
