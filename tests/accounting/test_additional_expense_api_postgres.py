@@ -49,7 +49,7 @@ async def test_expense_api_atomic_versioned_scoped_documents(issuance_pg, pg_boo
         draft = (await api.get(path.rsplit("/", 1)[0])).json()[0]
         source_document = draft["revisions"][-1]["document"]
         source_document["items"][0]["quantity"] = quantity
-        revised = await api.put(path, json={"expected_version": 1, "document": source_document})
+        revised = await api.put(path, json={"key": "expense-api-source-edit", "expected_version": 1, "document": source_document})
         assert revised.status_code == 200, revised.text
         options["expected_version"] = 2
     preview = await api.post(path + "/preview", json=options)
@@ -311,11 +311,24 @@ async def test_expense_api_atomic_versioned_scoped_documents(issuance_pg, pg_boo
         next_issue = {**issue.model_dump(mode="json"), "source": "after-late-cost",
                       "policy_id": allocation["policy_id"], "posting_date": allocation["posting_date"],
                       "quantity": "9.5"}
+        from core.domain.models import Counterparty, Sku
+        from modules.wms.models import WarehouseDirectory
+
+        async with factory() as session:
+            warehouse = await session.get(WarehouseDirectory, 1)
+            sku = await session.get(Sku, 1)
+            buyer = await session.get(Counterparty, 1)
+            assert warehouse is not None and sku is not None and buyer is not None
+            next_issue.update(warehouse_identity={"id": warehouse.id, "name": warehouse.name, "title": warehouse.title},
+                sku_identity={"id": sku.id, "code": sku.code, "title": sku.title, "unit": sku.unit})
         issue_url = f"/accounting/organizations/{pg_book[0]}/inventory/issues"
         sale = {**next_issue, "source": "sale-after-late-cost", "net_amount": "1000.00", "vat_rate": "0",
                 "vat_basis": "Synthetic zero VAT example", "buyer_account": "62", "revenue_account": "90.1",
                 "vat_revenue_account": "90.2", "vat_payable_account": "68.2",
                 "buyer_dimensions": {"counterparty": "buyer", "contract": "contract", "settlement_document": "sale"}}
+        sale["buyer_dimensions"].update(counterparty_id=str(buyer.id),
+            counterparty=buyer.legal_name or buyer.name, counterparty_unp=buyer.unp or "",
+            counterparty_revision=str(buyer.revision))
         sale_preview = await api.post(f"/accounting/organizations/{pg_book[0]}/sales/posting-preview", json=sale)
         assert sale_preview.status_code == 200, sale_preview.text
         next_preview = await api.post(issue_url + "/posting-preview", json=next_issue)
