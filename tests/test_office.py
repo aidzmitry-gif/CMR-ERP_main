@@ -83,6 +83,7 @@ async def test_update_stage_await_pay_triggers_awaiting_and_ladder(office_actor,
     doc = await session.get(OfficeDoc, doc_id)
     doc.overdue_days = 20  # > 15 → ступень «претензия» (Юрист)
     await session.flush()
+    await session.commit()
 
     await api.patch(f"/office/docs/{doc_id}", json={"stage": "await_pay"})
     types = await _event_types(session)
