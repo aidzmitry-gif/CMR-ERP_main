@@ -42,6 +42,7 @@ from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_zero_value_disposals_postgres import command as issue_command
 from tests.accounting.test_zero_value_disposals_postgres import zeroed_output
 from tests.accounting.test_zero_value_output_cost_postgres import run_migration
+from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 pytestmark = pytest.mark.integration
 
@@ -149,13 +150,14 @@ async def test_zero_sale_persists_revenue_and_quantity_once(pg_factory, pg_book,
 
 
 @pytest.mark.parametrize("failure", ["missing_quantity", "forged_money", "forged_dimensions", "foreign_organization"])
-async def test_zero_sale_rejects_partial_or_forged_transaction(pg_factory, pg_book, failure):
+async def test_zero_sale_rejects_partial_or_forged_transaction(pg_factory, pg_book, issuance_pg, failure):
     async with pg_factory() as session:
-        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
-                         "0142_zero_value_command_dates.py", "0143_zero_value_sales.py"):
-            await run_migration(session, revision, "upgrade")
+        if not await session.scalar(text("SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt')")):
+            for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
+                             "0142_zero_value_command_dates.py", "0143_zero_value_sales.py"):
+                await run_migration(session, revision, "upgrade")
         await session.commit()
-    policy_id, _, _ = await zeroed_output(pg_factory, pg_book)
+    policy_id, _, _ = await zeroed_output(pg_factory, pg_book, api=issuance_pg[0])
     document = sale_document(policy_id).model_copy(update={"quantity": Decimal("0.5")})
     if failure == "foreign_organization":
         async with pg_factory() as session:
