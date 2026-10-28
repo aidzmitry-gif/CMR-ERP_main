@@ -687,12 +687,13 @@ async def test_material_issue_persists_complete_mixed_allocation(pg_factory, pg_
     _, movement_id, physical = await seed_physical_issue(pg_factory, pg_book, order_id)
     data = posting_input(policy_id).model_copy(update={"order_id": order_id, "wms_movement_id": movement_id})
     async with pg_factory() as session:
-        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
-                         "0142_zero_value_command_dates.py", "0143_zero_value_sales.py",
-                         "0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py",
-                         "0146_zero_value_allocation_basis.py", "0147_zero_value_allocation_runtime.py",
-                         "0148_zero_value_allocated_sales.py", "0149_production_material_allocations.py"):
-            await run_migration(session, revision, "upgrade")
+        if not await session.scalar(text("SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt')")):
+            for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
+                             "0142_zero_value_command_dates.py", "0143_zero_value_sales.py",
+                             "0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py",
+                             "0146_zero_value_allocation_basis.py", "0147_zero_value_allocation_runtime.py",
+                             "0148_zero_value_allocated_sales.py", "0149_production_material_allocations.py"):
+                await run_migration(session, revision, "upgrade")
         await session.commit()
         preview = await prepare_material_issue_posting(session, pg_book[0], "2026-10", data, SyntheticProduction())
         cost = preview["inventory_cost"]
