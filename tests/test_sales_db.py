@@ -18,6 +18,12 @@ async def _sales_db_parties(session):
     await session.commit()
 
 
+@pytest_asyncio.fixture
+async def _sales_price_approval_parties(session):
+    session.add_all([Counterparty(name="ООО Прайс"), Counterparty(name="ООО Згода")])
+    await session.commit()
+
+
 async def test_create_and_list_deal(api, _sales_db_parties):
     r = await api.post(
         "/sales/deals",
@@ -888,7 +894,7 @@ async def test_messages_omnichannel(session, api):
     ).status_code == 404
 
 
-async def test_price_engine(session, api):
+async def test_price_engine(session, api, _sales_price_approval_parties):
     from core.domain.models import Sku
     from modules.sales.models import DealItem
 
@@ -1095,7 +1101,7 @@ async def test_owner_dashboard(session, api, _sales_db_parties):
     assert any(w["key"] == "sales_pipeline" for w in d["widgets"])
 
 
-async def test_approval_request_and_decide(session, api):
+async def test_approval_request_and_decide(session, api, _sales_price_approval_parties):
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent
