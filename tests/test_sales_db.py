@@ -1009,7 +1009,7 @@ async def test_dispatch_ctx_backward_compat(session):
     assert seen2 == [({"x": 1}, ctx)]  # новый получил контекст
 
 
-async def test_ai_assist_endpoint_disabled(api):
+async def test_ai_assist_endpoint_disabled(api, _sales_db_parties):
     deal = (
         await api.post("/sales/deals", json={"number": "AS-2", "title": "t", "counterparty": "c"})
     ).json()
@@ -1029,7 +1029,7 @@ async def test_ai_gateway_disabled_raises():
         await gateway.complete("test")
 
 
-async def test_ai_draft_endpoint_disabled(api):
+async def test_ai_draft_endpoint_disabled(api, _sales_db_parties):
     deal = (
         await api.post("/sales/deals", json={"number": "AI-2", "title": "t", "counterparty": "c"})
     ).json()
