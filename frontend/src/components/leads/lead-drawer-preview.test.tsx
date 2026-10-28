@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PickerRow } from "@/components/kanban/product-picker";
 
@@ -103,6 +103,60 @@ beforeEach(() => {
 });
 
 describe("LeadDrawerPreview", () => {
+  it.each([false, true])("late success cannot reset another picker (return to original lead: %s)", async (returnToOriginal) => {
+    let complete!: (value: boolean) => void;
+    vi.mocked(api.saveLeadItems).mockImplementationOnce(() => new Promise<boolean>((resolve) => { complete = resolve; }));
+    picker.pickedRows = [{ skuId: 1, code: "A1", title: "Товар", unit: "шт", qty: 2, picked: true, priceOverride: 80 }];
+    const h = { ...noopHandlers(), onItemsSaved: vi.fn() };
+    const { rerender } = render(<LeadDrawerPreview lead={makeLead()} busy={false} {...h} />);
+    fireEvent.click(screen.getByText("Подобрать товары"));
+    fireEvent.click(screen.getByText("Сохранить подбор"));
+    expect(api.saveLeadItems).toHaveBeenCalledTimes(1);
+    rerender(<LeadDrawerPreview lead={makeLead({ id: 8 })} busy={false} {...h} />);
+    if (returnToOriginal) rerender(<LeadDrawerPreview lead={makeLead()} busy={false} {...h} />);
+    picker.pickedRows = [{ skuId: 2, code: "B2", title: "Новый подбор", unit: "шт", qty: 3, picked: true, priceOverride: 50 }];
+    fireEvent.click(screen.getByText("Подобрать товары"));
+    const resetBeforeReply = picker.reset.mock.calls.length;
+    await act(async () => complete(true));
+    expect(h.onItemsSaved).toHaveBeenCalledExactlyOnceWith(7, 1, 160);
+    expect(screen.getByTestId("catalog")).toBeInTheDocument();
+    expect(picker.reset).toHaveBeenCalledTimes(resetBeforeReply);
+    expect(picker.pickedRows[0]).toMatchObject({ skuId: 2, qty: 3, priceOverride: 50 });
+    expect(screen.getByText("Сохранить подбор")).toBeEnabled();
+  });
+
+  it.each(["false", "rejection"])("late failure %s cannot affect a newer save", async (failure) => {
+    let completeOld!: (value: boolean) => void;
+    let rejectOld!: (reason: Error) => void;
+    let completeNew!: (value: boolean) => void;
+    vi.mocked(api.saveLeadItems)
+      .mockImplementationOnce(() => new Promise<boolean>((resolve, reject) => { completeOld = resolve; rejectOld = reject; }))
+      .mockImplementationOnce(() => new Promise<boolean>((resolve) => { completeNew = resolve; }));
+    picker.pickedRows = [{ skuId: 1, code: "A1", title: "Товар", unit: "шт", qty: 2, picked: true, priceOverride: 80 }];
+    const h = { ...noopHandlers(), onItemsSaved: vi.fn() };
+    const { rerender } = render(<LeadDrawerPreview lead={makeLead()} busy={false} {...h} />);
+    fireEvent.click(screen.getByText("Подобрать товары"));
+    fireEvent.click(screen.getByText("Сохранить подбор"));
+    rerender(<LeadDrawerPreview lead={makeLead({ id: 8 })} busy={false} {...h} />);
+    picker.pickedRows = [{ skuId: 2, code: "B2", title: "Новый подбор", unit: "шт", qty: 3, picked: true, priceOverride: 50 }];
+    fireEvent.click(screen.getByText("Подобрать товары"));
+    expect(screen.getByText("Сохранить подбор")).toBeEnabled();
+    fireEvent.click(screen.getByText("Сохранить подбор"));
+    expect(api.saveLeadItems).toHaveBeenCalledTimes(2);
+    expect(api.saveLeadItems).toHaveBeenNthCalledWith(2, 8, [{ skuId: 2, skuCode: "B2", name: "Новый подбор", qty: 3, price: 50, discountPct: 0 }]);
+    expect(screen.getByText("Сохранить подбор")).toBeDisabled();
+    await act(async () => {
+      if (failure === "false") completeOld(false);
+      else rejectOld(new Error("Synthetic delayed failure"));
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText("Сохранить подбор")).toBeDisabled();
+    expect(h.onItemsSaved).not.toHaveBeenCalled();
+    await act(async () => completeNew(true));
+    expect(h.onItemsSaved).toHaveBeenCalledExactlyOnceWith(8, 1, 150);
+    expect(screen.queryByTestId("catalog")).toBeNull();
+  });
+
   it("неизвестная цена блокирует сохранение, оставляет подбор и допускает явный ноль", async () => {
     const h = { ...noopHandlers(), onItemsSaved: vi.fn() };
     picker.pickedRows = [{ skuId: 1, code: "A1", title: "Товар", unit: "шт", qty: 2, picked: true }];
