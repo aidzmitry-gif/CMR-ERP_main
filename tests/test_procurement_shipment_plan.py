@@ -11,6 +11,8 @@ from datetime import date, timedelta
 import pytest
 
 from modules.procurement.plan import STAGE_ORDER
+from tests.test_procurement_orders_lifecycle import _order_command
+from tests.test_procurement_orders_lifecycle import catalog_supplier as catalog_supplier
 
 pytestmark = pytest.mark.asyncio
 
@@ -49,18 +51,22 @@ async def _order(api, **over):
     api.headers["X-User"] = "procurement-owner-test"
     body = {"supplier": "S", "lines": [{"sku_code": "A", "qty": 1, "goods_value_byn": 100}]}
     body.update(over)
-    r = await api.post("/procurement/orders", json=body)
+    org, command = await _order_command(api, **body)
+    api.headers["X-Expected-Organization"] = str(org)
+    api.headers["X-Expected-Principal"] = "procurement-owner-test"
+    r = await api.post(f"/procurement/organizations/{org}/orders", json=command)
     assert r.status_code == 201, r.text
+    order_id = r.json()["order_id"]
     books = (await api.get("/accounting/organizations")).json()
     if not books:
         created = await api.post("/accounting/organizations", json={"name": "Synthetic procurement company", "unp": "999999994"})
         assert created.status_code == 201, created.text
         books = [created.json()]
-    assigned = await api.post(f"/procurement/organizations/{books[0]['id']}/purchase-ownership", json={"kind": "order", "source_id": r.json()["id"], "evidence": "Explicit synthetic lifecycle fixture"})
+    assigned = await api.post(f"/procurement/organizations/{books[0]['id']}/purchase-ownership", json={"kind": "order", "source_id": order_id, "evidence": "Explicit synthetic lifecycle fixture"})
     assert assigned.status_code == 201, assigned.text
     api.headers["X-Expected-Organization"] = str(books[0]["id"])
     api.headers["X-Expected-Principal"] = "procurement-owner-test"
-    return r.json()
+    return {"id": order_id}
 
 
 async def test_plan_order_container_backward(api):
