@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 if not os.environ.get("ESCHF_TEST_DATABASE_URL"):
     pytest.skip(
@@ -23,11 +24,12 @@ if not os.environ.get("ESCHF_TEST_DATABASE_URL"):
         allow_module_level=True,
     )
 
-from core.domain.models import OutboxEvent
+from core.db.base import Base
+from core.domain.models import IdentityInvitationRequest, OutboxEvent, User
 from core.runtime.access import AccessControlMiddleware, build_prefix_map
 from core.runtime.core import Core
 from core.runtime.loader import load_modules
-from core.services.auth import CurrentUser
+from core.services.auth import GUEST, CurrentUser
 from core.services.eventbus import OutboxEventBus
 from modules.eschf.bridge import PreparedSource
 from modules.eschf.models import (
@@ -43,13 +45,40 @@ from modules.eschf.repository import Repository
 from modules.eschf.routes import MAX_ARTIFACT_BYTES
 from tests.eschf import test_repository_postgres as repository_fixtures
 from tests.eschf.test_repository_postgres import SyntheticAdapter
-from tests.eschf.test_repository_postgres import pg as pg
 
 pytestmark = pytest.mark.integration
 repository_value = repository_fixtures.value
+repository_pg = repository_fixtures.pg
 ACCOUNTANT = {"X-User": "synthetic-accountant", "X-User-Roles": "eschf_accountant"}
 BINARY = {"Content-Type": "application/octet-stream"}
 SOURCE = {"source_document_id": 101, "source_document_version": 3}
+
+
+def role_headers(role):
+    usernames = {
+        "": "synthetic-guest",
+        "sales": "synthetic-sales",
+        "eschf_accountant": "synthetic-accountant",
+        "eschf_auditor": "synthetic-auditor",
+        "eschf_worker": "synthetic-worker",
+    }
+    return {"X-User": usernames[role], "X-User-Roles": role}
+
+
+@pytest_asyncio.fixture
+async def pg(repository_pg):
+    schema = "eschf_api_fixture_" + uuid4().hex
+    engine = repository_pg.kw["bind"].execution_options(schema_translate_map={None: schema})
+    tables = [User.__table__, IdentityInvitationRequest.__table__, OutboxEvent.__table__]
+    async with engine.begin() as connection:
+        await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        await connection.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
+    try:
+        yield async_sessionmaker(engine, expire_on_commit=False)
+    finally:
+        async with engine.begin() as connection:
+            assert schema.startswith("eschf_api_fixture_") and len(schema) == 50
+            await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
 
 
 @pytest.fixture
@@ -108,6 +137,12 @@ async def http(pg, value, monkeypatch):
     app.state.core = core
     app.state.eschf_source_provider = SyntheticSourceProvider(value)
     app.state.eschf_evidence_adapter = SyntheticAdapter()
+    async with pg.begin() as session:
+        for role in ("", "sales", "eschf_accountant", "eschf_auditor", "eschf_worker"):
+            session.add(User(
+                username=role_headers(role)["X-User"], full_name="Synthetic API actor",
+                role=role or GUEST, status="active",
+            ))
     for registered in core.routers:
         app.include_router(registered.router, prefix=registered.prefix)
     app.add_middleware(AccessControlMiddleware, prefixes=build_prefix_map(core))
@@ -208,7 +243,7 @@ async def test_guest_unrelated_role_and_auditor_permissions_cover_every_route(ht
     ]
     before = await counts(pg)
     for role in ("", "sales", "eschf_auditor"):
-        headers = {"X-User-Roles": role}
+        headers = role_headers(role)
         for path, body in writes:
             response = await http.client.post(path, json=body, headers=headers)
             assert response.status_code == 403, (role, path, response.text)
@@ -217,8 +252,11 @@ async def test_guest_unrelated_role_and_auditor_permissions_cover_every_route(ht
             assert response.status_code == (200 if role == "eschf_auditor" else 403)
     # The worker can reconcile, but cannot prepare/approve/sign/queue.
     for path, body in writes[:4] + [writes[5]]:
-        response = await http.client.post(path, json=body, headers={"X-User-Roles": "eschf_worker"})
+        response = await http.client.post(path, json=body, headers=role_headers("eschf_worker"))
         assert response.status_code == 403, (path, response.text)
+    # A role header cannot turn the linked accountant into another persisted actor.
+    response = await http.client.get(root, headers={"X-User-Roles": "eschf_auditor"})
+    assert response.status_code == 403
     assert await counts(pg) == before
     assert len(http.provider.calls) == 1
 
@@ -474,7 +512,7 @@ async def test_attempt_unknown_recovery_and_authenticated_synthetic_observation(
         )
     assert (await http.client.get(root)).status_code == 409
     response = await http.client.post(
-        root + "/recovery", json={}, headers={"X-User-Roles": "eschf_worker"}
+        root + "/recovery", json={}, headers=role_headers("eschf_worker")
     )
     assert response.status_code == 200
     assert (
