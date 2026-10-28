@@ -344,10 +344,11 @@ async def test_pool_stream_preserves_real_production_output(pg_factory, pg_book,
 
 async def test_full_allocation_stream_preserves_zero_portion_and_cutoff(pg_factory, pg_book, posting):
     async with pg_factory() as session:
-        for revision in ("0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py"):
-            await run_migration(session, revision, "upgrade")
+        if not await session.scalar(text("SELECT to_regprocedure('accounting.inventory_allocation_cost_stream(integer,text,text,text,date,integer)')")):
+            for revision in ("0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py"):
+                await run_migration(session, revision, "upgrade")
         await session.commit()
-    await save_mixed_weighted_receipt(pg_factory, pg_book, posting)
+    await save_mixed_weighted_receipt(pg_factory, pg_book, posting, issue_writer_snapshot=True)
     query = text("SELECT * FROM accounting.inventory_allocation_cost_stream(:org,'41.2','W','SKU',CAST(:cutoff AS date),:token)")
     async with pg_factory() as session:
         params = {"org": pg_book[0], "cutoff": "2026-09-04", "token": None}
