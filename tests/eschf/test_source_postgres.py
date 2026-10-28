@@ -50,7 +50,7 @@ from modules.accounting.models import Organization
 from modules.eschf.bridge import MappingReceipt, SalesNativeSourceProvider, VerifiedCapture
 from modules.eschf.models import Original, Snapshot
 from modules.sales.deal_loss import DealLossRequest, DealLossResolution
-from modules.sales.models import Deal, DealDocument, Stage
+from modules.sales.models import CrmClient, Deal, DealDocument, Stage
 from tests.eschf.test_repository_postgres import pg as pg
 from tests.onec_eschf.test_adapter import (
     binding_for,
@@ -69,6 +69,7 @@ async def source_pg(pg):
         User.__table__,
         Counterparty.__table__,
         CounterpartyBranch.__table__,
+        CrmClient.__table__,
         Deal.__table__,
         DealDocument.__table__,
         Organization.__table__,
@@ -165,7 +166,7 @@ async def bridge_http(source_pg, monkeypatch):
     for name in (
         "core.services.auth.get_settings",
         "core.runtime.access.get_settings",
-        "modules.sales.access.get_settings",
+        "core.services.crm_access.get_settings",
     ):
         monkeypatch.setattr(name, lambda: settings)
     core = Core(
@@ -177,6 +178,11 @@ async def bridge_http(source_pg, monkeypatch):
     )
     load_modules(core, ["eschf"])
     core.declare_role(Role("source_reader", ("sales.deal.read",)))
+    # Linked users have one persisted effective role, not arbitrary header extras.
+    accountant = next(role for role in core.roles if role.name == "eschf_accountant")
+    core.declare_role(Role(
+        "synthetic_source_accountant", (*accountant.permissions, "sales.deal.read"),
+    ))
     app = FastAPI()
     app.state.core = core
     source, _, native = setup_case(shared=True)
@@ -195,7 +201,7 @@ async def bridge_http(source_pg, monkeypatch):
                 username="synthetic-accountant",
                 full_name="Synthetic accountant",
                 employee_id=701,
-                role="eschf_accountant",
+                role="synthetic_source_accountant",
                 status="active",
                 deal_visibility="own",
             )
@@ -257,7 +263,7 @@ async def bridge_http(source_pg, monkeypatch):
     for registered in core.routers:
         app.include_router(registered.router, prefix=registered.prefix)
     app.add_middleware(AccessControlMiddleware, prefixes=build_prefix_map(core))
-    actor = CurrentUser("synthetic-accountant", ["eschf_accountant", "source_reader"])
+    actor = CurrentUser("synthetic-accountant", ["synthetic_source_accountant"])
     request = Request(
         {
             "type": "http",
@@ -384,12 +390,15 @@ async def test_source_snapshot_and_branch_identity_are_required(bridge_http, cha
 
 async def test_eschf_permission_does_not_grant_source_access(bridge_http):
     h = bridge_http
+    async with h.pg.begin() as session:
+        await session.execute(update(User).values(role="eschf_accountant"))
     response = await h.client.post(
         "/eschf/preparations",
         json={"source_document_id": 301, "source_document_version": 1},
         headers={"X-User-Roles": "eschf_accountant"},
     )
     assert response.status_code == 403 and not h.pipeline.calls
+    assert response.json()["detail"] == "eschf_source_access_denied"
 
 
 @pytest.mark.parametrize("component", ["mapping_resolver", "mapping_verifier", "capture_provider"])
@@ -496,6 +505,7 @@ async def test_final_pg_share_lock_lasts_until_caller_commit(bridge_http):
                 blocked = 0
                 async with h.pg() as observer:
                     for _ in range(100):
+                        await observer.execute(text("SELECT pg_stat_clear_snapshot()"))
                         blocked = await observer.scalar(
                             text(
                                 "SELECT count(*) FROM pg_stat_activity WHERE :pid=ANY(pg_blocking_pids(pid))"
@@ -554,7 +564,9 @@ async def test_oidc_source_uses_stable_subject_without_username_fallback(bridge_
     h = bridge_http
     h.core.declare_role(Role("eschf_accountant", ("sales.deal.read",)))
     async with h.pg.begin() as session:
-        await session.execute(update(User).values(keycloak_user_id="synthetic-stable-subject"))
+        await session.execute(update(User).values(
+            keycloak_user_id="synthetic-stable-subject", role="eschf_accountant",
+        ))
     actor = CurrentUser(
         "renamed-accountant",
         ["eschf_accountant"],
@@ -574,7 +586,9 @@ async def test_oidc_revocation_fact_is_rechecked_after_native_io(bridge_http):
     h = bridge_http
     h.core.declare_role(Role("eschf_accountant", ("sales.deal.read",)))
     async with h.pg.begin() as session:
-        await session.execute(update(User).values(keycloak_user_id="synthetic-stable-subject"))
+        await session.execute(update(User).values(
+            keycloak_user_id="synthetic-stable-subject", role="eschf_accountant",
+        ))
     actor = CurrentUser(
         "synthetic-accountant",
         ["eschf_accountant"],
