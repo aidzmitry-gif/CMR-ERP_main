@@ -2,6 +2,7 @@
 
 import clsx from "clsx";
 import {
+  AlertCircle,
   BarChart3,
   Boxes,
   Box,
@@ -17,6 +18,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
+  RefreshCw,
   Scale,
   Settings,
   ShoppingCart,
@@ -26,7 +28,7 @@ import {
   Workflow,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type IconCmp = React.ComponentType<{ size?: number }>;
@@ -314,15 +316,17 @@ function applySubOrder(items: SubItem[], order: string[] | undefined): SubItem[]
 }
 
 interface SidebarProps {
-  // доступные UI-слаги модулей для текущей роли; null/undefined → показывать все
-  // (backend недоступен или standalone-рендер). Источник — матрица config/access.py.
+  // null/undefined сохраняет legacy/standalone-рендер всех модулей.
+  // Ошибка OIDC-доступа передаётся отдельно и всегда скрывает навигацию.
   allowedSlugs?: string[] | null;
+  accessUnavailable?: boolean;
   userName?: string;
   roleTitle?: string;
 }
 
-export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}) {
+export function Sidebar({ allowedSlugs, accessUnavailable = false, userName, roleTitle }: SidebarProps = {}) {
   const pathname = usePathname() || "";
+  const router = useRouter();
 
   // collapsed (rail) — пользовательский тоггл, в localStorage.
   // hoverExpanded — временное раскрытие при наведении (overlay, не толкает контент).
@@ -369,9 +373,10 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
 
   // Применяем пользовательский порядок + фильтр по правам.
   const visibleModules = useMemo(() => {
+    if (accessUnavailable) return [];
     const ordered = applyOrder(MODULES, order);
     return allowedSlugs == null ? ordered : ordered.filter((m) => allowedSlugs.includes(m.slug));
-  }, [order, allowedSlugs]);
+  }, [order, allowedSlugs, accessUnavailable]);
 
   const crmActive =
     pathname.startsWith("/crm/sales") ||
@@ -667,6 +672,28 @@ export function Sidebar({ allowedSlugs, userName, roleTitle }: SidebarProps = {}
               </div>
             </div>
           )}
+
+          {accessUnavailable ? (
+            <div role="alert" className={clsx(
+              "mb-3 text-sm text-amber-900 dark:text-amber-100",
+              showFull ? "rounded-lg border border-amber-400 bg-amber-50 p-3 dark:bg-amber-950" : "flex flex-col items-center gap-2",
+            )}>
+              <AlertCircle size={18} aria-hidden />
+              <p className={showFull ? "my-2" : "sr-only"}>Не удалось загрузить разделы. Повторите попытку.</p>
+              <button
+                type="button"
+                aria-label="Повторить загрузку разделов"
+                title="Повторить загрузку разделов"
+                onClick={() => router.refresh()}
+                className={clsx("inline-flex items-center justify-center gap-2 rounded border border-current hover:bg-amber-100 dark:hover:bg-amber-900", showFull ? "px-2 py-1" : "h-7 w-7")}
+              >
+                <RefreshCw size={14} aria-hidden />
+                {showFull && "Повторить"}
+              </button>
+            </div>
+          ) : visibleModules.length === 0 ? (
+            <p role="status" className={showFull ? "px-3 py-2 text-sm text-muted" : "sr-only"}>Нет доступных разделов.</p>
+          ) : null}
 
           {visibleModules.map((m) => {
             const active = moduleActive(m);

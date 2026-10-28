@@ -46,7 +46,11 @@ export async function AppShell({
     ? rawMatrix as Record<string, unknown>
     : null;
   const rawModules = roleMatrix?.[role];
-  const allowedSlugs = Array.isArray(rawModules)
+  const accessUnavailable = oidc && (
+    !access || !currentRoles || !Array.isArray(rawModules)
+    || rawModules.some((slug: unknown) => typeof slug !== "string")
+  );
+  const allowedSlugs = accessUnavailable ? [] : Array.isArray(rawModules)
     ? rawModules.filter((slug): slug is string => typeof slug === "string")
     : access ? [] : oidc ? [] : null;
   const roleMetadata = Array.isArray(access?.roles)
@@ -54,7 +58,8 @@ export async function AppShell({
     : undefined;
   const roleTitle = roleMetadata?.title ?? role;
   const canSubscribeToCalls = Boolean(
-    currentRoles
+    !accessUnavailable
+    && currentRoles
     && !currentRoles.some((currentRole) => CALL_STREAM_DENIED_ROLES.has(currentRole))
     && currentRoles.some((currentRole) => {
       const modules = roleMatrix?.[currentRole];
@@ -70,7 +75,7 @@ export async function AppShell({
       {/* Подписка на собственные входящие звонки (SSE) + окно на любом экране оболочки. */}
       <ActiveCallProvider enabled={canSubscribeToCalls}>
         <div className="flex h-screen overflow-hidden max-md:[&>aside:first-child]:w-14">
-          <Sidebar allowedSlugs={allowedSlugs} userName={userName} roleTitle={roleTitle} />
+          <Sidebar allowedSlugs={allowedSlugs} accessUnavailable={accessUnavailable} userName={userName} roleTitle={roleTitle} />
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
             <Topbar crumbs={crumbs} headerActions={headerActions} />
             {/* Вертикальный скролл на уровне оболочки: страницы без своего overflow-контейнера
