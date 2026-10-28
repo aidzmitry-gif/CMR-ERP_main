@@ -11,10 +11,12 @@ SALES_HEAD_HEADERS = {"X-User": "l3-head", "X-User-Roles": "sales_head"}
 
 @pytest_asyncio.fixture(autouse=True)
 async def registered_managers(session):
-    from core.domain.models import User
+    from core.domain.models import Counterparty, User
     session.add_all([
         User(username="l3-sales", full_name="L3 manager", role="sales", status="active", deal_visibility="all"),
         User(username="l3-head", full_name="L3 head", role="sales_head", status="active", deal_visibility="all"),
+        Counterparty(name="ООО Тест"),
+        Counterparty(name="c"),
     ])
     await session.commit()
 
