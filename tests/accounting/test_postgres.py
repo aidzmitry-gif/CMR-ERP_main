@@ -2133,9 +2133,12 @@ async def test_wms_concurrent_accept_preserves_owner_without_duplicate_moves(pg_
     from core.runtime.deps import get_session
     from core.services.auth import CurrentUser, get_current_user
     from modules.accounting.gateway import AccountingService
-    from modules.wms.models import Receipt, ReceiptLine, StockMovement, Task
+    from modules.wms.models import Receipt, ReceiptLine, StockMovement, Task, WarehouseDirectory
     from modules.wms.routes import router
     async with pg_factory() as session:
+        await session.execute(text("SELECT setval(pg_get_serial_sequence('wms.warehouse_directory','id'), (SELECT max(id) FROM wms.warehouse_directory))"))
+        session.add(WarehouseDirectory(organization_id=pg_book[0], name="Test", title="Synthetic test warehouse",
+                                       wms_enabled=True, created_by="tester"))
         receipt = Receipt(organization_id=pg_book[0], number="PG-WMS", source="procurement", entity_ref="purchase_order:1:1", warehouse="Test")
         session.add(receipt)
         await session.flush()
