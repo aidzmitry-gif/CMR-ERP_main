@@ -187,6 +187,11 @@ async def test_pg_atomic_save_has_one_history_receipt_and_line_proof(issuance_pg
 @pytest.mark.parametrize('case', ['same', 'changed', 'execute-reconcile', 'reconcile-execute', 'rollback', 'revoke', 'revoke-replay'])
 async def test_pg_edit_real_lock_wait(issuance_pg, tmp_path, case):  # noqa: F811
     api, factory = issuance_pg
+    async with factory() as session:
+        session.add(Counterparty(id=1, name="supplier1", unp="190000001"))
+        session.add(Supplier(id=1, name="supplier1", unp="190000001", status="active",
+                             counterparty_id=1))
+        await session.commit()
     organization = await api.post('/accounting/organizations', json={
         'name': 'Synthetic concurrent edit', 'unp': '999999939'})
     assert organization.status_code == 201, organization.text
