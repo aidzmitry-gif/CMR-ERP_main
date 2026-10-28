@@ -2175,8 +2175,8 @@ async def test_wms_event_retry_after_rollback_and_concurrent_replay(pg_factory, 
     async with pg_factory() as session:
         conn = await session.connection()
         def catalog(sync):
-            Sku.metadata.tables["ref_nomenclature_category"].create(sync)
-            Sku.__table__.create(sync)
+            Sku.metadata.tables["ref_nomenclature_category"].create(sync, checkfirst=True)
+            Sku.__table__.create(sync, checkfirst=True)
         await conn.run_sync(catalog)
         event = OutboxEvent(event_type="procurement.received", payload={"organization_id": pg_book[0], "item": "A", "qty": "1.25", "entity_ref": "purchase_order:1:1"})
         session.add(event)
