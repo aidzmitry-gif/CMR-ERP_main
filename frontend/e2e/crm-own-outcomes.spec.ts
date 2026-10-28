@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type APIResponse, type Response } from '@playwright/test';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
@@ -200,21 +200,80 @@ for (const mode of ['stock', 'on_order'] as const) {
       expect(previewReply.status(), await previewReply.text()).toBe(200);
       const basis = await previewReply.json();
       const bounds = basis.sections.legacy_fulfillment.facts;
-      const reviewReply = await control.request.post(prefix + '/fulfillment-review', { data: {
-        ...identity, request_key: randomUUID(), expected_basis_digest: basis.basis_digest,
-        money_reconciliation_id: (await reconciled.json()).id, evidence: 'Synthetic complete fulfillment archive',
-        external_sources: [{ system: 'Synthetic warehouse', reference: `Archive invoice ${invoice.id}`,
-          history_from: bounds.required_history_from, history_through: bounds.required_history_through,
-          confirmed_no_fulfillment: true }], all_fulfillment_sources_identified: true,
-      } });
-      expect(reviewReply.status(), await reviewReply.text()).toBe(201);
-      const review = await reviewReply.json();
-      const cancellation = { ...identity, request_key: randomUUID(), fulfillment_review_id: review.review_id,
-        expected_review_digest: review.review_digest, evidence: 'Synthetic lost deal, fully reconciled',
-        acknowledge_invoice_invalidation: true };
-      const cancelled = await control.request.post(prefix + '/cancel', { data: cancellation });
-      expect(cancelled.status(), await cancelled.text()).toBe(201);
-      const cancellationReceipt = await cancelled.json();
+      let cancelled: APIResponse | Response;
+      let cancellation: Record<string, unknown>;
+      let cancellationReceipt: Record<string, unknown>;
+      if (mode === 'on_order') {
+        const chief = await control.newPage();
+        try {
+          await chief.goto(`/crm/deals/${deal.id}?org=${fixture.organization}&invoice=${invoice.id}#document-register`);
+          const register = chief.getByRole('region', { name: 'Реестр документов сделки', exact: true });
+          await register.getByRole('button', { name: 'Аннулирование счёта', exact: true }).click();
+          const panel = register.getByRole('region', { name: 'Аннулирование счёта', exact: true });
+          await expect(panel.getByText('Сохранённая денежная сверка актуальна по проверке сервера.')).toBeVisible();
+          await panel.getByRole('button', { name: 'Добавить внешний источник', exact: true }).click();
+          await panel.getByLabel('Система или источник 1', { exact: true }).fill('Synthetic warehouse');
+          await panel.getByLabel('Документ или ссылка 1', { exact: true }).fill(`Archive invoice ${invoice.id}`);
+          await expect(panel.getByLabel('Проверено с 1', { exact: true })).toHaveValue(bounds.required_history_from);
+          await expect(panel.getByLabel('Проверено по 1', { exact: true })).toHaveValue(bounds.required_history_through);
+          await panel.getByRole('checkbox', { name: 'Источник 1: отсутствие исполнения подтверждено', exact: true }).check();
+          await panel.getByLabel('Основание сверки исполнения', { exact: true }).fill('Synthetic complete fulfillment archive');
+          await panel.getByRole('checkbox', { name: 'Все источники исполнения выявлены и проверены', exact: true }).check();
+          const reviewResponse = chief.waitForResponse(r => new URL(r.url()).pathname === prefix + '/fulfillment-review'
+            && r.request().method() === 'POST');
+          await panel.getByRole('button', { name: 'Сохранить сверку исполнения', exact: true }).click();
+          const reviewReply = await reviewResponse;
+          expect(reviewReply.status(), await reviewReply.text()).toBe(201);
+          const review = await reviewReply.json();
+          expect(review.money_reconciliation_id).toBe((await reconciled.json()).id);
+          await expect(panel.getByText('Резерв отсутствовал; складские остатки не изменятся.', { exact: false })).toBeVisible();
+          await panel.getByLabel('Причина аннулирования', { exact: true }).fill('Synthetic lost deal, fully reconciled');
+          await panel.getByRole('checkbox', { name: 'Подтверждаю, что счёт больше не будет действителен', exact: true }).check();
+          const journalKey = `invoice-cancellation:v1:${fixture.organization}:${deal.id}:${invoice.id}`;
+          let persistedBeforePost = false;
+          await chief.route('**' + prefix + '/cancel', async route => {
+            const raw = await chief.evaluate(key => sessionStorage.getItem(key), journalKey);
+            expect(raw).not.toBeNull();
+            const pending = JSON.parse(raw!).pending;
+            expect(pending.phase).toBe('cancel');
+            expect(pending.body).toEqual(route.request().postDataJSON());
+            persistedBeforePost = true;
+            await route.continue();
+          });
+          const cancelResponse = chief.waitForResponse(r => new URL(r.url()).pathname === prefix + '/cancel'
+            && r.request().method() === 'POST');
+          await panel.getByRole('button', { name: 'Аннулировать счёт', exact: true }).click();
+          cancelled = await cancelResponse;
+          cancellation = cancelled.request().postDataJSON();
+          expect(cancellation).toMatchObject({ ...identity, fulfillment_review_id: review.review_id,
+            expected_review_digest: review.review_digest, acknowledge_invoice_invalidation: true });
+          expect(cancelled.status(), await cancelled.text()).toBe(201);
+          // Read the browser body before closing its page; retain the exact receipt.
+          cancellationReceipt = await cancelled.json();
+          const success = panel.getByText('Счёт аннулирован. Резерв отсутствовал.', { exact: true });
+          await expect(success).toBeVisible();
+          await expect(panel.getByText('Уведомление клиенту не отправлено.', { exact: true })).toBeVisible();
+          expect(persistedBeforePost).toBe(true);
+          expect(JSON.parse((await chief.evaluate(key => sessionStorage.getItem(key), journalKey))!).pending).toBeNull();
+          await success.locator('..').screenshot({ path: test.info().outputPath('cancellation-on-order-ui.png') });
+        } finally { await chief.close(); }
+      } else {
+        const reviewReply = await control.request.post(prefix + '/fulfillment-review', { data: {
+          ...identity, request_key: randomUUID(), expected_basis_digest: basis.basis_digest,
+          money_reconciliation_id: (await reconciled.json()).id, evidence: 'Synthetic complete fulfillment archive',
+          external_sources: [{ system: 'Synthetic warehouse', reference: `Archive invoice ${invoice.id}`,
+            history_from: bounds.required_history_from, history_through: bounds.required_history_through,
+            confirmed_no_fulfillment: true }], all_fulfillment_sources_identified: true,
+        } });
+        expect(reviewReply.status(), await reviewReply.text()).toBe(201);
+        const review = await reviewReply.json();
+        cancellation = { ...identity, request_key: randomUUID(), fulfillment_review_id: review.review_id,
+          expected_review_digest: review.review_digest, evidence: 'Synthetic lost deal, fully reconciled',
+          acknowledge_invoice_invalidation: true };
+        cancelled = await control.request.post(prefix + '/cancel', { data: cancellation });
+        cancellationReceipt = await cancelled.json();
+      }
+      expect(cancelled.status(), JSON.stringify(cancellationReceipt)).toBe(201);
       expect(cancellationReceipt.reserve_status).toBe(mode === 'stock' ? 'released' : 'unreserved');
       if (mode === 'stock') {
         expect(cancellationReceipt.release_id).toBeGreaterThan(0);
@@ -224,8 +283,8 @@ for (const mode of ['stock', 'on_order'] as const) {
         expect(basis.reservation_digest).toBeNull();
         expect(basis.sections.wms_pick.facts.reservation).toBeNull();
       }
-      expect((await cancelled.json()).customer_notification).toBe('not_sent');
-      expect(await (await control.request.post(prefix + '/cancel', { data: cancellation })).json()).toEqual(await cancelled.json());
+      expect(cancellationReceipt.customer_notification).toBe('not_sent');
+      expect(await (await control.request.post(prefix + '/cancel', { data: cancellation })).json()).toEqual(cancellationReceipt);
       invoiceCancelled = true;
       expect((await preserved()).stage).toBe('qual');
       await loss.getByRole('button', { name: 'Обновить сведения', exact: true }).click();
