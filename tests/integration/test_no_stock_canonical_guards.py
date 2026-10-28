@@ -12,10 +12,13 @@ import pytest
 from sqlalchemy import text
 
 from tests.integration.test_unreserved_cancellation_postgres import (
+    CONTRACT_AVAILABLE,
     issuance_pg,  # noqa: F401
     pg_factory,  # noqa: F401
     unreserved_pg,  # noqa: F401
 )
+
+pytestmark = pytest.mark.skipif(not CONTRACT_AVAILABLE, reason="Registered 0198 or an explicit local proposal required")
 
 
 @pytest.fixture

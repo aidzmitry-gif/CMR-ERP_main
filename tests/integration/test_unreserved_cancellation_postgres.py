@@ -1,11 +1,20 @@
-"""Draft SQL verification; a numbered Alembic release remains mandatory."""
+"""Native cancellation contract on registered 0198 or an explicit local proposal.
+
+Ordinary CI uses only its migrated, disposable fixture database. Draft inputs
+are opt-in local evidence and never imply registered-migration acceptance.
+"""
+import ast
 import asyncio
 import os
+import re
+import runpy
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 
@@ -27,18 +36,40 @@ from tests.test_unreserved_invoice_cancellation import (
     test_unreserved_cancellation_preserves_original_without_fake_release as exercise_cancellation,
 )
 
+ROOT = Path(__file__).resolve().parents[2]
+MIGRATION = Path(os.getenv("ERP_UNRESERVED_MIGRATION_SOURCE", str(
+    ROOT / "migrations/versions/0198_invoice_no_stock_cancellation.py")))
+CONTRACT_AVAILABLE = bool(os.getenv("ERP_UNRESERVED_SQL_DRAFT")) or MIGRATION.is_file()
+pytestmark = pytest.mark.skipif(not CONTRACT_AVAILABLE, reason="Registered 0198 or an explicit local proposal required")
+
+
+async def apply_migration_action(session, action):
+    draft = os.getenv("ERP_UNRESERVED_SQL_DRAFT")
+    if draft:
+        path = Path(draft)
+        statement = text(path.with_name(path.name.replace("upgrade", action)).read_text(
+            encoding="utf-8").replace(":", r"\:"))
+        assert not statement._bindparams
+        await session.execute(statement)
+    else:
+        migration = runpy.run_path(str(MIGRATION))
+
+        def invoke(connection):
+            with Operations.context(MigrationContext.configure(connection)):
+                migration[action]()
+
+        await session.run_sync(lambda sync: invoke(sync.connection()))
+
 
 @pytest_asyncio.fixture
 async def unreserved_pg(issuance_pg):  # noqa: F811
     api, factory = issuance_pg
-    draft = os.getenv("ERP_UNRESERVED_SQL_DRAFT")
-    if not draft:
-        pytest.skip("Explicit local SQL draft required; no automatic schema adaptation")
-    statement = text(Path(draft).read_text(encoding="utf-8").replace(":", r"\:"))
-    assert not statement._bindparams
     async with factory() as session:
-        await session.execute(statement)
-        await session.commit()
+        if os.getenv("ERP_UNRESERVED_SQL_DRAFT") or os.getenv("ERP_UNRESERVED_MIGRATION_SOURCE"):
+            await apply_migration_action(session, "upgrade")
+            await session.commit()
+        else:
+            assert await session.scalar(text("SELECT version_num FROM alembic_version")) == "0198"
     yield api, factory
 
 
@@ -103,13 +134,16 @@ async def test_pg_concurrent_never_reserved_cancellation_is_single(unreserved_pg
             OutboxEvent.event_type == "sales.invoice.cancelled")) == 1
 
 
-def draft_sql(name):
-    path = Path(os.environ["ERP_UNRESERVED_SQL_DRAFT"])
-    if name in {"upgrade", "downgrade"}:
-        path = path.with_name(path.name.replace("upgrade", name))
-    else:
-        path = path.with_name(name)
-    return path.read_text(encoding="utf-8")
+def original_guard_body(name):
+    source = ROOT / "migrations/versions/0130_accounting_ledger.py"
+    pattern = r"CREATE OR REPLACE FUNCTION sales\." + name + r"\(.*?\$\$.*?\$\$;"
+    for node in ast.parse(source.read_text(encoding="utf-8")).body:
+        value = getattr(node, "value", None)
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            match = re.search(pattern, value.value, re.S)
+            if match:
+                return match.group().split("$$")[1]
+    raise AssertionError(f"Missing immutable baseline function: {name}")
 
 
 async def test_pg_downgrade_refuses_never_reserved_history(unreserved_pg):
@@ -120,7 +154,7 @@ async def test_pg_downgrade_refuses_never_reserved_history(unreserved_pg):
         before = (await session.execute(text(
             "SELECT id,digest,snapshot::text,release_id FROM sales.invoice_cancellation_receipt"))).all()
         with pytest.raises(DBAPIError, match="No-stock cancellation history prevents downgrade"):
-            await session.execute(text(draft_sql("downgrade").replace(":", r"\:")))
+            await apply_migration_action(session, "downgrade")
         await session.rollback()
         assert (await session.execute(text(
             "SELECT id,digest,snapshot::text,release_id FROM sales.invoice_cancellation_receipt"))).all() == before
@@ -133,16 +167,16 @@ async def test_pg_downgrade_preserves_old_reserved_history_and_upgrade_restores_
     async with factory() as session:
         read_history = text("SELECT id,document_id,digest,release_id,snapshot::text FROM sales.invoice_cancellation_receipt")
         before = (await session.execute(read_history)).all()
-        await session.execute(text(draft_sql("downgrade").replace(":", r"\:")))
+        await apply_migration_action(session, "downgrade")
         await session.commit()
         assert (await session.execute(read_history)).all() == before
         assert not await session.scalar(text("SELECT EXISTS(SELECT 1 FROM information_schema.columns "
             "WHERE table_schema='sales' AND table_name='invoice_cancellation_receipt' AND column_name='reservation_state')"))
-        original = draft_sql("unreserved-cancellation-guard-before.sql").split("$$")[1]
+        original = original_guard_body("check_cancellation_package")
         assert await session.scalar(text("SELECT prosrc FROM pg_proc WHERE oid='sales.check_cancellation_package()'::regprocedure")) == original
-        loss_original = draft_sql("unreserved-loss-guard-before.sql").split("$$")[1]
+        loss_original = original_guard_body("check_loss_cancelled_invoice")
         assert await session.scalar(text("SELECT prosrc FROM pg_proc WHERE oid='sales.check_loss_cancelled_invoice(text)'::regprocedure")) == loss_original
-        await session.execute(text(draft_sql("upgrade").replace(":", r"\:")))
+        await apply_migration_action(session, "upgrade")
         await session.commit()
         assert (await session.execute(read_history)).all() == before
         assert await session.scalar(text("SELECT count(*) FROM sales.invoice_cancellation_receipt "
