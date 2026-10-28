@@ -36,6 +36,8 @@ async def _make_deal(api, counterparty="ООО «Аккумулятор»"):
 
 async def test_prepare_contract_enriches_by_unp(api, session):
     # УНП 191234567 есть в mock-реестре ЕГР (RegistryClient)
+    session.add(Counterparty(name="ООО «Аккумулятор»"))
+    await session.commit()
     await _make_template(api)
     deal = await _make_deal(api)
     r = await api.post(
