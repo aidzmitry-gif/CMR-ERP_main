@@ -6,6 +6,16 @@
 месяца» ломает их при смене календарного месяца.
 """
 
+import pytest_asyncio
+
+from core.domain.models import Counterparty
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def synthetic_parties(session):
+    session.add_all([Counterparty(name=name) for name in ("ООО Клиент", "ООО X", "X")])
+    await session.commit()
+
 
 
 async def test_rop_plan_fact_empty(api):
@@ -51,7 +61,7 @@ async def test_rop_plan_fact_with_won_deals(api):
 
 async def test_rop_plan_fact_other_period_excluded(api):
     """Сделка вне запрошенного месяца не попадает в период (stage_changed_at=now)."""
-    await api.post(
+    created = await api.post(
         "/sales/deals",
         json={
             "number": "ROP-T-2",
@@ -62,6 +72,7 @@ async def test_rop_plan_fact_other_period_excluded(api):
             "owner": "Петров Б.",
         },
     )
+    assert created.status_code == 201, created.text
     # сделка создаётся с stage_changed_at=сейчас → запрашиваем заведомо прошлый месяц
     r = await api.get("/sales/rop/plan-fact?period=2000-01")
     assert r.status_code == 200
