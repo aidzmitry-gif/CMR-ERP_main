@@ -58,14 +58,17 @@ describe("ProcurementRfqView", () => {
   });
 
   it("creates RFQ from an owned request with a repeatable key", async () => {
-    mocked(api.createRfq).mockResolvedValue(rfq);
+    let confirm!: (value: Rfq) => void;
+    mocked(api.createRfq).mockImplementation(() => new Promise<Rfq>((resolve) => { confirm = resolve; }));
     await chooseOrg();
     fireEvent.change(screen.getByLabelText("Заявка на закупку"), { target: { value: "9" } });
     fireEvent.click(screen.getByRole("button", { name: "Создать RFQ" }));
     await waitFor(() => expect(api.createRfq).toHaveBeenCalledWith(1, {
       request_key: expect.any(String), request_id: 9,
     }));
-    expect(screen.getByLabelText("Заявка на закупку")).toHaveValue("");
+    expect(screen.getByLabelText("Заявка на закупку")).toHaveValue("9");
+    confirm(rfq);
+    await waitFor(() => expect(screen.getByLabelText("Заявка на закупку")).toHaveValue(""));
   });
 
   it("keeps the same create key and company after an unknown response", async () => {
