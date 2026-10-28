@@ -30,6 +30,7 @@ from tests.accounting.test_postgres import (
     pg_factory,  # noqa: F401
 )
 from tests.accounting.test_zero_value_disposals_postgres import command, zeroed_output
+from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 pytestmark = pytest.mark.integration
 
@@ -55,12 +56,14 @@ async def test_0141_up_down_up_without_zero_history(pg_factory):
         assert await session.scalar(text("SELECT to_regprocedure('accounting.guard_output_cost_revision()')"))
 
 
-async def test_specific_zero_receipt_gets_typed_output_cost_destination(pg_factory, pg_book):
+async def test_specific_zero_receipt_gets_typed_output_cost_destination(pg_factory, pg_book, issuance_pg):
     async with pg_factory() as session:
-        await run_migration(session, "0140_zero_value_disposals.py", "upgrade")
-        await run_migration(session, "0141_zero_value_output_cost.py", "upgrade")
+        if not await session.scalar(text("SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt')")):
+            await run_migration(session, "0140_zero_value_disposals.py", "upgrade")
+            await run_migration(session, "0141_zero_value_output_cost.py", "upgrade")
         await session.commit()
-    policy_id, output_id, line_id = await zeroed_output(pg_factory, pg_book, normative_verified=True)
+    policy_id, output_id, line_id = await zeroed_output(
+        pg_factory, pg_book, normative_verified=True, api=issuance_pg[0])
     async with pg_factory() as session:
         draft = command(policy_id, output_id, line_id)
         basis = await preview_standalone_zero_value_issue_basis(session, pg_book[0], draft)
