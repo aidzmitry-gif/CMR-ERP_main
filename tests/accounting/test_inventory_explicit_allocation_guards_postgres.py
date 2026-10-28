@@ -75,7 +75,8 @@ async def test_loader_rejects_self_consistent_but_overpriced_saved_cost(pg_facto
     from decimal import Decimal
 
     async with pg_factory() as session:
-        await run_migration(session, "0144_inventory_explicit_allocation_guards.py", "upgrade")
+        if not await session.scalar(text("SELECT to_regprocedure('accounting.validate_inventory_allocation_link(integer)') IS NOT NULL")):
+            await run_migration(session, "0144_inventory_explicit_allocation_guards.py", "upgrade")
         await session.commit()
 
     def overpriced(cost, package):
@@ -86,4 +87,5 @@ async def test_loader_rejects_self_consistent_but_overpriced_saved_cost(pg_facto
 
     # Structural SQL binding succeeds; independent valuation must still reject it.
     with pytest.raises(AccountingError, match="historical calculation"):
-        await save_mixed_weighted_receipt(pg_factory, pg_book, posting, prepare_packet=overpriced)
+        await save_mixed_weighted_receipt(pg_factory, pg_book, posting, prepare_packet=overpriced,
+                                          issue_writer_snapshot=True)
