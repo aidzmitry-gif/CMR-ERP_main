@@ -100,6 +100,15 @@ describe("hasActiveFilters", () => {
 });
 
 describe("journalStats", () => {
+  it("не считает непроверенную оплату и отменённые счета долгом", () => {
+    const rows = (["paid", "invoiced", "partial", "refunded", "cancelled", "none", "unknown"] as const)
+      .map((payment, deal_id) => row({ payment, deal_id }));
+    expect(filterJournal(rows, { ...EMPTY_JOURNAL_FILTERS, unpaidOnly: true })
+      .map((r) => r.payment)).toEqual(["invoiced", "partial", "refunded", "none"]);
+    expect(journalStats(rows)).toEqual({
+      count: 7, totalAmount: 7000, totalGross: 1400, pricedCount: 7, unpaidCount: 4, unknownCount: 1,
+    });
+  });
   it("считает сумму и кол-во по срезу", () => {
     const rows = [row({ deal_id: 1, amount: 100 }), row({ deal_id: 2, amount: 200 })];
     const stats = journalStats(rows);

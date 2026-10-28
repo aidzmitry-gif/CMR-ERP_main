@@ -70,6 +70,37 @@ async function renderReady() {
 }
 
 describe("SalesJournal", () => {
+  it("отдельно показывает непроверенную оплату и не выдаёт её за долг", async () => {
+    respondWith([
+      invoicedRow,
+      { ...paidRow, payment: "unknown", payment_source: "unknown" },
+    ]);
+    await renderReady();
+    expect(screen.getByText("оплата не проверена")).toHaveAttribute("title",
+      "Данные оплаты недоступны или требуют проверки; наличие долга не подтверждено");
+    expect(screen.getByText("неоплаченных").parentElement).toHaveTextContent("1");
+    expect(screen.getByText("Оплата не проверена: 1 · в неоплаченные не включены")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(screen.queryByText("CRM-101")).not.toBeInTheDocument();
+    expect(screen.getByText("CRM-102")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["partial", "частично оплачен"],
+    ["refunded", "оплата возвращена"],
+    ["cancelled", "счёт отменён"],
+  ] as const)("показывает %s отдельной меткой", async (payment, label) => {
+    respondWith([{ ...paidRow, payment, payment_source: "ledger" }]);
+    await renderReady();
+    expect(screen.getByText(label)).toHaveAttribute("title", "По проверенным данным бухгалтерии для этого счёта");
+  });
+
+  it("помечает историческую оплату по статусу документа", async () => {
+    respondWith([{ ...paidRow, payment_source: "legacy" }]);
+    await renderReady();
+    expect(screen.getByText("оплачен · по статусу документа")).toHaveAttribute("title",
+      "Исторический статус документа; банковские распределения не проверены");
+  });
   it("показывает «Загрузка…» до ответа бэкенда и уходит с фетчем на /api/sales/journal", () => {
     // fetch «висит» — статус остаётся loading
     fetchImpl = () => new Promise(() => {});
