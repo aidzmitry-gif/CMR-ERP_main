@@ -30,6 +30,14 @@ async def _sales_chat_parties(session):
     await session.commit()
 
 
+@pytest_asyncio.fixture
+async def _sales_contract_denial_parties(session):
+    for index, name in enumerate(("ООО Гамма", "c"), 1):
+        session.add(Counterparty(name=name, legal_name=name, unp=str(920000000 + index),
+                                 requisites={"legal_address": "Synthetic contract test address"}))
+    await session.commit()
+
+
 async def test_create_and_list_deal(api, _sales_db_parties):
     r = await api.post(
         "/sales/deals",
@@ -640,7 +648,7 @@ async def test_contract_goes_through_approval(session, api):
     ).status_code == 409
 
 
-async def test_contract_rejected(session, api):
+async def test_contract_rejected(session, api, _sales_contract_denial_parties):
     deal = (
         await api.post(
             "/sales/deals", json={"number": "CT-2", "title": "t", "counterparty": "ООО Гамма"}
@@ -656,7 +664,7 @@ async def test_contract_rejected(session, api):
     assert d.json()["onec_ref"] is None
 
 
-async def test_decide_document_rbac_enforced(session, api):
+async def test_decide_document_rbac_enforced(session, api, _sales_contract_denial_parties):
     deal = (
         await api.post("/sales/deals", json={"number": "CT-3", "title": "t", "counterparty": "c"})
     ).json()
