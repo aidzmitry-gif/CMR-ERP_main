@@ -4,9 +4,15 @@ from decimal import Decimal as D
 
 import pytest
 
-from core.domain.models import Sku
+from core.domain.models import Counterparty, Sku
 from core.services.price_cost import ItemPriceCost
 from modules.sales.models import DealItem, PriceQuote
+
+
+@pytest.fixture(autouse=True)
+async def synthetic_counterparties(session):
+    session.add_all(Counterparty(name=name) for name in ("ООО X", "ООО Y", "ООО Z", "ООО W", "ООО Q", "ООО R", "ООО T", "c"))
+    await session.commit()
 
 
 async def _new_deal(api, number, **extra):
