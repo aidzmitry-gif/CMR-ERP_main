@@ -24,14 +24,23 @@ describe("DealApprovals", () => {
   });
 
   it("показывает pending-согласование и согласует его", async () => {
-    mock(api.fetchApprovals).mockResolvedValue([
+    const approvals = [
       { id: 1, kind: "deal.contract", entity_ref: "deal:1", subject: "s", route: "Юрист", status: "pending", requested_by: "М", decided_by: null },
-    ]);
+    ];
+    let respond!: (value: typeof approvals) => void;
+    const initialResponse = new Promise<typeof approvals>((resolve) => { respond = resolve; });
+    mock(api.fetchApprovals).mockReturnValueOnce(initialResponse).mockResolvedValue(approvals);
     mock(api.decideApproval).mockResolvedValue(true);
     render(<DealApprovals dealId="1" />);
     expect(await screen.findByText(/Юрист/)).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle("Согласовать"));
+    expect(screen.queryByTitle("Согласовать")).not.toBeInTheDocument();
+    expect(api.decideApproval).not.toHaveBeenCalled();
+    respond(approvals);
+    const approveButton = await screen.findByTitle("Согласовать");
+    expect(screen.getByText("deal.contract · Юрист")).toBeInTheDocument();
+    fireEvent.click(approveButton);
     await waitFor(() => expect(api.decideApproval).toHaveBeenCalledWith(1, true, "Согласующий"));
+    await waitFor(() => expect(approveButton).toBeEnabled());
   });
 
   it("смена вида согласования и отклонение", async () => {
