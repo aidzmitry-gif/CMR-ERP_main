@@ -108,7 +108,7 @@ for (const mode of ['stock', 'on_order'] as const) {
         expect(await read(path + '/items')).toEqual(before.items);
         expect(await read(path + '/documents')).toEqual(invoiceCancelled
           ? before.documents.map((document: { id: number }) => document.id === invoice.id
-            ? { ...document, status: 'cancelled', reserve_status: 'released' } : document)
+            ? { ...document, status: 'cancelled', reserve_status: mode === 'stock' ? 'released' : 'unreserved' } : document)
           : before.documents);
         expect(await originalHash()).toBe(before.original_sha256);
         expect(await stock()).toEqual(before.stock);
@@ -214,7 +214,16 @@ for (const mode of ['stock', 'on_order'] as const) {
         acknowledge_invoice_invalidation: true };
       const cancelled = await control.request.post(prefix + '/cancel', { data: cancellation });
       expect(cancelled.status(), await cancelled.text()).toBe(201);
-      expect((await cancelled.json()).reserve_status).toBe('released');
+      const cancellationReceipt = await cancelled.json();
+      expect(cancellationReceipt.reserve_status).toBe(mode === 'stock' ? 'released' : 'unreserved');
+      if (mode === 'stock') {
+        expect(cancellationReceipt.release_id).toBeGreaterThan(0);
+      } else {
+        expect(cancellationReceipt.stock_outcome).toBe('no_stock_release');
+        expect(cancellationReceipt.release_id).toBeNull();
+        expect(basis.reservation_digest).toBeNull();
+        expect(basis.sections.wms_pick.facts.reservation).toBeNull();
+      }
       expect((await cancelled.json()).customer_notification).toBe('not_sent');
       expect(await (await control.request.post(prefix + '/cancel', { data: cancellation })).json()).toEqual(await cancelled.json());
       invoiceCancelled = true;

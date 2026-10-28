@@ -113,7 +113,7 @@ class VerifiedNoShipment:
     document_id: int
     document_version: int
     content_sha256: str
-    reservation_digest: str
+    reservation_digest: str | None
     review_id: str
     review_digest: str
     reviewed_by: str
