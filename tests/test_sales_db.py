@@ -24,6 +24,12 @@ async def _sales_price_approval_parties(session):
     await session.commit()
 
 
+@pytest_asyncio.fixture
+async def _sales_chat_parties(session):
+    session.add_all([Counterparty(name="ООО Чат"), Counterparty(name="c")])
+    await session.commit()
+
+
 async def test_create_and_list_deal(api, _sales_db_parties):
     r = await api.post(
         "/sales/deals",
@@ -843,7 +849,7 @@ async def test_payment_preserves_invoice_reserve(session, api):
     assert await session.scalar(select(OutboxEvent).where(OutboxEvent.event_type == "sales.stock.reserved")) is not None
 
 
-async def test_chats(api):
+async def test_chats(api, _sales_chat_parties):
     deal = (
         await api.post("/sales/deals", json={"number": "CH-1", "title": "t", "counterparty": "ООО Чат"})
     ).json()
@@ -856,7 +862,7 @@ async def test_chats(api):
     )
 
 
-async def test_messages_omnichannel(session, api):
+async def test_messages_omnichannel(session, api, _sales_chat_parties):
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent
