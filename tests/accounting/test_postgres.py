@@ -1363,6 +1363,7 @@ async def test_manual_document_warehouse_snapshot_rechecked_on_postgres(pg_facto
     from modules.wms.models import WarehouseDirectory
 
     async with pg_factory() as session:
+        await session.execute(text("SELECT setval(pg_get_serial_sequence('wms.warehouse_directory','id'), (SELECT max(id) FROM wms.warehouse_directory))"))
         row = WarehouseDirectory(organization_id=pg_book[0], name="PG-MAIN",
                                  title="Main store", is_active=True, created_by="tester")
         session.add(row)
