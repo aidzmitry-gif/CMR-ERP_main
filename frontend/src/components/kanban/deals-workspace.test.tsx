@@ -954,6 +954,12 @@ describe("DealsWorkspace (канбан)", () => {
   // --- П4: кап карточек и в группировке «По датам действий» (DateColumn) ---
 
   it("группа «По датам действий»: бакет капает на 50 карточек, «Показать ещё» раскрывает остальные", async () => {
+    const nativeQueue = globalThis.queueMicrotask;
+    const held: VoidFunction[] = [];
+    vi.stubGlobal("queueMicrotask", (fn: VoidFunction) => {
+      if (fn.toString().includes("setNow")) held.push(fn);
+      else nativeQueue(fn);
+    });
     const todayIso = new Date().toISOString();
     const many: Stage[] = [
       {
@@ -977,8 +983,11 @@ describe("DealsWorkspace (канбан)", () => {
     ];
     render(<DealsWorkspace initialStages={many} initialKpis={[]} />);
     fireEvent.click(screen.getByTitle("По датам действий"));
-    // Бакеты гейтятся гидрационным `now` — ждём появления карточек, а не заголовка бакета
-    // «Сегодня» (тот неоднозначен: совпадает с чипом срочности на каждой карточке).
+    // До гидрации 50 карточек и кнопка принадлежат стадии, а не бакету дат.
+    expect(held).toHaveLength(1);
+    expect(screen.queryByText("Сегодня", { selector: "span.truncate" })).not.toBeInTheDocument();
+    await act(async () => { held[0](); });
+    expect(await screen.findByText("Сегодня", { selector: "span.truncate" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByTestId(/^deal-card-/)).toHaveLength(50));
     fireEvent.click(screen.getByRole("button", { name: "Показать ещё 10 (из 60)" }));
     await waitFor(() => expect(screen.getAllByTestId(/^deal-card-/)).toHaveLength(60));
