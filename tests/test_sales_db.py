@@ -44,6 +44,13 @@ async def _sales_telegram_party(session):
     await session.commit()
 
 
+@pytest_asyncio.fixture
+async def _sales_contract_positive_party(session):
+    session.add(Counterparty(name="ООО Бета", legal_name="ООО Бета", unp="930000001",
+                             requisites={"legal_address": "Synthetic contract test address"}))
+    await session.commit()
+
+
 async def test_create_and_list_deal(api, _sales_db_parties):
     r = await api.post(
         "/sales/deals",
@@ -597,7 +604,7 @@ async def test_create_invoice_uses_erp_issuance_contract(session, api):
     assert (await api.post("/sales/deals/999999/documents", json={"kind": "invoice", **request})).status_code == 404
 
 
-async def test_contract_goes_through_approval(session, api):
+async def test_contract_goes_through_approval(session, api, _sales_contract_positive_party):
     from sqlalchemy import select
 
     from core.domain.models import Approval, OutboxEvent
