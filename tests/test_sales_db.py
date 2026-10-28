@@ -38,6 +38,12 @@ async def _sales_contract_denial_parties(session):
     await session.commit()
 
 
+@pytest_asyncio.fixture
+async def _sales_telegram_party(session):
+    session.add(Counterparty(name="ООО Бот"))
+    await session.commit()
+
+
 async def test_create_and_list_deal(api, _sales_db_parties):
     r = await api.post(
         "/sales/deals",
@@ -1058,7 +1064,7 @@ async def test_ai_draft_endpoint_disabled(api, _sales_db_parties):
     assert r.status_code == 503
 
 
-async def test_telegram_bot(session, api):
+async def test_telegram_bot(session, api, _sales_telegram_party):
     # /help перечисляет встроенные команды и команды модулей
     r = await api.post("/telegram/webhook", json={"message": {"text": "/help", "chat": {"id": 1}}})
     assert r.status_code == 200
