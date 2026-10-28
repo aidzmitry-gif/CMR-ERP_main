@@ -30,7 +30,7 @@ from modules.sales.accounting_ownership import DealOwnership
 from modules.sales.models import Deal, DealDocument
 from modules.wms.events import on_stock_reserved
 from modules.wms.invoice_reservations import ReserveInput, reserve
-from modules.wms.models import ReservationVersion, StockMovement, Task
+from modules.wms.models import ReservationVersion, StockMovement, Task, WarehouseDirectory
 from modules.wms.reservation_events import ReservationEventState, ReservationPick
 from tests.accounting.test_postgres import pg_factory  # noqa: F401
 
@@ -93,6 +93,8 @@ async def pg(pg_factory, tmp_path, monkeypatch):  # noqa: F811
             reserve_status="reserved", version=1, amount=100, original_html=html,
             content_sha256=exact["expected_content_sha256"], issued_at=datetime(2026, 9, 10),
             snapshot_json={"items": [{"sku_code": "A", "qty": "2"}]}))
+        session.add(WarehouseDirectory(organization_id=1, name="W", title="Synthetic shipment warehouse",
+                                       wms_enabled=True, created_by=actor.username))
         session.add(StockMovement(organization_id=1, sku_code="A", warehouse="W", kind="in", qty=10, reason="receipt"))
         session.add(ShipmentJournal(id=1, generation=0))
         await session.flush()
