@@ -24,7 +24,8 @@ async def close(db, org, month="2026-10"):
 
 
 def assert_balance_breakdown(report):
-    signed = lambda row: Decimal(row["amount"]) * (Decimal("1") if row["side"] == "debit" else Decimal("-1"))
+    def signed(row):
+        return Decimal(row['amount']) * (Decimal('1') if row['side'] == 'debit' else Decimal('-1'))
     totals = {category: sum((signed(row) for row in report["balance_movements"] if row["category"] == category), Decimal("0"))
               for category in ("asset", "liability", "equity", "income", "expense")}
     balance = report["balance"]

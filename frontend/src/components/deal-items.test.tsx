@@ -71,7 +71,9 @@ describe("DealItems", () => {
     fireEvent.click(screen.getByRole("button", { name: "Сохранить позицию Аккумулятор 60" }));
     await waitFor(() => expect(api.updateDealItemIfCurrent).toHaveBeenCalledWith(5, 7, 1200, item.edit_token));
 
-    fireEvent.click(screen.getByTitle("Удалить позицию"));
+    const remove = screen.getByTitle("Удалить позицию");
+    await waitFor(() => expect(remove).toBeEnabled());
+    fireEvent.click(remove);
     await waitFor(() => expect(api.deleteDealItemIfCurrent).toHaveBeenCalledWith(5, item.edit_token));
   });
 

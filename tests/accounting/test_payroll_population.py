@@ -9,6 +9,7 @@ from sqlalchemy import select
 from modules.accounting.models import AccessGrant
 from modules.accounting.payroll_population import verify_for_close
 from modules.hr.models import Employee
+from tests.conftest import make_private_test_dir
 
 
 def roster_file(month="2026-10", *, reference="synthetic-roster"):
@@ -38,7 +39,7 @@ async def bind_employee(client, db, prefix, name):
 async def test_population_review_rejects_partial_roster_and_requires_new_revision(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     prefix = f"/accounting/organizations/{book[0]}"
     first_employee, first_binding = await bind_employee(client, db, prefix, "First worker")
@@ -98,7 +99,7 @@ async def test_population_review_rejects_partial_roster_and_requires_new_revisio
 async def test_population_review_requires_chief_and_scoped_source(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     prefix = f"/accounting/organizations/{book[0]}"
     source = await client.post(prefix + "/payroll-evidence-files", json=roster_file())

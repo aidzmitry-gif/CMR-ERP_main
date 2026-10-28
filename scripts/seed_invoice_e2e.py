@@ -16,7 +16,7 @@ from modules.accounting.models import AccessGrant, Organization
 from modules.sales.accounting_ownership import DealOwnership
 from modules.sales.client_document_register import DealClientBinding, preview_snapshot
 from modules.sales.models import Deal, DealItem, LossReason
-from modules.wms.models import StockMovement
+from modules.wms.models import StockMovement, WarehouseDirectory
 
 
 async def main():
@@ -26,6 +26,9 @@ async def main():
         raise RuntimeError("Only an existing dedicated e2e.db may be seeded")
     command = json.load(sys.stdin)
     actor, deal_id = command["actor"], command["deal_id"]
+    wms_enabled = command.get("wms_enabled", False)
+    if type(wms_enabled) is not bool:
+        raise ValueError("Invalid synthetic warehouse mode")
     if not isinstance(actor, str) or not actor or len(actor) > 200:
         raise ValueError("Invalid test actor")
     if type(deal_id) is not int or deal_id <= 0:
@@ -52,6 +55,7 @@ async def main():
             session.add_all([item, AccessGrant(organization_id=org.id, subject=actor, role="chief"), DealOwnership(deal_id=deal.id, organization_id=org.id, snapshot={}, evidence="Synthetic E2E ownership", actor=actor)])
             await session.flush()
             session.add(DealClientBinding(deal_id=deal.id, organization_id=org.id, counterparty_id=buyer.id, snapshot=await preview_snapshot(session, org.id, deal, buyer.id), evidence="Synthetic E2E buyer binding", actor=actor))
+            session.add(WarehouseDirectory(organization_id=org.id, name="E2E-W", title="Synthetic invoice warehouse", created_by=actor, wms_enabled=wms_enabled, prohibit_negative_stock=True))
             session.add(StockMovement(organization_id=org.id, sku_code=sku.code, warehouse="E2E-W", kind="in", qty=Decimal("10"), reason="receipt"))
             reason = "e2e-" + token[:24]
             session.add(LossReason(code=reason, title="Synthetic E2E loss reason", active=True))

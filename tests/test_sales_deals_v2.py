@@ -4,6 +4,184 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
+import pytest_asyncio
+
+from core.domain.models import Counterparty
+
+
+@pytest_asyncio.fixture
+async def _deals_v2_parties(session):
+    """Seed complete directory parties without changing any deal or outcome guard."""
+    names = (
+        "Synthetic buyer",
+        "Synthetic zero",
+        "c",
+        "ООО R",
+        "ООО X",
+        "ООО Y",
+        "ООО V",
+        "ООО Z",
+        "ООО Без Истории",
+        "ООО Ждёт",
+        "ООО Журнал",
+        "ООО Параллель",
+        "ООО Повтор",
+        "ООО Срок",
+        "ООО Чат",
+        "Одноразовый",
+        "Постоянный",
+    )
+    for index, name in enumerate(names, 1):
+        session.add(Counterparty(
+            name=name, legal_name=name, unp=str(930000000 + index),
+            requisites={"legal_address": "Synthetic Sales v2 test address"},
+        ))
+    await session.commit()
+
+
+@pytest_asyncio.fixture
+async def _empty_loss_command(api, session):
+    """Use the current durable loss workflow only for deals without invoices."""
+    from sqlalchemy import select
+
+    from modules.accounting.models import AccessGrant, Organization
+    from modules.sales.accounting_ownership import DealOwnership
+    from modules.sales.models import DealDocument
+    from tests.test_deal_loss import loss_command
+
+    api.headers["X-User"] = "issuer"
+    api.headers["X-Expected-Principal"] = "issuer"
+    org = Organization(name="Synthetic no-document loss seller", unp="940000001")
+    session.add(org)
+    await session.flush()
+    org_id = org.id
+    session.add(AccessGrant(organization_id=org_id, subject="issuer", role="chief"))
+    await session.commit()
+
+    async def prepare(deal_id, **changes):
+        owner = await session.get(DealOwnership, deal_id)
+        if owner is None:
+            session.add(DealOwnership(
+                deal_id=deal_id, organization_id=org_id, snapshot={},
+                evidence="Synthetic exact no-document loss ownership", actor="issuer",
+            ))
+            await session.commit()
+        else:
+            assert owner.organization_id == org_id
+        assert (await session.scalars(select(DealDocument.id).where(
+            DealDocument.deal_id == deal_id, DealDocument.kind == "invoice",
+        ))).all() == []
+        return await loss_command(api, org_id, deal=deal_id, finalize_if_empty=True, **changes)
+
+    return prepare
+
+
+@pytest_asyncio.fixture
+async def _erp_invoice_command(api, session):
+    """Prepare the existing ERP issue contract for each original test deal."""
+    from sqlalchemy import select
+
+    from core.domain.models import Sku
+    from modules.accounting.models import AccessGrant, Organization
+    from modules.sales.accounting_ownership import DealOwnership
+    from modules.sales.client_document_register import DealClientBinding, preview_snapshot
+    from modules.sales.models import Deal, DealItem
+    from modules.wms.models import StockMovement, WarehouseDirectory
+
+    api.headers["X-User"] = "issuer"
+    org = Organization(name="Synthetic invoice seller", unp="950000001")
+    session.add(org)
+    await session.flush()
+    org_id = org.id
+    session.add(AccessGrant(organization_id=org_id, subject="issuer", role="chief"))
+    session.add(WarehouseDirectory(
+        organization_id=org_id, name="W", title="Synthetic warehouse",
+        created_by="issuer", wms_enabled=False, prohibit_negative_stock=True,
+    ))
+    await session.commit()
+    profile = await api.post(f"/accounting/organizations/{org_id}/seller-profiles", json={
+        "source_key": "synthetic-sales-v2-seller", "expected_revision": 0,
+        "effective_from": "2026-01-01", "currency": "BYN", "address": "Synthetic seller address",
+        "account": "TEST ACCOUNT", "bank": "TEST BANK", "bik": "TEST BIK",
+        "director": "Synthetic director", "evidence": "Synthetic seller review", "confirmed": True,
+    })
+    assert profile.status_code == 201, profile.text
+
+    async def prepare(deal_id, *, reserve_mode="on_order", preview=True):
+        deal = await session.get(Deal, deal_id)
+        assert deal is not None and deal.counterparty_id is not None
+        items = (await session.scalars(select(DealItem).where(
+            DealItem.deal_id == deal_id,
+        ).order_by(DealItem.id))).all()
+        if await session.get(DealOwnership, deal_id) is None:
+            session.add(DealOwnership(
+                deal_id=deal_id, organization_id=org_id, snapshot={},
+                evidence="Synthetic exact invoice ownership", actor="issuer",
+            ))
+            session.add(DealClientBinding(
+                deal_id=deal_id, organization_id=org_id, counterparty_id=deal.counterparty_id,
+                snapshot=await preview_snapshot(session, org_id, deal, deal.counterparty_id),
+                evidence="Synthetic exact invoice buyer", actor="issuer",
+            ))
+            # Populate the actual per-organization physical journal, not the cache.
+            for item in items:
+                sku = await session.get(Sku, item.sku_id)
+                if sku is not None:
+                    session.add(StockMovement(
+                        organization_id=org_id, sku_code=sku.code, warehouse="W", kind="in",
+                        qty=item.qty, reason="receipt",
+                    ))
+            await session.commit()
+        base = {
+            "organization_id": org_id, "currency": "BYN", "document_date": "2026-09-01",
+            "valid_until": "2026-09-06", "reserve_mode": reserve_mode,
+            "pricing": [{"item_id": item.id,
+                         "unit_price_net": format(item.unit_price, ".2f") if item.unit_price is not None else None,
+                         "vat_rate": "20.00"} for item in items],
+            "pricing_evidence": "Explicit synthetic confirmed goods-line prices",
+        }
+        if preview:
+            response = await api.post(f"/sales/deals/{deal_id}/invoice-preview", json=base)
+            assert response.status_code == 200, response.text
+            current = response.json()
+            if reserve_mode == "stock":
+                assert current["availability"]["organization_id"] == org_id
+                assert current["availability"]["source"] == "wms_physical"
+            else:
+                assert current["availability"] is None
+        else:
+            # Rejected-input controls have no accepted preview or financial receipt.
+            current = {"document_version": 1, "basis_digest": "0" * 64}
+        command = {
+            "kind": "invoice", **base, "request_key": f"sales-v2-issue-{deal_id}",
+            "expected_document_version": current["document_version"],
+            "expected_basis_digest": current["basis_digest"], "allocations": [],
+        }
+        if reserve_mode == "on_order":
+            command["unreserved_confirmed"] = True
+        else:
+            command.update(
+                allocations=[{"line_no": line["line_no"], "warehouse": "W", "qty": line["qty"]}
+                             for line in current["lines"]],
+                evidence="Synthetic complete physical journal", journal_complete=True,
+            )
+        return command
+
+    return prepare
+
+
+async def _assert_no_issued_invoice(session, deal_id):
+    from sqlalchemy import func, select
+
+    from modules.sales.invoice_issuance import InvoiceIssuanceReceipt
+    from modules.sales.models import DealDocument
+
+    assert await session.scalar(select(func.count()).select_from(DealDocument).where(
+        DealDocument.deal_id == deal_id, DealDocument.kind == "invoice",
+    )) == 0
+    assert await session.scalar(select(func.count()).select_from(InvoiceIssuanceReceipt).where(
+        InvoiceIssuanceReceipt.deal_id == deal_id,
+    )) == 0
 
 
 async def _new_deal(api, number, **extra):
@@ -13,11 +191,14 @@ async def _new_deal(api, number, **extra):
     return r.json()
 
 
-async def test_confirmed_item_prices_are_independent_and_original_stays_fixed(api, session):
+async def test_confirmed_item_prices_are_independent_and_original_stays_fixed(
+    api, session, _deals_v2_parties, _erp_invoice_command,
+):
     from modules.sales.models import PriceQuote
     from modules.sales.routes import _invoice_items
 
     sku = await _seed_sku(session, "CONFIRMED-PRICE")
+    await session.commit()
     a = await _new_deal(api, "PRICE-A", counterparty="Synthetic buyer")
     b = await _new_deal(api, "PRICE-B", counterparty="Synthetic buyer")
     lines = []
@@ -42,10 +223,10 @@ async def test_confirmed_item_prices_are_independent_and_original_stays_fixed(ap
         assert Decimal(str(margin["lines"][0]["unit_price"])) == expected
         issued = await api.post(
             f"/sales/deals/{deal['id']}/documents",
-            json={"kind": "invoice", "reserve_mode": "on_order"},
+            json=await _erp_invoice_command(deal["id"]),
         )
         assert issued.status_code == 201, issued.text
-        doc = issued.json()
+        doc = issued.json()["document"]
         assert Decimal(str(doc["amount"])) == expected * 2 * Decimal("1.20")
         documents.append(doc)
 
@@ -65,11 +246,14 @@ async def test_confirmed_item_prices_are_independent_and_original_stays_fixed(ap
     assert persisted["amount"] == 240.0
 
 
-async def test_item_null_zero_and_partial_update_contract(api, session):
+async def test_item_null_zero_and_partial_update_contract(
+    api, session, _deals_v2_parties, _erp_invoice_command,
+):
     from modules.sales.models import PriceQuote
     from modules.sales.routes import _invoice_items
 
     sku = await _seed_sku(session, "CONFIRMED-ZERO")
+    await session.commit()
     deal = await _new_deal(api, "PRICE-ZERO", counterparty="Synthetic zero")
     session.add(PriceQuote(sku_code=sku.code, counterparty=deal["counterparty"], price=Decimal("999")))
     await session.commit()
@@ -78,8 +262,10 @@ async def test_item_null_zero_and_partial_update_contract(api, session):
     item = added.json()
     assert item["unit_price"] is None
     endpoint = f"/sales/deals/{deal['id']}/documents"
-    payload = {"kind": "invoice", "reserve_mode": "on_order"}
-    assert (await api.post(endpoint, json=payload)).status_code == 422
+    rejected = await api.post(endpoint, json=await _erp_invoice_command(deal["id"], preview=False))
+    assert rejected.status_code == 422
+    assert any(error["loc"][-1] == "unit_price_net" for error in rejected.json()["detail"])
+    await _assert_no_issued_invoice(session, deal["id"])
     # The shared-session test fixture needs the rollback performed by a real request's close.
     await session.rollback()
 
@@ -92,18 +278,21 @@ async def test_item_null_zero_and_partial_update_contract(api, session):
     cleared = await api.patch(f"/sales/deal-items/{item['id']}", json={"unit_price": None})
     assert cleared.status_code == 200 and cleared.json()["unit_price"] is None
     assert cleared.json()["qty"] == 3
-    assert (await api.post(endpoint, json=payload)).status_code == 422
+    rejected = await api.post(endpoint, json=await _erp_invoice_command(deal["id"], preview=False))
+    assert rejected.status_code == 422
+    assert any(error["loc"][-1] == "unit_price_net" for error in rejected.json()["detail"])
+    await _assert_no_issued_invoice(session, deal["id"])
     await session.rollback()
 
     assert (await api.patch(f"/sales/deal-items/{item['id']}", json={"qty": None})).status_code == 422
     assert (await api.patch(f"/sales/deal-items/{item['id']}", json={"unit_price": 0})).status_code == 200
-    issued = await api.post(endpoint, json=payload)
+    issued = await api.post(endpoint, json=await _erp_invoice_command(deal["id"]))
     assert issued.status_code == 201, issued.text
-    assert issued.json()["amount"] == 0
+    assert issued.json()["document"]["amount"] == 0
 
 
 @pytest.mark.parametrize("price", [-1, "NaN", "Infinity", "1000000000000", "1.001"])
-async def test_item_price_rejects_invalid_money(api, session, price):
+async def test_item_price_rejects_invalid_money(api, session, price, _deals_v2_parties):
     sku = await _seed_sku(session, "CONFIRMED-INVALID")
     deal = await _new_deal(api, "PRICE-INVALID")
     endpoint = f"/sales/deals/{deal['id']}/items"
@@ -129,44 +318,57 @@ async def test_item_price_database_rejects_negative(session):
     await session.rollback()
 
 
-async def test_confirmed_price_cannot_issue_an_item_with_missing_sku(api, session):
+async def test_confirmed_price_cannot_issue_an_item_with_missing_sku(
+    api, session, _deals_v2_parties, _erp_invoice_command,
+):
     from modules.sales.models import DealItem
 
     deal = await _new_deal(api, "PRICE-ORPHAN")
     session.add(DealItem(deal_id=deal["id"], sku_id=999999, qty=2, unit_price=Decimal("100")))
     await session.commit()
-    result = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
+    result = await api.post(f"/sales/deals/{deal['id']}/documents", json=await _erp_invoice_command(
+        deal["id"], preview=False,
+    ))
     assert result.status_code == 422
-    assert "Номенклатура" in result.json()["detail"]
+    assert result.json()["detail"] == "Invoice goods require an active exact SKU and positive two-place quantity"
+    await _assert_no_issued_invoice(session, deal["id"])
 
 
 # ── SALES-40: отказ + причины ──────────────────────────────────────────────
 
-async def test_lose_requires_reason(api):
+async def test_lose_requires_reason(api, _deals_v2_parties, _empty_loss_command):
     deal = await _new_deal(api, "L-1", amount=1000)
 
     # без причины → 422
-    bad = await api.post(f"/sales/deals/{deal['id']}/lose", json={"reason_code": ""})
+    bad = await api.post(f"/sales/deals/{deal['id']}/lose", json=await _empty_loss_command(
+        deal["id"], reason_code="",
+    ))
     assert bad.status_code == 422
+    assert any(error["loc"][-1] == "reason_code" for error in bad.json()["detail"])
+    legacy = await api.post(f"/sales/deals/{deal['id']}/lose", json={"reason_code": "price"})
+    assert legacy.status_code == 422
 
     # с причиной → стадия lost, причина и дата проставлены
     ok = await api.post(
         f"/sales/deals/{deal['id']}/lose",
-        json={"reason_code": "price", "comment": "дорого"},
+        json=await _empty_loss_command(deal["id"], reason_code="price", comment="дорого"),
     )
     assert ok.status_code == 200
-    body = ok.json()
+    assert ok.json()["state"] == "finalized"
+    body = (await api.get(f"/sales/deals/{deal['id']}")).json()
     assert body["stage"] == "lost"
     assert body["lost_reason_code"] == "price"
     assert body["lost_comment"] == "дорого"
     assert body["closed_date"]
 
     # повторно закрыть в отказ нельзя
-    again = await api.post(f"/sales/deals/{deal['id']}/lose", json={"reason_code": "other"})
+    again = await api.post(f"/sales/deals/{deal['id']}/lose", json=await _empty_loss_command(
+        deal["id"], reason_code="other",
+    ))
     assert again.status_code == 409
 
 
-async def test_lose_validates_against_dictionary(session, api):
+async def test_lose_validates_against_dictionary(session, api, _deals_v2_parties, _empty_loss_command):
     from modules.sales.models import LossReason
 
     session.add(LossReason(code="price", title="Дорого", sort_order=1, active=True))
@@ -174,11 +376,17 @@ async def test_lose_validates_against_dictionary(session, api):
 
     deal = await _new_deal(api, "L-2")
     # код вне справочника → 422
-    bad = await api.post(f"/sales/deals/{deal['id']}/lose", json={"reason_code": "zzz"})
+    bad = await api.post(f"/sales/deals/{deal['id']}/lose", json=await _empty_loss_command(
+        deal["id"], reason_code="zzz",
+    ))
     assert bad.status_code == 422
+    assert bad.json()["detail"] == "Unknown loss reason"
     # валидный код → ок
-    ok = await api.post(f"/sales/deals/{deal['id']}/lose", json={"reason_code": "price"})
+    ok = await api.post(f"/sales/deals/{deal['id']}/lose", json=await _empty_loss_command(
+        deal["id"], reason_code="price",
+    ))
     assert ok.status_code == 200
+    assert ok.json()["state"] == "finalized"
 
 
 async def test_loss_reasons_endpoint(session, api):
@@ -194,21 +402,35 @@ async def test_loss_reasons_endpoint(session, api):
     assert codes == ["b", "a"]  # только активные, по sort_order
 
 
-async def test_lost_emits_event(session, api):
+async def test_lost_emits_event(session, api, _deals_v2_parties, _empty_loss_command):
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent
 
     deal = await _new_deal(api, "L-3", amount=500)
-    await api.post(f"/sales/deals/{deal['id']}/lose", json={"reason_code": "competitor"})
+    response = await api.post(f"/sales/deals/{deal['id']}/lose", json=await _empty_loss_command(
+        deal["id"], reason_code="competitor",
+    ))
+    assert response.status_code == 200, response.text
+    row = response.json()
+    assert row["state"] == "finalized"
+    events = (await session.scalars(select(OutboxEvent).where(
+        OutboxEvent.event_type == "sales.deal.loss_finalized",
+    ))).all()
+    assert len(events) == 1
+    assert events[0].payload == {
+        "deal_id": deal["id"], "organization_id": row["organization_id"],
+        "request_id": row["request_id"], "resolution_id": row["resolution"]["resolution_id"],
+        "digest": row["resolution"]["digest"], "by": "issuer",
+    }
 
-    types = [e.event_type for e in (await session.execute(select(OutboxEvent))).scalars().all()]
-    assert "sales.deal.lost" in types
 
-
-async def test_lost_column_on_board(api):
+async def test_lost_column_on_board(api, _deals_v2_parties, _empty_loss_command):
     deal = await _new_deal(api, "L-4", amount=700)
-    await api.post(f"/sales/deals/{deal['id']}/lose", json={"reason_code": "no_need"})
+    response = await api.post(f"/sales/deals/{deal['id']}/lose", json=await _empty_loss_command(
+        deal["id"], reason_code="no_need",
+    ))
+    assert response.status_code == 200 and response.json()["state"] == "finalized"
 
     board = (await api.get("/sales/board")).json()
     stages = {s["id"]: s for s in board["stages"]}
@@ -220,7 +442,7 @@ async def test_lost_column_on_board(api):
 
 # ── SALES-40: выигрыш ───────────────────────────────────────────────────────
 
-async def test_win_deal(session, api):
+async def test_win_deal(session, api, _deals_v2_parties):
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent
@@ -241,7 +463,7 @@ async def test_win_deal(session, api):
 
 # ── Цикл 18 (фикс верификации): won-код воронки, реверс из closed ───────────
 
-async def test_win_deal_repeat_clients_resolves_rp_won(api):
+async def test_win_deal_repeat_clients_resolves_rp_won(api, _deals_v2_parties):
     """Фикс 1: win на сделке repeat_clients ставит ``rp_won`` (не литерал "won", которого
     нет в этой воронке) — иначе сделка выпадала бы с /board?funnel=repeat_clients."""
     await api.get("/sales/stages")  # материализовать канон всех воронок
@@ -261,21 +483,26 @@ async def test_win_deal_repeat_clients_resolves_rp_won(api):
     assert won_col["count"] == 1
 
 
-async def test_lose_deal_repeat_clients_resolves_rp_lost(api):
+async def test_lose_deal_repeat_clients_resolves_rp_lost(api, _deals_v2_parties, _empty_loss_command):
     """Тот же класс бага, что Фикс 1 (win): lose на сделке repeat_clients ставит ``rp_lost``
     (не литерал "lost", которого нет в этой воронке) — иначе закрытая сделка выпадала бы
     с /board?funnel=repeat_clients."""
     await api.get("/sales/stages")  # материализовать канон всех воронок
     deal = await _new_deal(api, "RP-L-1", stage="rp_request", funnel="repeat_clients", amount=800)
 
-    r = await api.post(f"/sales/deals/{deal['id']}/lose", json={"reason_code": "price"})
+    r = await api.post(f"/sales/deals/{deal['id']}/lose", json=await _empty_loss_command(
+        deal["id"], reason_code="price",
+    ))
     assert r.status_code == 200
-    body = r.json()
+    assert r.json()["state"] == "finalized"
+    body = (await api.get(f"/sales/deals/{deal['id']}")).json()
     assert body["stage"] == "rp_lost"
     assert body["closed_date"]
 
     # повторно нельзя — 409 сверяется с ПРАВИЛЬНЫМ lost-кодом воронки, не с литералом "lost"
-    again = await api.post(f"/sales/deals/{deal['id']}/lose", json={"reason_code": "other"})
+    again = await api.post(f"/sales/deals/{deal['id']}/lose", json=await _empty_loss_command(
+        deal["id"], reason_code="other",
+    ))
     assert again.status_code == 409
 
     board = (await api.get("/sales/board?funnel=repeat_clients")).json()
@@ -283,7 +510,7 @@ async def test_lose_deal_repeat_clients_resolves_rp_lost(api):
     assert lost_col["count"] == 1
 
 
-async def test_reverse_from_won_clears_closed_date(api):
+async def test_reverse_from_won_clears_closed_date(api, _deals_v2_parties):
     """Фикс 2: реверс сделки из won в нетерминальную стадию сбрасывает ``closed_date`` —
     иначе сделка, возвращённая в работу, продолжает числиться закрытой в отчётах."""
     deal = await _new_deal(api, "REV-1", amount=900)
@@ -297,7 +524,7 @@ async def test_reverse_from_won_clears_closed_date(api):
 
 # ── SALES-43: история стадий и висяки ───────────────────────────────────────
 
-async def test_stage_history_recorded(api):
+async def test_stage_history_recorded(api, _deals_v2_parties):
     deal = await _new_deal(api, "H-1", stage="new")
     await api.patch(f"/sales/deals/{deal['id']}", json={"stage": "qual"})
     await api.patch(f"/sales/deals/{deal['id']}", json={"stage": "price_req"})
@@ -308,7 +535,7 @@ async def test_stage_history_recorded(api):
     assert ("qual", "price_req") in transitions
 
 
-async def test_stage_history_orders_imported_event_before_later_local_event(api, session):
+async def test_stage_history_orders_imported_event_before_later_local_event(api, session, _deals_v2_parties):
     from modules.sales.models import DealStageEvent
 
     deal = await _new_deal(api, "H-MIXED", stage="new")
@@ -328,7 +555,7 @@ async def test_stage_history_orders_imported_event_before_later_local_event(api,
     assert stages.index("new") < stages.index("qual")
 
 
-async def test_deal_timeline_comments_are_chronological_and_owner_scoped(api, session):
+async def test_deal_timeline_comments_are_chronological_and_owner_scoped(api, session, _deals_v2_parties):
     from modules.sales.models import CrmTimelineComment
 
     deal = await _new_deal(api, "C-TIMELINE")
@@ -470,7 +697,7 @@ def test_timeline_attachment_model_uses_bigint_and_restrictive_comment_fk():
                for constraint in table.constraints)
 
 
-async def test_deal_task_source_ref_allows_manual_rows_and_rejects_duplicate_sources(api, session):
+async def test_deal_task_source_ref_allows_manual_rows_and_rejects_duplicate_sources(api, session, _deals_v2_parties):
     from sqlalchemy import func, select
     from sqlalchemy.exc import IntegrityError
 
@@ -505,10 +732,9 @@ async def test_deal_task_source_ref_allows_manual_rows_and_rejects_duplicate_sou
     assert await session.scalar(select(func.count()).select_from(DealTask)) == 3
 
 
-async def test_deal_task_fidelity_supports_unbound_tasks_and_ordered_crm_links(api, session):
-    from sqlalchemy import func, select
+async def test_deal_task_fidelity_supports_unbound_tasks_and_ordered_crm_links(api, session, _deals_v2_parties):
+    from sqlalchemy import Boolean, Text, func, select
     from sqlalchemy.exc import IntegrityError
-    from sqlalchemy import Boolean, Text
 
     from modules.sales.models import DealTask, DealTaskCrmLink
 
@@ -591,7 +817,7 @@ async def test_deal_task_fidelity_supports_unbound_tasks_and_ordered_crm_links(a
     ) == 2
 
 
-async def test_timeline_attachment_source_ref_is_unique(api, session):
+async def test_timeline_attachment_source_ref_is_unique(api, session, _deals_v2_parties):
     from sqlalchemy.exc import IntegrityError
 
     from modules.sales.models import CrmTimelineAttachment, CrmTimelineComment
@@ -616,7 +842,7 @@ async def test_timeline_attachment_source_ref_is_unique(api, session):
 
 async def test_timeline_attachment_api_lists_private_metadata_and_streams_verified_file(
     api, session, tmp_path, monkeypatch
-):
+, _deals_v2_parties):
     import asyncio
     import tempfile
 
@@ -723,7 +949,7 @@ async def test_timeline_attachment_api_lists_private_metadata_and_streams_verifi
     assert cancelled_snapshot.closed
 
 
-async def test_stage_change_updates_stage_changed_at(session, api):
+async def test_stage_change_updates_stage_changed_at(session, api, _deals_v2_parties):
     from modules.sales.models import Deal
 
     deal = await _new_deal(api, "H-2", stage="new")
@@ -737,7 +963,7 @@ async def test_stage_change_updates_stage_changed_at(session, api):
     assert obj2.stage_changed_at.year >= 2026  # обновилось при смене стадии
 
 
-async def test_stuck_deals_filter(session, api):
+async def test_stuck_deals_filter(session, api, _deals_v2_parties):
     from modules.sales.models import Deal
 
     stale = await _new_deal(api, "ST-1", stage="qual")
@@ -762,7 +988,7 @@ async def test_stuck_deals_filter(session, api):
 
 # ── SALES-44: вероятность и взвешенная сумма ───────────────────────────────
 
-async def test_probability_patch(api):
+async def test_probability_patch(api, _deals_v2_parties):
     deal = await _new_deal(api, "P-1", amount=1000)
     r = await api.patch(
         f"/sales/deals/{deal['id']}",
@@ -774,7 +1000,7 @@ async def test_probability_patch(api):
     assert body["expected_close_date"] == "30.06.2026"
 
 
-async def test_board_weighted(api):
+async def test_board_weighted(api, _deals_v2_parties):
     # явная вероятность
     await _new_deal(api, "WT-1", stage="has_price", amount=1000, probability=20)
     # без вероятности → дефолт стадии has_price = 45%
@@ -788,7 +1014,7 @@ async def test_board_weighted(api):
 
 # ── SALES-49: непрочитанные сообщения ──────────────────────────────────────
 
-async def test_chats_unread_and_mark_read(api):
+async def test_chats_unread_and_mark_read(api, _deals_v2_parties):
     deal = await _new_deal(api, "U-1", counterparty="ООО Чат")
     # входящее от клиента → непрочитано
     await api.post(
@@ -815,7 +1041,7 @@ async def test_chats_unread_and_mark_read(api):
 
 # ── Цикл 17: возраст ожидания ответа ────────────────────────────────────────
 
-async def test_chats_waiting_since(session, api):
+async def test_chats_waiting_since(session, api, _deals_v2_parties):
     """waiting_since = created_at САМОГО СТАРОГО непрочитанного входящего (MIN, не MAX).
 
     Цикл 18 (фикс верификации): оба сообщения создаются в один SQLite-тик (секундная точность
@@ -889,7 +1115,7 @@ async def test_stage_editor_lazy_seed_and_crud(api):
     assert (await api.delete("/sales/stages/nurture")).status_code == 204
 
 
-async def test_stage_delete_blocked_when_deals_exist(api):
+async def test_stage_delete_blocked_when_deals_exist(api, _deals_v2_parties):
     await api.get("/sales/stages")  # материализовать канон
     await _new_deal(api, "ST-1", stage="qual")
     # в стадии есть сделка → удаление запрещено (409, целостность Deal.stage)
@@ -929,7 +1155,7 @@ async def _seed_sku(session, code, title="t", unit="шт"):
     return sku
 
 
-async def test_deal_margin_priced_no_price_no_cost(api, session):
+async def test_deal_margin_priced_no_price_no_cost(api, session, _deals_v2_parties):
     """П1: margin отдаёт revenue/cogs/gross для priced; статусы no_price/no_cost для остальных."""
     from modules.sales.models import DealItem, PriceQuote
 
@@ -963,7 +1189,9 @@ async def test_deal_margin_priced_no_price_no_cost(api, session):
     assert statuses == {"SKU1": "priced", "SKU2": "no_cost", "SKU3": "no_price"}
 
 
-async def test_invoice_document_amount_includes_vat(api, session):
+async def test_invoice_document_amount_includes_vat(
+    api, session, _deals_v2_parties, _erp_invoice_command,
+):
     """Счёт клиенту — С НДС: сумма документа (→ дебиторка/1С/KPI «Оплаты с НДС») = грандтотал
     печатной формы (нетто+НДС 20%), а не нетто. Решение оператора «с НДС» (PLATFORM #1)."""
     from decimal import Decimal
@@ -981,6 +1209,7 @@ async def test_invoice_document_amount_includes_vat(api, session):
 
     sku1 = await _seed_sku(session, "VAT1")
     sku2 = await _seed_sku(session, "VAT2")
+    await session.commit()
     deal = await _new_deal(api, "VAT-1", counterparty="ООО V")
     session.add_all([
         DealItem(deal_id=deal["id"], sku_id=sku1.id, qty=5, unit_price=15),  # 75 нетто → 90 с НДС
@@ -995,11 +1224,15 @@ async def test_invoice_document_amount_includes_vat(api, session):
     items = await _invoice_items(session, deal["id"])
     assert _invoice_gross(items) == Decimal("162.00")  # (75+15)+(60+12); нетто было бы 135
 
-    doc = (await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})).json()
+    issued = await api.post(f"/sales/deals/{deal['id']}/documents", json=await _erp_invoice_command(
+        deal["id"], reserve_mode="stock",
+    ))
+    assert issued.status_code == 201, issued.text
+    doc = issued.json()["document"]
     assert doc["amount"] == 162.0  # С НДС, не 135.0 нетто
 
 
-async def test_deal_margin_facade_missing(api, session):
+async def test_deal_margin_facade_missing(api, session, _deals_v2_parties):
     """П1: фасад landed_cost None → cogs/gross_profit/margin_pct = None + reason."""
     from modules.sales.models import DealItem, PriceQuote
 
@@ -1019,7 +1252,7 @@ async def test_deal_margin_facade_missing(api, session):
 
 
 # ── П4: мульти-воронки в /board ────────────────────────────────────────────────
-async def test_board_funnel_filter(api):
+async def test_board_funnel_filter(api, _deals_v2_parties):
     await api.get("/sales/stages")  # материализовать канон всех воронок
     await _new_deal(api, "F-1", stage="new")  # default funnel = new_clients
     await _new_deal(api, "F-2", stage="rp_request", funnel="repeat_clients")
@@ -1035,7 +1268,7 @@ async def test_board_funnel_filter(api):
 
 
 # ── Слайс 3: воронка «Тендеры» ──────────────────────────────────────────────────
-async def test_board_funnel_tenders(api):
+async def test_board_funnel_tenders(api, _deals_v2_parties):
     await api.get("/sales/stages")  # материализовать канон всех воронок
     await _new_deal(api, "T-1", stage="tn_bidding", funnel="tenders")
     b_tn = (await api.get("/sales/board?funnel=tenders")).json()
@@ -1050,7 +1283,7 @@ async def test_board_funnel_tenders(api):
 
 
 # ── П6: pipeline-аналитика ─────────────────────────────────────────────────────
-async def test_pipeline_analytics(api, session):
+async def test_pipeline_analytics(api, session, _deals_v2_parties):
     from modules.sales.models import Deal, DealStageEvent
 
     await api.get("/sales/stages")  # канон
@@ -1076,7 +1309,7 @@ async def test_pipeline_analytics(api, session):
 
 
 # ── Период-срез конверсии/времени на стадии (pipeline/stage-metrics) ───────────
-async def test_pipeline_stage_metrics_period_window(api, session):
+async def test_pipeline_stage_metrics_period_window(api, session, _deals_v2_parties):
     """entered_count/avg_time_days/conv_next_pct считаются только по сегментам,
     попавшим в окно periода — переход вне окна (SM-OLD) не портит статистику."""
     from datetime import timedelta
@@ -1197,7 +1430,7 @@ async def test_plan_decide_requires_approve_permission():
 
 
 # ── П10: handoff на win ────────────────────────────────────────────────────────
-async def test_handoff_on_won(api, session):
+async def test_handoff_on_won(api, session, _deals_v2_parties):
     """sales.deal.handoff появляется в outbox после перевода сделки в won."""
     from sqlalchemy import select
 
@@ -1231,7 +1464,7 @@ async def test_handoff_on_won(api, session):
 
 
 # ── S3-1: взвешенный прогноз ВАЛОВОЙ МАРЖИ воронки ──────────────────────────────
-async def test_margin_forecast_weighted_gross(api, session):
+async def test_margin_forecast_weighted_gross(api, session, _deals_v2_parties):
     """S3-1: revenue/gross взвешены на вероятность; deals_priced=1/2 (priced + no_cost)."""
     from modules.sales.models import DealItem, PriceQuote
 
@@ -1260,7 +1493,7 @@ async def test_margin_forecast_weighted_gross(api, session):
     assert r["reason"] is None
 
 
-async def test_margin_forecast_facade_missing(api, session):
+async def test_margin_forecast_facade_missing(api, session, _deals_v2_parties):
     """S3-1: фасада landed нет → gross_weighted=null + reason, выручка остаётся числом."""
     from modules.sales.models import DealItem, PriceQuote
 
@@ -1282,7 +1515,7 @@ async def test_margin_forecast_facade_missing(api, session):
 
 
 # ── S3-3: procurement.received → sales.supply.arrived ───────────────────────────
-async def test_procurement_received_signals_active_deals(api, session):
+async def test_procurement_received_signals_active_deals(api, session, _deals_v2_parties):
     """S3-3: поставка по SKU активной сделки → sales.supply.arrived; payload без sku не валит."""
     from sqlalchemy import select
 
@@ -1324,7 +1557,7 @@ async def test_procurement_received_signals_active_deals(api, session):
 
 
 # ── S3-4: сверка маржи sales ↔ finance (sku-агрегат) ────────────────────────────
-async def test_margin_reconcile_with_and_without_finance(api, session):
+async def test_margin_reconcile_with_and_without_finance(api, session, _deals_v2_parties):
     """S3-4: без landed-событий → no_finance; с аудитом → delta/converged; actual бьёт estimated."""
     from core.domain.models import OutboxEvent
     from modules.sales.models import DealItem, PriceQuote
@@ -1463,7 +1696,7 @@ async def test_kpis_invalid_period_does_not_crash(api):
 
 
 # ── Крайняя дата отгрузки + штраф за опоздание → сигнал в закупки ───────────────
-async def test_deal_ship_deadline_and_penalty_persist(api):
+async def test_deal_ship_deadline_and_penalty_persist(api, _deals_v2_parties):
     """Поля крайней даты и штрафа сохраняются при создании и обновлении сделки."""
     deal = await _new_deal(
         api, "SD-1", ship_deadline="2026-07-15",
@@ -1482,7 +1715,7 @@ async def test_deal_ship_deadline_and_penalty_persist(api):
     assert got["ship_deadline"] == "2026-07-20"
 
 
-async def test_ship_deadline_emits_to_procurement(api, session):
+async def test_ship_deadline_emits_to_procurement(api, session, _deals_v2_parties):
     """Выставление/смена крайней даты → sales.deal.ship_deadline.set (дата+штраф+позиции)."""
     from sqlalchemy import select
 
@@ -1519,7 +1752,7 @@ async def test_ship_deadline_emits_to_procurement(api, session):
     assert len(evs2) == 1
 
 
-async def test_penalty_out_of_range_rejected(api):
+async def test_penalty_out_of_range_rejected(api, _deals_v2_parties):
     """Штраф вне диапазона режется в 422 на валидации, а не падает в 500 (overflow колонок БД)."""
     # ставка > Numeric(6,2) предела (9999.99) → 422
     r = await api.post("/sales/deals", json={
@@ -1539,7 +1772,7 @@ async def test_penalty_out_of_range_rejected(api):
 
 # ── повтор прошлого заказа ──────────────────────────────────────────────────
 
-async def test_repeat_last_order_returns_prior_deal_items(api, session):
+async def test_repeat_last_order_returns_prior_deal_items(api, session, _deals_v2_parties):
     """Вторая сделка того же контрагента → позиции подтягиваются из первой (с позициями)."""
     from modules.sales.models import DealItem
 
@@ -1559,7 +1792,7 @@ async def test_repeat_last_order_returns_prior_deal_items(api, session):
     assert {(i["code"], i["qty"]) for i in items} == {("RLO-1", 5.0), ("RLO-2", 3.0)}
 
 
-async def test_repeat_last_order_empty_when_no_prior_deals(api):
+async def test_repeat_last_order_empty_when_no_prior_deals(api, _deals_v2_parties):
     """Нет предыдущих сделок контрагента с позициями → пустой список, статус 200."""
     deal = await _new_deal(api, "RLO-D3", counterparty="ООО Без Истории")
     r = await api.get(f"/sales/deals/{deal['id']}/repeat-last-order")
@@ -1573,7 +1806,7 @@ async def test_repeat_last_order_404_for_missing_deal(api):
     assert r.status_code == 404
 
 
-async def test_repeat_last_order_ignores_newer_parallel_deal(api, session):
+async def test_repeat_last_order_ignores_newer_parallel_deal(api, session, _deals_v2_parties):
     """Повтор берёт ПРЕДЫДУЩУЮ сделку (id меньше), а не более новую параллельную.
 
     Регрессия из code-review: раньше выбиралась «последняя другая» по created_at без
@@ -1599,7 +1832,7 @@ async def test_repeat_last_order_ignores_newer_parallel_deal(api, session):
 
 # ── Журнал продаж (GET /sales/journal) ──────────────────────────────────────────
 
-async def test_journal_only_won_deals(api):
+async def test_journal_only_won_deals(api, _deals_v2_parties):
     """Журнал отдаёт ТОЛЬКО won-сделки — активная и отказная в реестр не попадают."""
     active = await _new_deal(api, "JRN-ACT", amount=100)
     lost = await _new_deal(api, "JRN-LST", amount=200)
@@ -1614,7 +1847,7 @@ async def test_journal_only_won_deals(api):
     assert lost["id"] not in ids
 
 
-async def test_journal_funnel_aware_repeat_clients(api):
+async def test_journal_funnel_aware_repeat_clients(api, _deals_v2_parties):
     """Сделка repeat_clients, выигранная через /win (стадия ``rp_won``, не литерал "won"),
     попадает в журнал с funnel=repeat_clients — тот же класс бага, что Фикс 1 win/lose."""
     await api.get("/sales/stages")  # материализовать канон всех воронок
@@ -1627,17 +1860,62 @@ async def test_journal_funnel_aware_repeat_clients(api):
     assert row["funnel"] == "repeat_clients"
 
 
-async def test_journal_payment_paid_and_none(session, api):
+async def test_journal_payment_paid_and_none(session, api, _deals_v2_parties, _erp_invoice_command):
     """Оплаченный счёт → payment="paid"+invoice_number; сделка без счетов → payment="none"."""
     from core.services.eventbus import EventContext
+    from modules.accounting.models import Account, Policy
     from modules.sales.events import on_payment_paid
+    from modules.sales.models import DealDocument
+    from tests.accounting.test_invoice_settlements import bank
 
     paid_deal = await _new_deal(api, "JRN-PAY-1", amount=1000)
+    sku = await _seed_sku(session, "JRN-PAID-GOODS")
+    await session.commit()
+    item = await api.post(f"/sales/deals/{paid_deal['id']}/items", json={
+        "sku_id": sku.id, "qty": 1, "unit_price": "833.33",
+    })
+    assert item.status_code == 201, item.text
     doc = (
-        await api.post(f"/sales/deals/{paid_deal['id']}/documents", json={"kind": "invoice"})
-    ).json()
+        await api.post(f"/sales/deals/{paid_deal['id']}/documents", json=await _erp_invoice_command(
+            paid_deal["id"], reserve_mode="stock",
+        ))
+    )
+    assert doc.status_code == 201, doc.text
+    issued = doc.json()
+    org_id = issued["organization_id"]
+    doc = issued["document"]
     await on_payment_paid({"ref": doc["number"]}, EventContext(session, None))
     await session.commit()
+    # A legacy ref-only event cannot establish payment for a current ERP invoice.
+    assert (await session.get(DealDocument, doc["id"])).status == "issued"
+    policy = Policy(
+        organization_id=org_id, effective_from=date(2026, 1, 1), reference="TEST ONLY",
+        inventory_method="specific", allocation_basis="direct_cost",
+        depreciation_method="straight_line", normative_reference="synthetic fixture",
+        normative_verified=True, approved_by="issuer",
+    )
+    session.add(policy)
+    for code, cash in (("51", True), ("62", False)):
+        session.add(Account(
+            organization_id=org_id, code=code, title="Synthetic", category="asset",
+            valid_from=date(2026, 1, 1), required_dimensions=[], currency_tracking=True,
+            quantity_tracking=False, cash=cash, normative_ref="synthetic",
+        ))
+    await session.commit()
+    amount = format(Decimal(str(doc["amount"])), ".2f")
+    bank_entry = await bank(api, (org_id, policy.id), doc["id"], "journal-paid", amount=amount)
+    invoice_url = f"/sales/organizations/{org_id}/invoices/{doc['id']}"
+    settlement = await api.post(invoice_url + "/settlements", json={
+        "bank_entry_id": bank_entry, "source_key": "journal-paid", "amount": amount,
+        "evidence": "Synthetic posted bank receipt and exact invoice allocation",
+    })
+    assert settlement.status_code == 201, settlement.text
+    basis = await api.get(invoice_url + "/money-basis")
+    assert basis.status_code == 200, basis.text
+    assert basis.json()["money_state"] == "funds_held"
+    settlements = await api.get(invoice_url + "/settlements")
+    assert settlements.status_code == 200, settlements.text
+    assert Decimal(settlements.json()["net_received"]) == Decimal(amount)
     await api.post(f"/sales/deals/{paid_deal['id']}/win")
 
     unpaid_deal = await _new_deal(api, "JRN-PAY-2", amount=500)
@@ -1652,7 +1930,7 @@ async def test_journal_payment_paid_and_none(session, api):
     assert unpaid_row["invoice_number"] is None
 
 
-async def test_journal_sorted_by_closed_on_desc(session, api):
+async def test_journal_sorted_by_closed_on_desc(session, api, _deals_v2_parties):
     """Сортировка реестра: closed_on DESC (свежезакрытые — первыми)."""
     from sqlalchemy import select
 
@@ -1674,7 +1952,7 @@ async def test_journal_sorted_by_closed_on_desc(session, api):
     assert ids == [new["id"], old["id"]]  # DESC по closed_on
 
 
-async def test_journal_honest_margin_without_facade(session, api):
+async def test_journal_honest_margin_without_facade(session, api, _deals_v2_parties):
     """Честная деградация: без фасада landed_cost margin_pct is None + margin_reason непустой
     (НЕ 0 — дефолт тестового ядра, core.services.landed_cost is None, пока не подменён стендом)."""
     from modules.sales.models import DealItem
@@ -1695,7 +1973,7 @@ async def test_journal_honest_margin_without_facade(session, api):
 
 # ── Конструктор месячного плана продавца (GET /plan-sources, PUT /plan-items) ────
 
-async def test_plan_sources_regulars_cycle_and_single_order(session, api):
+async def test_plan_sources_regulars_cycle_and_single_order(session, api, _deals_v2_parties):
     """≥2 won-заказа одного контрагента → цикл перезаказа (среднее интервалов) и ожидание
     следующего в месяце; контрагент с 1 заказом — cycle_days/expected пусты, in_month=False."""
     from sqlalchemy import select
@@ -1733,7 +2011,7 @@ async def test_plan_sources_regulars_cycle_and_single_order(session, api):
     assert single["in_month"] is False
 
 
-async def test_plan_sources_committed_open_only(api):
+async def test_plan_sources_committed_open_only(api, _deals_v2_parties):
     """committed отдаёт ОТКРЫТУЮ сделку с expected_close_date в месяце; won-сделку — нет."""
     open_deal = await _new_deal(api, "CMT-1", amount=800, expected_close_date="15.08.2026")
     won_deal = await _new_deal(api, "CMT-2", amount=900, expected_close_date="20.08.2026")

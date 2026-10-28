@@ -695,7 +695,7 @@ async def test_confirmed_inventory_records_shortage_preserves_reserve_and_blocks
     assert loss.qty == Decimal("6") and loss.reason == "adjustment"
     available = await invoice_availability(session, org, ["A"])
     assert available["rows"] == [{"sku_code": "A", "warehouse": "W", "physical": "4.00",
-                                  "reserved": "5.00", "free": "-1.00"}]
+                                  "prohibit_negative_stock": True, "reserved": "5.00", "free": "-1.00"}]
     body = await request(api, org, facts)
     denied = await api.post(endpoint(org), json=body)
     assert denied.status_code == 409 and "physical_reserves_exceed_stock" in denied.text

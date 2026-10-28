@@ -19,7 +19,7 @@ async def issued_invoice_for_shipments(api, session):
     """Use the trusted issuance flow when the caller verifies the immutable buyer."""
     from tests.test_invoice_issuance import command, create, seed
 
-    ids, base = await seed(api, session, qty="5")
+    ids, base = await seed(api, session, qty="5", wms_enabled=True)
     payload, _ = await command(api, ids, base)
     response = await create(api, ids, payload)
     assert response.status_code == 201, response.text

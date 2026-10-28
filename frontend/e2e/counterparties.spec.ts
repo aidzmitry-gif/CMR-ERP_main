@@ -135,6 +135,7 @@ test("контрагенты: создание, preview, повторное об
       const duplicateName = `${runName} duplicate`;
       await duplicateEditor.getByLabel("Наименование компании").fill(duplicateName);
       await duplicateEditor.getByLabel("УНП (карточка)").fill(demoUnp);
+      await duplicateEditor.getByLabel("Юридический адрес").fill("Синтетический адрес E2E");
       await duplicateEditor.getByRole("button", { name: "Сохранить" }).click();
       await expect(duplicateEditor.getByRole("alert")).toContainText("Найдите карточку по УНП");
       await expect(duplicateEditor.getByLabel("Наименование компании")).toHaveValue(duplicateName);

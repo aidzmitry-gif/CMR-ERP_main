@@ -1,6 +1,7 @@
 """Private payroll files have server hashes, scoped access and byte-level rechecks."""
 import base64
 import hashlib
+import os
 from uuid import uuid4
 
 import pytest
@@ -10,6 +11,7 @@ from modules.accounting import payroll_evidence_files
 from modules.accounting.models import AccessGrant, Organization, Period
 from modules.accounting.service import AccountingError
 from modules.hr.models import Employee
+from tests.conftest import make_private_test_dir
 
 PDF = b"%PDF-1.7\nsynthetic payroll source, not a real employee document\n"
 
@@ -30,7 +32,7 @@ def payload(*, request_key=None, data=PDF, **changes):
 async def test_payroll_file_upload_replay_download_and_tamper_block(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     url = f"/accounting/organizations/{book[0]}/payroll-evidence-files"
     command = payload()
@@ -82,8 +84,15 @@ async def test_payroll_file_requires_private_root_scope_and_valid_bytes(
     assert unavailable.status_code == 503
 
     root = tmp_path / "private"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
+    if os.name != "nt":
+        root.chmod(0o755)
+        try:
+            broad = await client.post(url, json=payload())
+            assert broad.status_code == 503 and "permissions are too broad" in broad.text
+        finally:
+            root.chmod(0o700)
     invalid = await client.post(url, json=payload(data=b"wrong bytes"))
     assert invalid.status_code == 422
     assert not list(root.iterdir())
@@ -174,7 +183,7 @@ async def test_payroll_file_requires_private_root_scope_and_valid_bytes(
 async def test_zero_activity_file_requires_chief_and_open_month(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     url = f"/accounting/organizations/{book[0]}/payroll-evidence-files"
     command = payload(kind="payroll_zero_activity", month="2026-10")

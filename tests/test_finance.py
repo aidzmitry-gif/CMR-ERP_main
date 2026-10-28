@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
+from core.domain.models import OutboxEvent
 from core.services.eventbus import EventContext, OutboxEventBus
 from modules.finance.models import Payment
 
@@ -79,6 +80,50 @@ async def test_malformed_landed_amount_does_not_fall_back_to_another_field(sessi
     with pytest.raises(ValueError, match="amount"):
         await on_landed_cost({"amount": "invalid", "total_landed_byn": "100.00"}, _ctx(session))
     assert (await session.execute(select(Payment))).scalars().all() == []
+
+
+async def test_explicit_zero_invoice_remains_a_valid_receivable(session):
+    from modules.finance.events import on_document_posted
+
+    await on_document_posted({"kind": "invoice", "number": "СЧ-ZERO", "amount": "0.00"}, _ctx(session))
+    await session.flush()
+    payment = (await session.execute(select(Payment))).scalars().one()
+    assert payment.ref == "СЧ-ZERO" and payment.amount == Decimal("0.00")
+
+
+@pytest.mark.parametrize("raw", ["-0.01", "-1"])
+async def test_negative_invoice_amount_is_rejected(session, raw):
+    from modules.finance.events import on_document_posted
+
+    with pytest.raises(ValueError, match="amount"):
+        await on_document_posted({"kind": "invoice", "number": "СЧ-NEGATIVE", "amount": raw}, _ctx(session))
+    assert (await session.execute(select(Payment))).scalars().all() == []
+
+
+@pytest.mark.parametrize("field", ["total_landed_byn", "unit_landed_cost_byn", "qty"])
+async def test_malformed_explicit_landed_fallback_is_not_coerced(session, field):
+    from modules.finance.events import on_landed_cost
+
+    payload = {field: "invalid"}
+    with pytest.raises(ValueError, match="amount"):
+        await on_landed_cost(payload, _ctx(session))
+    assert (await session.execute(select(Payment))).scalars().all() == []
+
+
+async def test_invalid_invoice_relay_fails_closed_and_keeps_events_pending(session):
+    from modules.finance.events import on_document_posted
+
+    bus = OutboxEventBus()
+    bus.subscribe("synthetic.invoice.posted", on_document_posted)
+    bus.emit(session, "synthetic.invoice.posted", {"kind": "invoice", "number": "BAD", "amount": "invalid"})
+    bus.emit(session, "synthetic.invoice.posted", {"kind": "invoice", "number": "GOOD", "amount": "10.00"})
+    await session.commit()
+    with pytest.raises(ValueError, match="amount"):
+        await bus.relay_once(session, _ctx(session))
+    await session.rollback()
+    assert (await session.execute(select(Payment))).scalars().all() == []
+    events = (await session.execute(select(OutboxEvent).order_by(OutboxEvent.id))).scalars().all()
+    assert len(events) == 2 and all(event.processed_at is None for event in events)
 
 
 async def test_payment_paid_sets_paid_at_and_emits(session, api):

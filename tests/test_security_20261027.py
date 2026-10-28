@@ -8,6 +8,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from core.domain.models import User
 from core.runtime.app import create_app
 from core.runtime.contract import Role
 from core.runtime.deps import get_session
@@ -92,10 +93,19 @@ async def test_module_access_does_not_allow_unrelated_write(
 
 
 @pytest.mark.parametrize("role", ["director", "commercial", "admin", "assistant", "sales_head", "procurement", "hr"])
-async def test_leadership_can_read_reference(api, role):
-    result = await api.get("/system/refs/units", headers={"X-User-Roles": role})
+async def test_leadership_can_read_reference(api, session, role):
+    headers = {"X-User-Roles": role}
+    if role == "sales_head":
+        username = "synthetic-reference-sales-head"
+        session.add(User(username=username, full_name="Synthetic reference reader", role=role, status="active"))
+        await session.commit()
+        headers["X-User"] = username
+    result = await api.get("/system/refs/units", headers=headers)
     assert result.status_code == 200
     assert result.json() == []
+    if role == "sales_head":
+        spoofed = await api.get("/system/refs/units", headers={"X-User": username, "X-User-Roles": "sales"})
+        assert spoofed.status_code == 403
 
 
 async def test_explicit_reference_permission_still_works(session):

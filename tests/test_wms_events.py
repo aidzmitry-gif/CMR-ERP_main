@@ -99,6 +99,8 @@ async def test_alerts_emit_clamps_negative_reorder(api, session):
 # --------------------------------------------------------------------------- #
 async def test_shipment_emits_completed_with_doc_ref(api, session):
     org = await book(api)
+    initial = await api.post("/wms/adjustment", json={"organization_id": org, "sku_code": "AKB-60", "qty": 5, "warehouse": "Минск"})
+    assert initial.status_code == 201, initial.text
     r = await api.post(
         "/wms/shipment",
         json={"organization_id": org, "sku_code": "AKB-60", "qty": 5, "warehouse": "Минск", "doc_ref": "ДОК-2026-0007"},
@@ -118,6 +120,8 @@ async def test_shipment_emits_completed_with_doc_ref(api, session):
 
 async def test_shipment_silent_without_doc_ref(api, session):
     org = await book(api)
+    initial = await api.post("/wms/adjustment", json={"organization_id": org, "sku_code": "AKB-60", "qty": 5, "warehouse": "Минск"})
+    assert initial.status_code == 201, initial.text
     r = await api.post("/wms/shipment", json={"organization_id": org, "sku_code": "AKB-60", "qty": 5, "warehouse": "Минск"})
     assert r.status_code == 201
     assert await _events(session, "wms.shipment.completed") == []

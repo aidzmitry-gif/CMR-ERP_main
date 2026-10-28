@@ -524,15 +524,59 @@ async def seed_mixed_inventory_value(factory, pg_book, policy_id):
 
 
 async def seed_zero_rounding_inventory_value(factory, pg_book, policy_id):
+    from core.domain.models import Counterparty, Sku
+    from modules.procurement.models import Supplier
+    from modules.procurement.receipt_documents import (
+        ReceiptAccounts,
+        ReceiptConfirm,
+        ReceiptCreate,
+        confirm_receipt,
+        create_document,
+        preview_document,
+    )
+    from modules.wms.models import WarehouseDirectory
+
+    gateway = AccountingService()
+    user = CurrentUser("tester", ["director"])
     async with factory() as session:
-        await service.post(session, pg_book[0], PostingInput(
-            source="inventory:receipt:material-zero-rounding", source_version=1, operation="inventory_purchase",
-            document_date="2026-10-01", operation_date="2026-10-01", posting_date="2026-10-01",
-            policy_id=policy_id, rule_version="synthetic-receipt-v1", explanation="Synthetic zero material origin", lines=[
-                LineInput(account="10.1", side="debit", amount="0.01", quantity="5.00",
-                          dimensions={"warehouse": "Main", "sku": "MAT-1", "lot": "LOT-1"}),
-                LineInput(account="60", side="credit", amount="0.01", dimensions={}),
-            ]), "tester")
+        await session.execute(text(
+            "SELECT setval(pg_get_serial_sequence('counterparty','id'), "
+            "(SELECT max(id) FROM counterparty))"
+        ))
+        await session.execute(text(
+            "SELECT setval(pg_get_serial_sequence('procurement.supplier','id'), "
+            "(SELECT max(id) FROM procurement.supplier))"
+        ))
+        party = Counterparty(name="Synthetic supplier", unp="999999993")
+        session.add(party)
+        await session.flush()
+        supplier = Supplier(counterparty_id=party.id, name=party.name, unp=party.unp, status="active")
+        session.add(supplier)
+        await session.flush()
+        connection = await session.connection()
+        await connection.run_sync(lambda sync: Sku.metadata.tables["ref_nomenclature_category"].create(sync, checkfirst=True))
+        await connection.run_sync(lambda sync: Sku.__table__.create(sync, checkfirst=True))
+        sku = Sku(id=9001, code="MAT-1", title="Synthetic material", unit="шт", is_active=True)
+        warehouse = WarehouseDirectory(id=9001, organization_id=pg_book[0], name="Main",
+            title="Synthetic Main", wms_enabled=True, prohibit_negative_stock=True, is_active=True, created_by="tester")
+        session.add_all([sku, warehouse])
+        await session.flush()
+        primary = ReceiptCreate.model_validate({"key": "material-zero-rounding", "document": {
+            "currency": "BYN", "invoice_reference": "material-zero-rounding",
+            "document_date": "2026-10-01", "operation_date": "2026-10-01",
+            "supplier": supplier.name, "supplier_id": supplier.id, "supplier_unp": supplier.unp,
+            "contract": "contract", "contract_basis": "Synthetic unregistered supplier agreement",
+            "warehouse": "Main", "warehouse_id": warehouse.id, "warehouse_title": warehouse.title,
+            "explanation": "Synthetic zero material origin", "items": [{
+                "sku": "MAT-1", "sku_id": sku.id, "sku_title": sku.title, "unit": sku.unit,
+                "lot": "LOT-1", "quantity": "5.00", "net_amount": "0.01",
+                "vat_rate": "0", "vat_amount": "0", "vat_basis": "Synthetic"}]}})
+        receipt = await create_document(pg_book[0], primary, (session, "tester"), (session, gateway, user))
+        options = ReceiptAccounts(expected_version=1, posting_date="2026-10-01", policy_id=policy_id,
+                                  settlement_account="60", vat_account=None, inventory_accounts=["10.1"])
+        preview = await preview_document(pg_book[0], receipt["id"], options, (session, gateway, user))
+        await confirm_receipt(session, pg_book[0], receipt["id"], ReceiptConfirm.model_validate({
+            **options.model_dump(mode="json"), "digest": preview["digest"]}), user, gateway, None)
         await session.commit()
 
 
@@ -578,7 +622,8 @@ async def test_material_issue_posts_one_reviewed_wip_package(pg_factory, pg_book
     production = SyntheticProduction()
 
     async with pg_factory() as session:
-        await run_migration(session, "0140_zero_value_disposals.py", "upgrade")
+        if not await session.scalar(text("SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt')")):
+            await run_migration(session, "0140_zero_value_disposals.py", "upgrade")
         await session.commit()
         preview = await prepare_material_issue_posting(
             session, pg_book[0], "2026-10", data, production
@@ -642,12 +687,13 @@ async def test_material_issue_persists_complete_mixed_allocation(pg_factory, pg_
     _, movement_id, physical = await seed_physical_issue(pg_factory, pg_book, order_id)
     data = posting_input(policy_id).model_copy(update={"order_id": order_id, "wms_movement_id": movement_id})
     async with pg_factory() as session:
-        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
-                         "0142_zero_value_command_dates.py", "0143_zero_value_sales.py",
-                         "0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py",
-                         "0146_zero_value_allocation_basis.py", "0147_zero_value_allocation_runtime.py",
-                         "0148_zero_value_allocated_sales.py", "0149_production_material_allocations.py"):
-            await run_migration(session, revision, "upgrade")
+        if not await session.scalar(text("SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt')")):
+            for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
+                             "0142_zero_value_command_dates.py", "0143_zero_value_sales.py",
+                             "0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py",
+                             "0146_zero_value_allocation_basis.py", "0147_zero_value_allocation_runtime.py",
+                             "0148_zero_value_allocated_sales.py", "0149_production_material_allocations.py"):
+                await run_migration(session, revision, "upgrade")
         await session.commit()
         preview = await prepare_material_issue_posting(session, pg_book[0], "2026-10", data, SyntheticProduction())
         cost = preview["inventory_cost"]
@@ -714,13 +760,14 @@ async def test_material_zero_rounding_receipt_is_entryless_and_retries(pg_factor
     _, movement_id, _ = await seed_physical_issue(pg_factory, pg_book, order_id)
     data = posting_input(policy_id).model_copy(update={"order_id": order_id, "wms_movement_id": movement_id})
     async with pg_factory() as session:
-        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
-                         "0142_zero_value_command_dates.py", "0143_zero_value_sales.py",
-                         "0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py",
-                         "0146_zero_value_allocation_basis.py", "0147_zero_value_allocation_runtime.py",
-                         "0148_zero_value_allocated_sales.py", "0149_production_material_allocations.py",
-                         "0150_zero_material_allocations.py"):
-            await run_migration(session, revision, "upgrade")
+        if not await session.scalar(text("SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt')")):
+            for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
+                             "0142_zero_value_command_dates.py", "0143_zero_value_sales.py",
+                             "0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py",
+                             "0146_zero_value_allocation_basis.py", "0147_zero_value_allocation_runtime.py",
+                             "0148_zero_value_allocated_sales.py", "0149_production_material_allocations.py",
+                             "0150_zero_material_allocations.py"):
+                await run_migration(session, revision, "upgrade")
         await session.commit()
         prepared = await prepare_material_zero_issue(session, pg_book[0], "2026-10", data, SyntheticProduction())
         assert prepared["inventory_cost"]["issue_cost_byn"] == "0.00"

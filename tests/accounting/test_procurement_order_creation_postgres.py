@@ -32,9 +32,14 @@ HEADERS = {"X-Expected-Principal": "issuer"}
 async def selected_supplier_for_order_commands(issuance_pg):  # noqa: F811
     _, factory = issuance_pg
     async with factory() as session:
-        session.add(Counterparty(id=1, name="supplier1", unp="190000001"))
-        session.add(Supplier(id=1, name="supplier1", unp="190000001", status="active",
-                             counterparty_id=1))
+        party = Counterparty(name="supplier1", unp="190000001")
+        session.add(party)
+        await session.flush()
+        supplier = Supplier(name="supplier1", unp="190000001", status="active",
+                            counterparty_id=party.id)
+        session.add(supplier)
+        await session.flush()
+        assert (party.id, supplier.id) == (1, 1)
         await session.commit()
 
 

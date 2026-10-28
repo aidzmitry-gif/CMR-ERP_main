@@ -16,6 +16,7 @@ from modules.accounting.models import AccessGrant
 from modules.sales.accounting_ownership import DealOwnership
 from modules.sales.client_document_register import DealClientBinding, preview_snapshot
 from modules.sales.invoice_issuance import InvoiceIssuanceReceipt
+from modules.sales.mail_models import OutgoingEmail
 from modules.sales.models import Deal, DealDocument, DealItem
 from modules.wms.models import ReservationVersion, StockMovement, Task
 from tests.accounting.test_postgres import pg_factory  # noqa: F401
@@ -27,7 +28,7 @@ async def issuance_pg(pg_factory):  # noqa: F811
     factory = pg_factory
     async with factory() as session:
         conn = await session.connection()
-        tables = {Sku.__table__, DealItem.__table__}
+        tables = {Sku.__table__, DealItem.__table__, OutgoingEmail.__table__}
         pending = list(tables)
         while pending:
             for fk in pending.pop().foreign_keys:
@@ -61,7 +62,7 @@ async def test_pg_long_author_issue_reserve_delivery_and_truncate_guard(issuance
 
     client, factory = issuance_pg
     async with factory() as session:
-        ids, base = await seed(client, session, suffix=uuid4().hex[:8])
+        ids, base = await seed(client, session, suffix=uuid4().hex[:8], wms_enabled=True)
         actor = "issuer-" + "x" * 193
         session.add(AccessGrant(organization_id=ids["org"], subject=actor, role="chief"))
         await session.commit()
@@ -271,3 +272,12 @@ async def test_pg_concurrent_expiry_ticks_emit_one_reminder(issuance_pg, monkeyp
             OutboxEvent.event_type == "sales.invoice.expiring")) == 1
         doc = await check.get(DealDocument, doc_id)
         assert doc.status == "issued" and doc.reserve_status == "reserved" and doc.reminded_at is not None
+
+
+async def test_pg_concurrent_cancelled_replacement_replay_uses_current_original(issuance_pg, monkeypatch):
+    from tests.test_document_concurrency import test_concurrent_revision_and_issue_cannot_duplicate
+
+    api, factory = issuance_pg
+    async with factory() as session:
+        ids, base = await seed(api, session)
+    await test_concurrent_revision_and_issue_cannot_duplicate((api, factory, ids, base), monkeypatch)

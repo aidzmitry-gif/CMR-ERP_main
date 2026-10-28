@@ -191,3 +191,51 @@ def test_rejects_strict_version_and_saved_identity_mismatches(edit, match):
     edit(entry, receipt, document, allocation)
     with pytest.raises(AccountingError, match=match):
         check(entry, receipt, document, allocation)
+
+
+def test_issue_allocation_accepts_its_own_legacy_identity_snapshot():
+    from modules.accounting.inventory_issues import document_snapshot
+
+    entry, receipt, document, allocation = binding()
+    receipt.command = document_snapshot(document)
+    assert "warehouse_identity" not in receipt.command
+    assert "sku_identity" not in receipt.command
+    check(entry, receipt, document, allocation)
+
+
+@pytest.mark.parametrize("field", ["warehouse_identity", "sku_identity", "account", "unexpected"])
+def test_issue_allocation_rejects_modified_identity_snapshot(field):
+    from modules.accounting.inventory_issues import document_snapshot
+
+    entry, receipt, document, allocation = binding()
+    receipt.command = document_snapshot(document)
+    receipt.command[field] = {"forged": True} if field.endswith("identity") else "forged"
+    with pytest.raises(AccountingError, match="command differs"):
+        check(entry, receipt, document, allocation)
+
+
+@pytest.mark.parametrize("field, identity", [
+    ("warehouse_identity", InventoryWarehouseIdentity(id=4, name="W", title="Main warehouse")),
+    ("sku_identity", InventorySkuIdentity(id=8, code="S", title="Item S", unit="шт")),
+])
+def test_issue_allocation_rejects_omitted_bound_identity(field, identity):
+    from modules.accounting.inventory_issues import document_snapshot
+
+    entry, receipt, document, allocation = binding()
+    document = document.model_copy(update={field: identity})
+    receipt.command = document_snapshot(document)
+    receipt.command.pop(field)
+    with pytest.raises(AccountingError, match="command differs"):
+        check(entry, receipt, document, allocation)
+
+
+def test_sale_allocation_does_not_accept_issue_only_legacy_snapshot():
+    from modules.accounting.inventory_issues import document_snapshot
+
+    entry, receipt, issue, allocation = binding()
+    document = SaleDocument(**issue.model_dump(), net_amount="10.00", vat_rate="0", vat_basis="Synthetic",
+        buyer_account="62", revenue_account="90.1", vat_revenue_account="90.2", vat_payable_account="68",
+        buyer_dimensions={"counterparty": "C", "contract": "D", "settlement_document": "S"})
+    receipt.command = document_snapshot(document)
+    with pytest.raises(AccountingError, match="command differs"):
+        check(entry, receipt, document, allocation)

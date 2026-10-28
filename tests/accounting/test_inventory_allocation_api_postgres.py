@@ -29,7 +29,9 @@ from modules.accounting.production_output_transfer import (
 from modules.accounting.schemas import LineInput, PostingInput
 from modules.wms.models import WarehouseDirectory
 from tests.accounting.test_finished_goods_inventory_postgres import _output_cost_command
-from tests.accounting.test_inventory_allocation_cost_stream_postgres import TwoOutputs
+from tests.accounting.test_inventory_allocation_cost_stream_postgres import (
+    accepted_production_outputs,
+)
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_production_output_transfer_postgres import (
     _seed_production_book,
@@ -37,6 +39,7 @@ from tests.accounting.test_production_output_transfer_postgres import (
     transfer_input,
 )
 from tests.accounting.test_zero_value_output_cost_postgres import run_migration
+from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 pytestmark = pytest.mark.integration
 
@@ -63,19 +66,20 @@ async def inventory_identities(factory, book):
         return result
 
 
-async def output_sources(factory, book, method):
+async def output_sources(factory, book, method, *, api):
     policy_id = await _seed_production_book(factory, book, method)
     await _seed_wip(factory, book, policy_id, [("SHOP", "ORDER-42", "0.01"), ("SHOP", "ORDER-43", "0.01")])
-    production, output_ids = TwoOutputs(), []
+    production, warehouse, documents, _ = await accepted_production_outputs(api, factory, book, same_lot=False)
+    output_ids = []
     async with factory() as session:
         for order_id in (42, 43):
             command = transfer_input(policy_id).model_copy(update={
-                "order_id": order_id, "analytical_order": f"ORDER-{order_id}", "output_document_ids": [order_id + 59]})
-            preview = await prepare_output_transfer(session, book[0], "2026-10", command, production, object())
+                "order_id": order_id, "analytical_order": f"ORDER-{order_id}", "output_document_ids": [documents[order_id]]})
+            preview = await prepare_output_transfer(session, book[0], "2026-10", command, production, warehouse)
             confirmation = ProductionOutputTransferConfirmInput.model_validate({
                 **command.model_dump(mode="json"), "basis_digest": preview["basis_digest"], "digest": preview["digest"]})
             output = await confirm_output_transfer(session, book[0], "2026-10", confirmation, "tester",
-                                                   production=production, warehouse_gateway=object())
+                                                   production=production, warehouse_gateway=warehouse)
             output_ids.append(output.id)
         await session.commit()
     await inventory_identities(factory, book)
@@ -106,8 +110,8 @@ def issue_document(policy_id, identities):
 
 @pytest.mark.parametrize("method", ["fifo", "weighted_average"])
 @pytest.mark.parametrize("sale", [False, True])
-async def test_accountant_mixed_allocation_http_confirm_retry_stock_and_late_cost(pg_factory, pg_book, method, sale):
-    policy_id, outputs = await output_sources(pg_factory, pg_book, method)
+async def test_accountant_mixed_allocation_http_confirm_retry_stock_and_late_cost(pg_factory, pg_book, method, sale, issuance_pg):
+    policy_id, outputs = await output_sources(pg_factory, pg_book, method, api=issuance_pg[0])
     payload = issue_document(policy_id, await inventory_identities(pg_factory, pg_book))
     if sale:
         payload |= {"net_amount": "10.00", "vat_rate": "0", "vat_basis": "Synthetic exemption",
@@ -194,8 +198,8 @@ async def test_accountant_mixed_allocation_http_confirm_retry_stock_and_late_cos
         assert blocked.status_code == 422 and "FIFO or weighted-average" in blocked.text
 
 
-async def test_public_issue_requires_both_directory_snapshots(pg_factory, pg_book):
-    policy_id, _ = await output_sources(pg_factory, pg_book, "weighted_average")
+async def test_public_issue_requires_both_directory_snapshots(pg_factory, pg_book, issuance_pg):
+    policy_id, _ = await output_sources(pg_factory, pg_book, "weighted_average", api=issuance_pg[0])
     payload = issue_document(policy_id, await inventory_identities(pg_factory, pg_book))
     payload.pop("warehouse_identity")
     payload.pop("sku_identity")

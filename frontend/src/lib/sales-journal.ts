@@ -4,7 +4,7 @@
  * Контракт данных — `GET /api/sales/journal` (см. sales-journal.tsx).
  */
 
-export type PaymentStatus = "paid" | "invoiced" | "none";
+export type PaymentStatus = "paid" | "invoiced" | "partial" | "refunded" | "cancelled" | "none" | "unknown";
 export type ShipmentStatus = "delivered" | "none";
 
 export type JournalRow = {
@@ -21,6 +21,8 @@ export type JournalRow = {
   margin_pct: number | null;
   margin_reason: string | null; // причина «маржа не рассчитана»
   payment: PaymentStatus;
+  payment_source?: "ledger" | "legacy" | "none" | "unknown";
+  payment_reason?: string | null;
   invoice_number: string | null;
   shipment: ShipmentStatus;
 };
@@ -64,7 +66,7 @@ export function filterJournal(rows: JournalRow[], filters: JournalFilters): Jour
     if (filters.to && (!iso || iso > filters.to)) return false;
     if (filters.funnel && r.funnel !== filters.funnel) return false;
     if (filters.owner && r.owner !== filters.owner) return false;
-    if (filters.unpaidOnly && r.payment === "paid") return false;
+    if (filters.unpaidOnly && !hasUnpaidBalance(r.payment)) return false;
     if (q && !`${r.number} ${r.title} ${r.counterparty}`.toLowerCase().includes(q)) return false;
     return true;
   });
@@ -76,7 +78,13 @@ export type JournalStats = {
   totalGross: number | null; // null = ни одна сделка среза не оценена
   pricedCount: number;
   unpaidCount: number;
+  unknownCount: number;
 };
+
+// Недоступные данные и отменённый счёт не подтверждают наличие долга.
+function hasUnpaidBalance(payment: PaymentStatus): boolean {
+  return ["invoiced", "partial", "refunded", "none"].includes(payment);
+}
 
 export function journalStats(rows: JournalRow[]): JournalStats {
   const totalAmount = rows.reduce((s, r) => s + r.amount, 0);
@@ -84,8 +92,9 @@ export function journalStats(rows: JournalRow[]): JournalStats {
   const totalGross = priced.length
     ? priced.reduce((s, r) => s + (r.gross_profit ?? 0), 0)
     : null;
-  const unpaidCount = rows.filter((r) => r.payment !== "paid").length;
-  return { count: rows.length, totalAmount, totalGross, pricedCount: priced.length, unpaidCount };
+  const unpaidCount = rows.filter((r) => hasUnpaidBalance(r.payment)).length;
+  const unknownCount = rows.filter((r) => r.payment === "unknown").length;
+  return { count: rows.length, totalAmount, totalGross, pricedCount: priced.length, unpaidCount, unknownCount };
 }
 
 export type MonthGroup = {

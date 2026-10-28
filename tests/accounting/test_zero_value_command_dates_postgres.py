@@ -17,6 +17,7 @@ from modules.accounting.zero_value_disposals import (
 )
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_zero_value_disposals_postgres import command, zeroed_output
+from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 pytestmark = pytest.mark.integration
 
@@ -68,14 +69,18 @@ def dated_command(policy_id, output_id, line_id, **changes):
     return parse_zero_value_command(body)
 
 
-async def test_0142_accepts_dated_v2_and_legacy_v1_and_rejects_raw_variants(pg_factory, pg_book):
+async def test_0142_accepts_dated_v2_and_legacy_v1_and_rejects_raw_variants(pg_factory, pg_book, issuance_pg):
     async with pg_factory() as session:
-        await run_migration(session, "0140_zero_value_disposals.py", "upgrade")
-        await run_migration(session, "0141_zero_value_output_cost.py", "upgrade")
-        await run_migration(session, "0142_zero_value_command_dates.py", "upgrade")
+        if not await session.scalar(text("SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt')")):
+            await run_migration(session, "0140_zero_value_disposals.py", "upgrade")
+            await run_migration(session, "0141_zero_value_output_cost.py", "upgrade")
+            await run_migration(session, "0142_zero_value_command_dates.py", "upgrade")
         await session.commit()
-    policy_id, output_id, line_id = await zeroed_output(pg_factory, pg_book)
+    policy_id, output_id, line_id = await zeroed_output(pg_factory, pg_book, api=issuance_pg[0])
     async with pg_factory() as session:
+        # This migration contract rejects v3; the current release also supports sales.
+        await run_migration(session, "0142_zero_value_command_dates.py", "downgrade")
+        await run_migration(session, "0142_zero_value_command_dates.py", "upgrade")
         v2 = dated_command(policy_id, output_id, line_id)
         await save_with_basis(session, pg_book[0], v2)
         legacy = command(policy_id, output_id, line_id, source="inventory:zero:legacy", source_version=2)
@@ -119,17 +124,18 @@ async def test_0142_accepts_dated_v2_and_legacy_v1_and_rejects_raw_variants(pg_f
                 await run_migration(session, "0142_zero_value_command_dates.py", "downgrade")
 
 
-async def test_0142_rejects_invalid_existing_v2_and_empty_roundtrip(pg_factory, pg_book):
+async def test_0142_rejects_invalid_existing_v2_and_empty_roundtrip(pg_factory, pg_book, issuance_pg):
     async with pg_factory() as session:
-        await run_migration(session, "0140_zero_value_disposals.py", "upgrade")
-        await run_migration(session, "0141_zero_value_output_cost.py", "upgrade")
-        await run_migration(session, "0142_zero_value_command_dates.py", "upgrade")
+        if not await session.scalar(text("SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt')")):
+            await run_migration(session, "0140_zero_value_disposals.py", "upgrade")
+            await run_migration(session, "0141_zero_value_output_cost.py", "upgrade")
+            await run_migration(session, "0142_zero_value_command_dates.py", "upgrade")
         await run_migration(session, "0142_zero_value_command_dates.py", "downgrade")
         await run_migration(session, "0142_zero_value_command_dates.py", "upgrade")
         assert await session.scalar(text("SELECT to_regprocedure('accounting.validate_zero_value_disposal_command(jsonb)')"))
         await session.commit()
 
-    policy_id, output_id, line_id = await zeroed_output(pg_factory, pg_book)
+    policy_id, output_id, line_id = await zeroed_output(pg_factory, pg_book, api=issuance_pg[0])
     async with pg_factory() as session:
         await run_migration(session, "0142_zero_value_command_dates.py", "downgrade")
         raw = dated_command(policy_id, output_id, line_id, source="inventory:zero:historic-invalid", source_version=9)

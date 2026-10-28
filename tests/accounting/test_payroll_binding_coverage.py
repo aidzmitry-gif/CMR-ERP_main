@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from modules.accounting import models, service
 from modules.accounting.schemas import CloseInput
 from modules.hr.models import Employee
+from tests.conftest import make_private_test_dir
 
 
 async def _binding(client, db, prefix, name):
@@ -62,7 +63,7 @@ def _file(kind, *, binding_id=None, reference="source"):
 async def test_mixed_accrual_and_individual_zero_cover_all_known_bindings(
         client, db, book, tmp_path, monkeypatch):
     root = tmp_path / "payroll"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     prefix = f"/accounting/organizations/{book[0]}"
     first_employee, first_id = await _binding(client, db, prefix, "First employee")
@@ -100,6 +101,12 @@ async def test_mixed_accrual_and_individual_zero_cover_all_known_bindings(
         "evidence": "Synthetic chief compared both employee sources",
     })
     assert review.status_code == 200, review.text
+    # This test isolates gross-binding coverage; satisfy the independent current
+    # statutory-source gate with an explicit, persisted synthetic chief review.
+    statutory = await client.post(prefix + "/payroll-evidence-files", json=_file(
+        "payroll_statutory_zero", reference="synthetic-reviewed-statutory-zero"))
+    assert statutory.status_code == 200, statutory.text
+    assert (await client.get(url)).json()["payroll"]["statutory_source_missing"] is False
     await service.validate_close_period(db, book[0], "2026-10", close)
 
     stored = root / str(book[0]) / (zero_command["request_key"].replace("-", "") + ".pdf")

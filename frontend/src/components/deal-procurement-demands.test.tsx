@@ -28,6 +28,7 @@ it("передаёт только выбранную строку сделки �
   vi.mocked(fetchDealDemands).mockResolvedValueOnce([]).mockResolvedValueOnce([demand]);
   vi.mocked(createDealDemand).mockResolvedValue(demand);
   render(<DealProcurementDemands dealId="5" items={[item, { ...item, id: 8, title: "Вторая позиция" }]} />);
+  await screen.findByRole("option", { name: "Компания · 123456789" });
   fireEvent.change(await screen.findByLabelText("Юрлицо закупки для потребности"), { target: { value: "1" } });
   await waitFor(() => expect(fetchDealDemands).toHaveBeenCalledWith(1, 5));
   fireEvent.click(screen.getAllByRole("button", { name: "В закупки" })[0]);
@@ -37,8 +38,16 @@ it("передаёт только выбранную строку сделки �
 });
 
 it("даёт честную навигацию в план без заказа и сохраняет строку для сверки заказа", async () => {
+  let revealOrganizations = () => {};
+  vi.mocked(organizations).mockReturnValueOnce(new Promise((resolve) => {
+    revealOrganizations = () => resolve([{ id: 1, name: "Компания", unp: "123456789" }]);
+  }));
   vi.mocked(fetchDealDemands).mockResolvedValueOnce([demand]);
   render(<DealProcurementDemands dealId="5" items={[item]} />);
+  expect(screen.queryByRole("option", { name: "Компания · 123456789" })).not.toBeInTheDocument();
+  expect(fetchDealDemands).not.toHaveBeenCalled();
+  revealOrganizations();
+  await screen.findByRole("option", { name: "Компания · 123456789" });
   fireEvent.change(await screen.findByLabelText("Юрлицо закупки для потребности"), { target: { value: "1" } });
   expect(await screen.findByRole("link", { name: "Открыть план закупок юрлица #1" })).toHaveAttribute("href", "/erp/procurement/planning?org=1");
   vi.mocked(fetchDealDemands).mockResolvedValueOnce([{ ...demand, allocations: [{ id: 4, order_id: 12, order_line_id: 34, qty: "1.00" }] }]);
@@ -51,6 +60,7 @@ it("даёт честную навигацию в план без заказа �
 it("при отказе сохраняет количество и повторяет команду с тем же ключом", async () => {
   vi.mocked(createDealDemand).mockRejectedValueOnce(new Error("Не удалось создать потребность закупки (403)"));
   render(<DealProcurementDemands dealId="5" items={[item]} />);
+  await screen.findByRole("option", { name: "Компания · 123456789" });
   fireEvent.change(await screen.findByLabelText("Юрлицо закупки для потребности"), { target: { value: "1" } });
   await waitFor(() => expect(fetchDealDemands).toHaveBeenCalledWith(1, 5));
   fireEvent.change(screen.getByLabelText("Количество в потребность Аккумулятор"), { target: { value: "1.5" } });

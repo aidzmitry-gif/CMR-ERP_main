@@ -22,6 +22,7 @@ from modules.hr.models import Employee
 from tests.accounting.test_payroll_calculation import rate_input
 from tests.accounting.test_timesheet_preflight import make_timesheet
 from tests.accounting.test_work_schedule_norm import make_schedule
+from tests.conftest import make_private_test_dir
 
 
 @pytest_asyncio.fixture
@@ -351,7 +352,7 @@ async def test_workpaper_verifies_stored_contract_and_timesheet_bytes(
         client, db, book, workpaper_sources, tmp_path, monkeypatch):
     binding, deduction, contribution, ruleset = workpaper_sources
     root = tmp_path / "payroll"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     url = f"/accounting/organizations/{book[0]}/payroll-evidence-files"
 
@@ -1157,7 +1158,7 @@ async def test_xlsx_preview_requires_personnel_number_in_employer_binding(
         client, db, book, workpaper_sources, tmp_path, monkeypatch):
     binding, deduction, contribution, ruleset = workpaper_sources
     root = tmp_path / "payroll"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     employer = await client.post(f"/accounting/organizations/{book[0]}/payroll-employments", json={
         "request_key": str(uuid4()), "employee_id": binding["employee_id"],

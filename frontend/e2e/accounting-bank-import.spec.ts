@@ -6,12 +6,15 @@ test("импорт выписки сохраняет аналитику из ф�
   const response = await page.request.post("/api/accounting/organizations", { data: { name: `E2E bank dimensions ${stamp}`, unp: String(stamp).slice(-9) } });
   expect(response.ok(), await response.text()).toBeTruthy();
   const org = await response.json();
-  execFileSync("python", ["e2e/seed_bank_import.py", String(org.id)], { timeout: 30000 });
+  execFileSync("python", ["e2e/seed_bank_import.py", String(org.id)], { timeout: 30000, env: { ...process.env, AIOS_E2E_SEED: "1" } });
   await page.goto("/erp/accounting");
   await page.getByLabel("Организация", { exact: true }).selectOption(String(org.id));
+  await page.getByRole("button", { name: "Банк и платежи", exact: true }).click();
   await page.getByRole("button", { name: "Импорт выписки", exact: true }).click();
   const row = page.getByRole("row").filter({ hasText: `E2E-BANK-${org.id}` });
+  await page.getByLabel("Выбрать счета вручную").check();
   await row.getByRole("button", { name: "Выбрать", exact: true }).click();
+  await page.getByLabel("Счёт расчётов импорта").selectOption("62");
   await page.getByLabel("Расчёты: counterparty").fill("BUYER-E2E");
   await page.getByLabel("Расчёты: contract").fill("CONTRACT-E2E");
   await page.getByRole("button", { name: "Рассчитать проводки", exact: true }).click();

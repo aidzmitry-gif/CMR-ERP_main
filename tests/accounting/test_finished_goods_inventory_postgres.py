@@ -54,9 +54,29 @@ async def _run_output_cost_revision_migration(session, action):
     await (await session.connection()).run_sync(run)
 
 
-async def _confirm_output(factory, book, method="specific", *, normative_verified=False):
+async def _confirm_output(factory, book, method="specific", *, normative_verified=False, api=None):
     policy_id = await _seed_production_book(factory, book, method, normative_verified=normative_verified)
     await _seed_wip(factory, book, policy_id)
+    if api is not None:
+        from modules.accounting.production_output_transfer import confirm_output_transfer
+        from tests.accounting.test_inventory_allocation_cost_stream_postgres import (
+            accepted_production_outputs,
+        )
+
+        production, warehouse, documents, _ = await accepted_production_outputs(
+            api, factory, book, same_lot=False, order_ids=(42,), lot_by_order={42: "LOT-1"})
+        command = transfer_input(policy_id).model_copy(update={"output_document_ids": [documents[42]]})
+        async with factory() as session:
+            preview = await prepare_output_transfer(session, book[0], "2026-10", command, production, warehouse)
+            confirmed = ProductionOutputTransferConfirmInput.model_validate({
+                **command.model_dump(mode="json"), "basis_digest": preview["basis_digest"], "digest": preview["digest"],
+            })
+            await confirm_output_transfer(session, book[0], "2026-10", confirmed, "tester",
+                                          production=production, warehouse_gateway=warehouse)
+            await session.commit()
+        return policy_id
+    # Preserve the legacy synthetic path for callers not yet migrated to the
+    # current physical workflow; historical migration helpers remain unchanged.
     production = SyntheticProduction()
     command = transfer_input(policy_id)
     async with factory() as session:
@@ -87,9 +107,24 @@ def sale_document(policy_id):
     })
 
 
-async def test_finished_goods_sale_uses_immutable_output_layer_and_replays(pg_factory, pg_book):
-    policy_id = await _confirm_output(pg_factory, pg_book)
+async def _physical_sale_document(factory, book, policy_id):
+    from core.domain.models import Counterparty
+    from tests.accounting.test_inventory_allocation_api_postgres import inventory_identities
+
     document = sale_document(policy_id)
+    identities = await inventory_identities(factory, book)
+    async with factory() as session:
+        buyer = await session.get(Counterparty, 1)
+        return document.model_copy(update={**identities, "buyer_dimensions": {
+            **document.buyer_dimensions, "counterparty_id": str(buyer.id),
+            "counterparty": buyer.legal_name or buyer.name, "counterparty_unp": buyer.unp or "",
+            "counterparty_revision": str(buyer.revision),
+        }})
+
+
+async def test_finished_goods_sale_uses_immutable_output_layer_and_replays(pg_factory, pg_book, issuance_pg):
+    policy_id = await _confirm_output(pg_factory, pg_book, api=issuance_pg[0])
+    document = await _physical_sale_document(pg_factory, pg_book, policy_id)
     async with pg_factory() as session:
         prepared = await sales.prepare(session, pg_book[0], document)
         assert prepared["cost"]["issue_cost_byn"] == "50.00"
@@ -129,10 +164,10 @@ async def test_finished_goods_sale_uses_immutable_output_layer_and_replays(pg_fa
 
 
 @pytest.mark.parametrize("method", ["specific", "fifo", "weighted_average"])
-async def test_output_cost_preview_authenticates_late_wip_and_sale_destinations(pg_factory, pg_book, method):
+async def test_output_cost_preview_authenticates_late_wip_and_sale_destinations(pg_factory, pg_book, method, issuance_pg):
     """2 units / 100, one sale / 50, then WIP +20 -> +10 stock and +10 expense."""
-    policy_id = await _confirm_output(pg_factory, pg_book, method)
-    document = sale_document(policy_id)
+    policy_id = await _confirm_output(pg_factory, pg_book, method, api=issuance_pg[0])
+    document = (await _physical_sale_document(pg_factory, pg_book, policy_id))
     async with pg_factory() as session:
         await _upgrade_output_cost_revision(session)
         prepared = await sales.prepare(session, pg_book[0], document)
@@ -253,14 +288,14 @@ async def _output_cost_command(session, org_id, receipt_id):
     )
 
 
-async def test_output_cost_confirm_same_command_concurrently_creates_one_revision(pg_factory, pg_book):
+async def test_output_cost_confirm_same_command_concurrently_creates_one_revision(pg_factory, pg_book, issuance_pg):
     """Two sessions retrying one request key serialize to the same immutable revision."""
     from sqlalchemy import func
 
     from modules.accounting.models import Entry, ProductionOutputCostRevision
     from modules.accounting.production_output_cost_workflow import confirm_output_cost_correction
 
-    policy_id = await _confirm_output(pg_factory, pg_book)
+    policy_id = await _confirm_output(pg_factory, pg_book, api=issuance_pg[0])
     async with pg_factory() as session:
         output = await session.scalar(select(ProductionOutputTransferReceipt).where(
             ProductionOutputTransferReceipt.organization_id == pg_book[0]))
@@ -296,12 +331,12 @@ async def test_output_cost_confirm_same_command_concurrently_creates_one_revisio
         )) == 1
 
 
-async def test_negative_output_cost_revision_changes_future_sale_not_historical_replay(pg_factory, pg_book):
+async def test_negative_output_cost_revision_changes_future_sale_not_historical_replay(pg_factory, pg_book, issuance_pg):
     """A -20 WIP revision makes remaining stock 40 while the old sale stays 50."""
     from modules.accounting.production_output_cost_workflow import confirm_output_cost_correction
 
-    policy_id = await _confirm_output(pg_factory, pg_book)
-    document = sale_document(policy_id)
+    policy_id = await _confirm_output(pg_factory, pg_book, api=issuance_pg[0])
+    document = (await _physical_sale_document(pg_factory, pg_book, policy_id))
     async with pg_factory() as session:
         prepared = await sales.prepare(session, pg_book[0], document)
         original_sale = await sales.confirm(session, pg_book[0], document, prepared["cost"]["basis_digest"],
@@ -334,13 +369,13 @@ async def test_negative_output_cost_revision_changes_future_sale_not_historical_
         assert replay.id == original_sale.id
 
 
-async def test_output_cost_revision_downgrade_preserves_populated_history(pg_factory, pg_book):
+async def test_output_cost_revision_downgrade_preserves_populated_history(pg_factory, pg_book, issuance_pg):
     from sqlalchemy.exc import DBAPIError
 
     from modules.accounting.models import Entry, ProductionOutputCostRevision
     from modules.accounting.production_output_cost_workflow import confirm_output_cost_correction
 
-    policy_id = await _confirm_output(pg_factory, pg_book)
+    policy_id = await _confirm_output(pg_factory, pg_book, api=issuance_pg[0])
     async with pg_factory() as session:
         output = await session.scalar(select(ProductionOutputTransferReceipt).where(
             ProductionOutputTransferReceipt.organization_id == pg_book[0]))
@@ -410,7 +445,7 @@ async def test_output_cost_correction_marks_downstream_output_stale_without_rewr
         prepare_output,
     )
     from modules.wms.events import on_goods_received
-    from modules.wms.models import Location, Receipt, ReceiptLine
+    from modules.wms.models import Location, Receipt, ReceiptLine, WarehouseDirectory
     from modules.wms.production_material_issues import (
         ProductionMaterialIssueCommand,
         record_material_issue,
@@ -425,6 +460,9 @@ async def test_output_cost_correction_marks_downstream_output_stale_without_rewr
     await _seed_wip(factory, pg_book, policy_id)
     async with factory() as session:
         place = Location(warehouse="Main", code="COST-CHAIN")
+        await session.execute(text("SELECT setval(pg_get_serial_sequence('wms.warehouse_directory','id'), (SELECT max(id) FROM wms.warehouse_directory))"))
+        session.add(WarehouseDirectory(organization_id=pg_book[0], name="Main", title="Synthetic cost-chain warehouse",
+                                       wms_enabled=True, created_by=user.username))
         session.add_all([place, Sku(code="SYN-WIDGET", title="First output", unit="шт"),
                         Sku(code="SYN-WIDGET-2", title="Second output", unit="шт")])
         for order_id, qty in ((42, 2), (43, 1)):
@@ -537,8 +575,8 @@ async def test_output_cost_correction_marks_downstream_output_stale_without_rewr
         await session.commit()
 
 
-async def test_finished_goods_manual_layer_is_not_an_output_source(pg_factory, pg_book):
-    policy_id = await _confirm_output(pg_factory, pg_book)
+async def test_finished_goods_manual_layer_is_not_an_output_source(pg_factory, pg_book, issuance_pg):
+    policy_id = await _confirm_output(pg_factory, pg_book, api=issuance_pg[0])
     async with pg_factory() as session:
         manual = PostingInput(
             source="manual:forged-fg", source_version=1, operation="manual", document_date="2026-10-31",
@@ -667,7 +705,7 @@ async def test_output_trace_maps_second_fifo_lot_to_aggregate_expense(pg_factory
         assert disposal["destination_dimensions"] == {}
 
 @pytest.mark.parametrize("delta", [20, -20, 0])
-async def test_output_revision_sql_checks_exact_destinations(pg_factory, pg_book, delta):
+async def test_output_revision_sql_checks_exact_destinations(pg_factory, pg_book, delta, issuance_pg):
     """Exercise the real revision INSERT, including balanced forged alternatives."""
     import copy
     from uuid import uuid4
@@ -677,10 +715,10 @@ async def test_output_revision_sql_checks_exact_destinations(pg_factory, pg_book
 
     from modules.accounting.models import Account, Entry, Line, ProductionOutputCostRevision
 
-    policy_id = await _confirm_output(pg_factory, pg_book)
+    policy_id = await _confirm_output(pg_factory, pg_book, api=issuance_pg[0])
     async with pg_factory() as session:
         await _upgrade_output_cost_revision(session)
-        doc = sale_document(policy_id)
+        doc = (await _physical_sale_document(pg_factory, pg_book, policy_id))
         prepared = await sales.prepare(session, pg_book[0], doc)
         await sales.confirm(session, pg_book[0], doc, prepared["cost"]["basis_digest"], prepared["digest"], "tester")
         await service.post(session, pg_book[0], PostingInput(
@@ -781,7 +819,7 @@ async def test_output_revision_sql_checks_exact_destinations(pg_factory, pg_book
             ("20", "credit", 20), ("43", "debit", 10), ("90.4", "debit", 10)]
     await insert_revision(sequence=2)
 
-async def test_output_revision_empty_matrix_records_no_fabricated_entry(pg_factory, pg_book):
+async def test_output_revision_empty_matrix_records_no_fabricated_entry(pg_factory, pg_book, issuance_pg):
     from uuid import uuid4
 
     from sqlalchemy import func, text
@@ -789,7 +827,7 @@ async def test_output_revision_empty_matrix_records_no_fabricated_entry(pg_facto
 
     from modules.accounting.models import Entry, ProductionOutputCostRevision
 
-    await _confirm_output(pg_factory, pg_book)
+    await _confirm_output(pg_factory, pg_book, api=issuance_pg[0])
     async with pg_factory() as session:
         await _upgrade_output_cost_revision(session)
         output = await session.scalar(select(ProductionOutputTransferReceipt).where(

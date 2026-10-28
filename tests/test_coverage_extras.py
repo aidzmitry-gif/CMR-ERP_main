@@ -70,9 +70,9 @@ async def test_request_approval_missing_deal(api):
     assert r.status_code == 404
 
 
-async def test_chats_dedup_same_deal(api):
+async def test_chats_dedup_same_deal(api, synthetic_sales_party):
     deal = (
-        await api.post("/sales/deals", json={"number": "CH-D", "title": "t", "counterparty": "c"})
+        await api.post("/sales/deals", json={"number": "CH-D", "title": "t", "counterparty": "c", "counterparty_id": synthetic_sales_party.id})
     ).json()
     await api.post(f"/sales/deals/{deal['id']}/messages", json={"channel": "whatsapp", "text": "первое"})
     await api.post(f"/sales/deals/{deal['id']}/messages", json={"channel": "telegram", "text": "второе"})
@@ -91,9 +91,9 @@ async def test_set_primary_contact_without_counterparty(session, api):
     assert r.status_code == 200 and r.json()["is_primary"] is True
 
 
-async def test_order_document_on_deal_without_items(api):
+async def test_order_document_on_deal_without_items(api, synthetic_sales_party):
     deal = (
-        await api.post("/sales/deals", json={"number": "ORD-NI", "title": "t", "counterparty": "c"})
+        await api.post("/sales/deals", json={"number": "ORD-NI", "title": "t", "counterparty": "c", "counterparty_id": synthetic_sales_party.id})
     ).json()
     # заказ на сделке без позиций → _deal_stock_items вернёт [] (ветка «нет позиций»)
     r = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "order"})
@@ -111,18 +111,18 @@ async def test_ai_endpoints_404_when_enabled(ai_api):
 # --- Локальный lifecycle без исходящей 1С ---
 
 
-async def test_document_issues_locally_without_onec(api_no_gateways):
+async def test_document_issues_locally_without_onec(api_no_gateways, synthetic_sales_party):
     deal = (
-        await api_no_gateways.post("/sales/deals", json={"number": "NO-1", "title": "t", "counterparty": "c"})
+        await api_no_gateways.post("/sales/deals", json={"number": "NO-1", "title": "t", "counterparty": "c", "counterparty_id": synthetic_sales_party.id})
     ).json()
     r = await api_no_gateways.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "order"})
     assert r.status_code == 201, r.text
     assert r.json()["status"] == "posted" and r.json()["onec_ref"] is None
 
 
-async def test_approved_contract_issues_locally_without_onec(api_no_gateways):
+async def test_approved_contract_issues_locally_without_onec(api_no_gateways, synthetic_sales_party):
     deal = (await api_no_gateways.post(
-        "/sales/deals", json={"number": "DEC-NO", "title": "t", "counterparty": "c"}
+        "/sales/deals", json={"number": "DEC-NO", "title": "t", "counterparty": "c", "counterparty_id": synthetic_sales_party.id}
     )).json()
     pending = await api_no_gateways.post(
         f"/sales/deals/{deal['id']}/documents", json={"kind": "contract"}

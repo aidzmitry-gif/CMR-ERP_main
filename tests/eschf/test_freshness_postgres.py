@@ -102,6 +102,8 @@ async def test_another_authorized_approver_preserves_exact_preview_and_receipt(b
     h = bridge_http
     data = await candidate(h, "approval")
     original = await saved_value(h, data["id"])
+    # Match the same single persisted effective role as the authenticated bridge.
+    assert len(h.actor.roles) == 1
     async with h.pg.begin() as session:
         session.add(
             User(
@@ -109,7 +111,7 @@ async def test_another_authorized_approver_preserves_exact_preview_and_receipt(b
                 username="second-accountant",
                 full_name="Second synthetic accountant",
                 employee_id=702,
-                role="eschf_accountant",
+                role=h.actor.roles[0],
                 status="active",
                 deal_visibility="all",
             )

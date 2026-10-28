@@ -217,15 +217,22 @@ async def test_module_does_not_enable_implicit_demo(api, monkeypatch, environmen
     assert response.json()["detail"]["code"] == "unconfigured"
 
 
-async def test_registry_unconfigured_contract_keeps_manual_buyer(api):
+async def test_registry_unconfigured_contract_keeps_manual_buyer(api, session):
+    from core.domain.models import Counterparty
+
     core = api._transport.app.state.core
     core.services.registry = RegistryClient()
+    buyer = Counterparty(name="Ручная компания", legal_name="Ручная компания", unp="191234567",
+                         requisites={"legal_address": "Synthetic manual buyer address"})
+    session.add(buyer)
+    await session.commit()
     template = await api.post("/sales/contract-templates", json={
         "code": "registry-off", "name": "Без реестра", "body": "{{buyer.name}} {{buyer.unp}}",
     })
     assert template.status_code == 201
     deal = await api.post("/sales/deals", json={
         "number": "REGISTRY-OFF", "title": "Ручные реквизиты", "counterparty": "Ручная компания",
+        "counterparty_id": buyer.id,
     })
     assert deal.status_code == 201
     response = await api.post(f"/sales/deals/{deal.json()['id']}/contract", json={

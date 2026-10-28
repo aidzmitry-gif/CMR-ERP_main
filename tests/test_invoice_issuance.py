@@ -13,10 +13,10 @@ from modules.sales.models import Deal, DealDocument, DealItem
 from modules.sales.reservation_source import SalesReservationSource
 from modules.sales.reserve import tick_invoice_reserve
 from modules.wms.invoice_reservations import InvoiceReservation
-from modules.wms.models import ReservationVersion, StockMovement
+from modules.wms.models import ReservationVersion, StockMovement, WarehouseDirectory
 
 
-async def seed(api, session, *, qty="2", physical="10", suffix=""):
+async def seed(api, session, *, qty="2", physical="10", suffix="", wms_enabled=False):
     api.headers["X-User"] = "issuer"
     serial = int(sha256(suffix.encode()).hexdigest()[:8], 16) % 400000000
     org = Organization(name="Bound seller" + suffix, unp=str(100000000 + serial))
@@ -54,6 +54,8 @@ async def seed(api, session, *, qty="2", physical="10", suffix=""):
             actor="issuer",
         )
     )
+    session.add(WarehouseDirectory(organization_id=org.id, name="W", title="Synthetic warehouse",
+        created_by="issuer", wms_enabled=wms_enabled, prohibit_negative_stock=True))
     session.add(
         StockMovement(
             organization_id=org.id,
@@ -564,6 +566,8 @@ async def test_marker_without_persisted_receipt_is_never_authority(api, session)
 
 async def test_same_sku_lines_preserve_separate_allocation_matrix(api, session):
     ids, base = await seed(api, session)
+    session.add(WarehouseDirectory(organization_id=ids["org"], name="SECOND", title="Second synthetic warehouse",
+        created_by="issuer", wms_enabled=False, prohibit_negative_stock=True))
     line = DealItem(deal_id=ids["deal"], sku_id=ids["sku"], qty=1)
     session.add(line)
     session.add(
@@ -617,6 +621,7 @@ async def test_parallel_file_sqlite_invoices_cannot_overissue(tmp_path):
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     app = create_app()
+    app.state.core.services.db.session_factory = factory
 
     async def request_session():
         async with factory() as session:

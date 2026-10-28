@@ -27,11 +27,14 @@ from tests.accounting.test_finished_goods_inventory_postgres import (
     _output_cost_command,
 )
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
+from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 pytestmark = pytest.mark.integration
 
 
 async def upgrade_0140(session):
+    if await session.scalar(text("SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt')")):
+        return  # Canonical head includes 0140; the isolated 0139 roundtrip still runs its DDL.
     def upgrade(connection):
         migration = runpy.run_path("migrations/versions/0140_zero_value_disposals.py")
         with Operations.context(MigrationContext.configure(connection)):
@@ -47,6 +50,7 @@ async def downgrade_0140(session):
     await (await session.connection()).run_sync(downgrade)
 
 
+@pytest.mark.parametrize("accounting_pg_revision", ["0139"], indirect=True)
 async def test_migration_0140_up_down_up_isolated(pg_factory):
     async with pg_factory() as session:
         await upgrade_0140(session)
@@ -68,8 +72,8 @@ def command(policy_id, output_id, line_id, **changes):
     return ZeroValueDisposalCommand(**body)
 
 
-async def zeroed_output(factory, book, *, normative_verified=False):
-    policy_id = await _confirm_output(factory, book, normative_verified=normative_verified)
+async def zeroed_output(factory, book, *, normative_verified=False, api=None):
+    policy_id = await _confirm_output(factory, book, normative_verified=normative_verified, api=api)
     async with factory() as session:
         output = await session.scalar(select(ProductionOutputTransferReceipt).where(ProductionOutputTransferReceipt.organization_id == book[0]))
         await service.post(session, book[0], PostingInput(source="production:reverse-wip:zero", source_version=1,
@@ -85,8 +89,8 @@ async def zeroed_output(factory, book, *, normative_verified=False):
     return policy_id, output.entry_id, output_line
 
 
-async def test_persists_immutable_entryless_zero_issue_and_rejects_forgery(pg_factory, pg_book):
-    policy_id, output_id, line_id = await zeroed_output(pg_factory, pg_book)
+async def test_persists_immutable_entryless_zero_issue_and_rejects_forgery(pg_factory, pg_book, issuance_pg):
+    policy_id, output_id, line_id = await zeroed_output(pg_factory, pg_book, api=issuance_pg[0])
     async with pg_factory() as session:
         await upgrade_0140(session)
         draft = command(policy_id, output_id, line_id)

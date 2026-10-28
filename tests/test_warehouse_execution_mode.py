@@ -1,8 +1,8 @@
 """New optional-WMS behavior; existing unrelated suites are not repeated."""
 from datetime import date
 from decimal import Decimal
-from uuid import uuid4
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
@@ -20,7 +20,7 @@ from tests.test_invoice_stock_allocation import setup
 
 
 async def prepared(api, session, enabled):
-    org, facts, allocation, actor = await setup(api, session)
+    org, facts, allocation, actor = await setup(api, session, create_warehouse=False)
     warehouse = WarehouseDirectory(organization_id=org, name="W", title="Warehouse",
                                    created_by=actor, wms_enabled=enabled)
     session.add(warehouse)
@@ -198,7 +198,7 @@ async def test_accounting_source_identity_is_exact_and_crm_remains_closed(api, s
 
 
 async def test_mixed_warehouse_reservation_only_creates_wms_tasks(api, session):
-    org, facts, allocation, actor = await setup(api, session)
+    org, facts, allocation, actor = await setup(api, session, create_warehouse=False)
     session.add_all([WarehouseDirectory(organization_id=org,name="W",title="Off",created_by=actor,wms_enabled=False),
         WarehouseDirectory(organization_id=org,name="Z",title="On",created_by=actor,wms_enabled=True),
         StockMovement(organization_id=org,sku_code="A",warehouse="Z",kind="in",qty="10",reason="receipt")])
@@ -234,10 +234,11 @@ async def test_event_only_legacy_pick_remains_assignable_but_not_directly_consum
 
 @pytest.mark.parametrize("enabled",[False,True])
 async def test_receipt_stock_is_independent_of_optional_putaway(api,session,services,enabled,monkeypatch):
-    from tests.test_wms_primary_receipts import setup as receipt_setup, command
-    from modules.wms.primary_receipts import create_from_primary
     from modules.wms.models import ReceiptLine
+    from modules.wms.primary_receipts import create_from_primary
     from tests import test_wms_primary_receipts as receipt_fixture
+    from tests.test_wms_primary_receipts import command
+    from tests.test_wms_primary_receipts import setup as receipt_setup
     original_document = receipt_fixture.document
     def selected_warehouse_document():
         data = original_document()

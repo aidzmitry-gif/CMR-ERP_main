@@ -8,9 +8,9 @@ from sqlalchemy import select
 from core.domain.models import OutboxEvent
 
 
-async def test_ai_draft_reply_enabled(ai_api):
+async def test_ai_draft_reply_enabled(ai_api, synthetic_sales_party):
     deal = (
-        await ai_api.post("/sales/deals", json={"number": "AID-1", "title": "t", "counterparty": "c"})
+        await ai_api.post("/sales/deals", json={"number": "AID-1", "title": "t", "counterparty": "c", "counterparty_id": synthetic_sales_party.id})
     ).json()
     r = await ai_api.post(f"/sales/deals/{deal['id']}/ai/draft-reply")
     assert r.status_code == 200
@@ -18,9 +18,9 @@ async def test_ai_draft_reply_enabled(ai_api):
     assert body["text"] and body["model"] == "qwen2.5"
 
 
-async def test_ai_draft_reply_uses_last_inbound(session, ai_api):
+async def test_ai_draft_reply_uses_last_inbound(session, ai_api, synthetic_sales_party):
     deal = (
-        await ai_api.post("/sales/deals", json={"number": "AID-3", "title": "t", "counterparty": "c"})
+        await ai_api.post("/sales/deals", json={"number": "AID-3", "title": "t", "counterparty": "c", "counterparty_id": synthetic_sales_party.id})
     ).json()
     await ai_api.post(
         f"/sales/deals/{deal['id']}/messages",
@@ -32,9 +32,9 @@ async def test_ai_draft_reply_uses_last_inbound(session, ai_api):
     assert "ai.draft.generated" in types
 
 
-async def test_ai_assist_enabled_both_kinds(session, ai_api):
+async def test_ai_assist_enabled_both_kinds(session, ai_api, synthetic_sales_party):
     deal = (
-        await ai_api.post("/sales/deals", json={"number": "AID-2", "title": "t", "counterparty": "c"})
+        await ai_api.post("/sales/deals", json={"number": "AID-2", "title": "t", "counterparty": "c", "counterparty_id": synthetic_sales_party.id})
     ).json()
     for kind in ("summary", "next_step"):
         r = await ai_api.post(f"/sales/deals/{deal['id']}/ai/assist", json={"kind": kind})

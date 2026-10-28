@@ -22,9 +22,13 @@ async def test_sales_missing_deal_returns_empty_lists(api):
     assert (await api.get("/sales/deals/999999/messages")).json() == []
 
 
-async def test_sales_documents_404(api):
+async def test_sales_documents_404(api, session):
+    from tests.test_invoice_issuance import command, seed
+
+    ids, base = await seed(api, session)
+    payload, _ = await command(api, ids, base)
     assert (
-        await api.post("/sales/deals/999999/documents", json={"kind": "invoice"})
+        await api.post("/sales/deals/999999/documents", json={"kind": "invoice", **payload})
     ).status_code == 404
     # решение по несуществующему документу
     assert (
@@ -74,14 +78,34 @@ async def test_module_patch_404(api):
     assert (await api.post("/marketing/campaigns/999999/launch")).status_code == 404
 
 
-async def test_module_non_terminal_stage_no_event(api):
+async def test_module_non_terminal_stage_no_event(api, session):
+    from sqlalchemy import func, select
+
+    from core.domain.models import OutboxEvent
+    from modules.accounting.models import AccessGrant, Organization
+
+    api.headers['X-User'] = 'edge-operator'
+    org = Organization(name='Synthetic edge book', unp='100000012')
+    session.add(org)
+    await session.flush()
+    session.add(AccessGrant(organization_id=org.id, subject='edge-operator', role='chief'))
+    await session.commit()
+    org_id = org.id
     # PATCH в промежуточную стадию не эмитит «терминальное» событие (ветка else)
     req = (
         await api.post("/procurement/requests", json={"supplier": "S", "item": "X", "qty": 1})
     ).json()
+    assert (await api.patch(f"/procurement/requests/{req['id']}", json={"stage": "sourcing"})).status_code == 409
+    assigned = await api.post(f'/procurement/organizations/{org_id}/purchase-ownership', json={
+        'kind': 'request', 'source_id': req['id'], 'evidence': 'Synthetic explicit organization review'})
+    assert assigned.status_code == 201, assigned.text
+    before = await session.scalar(select(func.count()).select_from(OutboxEvent))
     r = await api.patch(f"/procurement/requests/{req['id']}", json={"stage": "sourcing"})
-    assert r.status_code == 200 and r.json()["stage"] == "sourcing"
+    assert r.status_code == 200 and r.json()["stage"] == "sourcing", r.text
+    assert await session.scalar(select(func.count()).select_from(OutboxEvent)) == before
 
     pay = (await api.post("/finance/payments", json={"ref": "СЧ-Z", "amount": 10})).json()
+    before = await session.scalar(select(func.count()).select_from(OutboxEvent))
     r2 = await api.patch(f"/finance/payments/{pay['id']}", json={"status": "processing"})
     assert r2.status_code == 200 and r2.json()["status"] == "processing"
+    assert await session.scalar(select(func.count()).select_from(OutboxEvent)) == before

@@ -27,12 +27,20 @@ const CHIP_CLS =
 const PAYMENT_CLS: Record<PaymentStatus, string> = {
   paid: "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300",
   invoiced: "bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300",
+  partial: "bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300",
+  refunded: "bg-sunken text-muted",
+  cancelled: "bg-sunken text-muted",
+  unknown: "bg-sunken text-muted",
   none: "bg-sunken text-muted",
 };
 
 const PAYMENT_LABEL: Record<PaymentStatus, string> = {
   paid: "оплачен",
   invoiced: "счёт выставлен",
+  partial: "частично оплачен",
+  refunded: "оплата возвращена",
+  cancelled: "счёт отменён",
+  unknown: "оплата не проверена",
   none: "нет счёта",
 };
 
@@ -176,6 +184,11 @@ export function SalesJournal() {
                   <Banknote size={16} /> {stats.unpaidCount}
                 </div>
                 <div className="mt-1 text-[11.5px] text-muted">неоплаченных</div>
+                {stats.unknownCount > 0 && (
+                  <div className="mt-1 text-[11.5px] text-muted">
+                    Оплата не проверена: {stats.unknownCount} · в неоплаченные не включены
+                  </div>
+                )}
               </div>
             </div>
 
@@ -365,10 +378,18 @@ function JournalRowView({ row }: { row: JournalRow }) {
       )}
 
       <span
-        className={`w-fit whitespace-nowrap rounded-md px-2 py-0.5 text-[10px] font-bold ${PAYMENT_CLS[row.payment]}`}
+        className={`w-fit min-w-0 max-w-full break-words whitespace-normal rounded-md px-2 py-0.5 text-[10px] font-bold ${PAYMENT_CLS[row.payment]}`}
+        title={row.payment_source === "legacy"
+          ? "Исторический статус документа; банковские распределения не проверены"
+          : row.payment === "unknown"
+            ? "Данные оплаты недоступны или требуют проверки; наличие долга не подтверждено"
+            : row.payment_source === "ledger"
+              ? "По проверенным данным бухгалтерии для этого счёта"
+              : undefined}
       >
         {PAYMENT_LABEL[row.payment]}
         {row.payment === "invoiced" && row.invoice_number ? ` · ${row.invoice_number}` : ""}
+        {row.payment_source === "legacy" ? " · по статусу документа" : ""}
       </span>
 
       <span

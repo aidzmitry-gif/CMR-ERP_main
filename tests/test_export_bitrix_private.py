@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 import requests
 
-
 SPEC = importlib.util.spec_from_file_location(
     "export_bitrix_private", Path(__file__).parents[1] / "scripts" / "export_bitrix_private.py")
 assert SPEC and SPEC.loader
@@ -891,6 +890,18 @@ def test_private_stage_seals_call_binary_as_blocked_v3_without_signed_urls(tmp_p
     assert "SOURCE_SIGNED_TOKEN" not in sealed_text
     assert "FRESH_CALL" not in sealed_text
     from scripts import import_month
+    with pytest.raises(RuntimeError, match="^BITRIX_CALL_RECORDINGS_UNSUPPORTED$"):
+        import_month._verify_private_cache(output)
+
+    # A correctly sealed marker cannot make an unsupported V3 cache loadable.
+    manifest_path = output / "private-source-manifest.json"
+    manifest = json.loads(manifest_path.read_bytes())
+    manifest["ready_for_load"] = True
+    body = json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8")
+    manifest_path.write_bytes(body)
+    (output / "PRIVATE_CACHE_FORMAT").write_text(
+        manifest["format"] + ":" + module.hashlib.sha256(body).hexdigest() + "\n", encoding="ascii",
+    )
     with pytest.raises(RuntimeError, match="PRIVATE_CACHE_NOT_LOADABLE"):
         import_month._verify_private_cache(output)
 

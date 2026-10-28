@@ -76,11 +76,11 @@ def test_ordered_credit_replacement_allows_identical_shapes_from_distinct_origin
 
 @pytest.mark.integration
 async def test_saved_mixed_weighted_receipt_loader_replays_zero_portion_once(pg_factory, pg_book, posting):
-    await save_mixed_weighted_receipt(pg_factory, pg_book, posting)
+    await save_mixed_weighted_receipt(pg_factory, pg_book, posting, issue_writer_snapshot=True)
 
 
 async def save_mixed_weighted_receipt(pg_factory, pg_book, posting, *, prepare_packet=None,
-                                     method="weighted_average", sale=False):
+                                     method="weighted_average", sale=False, issue_writer_snapshot=False):
     """Synthetic immutable mixed-cent receipt -> loader -> next weighted issue replay."""
     async with pg_factory() as session:
         from sqlalchemy import text
@@ -129,8 +129,9 @@ async def save_mixed_weighted_receipt(pg_factory, pg_book, posting, *, prepare_p
             package = prepare_packet(cost, package)
         entry = await service.post(session, pg_book[0], package, "tester", inventory_issue=not sale, inventory_sale=sale)
         receipt_type = models.InventorySaleReceipt if sale else models.InventoryIssueReceipt
+        command = inventory_issues.document_snapshot(document) if issue_writer_snapshot and not sale else document.model_dump(mode="json")
         session.add(receipt_type(entry_id=entry.id, organization_id=pg_book[0],
-            command=document.model_dump(mode="json"), cost=json.loads(json.dumps(cost, default=str)), posting=package.model_dump(mode="json"),
+            command=command, cost=json.loads(json.dumps(cost, default=str)), posting=package.model_dump(mode="json"),
             digest=service.digest(package), actor="tester"))
         await session.commit()
 

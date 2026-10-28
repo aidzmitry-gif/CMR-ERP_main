@@ -40,7 +40,7 @@ test("карточка сделки: выпуск счёта ERP с резерв
   expect(actor).toBeTruthy();
   const fixture = JSON.parse(execFileSync(process.env.E2E_PYTHON ?? "python", ["-m", "scripts.seed_invoice_e2e"], {
     cwd: resolve(process.cwd(), ".."),
-    input: JSON.stringify({ deal_id: dealId, actor }),
+    input: JSON.stringify({ deal_id: dealId, actor, wms_enabled: true }),
     env: { ...process.env, AIOS_E2E_SEED: "1" }, encoding: "utf8",
   })) as { organization: number; item: number; sku: string; buyer: number; loss_reason: string };
   const profile = await page.request.post(`/api/accounting/organizations/${fixture.organization}/seller-profiles`, { data: {
@@ -127,9 +127,21 @@ test("карточка сделки: выпуск счёта ERP с резерв
   await loss.screenshot({ path: testInfo.outputPath("pending-deal-loss.png") });
 });
 
-test("документы: ошибка загрузки отличается от пустого списка и допускает повтор", async ({ page }) => {
+test("документы: ошибка загрузки отличается от пустого списка и допускает повтор", async ({ page, context }) => {
+  await context.clearCookies();
+  await page.goto('/login');
+  await page.getByLabel('Сотрудник').selectOption('e2e_owner');
+  await page.getByRole('button', { name: 'Войти', exact: true }).click();
+  await expect(page).not.toHaveURL(/\/login/);
+  const nonce = Date.now();
+  const clientReply = await page.request.post("/api/sales/clients", { data: {
+    name: `Synthetic document load ${nonce}`, request_key: `doc-load-${nonce}`,
+  } });
+  expect(clientReply.status(), await clientReply.text()).toBe(201);
+  const client = await clientReply.json();
   const created = await page.request.post("/api/sales/deals", { data: {
-    number: `E2E-DOC-LOAD-${Date.now()}`, title: "Синтетическая проверка загрузки", counterparty: "E2E document load",
+    number: `E2E-DOC-LOAD-${nonce}`, title: "Синтетическая проверка загрузки",
+    counterparty: client.name, crm_client_id: client.id,
   } });
   expect(created.status()).toBe(201);
   const deal = await created.json();

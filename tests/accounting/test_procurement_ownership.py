@@ -89,9 +89,9 @@ async def test_receipt_order_link_is_versioned_and_reaches_posting(client, db, b
     data = document()
     data["items"][0].update(order_id=order_id, vat_rate="0", vat_amount="0.00")
     # A real order without a company decision must not become a receipt basis.
-    assert (await client.put(path, json={"expected_version": 1, "document": data})).status_code == 409
+    assert (await client.put(path, json={"key": "synthetic-order-link-edit", "expected_version": 1, "document": data})).status_code == 409
     assert (await client.post(prefix + "/purchase-ownership", json={"kind": "order", "source_id": order_id, "evidence": "Approved synthetic owner"})).status_code == 201
-    edited = await client.put(path, json={"expected_version": 1, "document": data})
+    edited = await client.put(path, json={"key": "synthetic-order-link-edit", "expected_version": 1, "document": data})
     assert edited.status_code == 200, edited.text
     assert edited.json()["revisions"][0]["document"]["items"][0].get("order_id") is None
     assert edited.json()["revisions"][1]["document"]["items"][0]["order_id"] == order_id

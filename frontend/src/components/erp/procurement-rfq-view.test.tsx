@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/procurement-rfq", async () => {
@@ -58,14 +58,17 @@ describe("ProcurementRfqView", () => {
   });
 
   it("creates RFQ from an owned request with a repeatable key", async () => {
-    mocked(api.createRfq).mockResolvedValue(rfq);
+    let confirm!: (value: Rfq) => void;
+    mocked(api.createRfq).mockImplementation(() => new Promise<Rfq>((resolve) => { confirm = resolve; }));
     await chooseOrg();
     fireEvent.change(screen.getByLabelText("Заявка на закупку"), { target: { value: "9" } });
     fireEvent.click(screen.getByRole("button", { name: "Создать RFQ" }));
     await waitFor(() => expect(api.createRfq).toHaveBeenCalledWith(1, {
       request_key: expect.any(String), request_id: 9,
     }));
-    expect(screen.getByLabelText("Заявка на закупку")).toHaveValue("");
+    expect(screen.getByLabelText("Заявка на закупку")).toHaveValue("9");
+    confirm(rfq);
+    await waitFor(() => expect(screen.getByLabelText("Заявка на закупку")).toHaveValue(""));
   });
 
   it("keeps the same create key and company after an unknown response", async () => {
@@ -102,7 +105,8 @@ describe("ProcurementRfqView", () => {
   });
 
   it("uses catalog supplier ID and exact price, then awards within the same company", async () => {
-    mocked(api.addBid).mockResolvedValue(rfq);
+    let release!: (value: Rfq) => void;
+    mocked(api.addBid).mockReturnValueOnce(new Promise<Rfq>((resolve) => { release = resolve; }));
     mocked(api.awardRfq).mockResolvedValue({ ...rfq, status: "awarded" });
     await chooseOrg();
     fireEvent.change(screen.getByLabelText("Поставщик предложения"), { target: { value: "7" } });
@@ -111,6 +115,10 @@ describe("ProcurementRfqView", () => {
     await waitFor(() => expect(api.addBid).toHaveBeenCalledWith(1, 3, expect.objectContaining({
       supplier_id: 7, price_byn: "100.50", bid_key: expect.any(String),
     })));
+    expect(screen.getByRole("button", { name: "Выбрать" })).toBeDisabled();
+    expect(api.awardRfq).not.toHaveBeenCalled();
+    await act(async () => { release(rfq); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Выбрать" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Выбрать" }));
     await waitFor(() => expect(api.awardRfq).toHaveBeenCalledWith(1, 3, 20));
   });

@@ -21,18 +21,27 @@ from tests.accounting.test_procurement_receipt_drafts import document
 from tests.test_wms_organization import book
 
 
-async def setup(api, session, services):
+async def setup(api, session, services, *, source_warehouse=None):
     org = await book(api)
     session.add(Counterparty(id=1, name="supplier1", unp="190000001"))
     session.add(Supplier(id=1, counterparty_id=1, name="supplier1", unp="190000001", status="active"))
     source_sku = Sku(code="sku1", title="Synthetic receipt item", unit="кг")
     session.add(source_sku)
-    session.add(WarehouseDirectory(organization_id=org, name="Main", title="Main warehouse",
-                                   created_by="wms-owner-test"))
+    physical = WarehouseDirectory(organization_id=org, name="Main", title="Main warehouse",
+                                  created_by="wms-owner-test")
+    session.add(physical)
     await session.flush()
+    data = document()
+    source_warehouse = source_warehouse or data["warehouse"]
+    primary = physical
+    if source_warehouse != physical.name:
+        primary = WarehouseDirectory(organization_id=org, name=source_warehouse,
+                                     title="Synthetic source warehouse", created_by="wms-owner-test")
+        session.add(primary)
+        await session.flush()
     sku_id = source_sku.id
     await session.commit()
-    data = document()
+    data.update(warehouse_id=primary.id, warehouse=primary.name, warehouse_title=primary.title)
     data["items"][0]["sku_id"] = sku_id
     data["items"][0].update(quantity="2.00", unit="кг")
     response = await api.post(f"/procurement/organizations/{org}/receipt-documents", json={"key": "physical-source", "document": data})
@@ -85,7 +94,7 @@ async def test_partial_primary_receipts_preserve_source_and_replay_without_stock
 
 
 async def test_physical_warehouse_catalog_is_company_scoped_and_replayable(api, session, services):
-    org, source, core, user, _ = await setup(api, session, services)
+    org, source, core, user, _ = await setup(api, session, services, source_warehouse="Main")
     path = f"/wms/organizations/{org}"
     options = await api.get(path + "/warehouse-options")
     assert options.status_code == 200, options.text
@@ -138,13 +147,14 @@ async def test_primary_change_requires_reconciliation_after_physical_preparation
     assert report.json()["receipts"][0]["source_version"] == 1
 
 
-async def test_correction_draft_is_not_a_warehouse_primary_source(api, session, services):
+async def test_correction_draft_is_not_a_warehouse_primary_source(api, session, services, monkeypatch):
     from datetime import date
 
     from modules.accounting.models import Account, Policy
+    from tests.accounting import test_procurement_receipt_drafts as source_fixture
     from tests.accounting.test_procurement_receipt_drafts import source_options
 
-    org, _, core, user, _ = await setup(api, session, services)
+    org, _, core, user, primary_document = await setup(api, session, services)
     policy = Policy(organization_id=org, effective_from=date(2026, 1, 1), reference="Synthetic WMS test",
                     inventory_method="specific", allocation_basis="direct_cost",
                     depreciation_method="straight_line", normative_reference="synthetic",
@@ -154,7 +164,16 @@ async def test_correction_draft_is_not_a_warehouse_primary_source(api, session, 
                         valid_from=date(2026, 1, 1), required_dimensions=[], currency_tracking=False,
                         quantity_tracking=False, cash=False, normative_ref="synthetic"))
     await session.flush()
-    path, options = await source_options(api, session, (org, policy.id), unit="кг")
+    original_document = source_fixture.document
+
+    def selected_warehouse_document():
+        data = original_document()
+        data.update({key: primary_document[key] for key in ("warehouse_id", "warehouse", "warehouse_title")})
+        return data
+
+    with monkeypatch.context() as patch:
+        patch.setattr(source_fixture, "document", selected_warehouse_document)
+        path, options = await source_options(api, session, (org, policy.id), unit="кг")
     preview = await api.post(path + "/preview", json=options)
     assert preview.status_code == 200, preview.text
     posted = await api.post(path + "/confirm", json={**options, "digest": preview.json()["digest"]})

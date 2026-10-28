@@ -11,13 +11,13 @@ async def _new_deal(api, number, **extra):
     return r.json()
 
 
-async def test_create_and_list_tasks(session, api):
+async def test_create_and_list_tasks(session, api, synthetic_sales_party):
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent
     from modules.sales.models import DealTaskCrmLink
 
-    deal = await _new_deal(api, "TK-3")
+    deal = await _new_deal(api, "TK-3", counterparty_id=synthetic_sales_party.id)
     await api.post(f"/sales/deals/{deal['id']}/tasks", json={"title": "A", "kind": "call"})
     await api.post(f"/sales/deals/{deal['id']}/tasks", json={"title": "B", "kind": "email"})
 
@@ -36,8 +36,8 @@ async def test_create_and_list_tasks(session, api):
     assert (await api.post("/sales/deals/999999/tasks", json={"title": "x"})).status_code == 404
 
 
-async def test_task_overdue_flag(api):
-    deal = await _new_deal(api, "TK-1")
+async def test_task_overdue_flag(api, synthetic_sales_party):
+    deal = await _new_deal(api, "TK-1", counterparty_id=synthetic_sales_party.id)
     past = (
         await api.post(
             f"/sales/deals/{deal['id']}/tasks",
@@ -60,11 +60,12 @@ async def test_task_overdue_flag(api):
     assert nodue["overdue"] is False
 
 
-async def test_task_due_at_with_timezone_is_stored_as_utc_before_commit(api, session):
+async def test_task_due_at_with_timezone_is_stored_as_utc_before_commit(api, session, synthetic_sales_party):
     from sqlalchemy import func, select
+
     from modules.sales.models import DealTask
 
-    deal = await _new_deal(api, "TK-TZ")
+    deal = await _new_deal(api, "TK-TZ", counterparty_id=synthetic_sales_party.id)
     response = await api.post(
         f"/sales/deals/{deal['id']}/tasks",
         json={"title": "Timezone task", "due_at": "2030-01-01T12:00:00+03:00"},
@@ -80,12 +81,12 @@ async def test_task_due_at_with_timezone_is_stored_as_utc_before_commit(api, ses
     assert moved.json()["due_at"] == "2030-01-02T09:00:00"
 
 
-async def test_complete_task(session, api):
+async def test_complete_task(session, api, synthetic_sales_party):
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent
 
-    deal = await _new_deal(api, "TK-2")
+    deal = await _new_deal(api, "TK-2", counterparty_id=synthetic_sales_party.id)
     t = (
         await api.post(
             f"/sales/deals/{deal['id']}/tasks",
@@ -111,9 +112,9 @@ async def test_complete_task(session, api):
     assert (await api.patch("/sales/tasks/999999", json={"status": "done"})).status_code == 404
 
 
-async def test_deals_without_open_task(api):
-    d1 = await _new_deal(api, "NT-1")  # без задачи
-    d2 = await _new_deal(api, "NT-2")  # с открытой задачей
+async def test_deals_without_open_task(api, synthetic_sales_party):
+    d1 = await _new_deal(api, "NT-1", counterparty_id=synthetic_sales_party.id)  # без задачи
+    d2 = await _new_deal(api, "NT-2", counterparty_id=synthetic_sales_party.id)  # с открытой задачей
     task = (
         await api.post(f"/sales/deals/{d2['id']}/tasks", json={"title": "call"})
     ).json()
@@ -130,7 +131,7 @@ async def test_deals_without_open_task(api):
 
 
 @pytest.mark.parametrize("visibility", ["own", "all"])
-async def test_employee_can_update_visible_task_without_duplicate_completion(api, session, visibility):
+async def test_employee_can_update_visible_task_without_duplicate_completion(api, session, visibility, synthetic_sales_party):
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent, User
@@ -141,7 +142,7 @@ async def test_employee_can_update_visible_task_without_duplicate_completion(api
         department="Продажи", role="sales", status="active", deal_visibility=visibility,
     ))
     await session.commit()
-    deal = await _new_deal(api, "TK-OWN", owner_id=101)
+    deal = await _new_deal(api, "TK-OWN", owner_id=101, counterparty_id=synthetic_sales_party.id)
     headers = {"X-User": "task-owner", "X-User-Roles": "sales"}
     created = await api.post(
         f"/sales/deals/{deal['id']}/tasks", json={"title": "Follow up"}, headers=headers,
@@ -174,7 +175,7 @@ async def test_employee_can_update_visible_task_without_duplicate_completion(api
     assert [event.payload["task_id"] for event in events] == [task_id]
 
 
-async def test_own_scope_cannot_update_foreign_or_unassigned_tasks(api, session):
+async def test_own_scope_cannot_update_foreign_or_unassigned_tasks(api, session, synthetic_sales_party):
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent, User
@@ -189,7 +190,7 @@ async def test_own_scope_cannot_update_foreign_or_unassigned_tasks(api, session)
     await session.commit()
     headers = {"X-User": "alice", "X-User-Roles": "sales"}
     for number, owner_id in (("TK-FOREIGN", 102), ("TK-UNASSIGNED", None)):
-        deal = await _new_deal(api, number, owner_id=owner_id)
+        deal = await _new_deal(api, number, owner_id=owner_id, counterparty_id=synthetic_sales_party.id)
         created = await api.post(f"/sales/deals/{deal['id']}/tasks", json={"title": "Private"})
         assert created.status_code == 201
         task_id = created.json()["id"]
@@ -211,7 +212,7 @@ async def test_own_scope_cannot_update_foreign_or_unassigned_tasks(api, session)
     ))).scalars().all() == []
 
 
-async def test_task_update_requires_write_permission(api, session):
+async def test_task_update_requires_write_permission(api, session, synthetic_sales_party):
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent, User
@@ -221,7 +222,7 @@ async def test_task_update_requires_write_permission(api, session):
     session.add(User(username="hr-reader", full_name="HR Reader", department="HR",
                      role="hr", status="active", deal_visibility="all"))
     await session.commit()
-    deal = await _new_deal(api, "TK-NO-WRITE")
+    deal = await _new_deal(api, "TK-NO-WRITE", counterparty_id=synthetic_sales_party.id)
     created = await api.post(f"/sales/deals/{deal['id']}/tasks", json={"title": "Protected"})
     assert created.status_code == 201
     task_id = created.json()["id"]
@@ -241,7 +242,7 @@ async def test_task_update_requires_write_permission(api, session):
     ))).scalars().all() == []
 
 
-async def test_imported_multilink_tasks_are_visible_without_foreign_link_leak(api, session):
+async def test_imported_multilink_tasks_are_visible_without_foreign_link_leak(api, session, synthetic_sales_party):
     from core.domain.models import User
     from modules.sales.models import DealTask, DealTaskCrmLink
 
@@ -252,8 +253,8 @@ async def test_imported_multilink_tasks_are_visible_without_foreign_link_leak(ap
              department="Продажи", role="sales", status="active", deal_visibility="own"),
     ])
     await session.commit()
-    own = await _new_deal(api, "TASK-LINK-OWN", owner_id=601)
-    other = await _new_deal(api, "TASK-LINK-OTHER", owner_id=602)
+    own = await _new_deal(api, "TASK-LINK-OWN", owner_id=601, counterparty_id=synthetic_sales_party.id)
+    other = await _new_deal(api, "TASK-LINK-OTHER", owner_id=602, counterparty_id=synthetic_sales_party.id)
     task = DealTask(
         deal_id=other["id"], title="Shared synthetic task", source_ref="bitrix:task:801",
         description="Synthetic description", source_responsible_id="901",

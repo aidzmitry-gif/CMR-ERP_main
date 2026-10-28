@@ -42,6 +42,7 @@ async def _upgrade_to_0153(session):
             await run_migration(session, path.name, "upgrade")
 
 
+@pytest.mark.parametrize("accounting_pg_revision", ["0139"], indirect=True)
 async def test_0153_up_down_up_without_v3_history(pg_factory):
     async with pg_factory() as session:
         await _upgrade_to_0153(session)

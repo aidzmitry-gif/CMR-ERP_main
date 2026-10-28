@@ -18,7 +18,7 @@ from modules.sales.mail_queue import (
     request_fingerprint,
 )
 from modules.sales.mail_transport import SMTPResult
-from modules.sales.models import Deal
+from modules.sales.models import Deal, DealDocument
 from tests.test_sales_email_transport import parse_message, receiver, settings
 
 
@@ -28,6 +28,11 @@ async def prepared(session, key="test-request", number="QUEUE-1", actor="directo
         deal = Deal(number=number, title="Synthetic email only", counterparty="Synthetic buyer")
         session.add(deal)
         await session.commit()
+    # Email history references a real synthetic legacy document, not a phantom id.
+    if await session.get(DealDocument, 123) is None:
+        session.add(DealDocument(id=123, deal_id=deal.id, kind="invoice", number="INV-1",
+                                 status="posted", version=2))
+        await session.flush()
     profile = await session.scalar(select(User).where(User.username == actor))
     if profile is None:
         session.add(
@@ -35,7 +40,7 @@ async def prepared(session, key="test-request", number="QUEUE-1", actor="directo
                 username=actor,
                 full_name="Synthetic sales director",
                 department="Продажи",
-                role="sales",
+                role="director" if actor == "director" else "sales",
                 status="active",
             )
         )

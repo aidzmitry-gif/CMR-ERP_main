@@ -23,6 +23,14 @@ from tests.accounting.test_postgres import pg_factory as pg_factory
 pytestmark = pytest.mark.integration
 
 
+@pytest.fixture(autouse=True)
+async def synthetic_counterparty_sequence(pg_factory, pg_book):
+    async with pg_factory() as session:
+        await session.execute(text("SELECT setval(pg_get_serial_sequence('counterparty', 'id'), "
+                                   "(SELECT max(id) FROM counterparty))"))
+        await session.commit()
+
+
 async def test_concurrent_claim_and_database_immutability(pg_factory, pg_book):
     org = pg_book[0]
     gateway = AccountingService()

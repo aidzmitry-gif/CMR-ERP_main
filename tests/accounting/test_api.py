@@ -183,6 +183,7 @@ async def test_analytics_and_tracking_validation(db, book, posting):
 
 async def test_event_adapter_and_registration(db, book, posting):
     from modules.accounting import expense_routes, routes
+    from modules.accounting.stock_issue_source import router as stock_issue_router
 
     registered = []
     routers = []
@@ -198,8 +199,16 @@ async def test_event_adapter_and_registration(db, book, posting):
     module = get_module()
     assert isinstance(module, AccountingModule)
     module.register(core)
-    assert registered == ["router", "router", "event", "widget", "reference"]
-    assert routers == [(routes.router, "/accounting"), (expense_routes.router, "/accounting")]
+    assert registered == ["router", "router", "router", "router", "event", "widget", "reference"]
+    assert routers[:3] == [(routes.router, "/accounting"), (expense_routes.router, "/accounting"),
+                           (stock_issue_router, "/accounting")]
+    shipment_router, shipment_prefix = routers[3]
+    assert shipment_prefix == "/accounting"
+    prefix = "/organizations/{org}/invoices/{document}/document-shipments"
+    assert [(route.path, route.methods) for route in shipment_router.routes] == [
+        (prefix + "/preview", {"POST"}), (prefix, {"POST"}),
+        (prefix + "/by-key/{key}", {"GET"}), (prefix + "/history", {"POST"}),
+    ]
     ctx = SimpleNamespace(session=db)
     with pytest.raises(service.AccountingError, match="organization"):
         await on_posting_requested({"organization_id": None}, ctx)

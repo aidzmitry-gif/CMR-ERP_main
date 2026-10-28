@@ -19,7 +19,6 @@ from modules.accounting.expense_schemas import (
 from modules.accounting.models import Account, Entry, Line
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 
-
 pytestmark = pytest.mark.integration
 
 
@@ -32,9 +31,34 @@ async def apply_attribution_migration(session):
 
     def upgrade(sync_connection):
         with Operations.context(MigrationContext.configure(sync_connection)):
-            migration["upgrade"]()
+            if sync_connection.scalar(text("SELECT to_regclass('accounting.expense_article_attribution')")) is None:
+                migration["upgrade"]()
 
     await connection.run_sync(upgrade)
+
+
+@pytest.mark.parametrize("accounting_pg_revision", ["0155"], indirect=True)
+async def test_attribution_migration_on_predecessor(pg_factory):  # noqa: F811
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    async with pg_factory() as session:
+        assert await session.scalar(text("SELECT to_regclass('accounting.expense_article_attribution')")) is None
+        await apply_attribution_migration(session)
+        assert await session.scalar(text("SELECT to_regclass('accounting.expense_article_attribution')")) is not None
+        migration = runpy.run_path(str(Path("migrations/versions/0156_expense_article_attribution.py")))
+
+        def downgrade(connection):
+            with Operations.context(MigrationContext.configure(connection)):
+                migration["downgrade"]()
+
+        await (await session.connection()).run_sync(downgrade)
+        assert await session.scalar(text("SELECT to_regclass('accounting.expense_article_attribution')")) is None
+        await apply_attribution_migration(session)
+        guards = (await session.scalars(text("SELECT tgname FROM pg_trigger WHERE "
+            "tgrelid='accounting.expense_article_attribution'::regclass AND NOT tgisinternal ORDER BY tgname"))).all()
+        assert guards == ["guard_expense_article_attribution", "immutable_expense_article_attribution"]
+        await session.commit()
 
 
 async def test_postgres_attribution_guard_accepts_only_immutable_receipt(pg_factory, pg_book):  # noqa: F811

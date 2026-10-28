@@ -12,6 +12,7 @@ from tests.accounting.test_zero_value_output_cost_postgres import run_migration
 pytestmark = pytest.mark.integration
 
 
+@pytest.mark.parametrize("accounting_pg_revision", ["0143"], indirect=True)
 async def test_explicit_allocation_guard_empty_roundtrip(pg_factory):
     async with pg_factory() as session:
         await run_migration(session, "0144_inventory_explicit_allocation_guards.py", "upgrade")
@@ -25,7 +26,8 @@ async def test_explicit_allocation_guard_empty_roundtrip(pg_factory):
 @pytest.mark.parametrize("mutation", [None, "missing_marker", "null_marker", "wrong_source", "wrong_total", "duplicate_source", "credit_quantity"])
 async def test_explicit_mixed_packet_guard_at_commit(pg_factory, pg_book, posting, mutation):
     async with pg_factory() as session:
-        await run_migration(session, "0144_inventory_explicit_allocation_guards.py", "upgrade")
+        if not await session.scalar(text("SELECT to_regprocedure('accounting.validate_inventory_allocation_link(integer)') IS NOT NULL")):
+            await run_migration(session, "0144_inventory_explicit_allocation_guards.py", "upgrade")
         await session.commit()
 
     def prepare_packet(cost, package):
@@ -49,9 +51,11 @@ async def test_explicit_mixed_packet_guard_at_commit(pg_factory, pg_book, postin
 
     if mutation is not None:
         with pytest.raises(DBAPIError, match="allocation|Allocation"):
-            await save_mixed_weighted_receipt(pg_factory, pg_book, posting, prepare_packet=prepare_packet)
+            await save_mixed_weighted_receipt(pg_factory, pg_book, posting, prepare_packet=prepare_packet,
+                                              issue_writer_snapshot=True)
     else:
-        await save_mixed_weighted_receipt(pg_factory, pg_book, posting, prepare_packet=prepare_packet)
+        await save_mixed_weighted_receipt(pg_factory, pg_book, posting, prepare_packet=prepare_packet,
+                                          issue_writer_snapshot=True)
         async with pg_factory() as session:
             with pytest.raises(DBAPIError, match="Cannot downgrade"):
                 await run_migration(session, "0144_inventory_explicit_allocation_guards.py", "downgrade")
@@ -61,17 +65,20 @@ async def test_explicit_mixed_packet_guard_at_commit(pg_factory, pg_book, postin
 @pytest.mark.parametrize("method,sale", [("fifo", False), ("fifo", True), ("weighted_average", True)])
 async def test_guarded_fifo_and_sale_preserve_mixed_remaining_cost(pg_factory, pg_book, posting, method, sale):
     async with pg_factory() as session:
-        await run_migration(session, "0144_inventory_explicit_allocation_guards.py", "upgrade")
+        if not await session.scalar(text("SELECT to_regprocedure('accounting.validate_inventory_allocation_link(integer)') IS NOT NULL")):
+            await run_migration(session, "0144_inventory_explicit_allocation_guards.py", "upgrade")
         await session.commit()
     await save_mixed_weighted_receipt(pg_factory, pg_book, posting, method=method, sale=sale,
-        prepare_packet=lambda cost, package: package.model_copy(update={"rule_version": package.rule_version + ":a1"}))
+        prepare_packet=lambda cost, package: package.model_copy(update={"rule_version": package.rule_version + ":a1"}),
+        issue_writer_snapshot=not sale)
 
 
 async def test_loader_rejects_self_consistent_but_overpriced_saved_cost(pg_factory, pg_book, posting):
     from decimal import Decimal
 
     async with pg_factory() as session:
-        await run_migration(session, "0144_inventory_explicit_allocation_guards.py", "upgrade")
+        if not await session.scalar(text("SELECT to_regprocedure('accounting.validate_inventory_allocation_link(integer)') IS NOT NULL")):
+            await run_migration(session, "0144_inventory_explicit_allocation_guards.py", "upgrade")
         await session.commit()
 
     def overpriced(cost, package):
@@ -82,4 +89,5 @@ async def test_loader_rejects_self_consistent_but_overpriced_saved_cost(pg_facto
 
     # Structural SQL binding succeeds; independent valuation must still reject it.
     with pytest.raises(AccountingError, match="historical calculation"):
-        await save_mixed_weighted_receipt(pg_factory, pg_book, posting, prepare_packet=overpriced)
+        await save_mixed_weighted_receipt(pg_factory, pg_book, posting, prepare_packet=overpriced,
+                                          issue_writer_snapshot=True)

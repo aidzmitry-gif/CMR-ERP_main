@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import os
-import runpy
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -16,64 +17,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from core.domain.reference import Currency
 from modules.accounting import service
 from modules.accounting.schemas import CloseInput
+from tests.conftest import make_private_test_dir
 
 pytestmark = pytest.mark.integration
-
-
-# ``migration-proposal.py`` freezes the shared 0130 accounting baseline for
-# disposable PostgreSQL databases.  The ORM has since gained only registered
-# additive accounting revisions, so a fixture must replay the same tail rather
-# than silently creating current tables from metadata.  Keeping this list
-# explicit makes a missing registration fail in the focused PostgreSQL tests.
-ACCOUNTING_TAIL_MIGRATIONS = (
-    "0140_zero_value_disposals.py",
-    "0141_zero_value_output_cost.py",
-    "0142_zero_value_command_dates.py",
-    "0143_zero_value_sales.py",
-    "0144_inventory_explicit_allocation_guards.py",
-    "0145_inventory_allocation_cost_stream.py",
-    "0146_zero_value_allocation_basis.py",
-    "0147_zero_value_allocation_runtime.py",
-    "0148_zero_value_allocated_sales.py",
-    "0149_production_material_allocations.py",
-    "0150_zero_material_allocations.py",
-    "0151_late_material_output_cost.py",
-    "0152_signed_prospective_wip.py",
-    "0153_late_pool_atomic_package.py",
-    "0154_late_pool_actual_output_evidence.py",
-    "0155_late_pool_inventory_value_links.py",
-    "0156_expense_article_attribution.py",
-    "0157_statutory_requirement_catalog.py",
-    "0158_catalog_adoption.py",
-    "0159_shipment_document_policy.py",
-    "0160_reconciliation_issue_queue.py",
-    "0161_payroll_employment_binding.py",
-    "0162_payroll_rule_set.py",
-    "0163_payroll_evidence_file.py",
-    "0164_payroll_workpaper_review.py",
-    "0165_payroll_employment_closed_period.py",
-    "0166_payroll_zero_activity_evidence.py",
-    "0167_payroll_population_review.py",
-    "0168_payroll_binding_month_coverage.py",
-    "0169_opening_import_single_cutover.py",
-    "0170_freeze_accepted_opening_balances.py",
-    "0171_payroll_statutory_close_source.py",
-    "0172_payroll_statutory_binding_coverage.py",
-    "0173_payroll_work_schedule_source.py",
-    "0174_reconciliation_erp_snapshot_blocker.py",
-    "0175_payroll_applicability_review.py",
-    "0176_payroll_organization_review.py",
-    "0177_procurement_catalog_receipt_guards.py",
-    "0178_procurement_atomic_order_save.py",
-    "0183_receipt_edit_request_key.py",
-    "0184_organization_warehouse_directory.py",
-    "0185_supplier_contract_directory.py",
-    "0186_supplier_contract_revocation.py",
-    "0187_manual_document_drafts.py",
-    "0188_manual_document_void.py",
-    "0189_inventory_issue_directory_identity.py",
-    "0190_procurement_receipt_correction_drafts.py",
-)
 
 
 @pytest.mark.parametrize("direction", ["receipt", "refund"])
@@ -373,7 +319,7 @@ async def test_primary_receipt_http_concurrent_replay_and_snapshot(pg_factory, p
 
 
 @pytest_asyncio.fixture
-async def pg_factory():
+async def pg_factory(accounting_pg_revision):
     from sqlalchemy.engine import make_url
 
     url = os.getenv("ACCOUNTING_TEST_POSTGRES_URL")
@@ -392,144 +338,22 @@ async def pg_factory():
             created = True
             await conn.execute(text(f'COMMENT ON DATABASE "{database}" IS \'crm-acc-fixture:{database}\''))
         engine = create_async_engine(parsed.set(database=database))
-        async with engine.begin() as conn:
-            # Exercise the frozen proposal via real Alembic Operations, not create_all.
-            # Revision registration remains subject to the shared allocator/operator.
-            from alembic.migration import MigrationContext
-            from alembic.operations import Operations
-
-            migration = runpy.run_path(str(Path("docs/accounting/migration-proposal.py")))
-
-            def upgrade(connection):
-                from sqlalchemy import MetaData
-
-                from core.domain.models import (
-                    AuditLog,
-                    Counterparty,
-                    IdentityInvitationRequest,
-                    OutboxEvent,
-                    User,
-                )
-                from modules.hr.models import Employee
-                from modules.logistics.models import CarrierRfq, ImportShipment, Shipment
-                from modules.office.models import OfficeDoc
-                from modules.procurement.models import (
-                    PurchaseOrder,
-                    PurchaseOrderLine,
-                    PurchaseRequest,
-                    Supplier,
-                )
-                from modules.production.models import ProductionOrder
-                from modules.sales.models import (
-                    CrmClient,
-                    CrmClientContact,
-                    Deal,
-                    DealDocument,
-                    DealStageEvent,
-                    LossReason,
-                    Stage,
-                )
-                from modules.wms import models as wms_models
-
-                # Existing WMS schema before this additive ownership migration.
-                baseline = MetaData()
-                for table in wms_models.Base.metadata.sorted_tables:
-                    if table.schema == "wms" and table.name in {"invoice_remainder_release", "invoice_remainder_release_line"}:
-                        continue  # Added by registered migration 0131 after the accounting baseline.
-                    if table.schema == "wms" and table.name == "production_arrival":
-                        continue  # Added by the shared unallocated proposal, not the legacy baseline.
-                    if table.schema == "wms" and table.name not in {"primary_receipt_binding", "reservation_version", "reservation_event_state", "reservation_pick", "invoice_reservation", "invoice_reservation_release", "invoice_reservation_release_line", "physical_shipment_act", "physical_shipment_line", "production_material_issue", "warehouse_directory"}:
-                        copied = table.to_metadata(baseline)
-                        for constraint in list(copied.constraints):
-                            if "source_event_id" in constraint.columns or "organization_id" in str(getattr(constraint, "sqltext", "")):
-                                copied.constraints.remove(constraint)
-                        for name in ("organization_id", "source_event_id", "expected_source", "source_evidence",
-                                     "journal_confirmed_by", "journal_confirmed_at", "snapshot_version",
-                                     "snapshot_cutoff", "snapshot_at"):
-                            if name in copied.c:
-                                copied._columns.remove(copied.c[name])
-                connection.execute(text("CREATE SCHEMA wms"))
-                baseline.create_all(connection)
-                User.__table__.create(connection)
-                IdentityInvitationRequest.__table__.create(connection)
-                Counterparty.__table__.create(connection)
-                connection.execute(text("CREATE SCHEMA sales"))
-                CrmClient.__table__.create(connection)
-                CrmClientContact.__table__.create(connection)
-                Deal.__table__.create(connection)
-                DealDocument.__table__.create(connection)
-                Stage.__table__.create(connection)
-                DealStageEvent.__table__.create(connection)
-                LossReason.__table__.create(connection)
-
-                # Bank-source completeness is part of month closing; these
-                # existing finance tables precede the accounting migration.
-                from modules.finance.models import (
-                    BankAccount,
-                    BankTransaction,
-                    Payment,
-                    PaymentAllocation,
-                )
-
-                connection.execute(text("CREATE SCHEMA finance"))
-                for table in (BankAccount.__table__, Payment.__table__, PaymentAllocation.__table__, BankTransaction.__table__):
-                    table.create(connection)
-
-                connection.execute(text("CREATE SCHEMA logistics"))
-                Shipment.__table__.create(connection)
-                CarrierRfq.__table__.create(connection)
-                # Already registered in migration 0023; the proposal must preserve it.
-                ImportShipment.__table__.create(connection)
-                connection.execute(text("CREATE SCHEMA office"))
-                OfficeDoc.__table__.create(connection)
-                # The global HR identity is a legacy FK target of the new
-                # accounting-owned employment evidence in revision 0161.
-                connection.execute(text("CREATE SCHEMA hr"))
-                Employee.__table__.create(connection)
-                # Existing request table is an FK target of the additive
-                # request-creation receipt; never create that receipt via ORM.
-                connection.execute(text("CREATE SCHEMA procurement"))
-                PurchaseRequest.__table__.create(connection)
-                PurchaseOrder.__table__.create(connection)
-                PurchaseOrderLine.__table__.create(connection)
-                Supplier.__table__.create(connection)
-                # Existing production order is the target of additive ownership.
-                connection.execute(text("CREATE SCHEMA production"))
-                ProductionOrder.__table__.create(connection)
-
-                Currency.__table__.create(connection)
-                # SKU is an existing public master-data table used by the
-                # accounting directory guard.  The fixture keeps only the
-                # production columns needed by the ORM and the immutable
-                # document snapshot; its category FK belongs to another
-                # legacy catalog outside this accounting migration graph.
-                connection.execute(text("""CREATE TABLE public.sku (
-                    id SERIAL PRIMARY KEY, code varchar(64) NOT NULL UNIQUE,
-                    title varchar(255) NOT NULL, unit varchar(16) NOT NULL DEFAULT 'шт',
-                    category_id integer NULL, weight_kg double precision NULL,
-                    volume_m3 double precision NULL, tnved_code varchar(16) NULL,
-                    vat_code varchar(16) NULL, shelf_life_days integer NULL,
-                    is_active boolean NOT NULL DEFAULT true,
-                    attributes json NOT NULL DEFAULT '{}', provenance json NOT NULL DEFAULT '{}'
-                )"""))
-                OutboxEvent.__table__.create(connection)
-                AuditLog.__table__.create(connection)
-                # Reproduce pre-issuance widths; the proposal must perform the
-                # actual 128 -> 200 upgrade, not merely accept current ORM widths.
-                connection.execute(text("ALTER TABLE sales.deal_document ALTER COLUMN issued_by TYPE varchar(128)"))
-                connection.execute(text("ALTER TABLE public.audit_log ALTER COLUMN actor TYPE varchar(128)"))
-                with Operations.context(MigrationContext.configure(connection)):
-                    migration["upgrade"]()
-                    remainder = runpy.run_path("migrations/versions/0131_invoice_remainder.py")
-                    remainder["upgrade"]()
-                    runpy.run_path("migrations/versions/0132_expense_approval_digest.py")["upgrade"]()
-                    for migration_name in (
-                        "0139_production_output_cost_revision.py",
-                        *ACCOUNTING_TAIL_MIGRATIONS,
-                    ):
-                        runpy.run_path(f"migrations/versions/{migration_name}")["upgrade"]()
-
-            await conn.run_sync(upgrade)
+        # Current API/domain evidence must use the registered release schema,
+        # including its SQL guards.  A hand-maintained accounting-only tail
+        # silently omitted later CRM/WMS revisions required by current models.
+        # Run in a child process so app settings/cache and the caller's URL stay
+        # unchanged; only this marked, freshly created database is migrated.
+        target = parsed.set(database=database).render_as_string(hide_password=False)
+        result = await asyncio.to_thread(
+            subprocess.run,
+            [sys.executable, "-m", "alembic", "upgrade", accounting_pg_revision],
+            env={**os.environ, "AIOS_DATABASE_URL": target, "AIOS_ENVIRONMENT": "dev"},
+            cwd=Path(__file__).resolve().parents[2],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode:
+            raise RuntimeError("Isolated test migration failed:\n" + result.stderr[-3000:])
         yield async_sessionmaker(engine, expire_on_commit=False)
     finally:
         try:
@@ -596,7 +420,7 @@ async def test_payroll_applicability_review_postgres_guards(pg_factory, pg_book,
     from modules.hr.models import Employee
 
     root = tmp_path / "private-payroll"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     org_id = pg_book[0]
     async with pg_factory() as session:
@@ -665,7 +489,7 @@ async def test_payroll_organization_review_postgres_guards(pg_factory, pg_book, 
     from modules.accounting.payroll_organization_review import create as review_rules
 
     root = tmp_path / "private-payroll"
-    root.mkdir()
+    make_private_test_dir(root)
     monkeypatch.setenv("AIOS_PAYROLL_DATA_DIR", str(root.resolve()))
     org_id = pg_book[0]
     async with pg_factory() as session:
@@ -1016,9 +840,10 @@ async def test_manual_employee_snapshot_post_and_replay_postgres(pg_factory, pg_
 
 
 async def test_opening_import_receipt_is_bound_and_immutable_in_postgres(pg_factory, pg_book, posting):
+    from datetime import timedelta
     from decimal import Decimal
 
-    from sqlalchemy.exc import DBAPIError
+    from sqlalchemy.exc import DBAPIError, IntegrityError
 
     from modules.accounting.models import OpeningImportReceipt
 
@@ -1051,6 +876,13 @@ async def test_opening_import_receipt_is_bound_and_immutable_in_postgres(pg_fact
             evidence="Synthetic forged receipt", entry_ids=[999999], snapshot={"entries": []}, digest="f" * 64,
             actor="tester",
         )
+        # The current schema also forbids a second receipt for the same cutover.
+        session.add(OpeningImportReceipt(**forged))
+        with pytest.raises(IntegrityError, match="uq_opening_import_cutover"):
+            await session.commit()
+        await session.rollback()
+        # Use a fresh cutover to reach the original forged-entry guard independently.
+        forged["cutover_date"] = (data.posting_date.replace(day=28) + timedelta(days=4)).replace(day=1)
         session.add(OpeningImportReceipt(**forged))
         with pytest.raises(DBAPIError, match="same-organization opening entries"):
             await session.commit()
@@ -1479,8 +1311,8 @@ async def test_manual_document_sku_snapshot_rechecked_on_postgres(pg_factory, pg
         connection = await session.connection()
 
         def catalog(sync):
-            Sku.metadata.tables["ref_nomenclature_category"].create(sync)
-            Sku.__table__.create(sync)
+            Sku.metadata.tables["ref_nomenclature_category"].create(sync, checkfirst=True)
+            Sku.__table__.create(sync, checkfirst=True)
 
         await connection.run_sync(catalog)
         session.add(Sku(id=71, code="PG-ITEM", title="Motor", unit="шт", is_active=True))
@@ -1531,6 +1363,7 @@ async def test_manual_document_warehouse_snapshot_rechecked_on_postgres(pg_facto
     from modules.wms.models import WarehouseDirectory
 
     async with pg_factory() as session:
+        await session.execute(text("SELECT setval(pg_get_serial_sequence('wms.warehouse_directory','id'), (SELECT max(id) FROM wms.warehouse_directory))"))
         row = WarehouseDirectory(organization_id=pg_book[0], name="PG-MAIN",
                                  title="Main store", is_active=True, created_by="tester")
         session.add(row)
@@ -2301,9 +2134,12 @@ async def test_wms_concurrent_accept_preserves_owner_without_duplicate_moves(pg_
     from core.runtime.deps import get_session
     from core.services.auth import CurrentUser, get_current_user
     from modules.accounting.gateway import AccountingService
-    from modules.wms.models import Receipt, ReceiptLine, StockMovement, Task
+    from modules.wms.models import Receipt, ReceiptLine, StockMovement, Task, WarehouseDirectory
     from modules.wms.routes import router
     async with pg_factory() as session:
+        await session.execute(text("SELECT setval(pg_get_serial_sequence('wms.warehouse_directory','id'), (SELECT max(id) FROM wms.warehouse_directory))"))
+        session.add(WarehouseDirectory(organization_id=pg_book[0], name="Test", title="Synthetic test warehouse",
+                                       wms_enabled=True, created_by="tester"))
         receipt = Receipt(organization_id=pg_book[0], number="PG-WMS", source="procurement", entity_ref="purchase_order:1:1", warehouse="Test")
         session.add(receipt)
         await session.flush()
@@ -2340,8 +2176,8 @@ async def test_wms_event_retry_after_rollback_and_concurrent_replay(pg_factory, 
     async with pg_factory() as session:
         conn = await session.connection()
         def catalog(sync):
-            Sku.metadata.tables["ref_nomenclature_category"].create(sync)
-            Sku.__table__.create(sync)
+            Sku.metadata.tables["ref_nomenclature_category"].create(sync, checkfirst=True)
+            Sku.__table__.create(sync, checkfirst=True)
         await conn.run_sync(catalog)
         event = OutboxEvent(event_type="procurement.received", payload={"organization_id": pg_book[0], "item": "A", "qty": "1.25", "entity_ref": "purchase_order:1:1"})
         session.add(event)

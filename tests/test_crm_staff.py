@@ -9,6 +9,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.domain.models import AuditLog, User
 from core.runtime.app import create_app
@@ -53,6 +54,7 @@ class FakeCrmIdentityGateway:
 @pytest_asyncio.fixture
 async def crm_staff_api(session):
     app = create_app()
+    app.state.core.services.db.session_factory = async_sessionmaker(session.bind, expire_on_commit=False)
     gateway = FakeCrmIdentityGateway()
 
     async def _session():

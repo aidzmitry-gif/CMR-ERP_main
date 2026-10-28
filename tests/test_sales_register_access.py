@@ -1,5 +1,6 @@
 from sqlalchemy import select
 
+from core.domain.models import User
 from modules.accounting.models import AccessGrant
 
 
@@ -7,6 +8,14 @@ async def test_sales_reader_can_select_books_without_accounting_package(api, ses
     api.headers["X-User"] = "register-sales-reader"
     created = await api.post("/accounting/organizations", json={"name": "Sales reader book", "unp": "999999976"})
     assert created.status_code == 201, created.text
+    # Effective CRM roles now come from persisted test identities, not headers.
+    # Both subjects remain ordinary Sales users; only the first has a book grant.
+    session.add_all([
+        User(username="register-sales-reader", full_name="Synthetic sales reader",
+             role="sales", status="active", employee_id=871, deal_visibility="all"),
+        User(username="no-grants", full_name="Synthetic sales without book grant",
+             role="sales", status="active", employee_id=872, deal_visibility="all"),
+    ])
     grant = await session.scalar(select(AccessGrant).where(AccessGrant.organization_id == created.json()["id"]))
     grant.role = "reader"
     await session.commit()

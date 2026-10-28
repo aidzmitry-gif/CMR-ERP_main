@@ -7,5 +7,5 @@ test("навигация: панель владельца → ERP-модуль",
 
   await page.getByRole("link", { name: "Закупки" }).click();
   await expect(page).toHaveURL(/\/erp\/procurement/);
-  await expect(page.getByRole("heading", { name: "Закупки", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Закупки · обзор и воронка", exact: true })).toBeVisible();
 });

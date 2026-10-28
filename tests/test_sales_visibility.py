@@ -6,9 +6,21 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
+import pytest_asyncio
 
 from core.domain.models import Counterparty, User
 from modules.sales.models import CallLog, CrmClient, CrmTimelineAttachment, CrmTimelineComment
+
+
+@pytest_asyncio.fixture
+async def _visibility_parties(session):
+    """Keep distinct pre-existing directory parties for deal/contact scope checks."""
+    for index, name in enumerate(("Тест", "Client OWN", "Client OTHER", "Client UNASSIGNED"), 1):
+        session.add(Counterparty(
+            name=name, legal_name=name, unp=str(900000000 + index),
+            requisites={"legal_address": "Synthetic visibility test address"},
+        ))
+    await session.commit()
 
 
 def _sales_headers(username: str) -> dict[str, str]:
@@ -25,7 +37,7 @@ async def _create(api, number: str, **extra) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_timeline_comments_follow_deal_visibility(api, session, tmp_path, monkeypatch):
+async def test_timeline_comments_follow_deal_visibility(api, session, tmp_path, monkeypatch, _visibility_parties):
     from modules.sales import timeline_storage
 
     monkeypatch.setattr(timeline_storage, "storage_root", lambda: tmp_path)
@@ -100,7 +112,7 @@ async def test_timeline_comments_follow_deal_visibility(api, session, tmp_path, 
 
 
 @pytest.mark.asyncio
-async def test_calls_follow_deal_scope_and_unlinked_confirmed_owner(api, session):
+async def test_calls_follow_deal_scope_and_unlinked_confirmed_owner(api, session, _visibility_parties):
     session.add_all([
         User(username="call-owner", full_name="Call Owner", employee_id=301,
              department="Продажи", role="sales", status="active", deal_visibility="own"),
@@ -148,7 +160,7 @@ async def test_calls_follow_deal_scope_and_unlinked_confirmed_owner(api, session
 
 
 @pytest.mark.asyncio
-async def test_call_review_filters_and_client_link_use_distinct_authorized_ids(api, session):
+async def test_call_review_filters_and_client_link_use_distinct_authorized_ids(api, session, _visibility_parties):
     session.add_all([
         User(username="review-owner", full_name="Owner", employee_id=321,
              department="Продажи", role="sales", status="active", deal_visibility="own"),
@@ -197,7 +209,7 @@ async def test_call_review_filters_and_client_link_use_distinct_authorized_ids(a
 
 
 @pytest.mark.asyncio
-async def test_all_scope_keeps_legacy_owner_and_confirms_employee_owner_id(api, session):
+async def test_all_scope_keeps_legacy_owner_and_confirms_employee_owner_id(api, session, _visibility_parties):
     session.add_all(
         [
             User(username="alice", full_name="Алиса CRM", employee_id=101, department="Продажи", role="sales", status="active"),
@@ -235,7 +247,7 @@ async def test_all_scope_keeps_legacy_owner_and_confirms_employee_owner_id(api, 
 
 
 @pytest.mark.asyncio
-async def test_own_scope_enforces_visibility_and_runtime_switch(api, session):
+async def test_own_scope_enforces_visibility_and_runtime_switch(api, session, _visibility_parties):
     alice = User(
         username="alice", full_name="Алиса CRM", employee_id=101,
         department="Продажи", role="sales", status="active", deal_visibility="own",
@@ -303,7 +315,7 @@ async def _contact_access_users(session):
     await session.commit()
 
 
-async def test_primary_contact_own_scope_preserves_foreign_contacts(api, session):
+async def test_primary_contact_own_scope_preserves_foreign_contacts(api, session, _visibility_parties):
     from core.domain.models import Contact
 
     await _contact_access_users(session)
@@ -332,7 +344,7 @@ async def test_primary_contact_own_scope_preserves_foreign_contacts(api, session
     assert orphan.is_primary is False
 
 
-async def test_primary_contact_requires_write_permission(api, session):
+async def test_primary_contact_requires_write_permission(api, session, _visibility_parties):
     from core.domain.models import Contact
 
     await _contact_access_users(session)
@@ -348,7 +360,7 @@ async def test_primary_contact_requires_write_permission(api, session):
     assert persisted.is_primary is False
 
 
-async def test_own_funnels_have_only_visible_counts_and_open_boards(api, session):
+async def test_own_funnels_have_only_visible_counts_and_open_boards(api, session, _visibility_parties):
     await _contact_access_users(session)
     # Match the materialized stage catalog used by migrations and other board tests.
     assert (await api.get("/sales/stages")).status_code == 200
@@ -520,3 +532,49 @@ async def test_calls_stream_releases_shared_access_session_before_stream(api, se
         disconnect.set()
         await asyncio.wait_for(task, timeout=5)
     assert not has_subscriber(employee_id)
+
+
+async def test_own_outcomes_can_read_stage_and_reason_metadata_but_cannot_edit(api, session):
+    session.add(User(username="stage-owner", full_name="Synthetic owner", employee_id=931,
+                     department="Sales", role="sales", status="active", deal_visibility="own"))
+    await session.commit()
+    headers = _sales_headers("stage-owner")
+    stages = await api.get("/sales/stages", headers=headers)
+    assert stages.status_code == 200, stages.text
+    assert {row["kind"] for row in stages.json()} >= {"normal", "won", "lost"}
+    assert all("deals" not in row and "owner_id" not in row for row in stages.json())
+    reasons = await api.get("/sales/loss-reasons", headers=headers)
+    assert reasons.status_code == 200, reasons.text
+    first = stages.json()[0]
+    for method, path, body in [
+        ("POST", "/sales/stages", {"code": "synthetic", "title": "Synthetic", "funnel": first["funnel"]}),
+        ("PATCH", f"/sales/stages/{first['code']}", {"title": "Changed"}),
+        ("DELETE", f"/sales/stages/{first['code']}", None),
+    ]:
+        response = await api.request(method, path, json=body, headers=headers)
+        assert response.status_code == 403, response.text
+    assert (await api.get("/sales/stages", headers=headers)).json() == stages.json()
+
+
+@pytest.mark.parametrize("outcome", ["win", "lose"])
+async def test_foreign_outcomes_hide_deal_before_book_lookup(api, session, monkeypatch, outcome):
+    from uuid import uuid4
+
+    from modules.sales.models import Deal
+
+    session.add(User(username="outcome-foreign", full_name="Synthetic foreign", employee_id=932,
+                     department="Sales", role="sales", status="active", deal_visibility="own"))
+    deal = Deal(number="SYN-HIDDEN-OUTCOME", title="Synthetic private deal", counterparty="Synthetic", owner_id=933)
+    session.add(deal)
+    await session.commit()
+    core = api._transport.app.state.core
+
+    async def unexpected_book_lookup(*args, **kwargs):
+        pytest.fail("Foreign deal must be rejected before organization authorization")
+
+    monkeypatch.setattr(core.services.accounting, "source_member", unexpected_book_lookup)
+    response = await api.post(f"/sales/deals/{deal.id}/{outcome}",
+        headers={**_sales_headers("outcome-foreign"), "X-Expected-Principal": "outcome-foreign"},
+        json={"organization_id": 999, "request_key": str(uuid4()), "expected_composition_digest": "a" * 64,
+              "reason_code": "synthetic", "comment": None, "finalize_if_empty": False})
+    assert response.status_code == 404, response.text

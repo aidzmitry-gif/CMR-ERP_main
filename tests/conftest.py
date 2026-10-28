@@ -68,6 +68,17 @@ def tmp_path() -> Path:
     return path
 
 
+def make_private_test_dir(path: Path) -> None:
+    """Use private POSIX modes and inherited Windows ACLs for synthetic file roots."""
+    path.mkdir(mode=0o700 if os.name != "nt" else 0o777)
+
+
+@pytest.fixture
+def accounting_pg_revision(request):
+    """Use current head unless a migration roundtrip explicitly requests history."""
+    return getattr(request, "param", "head")
+
+
 @pytest_asyncio.fixture
 async def session():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
@@ -161,3 +172,15 @@ def pytest_collection_modifyitems(items) -> None:
             item.add_marker("integration")
         else:
             item.add_marker("api")
+
+
+@pytest_asyncio.fixture
+async def synthetic_sales_party(session):
+    """A complete local MDM buyer for API tests unrelated to party selection."""
+    from core.domain.models import Counterparty
+
+    party = Counterparty(name="c", legal_name="Synthetic buyer", unp="100000001",
+                         requisites={"legal_address": "Synthetic test address"})
+    session.add(party)
+    await session.commit()
+    return party

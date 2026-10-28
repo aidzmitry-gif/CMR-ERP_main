@@ -1,7 +1,6 @@
 """Add append-only external statutory form/rate requirements."""
 from alembic import op
 
-
 revision = "0157"
 down_revision = "0156"
 branch_labels = None

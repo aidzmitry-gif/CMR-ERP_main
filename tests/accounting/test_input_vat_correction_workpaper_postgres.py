@@ -23,6 +23,7 @@ from modules.accounting.models import (
 from modules.procurement.receipt_documents import ReceiptDocument, ReceiptRevision
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_procurement_receipt_drafts import document, source_options
+from tests.conftest import make_private_test_dir
 from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 pytestmark = pytest.mark.integration
@@ -253,7 +254,7 @@ async def test_pg_inbound_vat_workpaper_scope_immutability_and_concurrent_succes
     api.headers["X-User"] = "tester"
     api.headers["X-User-Roles"] = "director"
     storage = tmp_path / "accounting-evidence"
-    storage.mkdir()
+    make_private_test_dir(storage)
     monkeypatch.setenv("AIOS_ACCOUNTING_EVIDENCE_DATA_DIR", str(storage.resolve()))
     base, basis, first = await seed_workpaper_api(api, factory, pg_book)
 

@@ -256,6 +256,7 @@ async def test_pg_posted_receipt_correction_draft_keeps_exact_source_and_blocks_
         await session.rollback()
 
 
+@pytest.mark.parametrize("accounting_pg_revision", ["0190"], indirect=True)
 async def test_pg_receipt_correction_migration_empty_roundtrip(pg_factory):
     async with pg_factory() as session:
         assert await session.scalar(text(
