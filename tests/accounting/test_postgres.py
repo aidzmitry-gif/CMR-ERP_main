@@ -840,9 +840,10 @@ async def test_manual_employee_snapshot_post_and_replay_postgres(pg_factory, pg_
 
 
 async def test_opening_import_receipt_is_bound_and_immutable_in_postgres(pg_factory, pg_book, posting):
+    from datetime import timedelta
     from decimal import Decimal
 
-    from sqlalchemy.exc import DBAPIError
+    from sqlalchemy.exc import DBAPIError, IntegrityError
 
     from modules.accounting.models import OpeningImportReceipt
 
@@ -875,6 +876,13 @@ async def test_opening_import_receipt_is_bound_and_immutable_in_postgres(pg_fact
             evidence="Synthetic forged receipt", entry_ids=[999999], snapshot={"entries": []}, digest="f" * 64,
             actor="tester",
         )
+        # The current schema also forbids a second receipt for the same cutover.
+        session.add(OpeningImportReceipt(**forged))
+        with pytest.raises(IntegrityError, match="uq_opening_import_cutover"):
+            await session.commit()
+        await session.rollback()
+        # Use a fresh cutover to reach the original forged-entry guard independently.
+        forged["cutover_date"] = (data.posting_date.replace(day=28) + timedelta(days=4)).replace(day=1)
         session.add(OpeningImportReceipt(**forged))
         with pytest.raises(DBAPIError, match="same-organization opening entries"):
             await session.commit()
