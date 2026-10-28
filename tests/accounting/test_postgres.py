@@ -1311,8 +1311,8 @@ async def test_manual_document_sku_snapshot_rechecked_on_postgres(pg_factory, pg
         connection = await session.connection()
 
         def catalog(sync):
-            Sku.metadata.tables["ref_nomenclature_category"].create(sync)
-            Sku.__table__.create(sync)
+            Sku.metadata.tables["ref_nomenclature_category"].create(sync, checkfirst=True)
+            Sku.__table__.create(sync, checkfirst=True)
 
         await connection.run_sync(catalog)
         session.add(Sku(id=71, code="PG-ITEM", title="Motor", unit="шт", is_active=True))
