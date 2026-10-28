@@ -1,12 +1,9 @@
 """Database guards for private inbound VAT evidence history (real PostgreSQL)."""
 # ruff: noqa: F811
 import json
-import runpy
 from uuid import uuid4
 
 import pytest
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
@@ -16,15 +13,6 @@ from tests.accounting.test_procurement_receipt_drafts import source_options
 from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 pytestmark = pytest.mark.integration
-
-
-async def run_migration(session):
-    def run(connection):
-        migration = runpy.run_path("migrations/versions/0191_accounting_inbound_vat_evidence.py")
-        with Operations.context(MigrationContext.configure(connection)):
-            migration["upgrade"]()
-
-    await (await session.connection()).run_sync(run)
 
 
 def insert_values(org_id, receipt_id, receipt_version, *, kind="supplier_eschf_xml", supersedes_id=None):
@@ -75,7 +63,6 @@ async def test_pg_inbound_vat_evidence_guards_org_revision_supersedes_and_immuta
     api.headers["X-User"] = "tester"
     api.headers["X-User-Roles"] = "director"
     async with factory() as session:
-        await run_migration(session)
         await session.execute(text(
             "SELECT setval(pg_get_serial_sequence('accounting.account', 'id'), "
             "(SELECT max(id) FROM accounting.account))"
