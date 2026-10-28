@@ -622,7 +622,8 @@ async def test_material_issue_posts_one_reviewed_wip_package(pg_factory, pg_book
     production = SyntheticProduction()
 
     async with pg_factory() as session:
-        await run_migration(session, "0140_zero_value_disposals.py", "upgrade")
+        if not await session.scalar(text("SELECT to_regclass('accounting.inventory_zero_value_disposal_receipt')")):
+            await run_migration(session, "0140_zero_value_disposals.py", "upgrade")
         await session.commit()
         preview = await prepare_material_issue_posting(
             session, pg_book[0], "2026-10", data, production
