@@ -19,9 +19,13 @@ from modules.accounting.zero_value_disposals import (
     register_standalone_zero_value_issue,
 )
 from tests.accounting.test_finished_goods_inventory_postgres import _output_cost_command
-from tests.accounting.test_inventory_allocation_api_postgres import output_sources
+from tests.accounting.test_inventory_allocation_api_postgres import (
+    inventory_identities,
+    output_sources,
+)
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_zero_value_output_cost_postgres import run_migration
+from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 pytestmark = pytest.mark.integration
 
@@ -32,8 +36,9 @@ async def basis(session, org, command, cutoff=2147483647):
 
 
 @pytest.mark.parametrize("method", ["fifo", "weighted_average"])
-async def test_v4_issue_replays_complete_sources_and_late_cost(pg_factory, pg_book, method):
-    policy_id, outputs = await output_sources(pg_factory, pg_book, method)
+async def test_v4_issue_replays_complete_sources_and_late_cost(pg_factory, pg_book, method, issuance_pg):
+    policy_id, outputs = await output_sources(pg_factory, pg_book, method, api=issuance_pg[0])
+    identities = await inventory_identities(pg_factory, pg_book)
     async with pg_factory() as session:
         await service.post(session, pg_book[0], PostingInput(source="zero-v4-reverse-wip", source_version=1,
             operation="manual", document_date="2026-10-31", operation_date="2026-10-31", posting_date="2026-10-31",
@@ -44,8 +49,6 @@ async def test_v4_issue_replays_complete_sources_and_late_cost(pg_factory, pg_bo
         for output_id in outputs:
             await confirm_output_cost_correction(session, pg_book[0], "2026-10",
                 await _output_cost_command(session, pg_book[0], output_id), "tester")
-        await run_migration(session, "0146_zero_value_allocation_basis.py", "upgrade")
-        await run_migration(session, "0147_zero_value_allocation_runtime.py", "upgrade")
         await run_migration(session, "0147_zero_value_allocation_runtime.py", "downgrade")
         assert await session.scalar(text("SELECT to_regprocedure('accounting.zero_value_allocation_runtime_version()')")) is None
         await run_migration(session, "0147_zero_value_allocation_runtime.py", "upgrade")
@@ -54,7 +57,8 @@ async def test_v4_issue_replays_complete_sources_and_late_cost(pg_factory, pg_bo
         document = {"source": "zero-v4-basis", "source_version": 1, "document_date": "2026-10-29",
             "operation_date": "2026-10-30", "posting_date": "2026-10-31", "policy_id": policy_id,
             "account": "43", "warehouse": "Main", "sku": "SYN-WIDGET", "lot": "", "quantity": "3.1",
-            "expense_account": "90.4", "expense_dimensions": {}, "explanation": "Synthetic complete zero allocation"}
+            "expense_account": "90.4", "expense_dimensions": {}, "explanation": "Synthetic complete zero allocation",
+            **identities}
         command = AllocatedZeroValueDisposalCommand(**{key: document[key] for key in (
             "source", "source_version", "document_date", "operation_date", "posting_date", "policy_id", "explanation")},
             command_version=4, operation="inventory_issue", valuation_method=method, document=document,
