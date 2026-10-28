@@ -542,6 +542,11 @@ async def test_wms_accept_idempotent_exactly_one_mirror(api, session, erp_organi
     from types import SimpleNamespace
 
     from modules.wms.events import on_goods_received
+    from modules.wms.models import WarehouseDirectory
+
+    session.add(WarehouseDirectory(organization_id=erp_organization, name="Брест", title="Synthetic receipt warehouse",
+                                   wms_enabled=True, created_by="erp-test-owner"))
+    await session.commit()
 
     await on_goods_received(
         {"organization_id": erp_organization, "item": "AKB-132", "qty": 10, "warehouse": "Брест", "entity_ref": "purchase:51"},
