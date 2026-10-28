@@ -5,6 +5,7 @@ from sqlalchemy import func, select, text
 
 from modules.accounting import inventory_issues, models, sales, service
 from modules.accounting.schemas import CloseInput, InventoryIssueDocument
+from modules.wms.models import WarehouseDirectory
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_sales import setup_sale
 
@@ -17,6 +18,13 @@ async def test_exact_inventory_replay_after_closed_month(pg_factory, pg_book, po
         # Leave stock available so the new-command rejection proves the period
         # guard specifically, rather than an earlier insufficient-stock check.
         raw = await setup_sale(session, pg_book, posting, quantity="1")
+        if kind == "issue":
+            await session.execute(text("SELECT setval(pg_get_serial_sequence('wms.warehouse_directory','id'), (SELECT max(id) FROM wms.warehouse_directory))"))
+            warehouse = WarehouseDirectory(organization_id=pg_book[0], name=raw["warehouse"],
+                                           title="Synthetic replay warehouse", is_active=True, created_by="tester")
+            session.add(warehouse)
+            await session.flush()
+            raw["warehouse_identity"] = {"id": warehouse.id, "name": warehouse.name, "title": warehouse.title}
         document = (sales.SaleDocument.model_validate(raw) if kind == "sale" else
             InventoryIssueDocument.model_validate({key: value for key, value in raw.items() if key in InventoryIssueDocument.model_fields}))
         prepared = await workflow.prepare(session, pg_book[0], document)
