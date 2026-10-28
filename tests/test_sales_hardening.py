@@ -9,92 +9,105 @@
 Хелперы переиспользуются из test_sales_deals_v2 (_new_deal/_FakeLanded/_seed_sku).
 """
 import pytest
+import pytest_asyncio
 from sqlalchemy import select
 
-from core.domain.models import OutboxEvent
+from core.domain.models import Counterparty, OutboxEvent
 from core.services.eventbus import EventContext
 from modules.sales.events import on_deal_won_handoff
 from tests.test_sales_deals_v2 import _FakeLanded, _new_deal, _seed_sku
+
+
+@pytest_asyncio.fixture
+async def _hardening_parties(session):
+    """Provide valid MDM selections so field guards are exercised independently."""
+    names = ("c", "ООО Тест", "ООО Слепой", "ООО F", "ООО Альфа", "ООО Бета", "ООО Гамма")
+    for index, name in enumerate(names, 1):
+        session.add(Counterparty(
+            name=name, legal_name=name, unp=str(920000000 + index),
+            requisites={"legal_address": "Synthetic hardening test address"},
+        ))
+    await session.commit()
 
 # ══ R5-1: деньго-границы штрафа (Numeric(6,2)/String) → 422, не DB overflow ══
 # Guard: на коде БЕЗ Field-границ SQLite принял бы 10000 / строку >512 (не enforce-ит) → 201,
 # и все «422» упали бы. На Postgres было бы DataError→500. Границы режут это в 422 на валидации.
 
-async def test_penalty_rate_pct_max_accepted(api):
+async def test_penalty_rate_pct_max_accepted(api, _hardening_parties):
     r = await api.post("/sales/deals", json={
         "number": "PR-1", "title": "t", "counterparty": "c", "penalty_rate_pct": 9999.99})
     assert r.status_code == 201
     assert r.json()["penalty_rate_pct"] == pytest.approx(9999.99)
 
 
-async def test_penalty_rate_pct_over_max_rejected(api):
+async def test_penalty_rate_pct_over_max_rejected(api, _hardening_parties):
     r = await api.post("/sales/deals", json={
         "number": "PR-2", "title": "t", "counterparty": "c", "penalty_rate_pct": 10000})
     assert r.status_code == 422
 
 
-async def test_penalty_rate_pct_negative_rejected(api):
+async def test_penalty_rate_pct_negative_rejected(api, _hardening_parties):
     r = await api.post("/sales/deals", json={
         "number": "PR-3", "title": "t", "counterparty": "c", "penalty_rate_pct": -0.01})
     assert r.status_code == 422
 
 
-async def test_penalty_cap_pct_max_accepted(api):
+async def test_penalty_cap_pct_max_accepted(api, _hardening_parties):
     r = await api.post("/sales/deals", json={
         "number": "PC-1", "title": "t", "counterparty": "c", "penalty_cap_pct": 9999.99})
     assert r.status_code == 201
     assert r.json()["penalty_cap_pct"] == pytest.approx(9999.99)
 
 
-async def test_penalty_cap_pct_over_max_rejected(api):
+async def test_penalty_cap_pct_over_max_rejected(api, _hardening_parties):
     r = await api.post("/sales/deals", json={
         "number": "PC-2", "title": "t", "counterparty": "c", "penalty_cap_pct": 10000})
     assert r.status_code == 422
 
 
-async def test_penalty_cap_pct_negative_rejected(api):
+async def test_penalty_cap_pct_negative_rejected(api, _hardening_parties):
     r = await api.post("/sales/deals", json={
         "number": "PC-3", "title": "t", "counterparty": "c", "penalty_cap_pct": -0.01})
     assert r.status_code == 422
 
 
-async def test_penalty_terms_max_length_accepted(api):
+async def test_penalty_terms_max_length_accepted(api, _hardening_parties):
     r = await api.post("/sales/deals", json={
         "number": "PT-1", "title": "t", "counterparty": "c", "penalty_terms": "А" * 512})
     assert r.status_code == 201
 
 
-async def test_penalty_terms_over_max_length_rejected(api):
+async def test_penalty_terms_over_max_length_rejected(api, _hardening_parties):
     r = await api.post("/sales/deals", json={
         "number": "PT-2", "title": "t", "counterparty": "c", "penalty_terms": "А" * 513})
     assert r.status_code == 422
 
 
-async def test_ship_deadline_max_length_accepted(api):
+async def test_ship_deadline_max_length_accepted(api, _hardening_parties):
     r = await api.post("/sales/deals", json={
         "number": "SD-1", "title": "t", "counterparty": "c", "ship_deadline": "D" * 32})
     assert r.status_code == 201
 
 
-async def test_ship_deadline_over_max_length_rejected(api):
+async def test_ship_deadline_over_max_length_rejected(api, _hardening_parties):
     r = await api.post("/sales/deals", json={
         "number": "SD-2", "title": "t", "counterparty": "c", "ship_deadline": "D" * 33})
     assert r.status_code == 422
 
 
-async def test_patch_penalty_rate_pct_over_max_rejected(api):
+async def test_patch_penalty_rate_pct_over_max_rejected(api, _hardening_parties):
     deal = await _new_deal(api, "PU-1")
     r = await api.patch(f"/sales/deals/{deal['id']}", json={"penalty_rate_pct": 10000})
     assert r.status_code == 422
 
 
-async def test_patch_penalty_terms_over_max_length_rejected(api):
+async def test_patch_penalty_terms_over_max_length_rejected(api, _hardening_parties):
     deal = await _new_deal(api, "PU-3")
     r = await api.patch(f"/sales/deals/{deal['id']}", json={"penalty_terms": "X" * 513})
     assert r.status_code == 422
 
 
-async def test_patch_all_penalty_fields_valid(api):
+async def test_patch_all_penalty_fields_valid(api, _hardening_parties):
     deal = await _new_deal(api, "PU-5")
     r = await api.patch(f"/sales/deals/{deal['id']}", json={
         "penalty_rate_pct": 5.5, "penalty_cap_pct": 10.0,
@@ -110,7 +123,7 @@ async def test_patch_all_penalty_fields_valid(api):
 # ══ R5-2: крайняя дата отгрузки — прошлое/null (детерминизм эмита) ══
 # Guard: эмит sales.deal.ship_deadline.set только на непустую СМЕНУ; "" / null / повтор — нет.
 
-async def test_empty_string_deadline_no_emit(api, session):
+async def test_empty_string_deadline_no_emit(api, session, _hardening_parties):
     """PATCH ship_deadline='' → НЕ эмитит (нечего слать в закупки), не 500."""
     deal = await _new_deal(api, "R5-A-1", amount=500)
     r = await api.patch(f"/sales/deals/{deal['id']}", json={"ship_deadline": ""})
@@ -120,7 +133,7 @@ async def test_empty_string_deadline_no_emit(api, session):
     assert len(evs) == 0
 
 
-async def test_clear_deadline_after_set_no_emit(api, session):
+async def test_clear_deadline_after_set_no_emit(api, session, _hardening_parties):
     """Была дата → PATCH '' → нет нового сигнала, не падает."""
     deal = await _new_deal(api, "R5-B-1", ship_deadline="2026-08-01")
     after_create = (await session.execute(select(OutboxEvent).where(
@@ -134,7 +147,7 @@ async def test_clear_deadline_after_set_no_emit(api, session):
     assert r.json()["ship_deadline"] in ("", None)
 
 
-async def test_past_deadline_accepted_and_emits(api, session):
+async def test_past_deadline_accepted_and_emits(api, session, _hardening_parties):
     """Дата в прошлом → принимается (просрочка) И эмитит сигнал (закупки видят срочность)."""
     deal = await _new_deal(api, "R5-C-1", amount=1000)
     r = await api.patch(f"/sales/deals/{deal['id']}", json={"ship_deadline": "2020-01-01"})
@@ -147,7 +160,7 @@ async def test_past_deadline_accepted_and_emits(api, session):
     assert evs[0].payload["deal_id"] == deal["id"]
 
 
-async def test_null_deadline_on_create_no_emit(api, session):
+async def test_null_deadline_on_create_no_emit(api, session, _hardening_parties):
     """POST без ship_deadline → 201, без эмита (создание без срока — норма)."""
     r = await api.post("/sales/deals", json={
         "number": "R5-D-1", "title": "t", "counterparty": "c"})
@@ -158,7 +171,7 @@ async def test_null_deadline_on_create_no_emit(api, session):
     assert len(evs) == 0
 
 
-async def test_explicit_null_patch_no_emit(api, session):
+async def test_explicit_null_patch_no_emit(api, session, _hardening_parties):
     """PATCH ship_deadline=null → нет эмита, не 500."""
     deal = await _new_deal(api, "R5-E-1")
     r = await api.patch(f"/sales/deals/{deal['id']}", json={"ship_deadline": None})
@@ -170,7 +183,7 @@ async def test_explicit_null_patch_no_emit(api, session):
 
 # ══ R5-3: мульти-воронки — нельзя двинуть сделку в стадию ЧУЖОЙ воронки (фикс) ══
 
-async def test_cross_funnel_stage_rejected(api):
+async def test_cross_funnel_stage_rejected(api, _hardening_parties):
     """PATCH стадией чужой воронки → 422; сделка не выпадает с досок."""
     stages = (await api.get("/sales/stages")).json()  # материализовать канон
     nc_codes = {s["code"] for s in stages if s["funnel"] == "new_clients"}
@@ -190,7 +203,7 @@ async def test_cross_funnel_stage_rejected(api):
     assert got["stage"] != "rp_won" and got["funnel"] == "new_clients"
 
 
-async def test_same_funnel_stage_still_allowed(api):
+async def test_same_funnel_stage_still_allowed(api, _hardening_parties):
     """Контроль: стадия СВОЕЙ воронки по-прежнему проходит (фикс не зарубил легитимный путь)."""
     await api.get("/sales/stages")
     deal = await _new_deal(api, "R5-3-OK", stage="new")
@@ -200,7 +213,7 @@ async def test_same_funnel_stage_still_allowed(api):
 
 # ══ R5-4: margin_blind — фасад есть, но landed None по всем sku → честный null, не 0/500 ══
 
-async def test_margin_blind_facade_present_sku_no_cost(api, session):
+async def test_margin_blind_facade_present_sku_no_cost(api, session, _hardening_parties):
     """priced_count=0 при живом фасаде → cogs/gross = None (не 0), reason есть."""
     from modules.sales.models import DealItem, PriceQuote
 
@@ -225,7 +238,7 @@ async def test_margin_blind_facade_present_sku_no_cost(api, session):
     assert r["margin_pct"] is None and r["reason"] is not None
 
 
-async def test_pipeline_forecast_blind_facade_honest(api, session):
+async def test_pipeline_forecast_blind_facade_honest(api, session, _hardening_parties):
     """Прогноз при слепом фасаде: не 500; выручка считается; gross_weighted = None (не 0)."""
     from modules.sales.models import DealItem, PriceQuote
 
@@ -253,7 +266,7 @@ async def test_pipeline_forecast_blind_facade_honest(api, session):
 
 # ══ R5-5: идемпотентность handoff — дедуп по deal_id, не глобальный (guard) ══
 
-async def test_two_different_deals_get_two_handoffs(api, session):
+async def test_two_different_deals_get_two_handoffs(api, session, _hardening_parties):
     app = api._transport.app  # type: ignore[attr-defined]
     ctx = EventContext(session=session, services=app.state.core.services)
     deal_a = await _new_deal(api, "HF-IA-1", counterparty="ООО Альфа")
@@ -270,7 +283,7 @@ async def test_two_different_deals_get_two_handoffs(api, session):
     assert hb[0].payload["counterparty"] == "ООО Бета"
 
 
-async def test_triple_call_same_deal_yields_one_handoff(api, session):
+async def test_triple_call_same_deal_yields_one_handoff(api, session, _hardening_parties):
     app = api._transport.app  # type: ignore[attr-defined]
     ctx = EventContext(session=session, services=app.state.core.services)
     deal = await _new_deal(api, "HF-IB-1", counterparty="ООО Гамма")
