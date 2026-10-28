@@ -1077,7 +1077,7 @@ async def test_owner_ai_insight_disabled(api):
     assert r.status_code == 503
 
 
-async def test_owner_dashboard(session, api):
+async def test_owner_dashboard(session, api, _sales_db_parties):
     # данные для метрик: сделка + согласование на ней
     deal = (
         await api.post("/sales/deals", json={"number": "OWN-1", "title": "t", "counterparty": "c"})
@@ -1151,7 +1151,7 @@ async def test_approval_escalation(session):
     assert overdue.escalation_level == 1
 
 
-async def test_rbac_approve_enforced(session, api):
+async def test_rbac_approve_enforced(session, api, _sales_db_parties):
     deal = (
         await api.post("/sales/deals", json={"number": "RB-1", "title": "t", "counterparty": "c"})
     ).json()
