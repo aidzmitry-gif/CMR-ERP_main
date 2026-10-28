@@ -51,7 +51,7 @@ class TwoOutputs(SyntheticProduction):
                 "documents": [{"document_id": order_id + 59, "operation_date": "2026-10-10"}]}
 
 
-async def accepted_production_outputs(api, factory, book, *, same_lot, order_ids=(42, 43)):
+async def accepted_production_outputs(api, factory, book, *, same_lot, order_ids=(42, 43), lot_by_order=None):
     """Create the physical documents and WMS facts required by a current transfer."""
     from sqlalchemy import select
 
@@ -73,6 +73,7 @@ async def accepted_production_outputs(api, factory, book, *, same_lot, order_ids
     gateway, user = AccountingService(), CurrentUser("tester", ["director"])
     documents = {}
     assert order_ids and len(order_ids) == len(set(order_ids))
+    assert lot_by_order is None or set(lot_by_order) <= set(order_ids)
     async with factory() as session:
         # pg_book copies explicit directory IDs from SQLite into this isolated DB.
         await session.execute(text(
@@ -100,7 +101,7 @@ async def accepted_production_outputs(api, factory, book, *, same_lot, order_ids
             document = await prepare_output(session, gateway, book[0], user, OutputCommand(
                 request_id=uuid4(), order_id=order_id, expected_order_digest=digest,
                 operation_date="2026-10-10", sku_code="SYN-WIDGET", quantity="2.00", warehouse="Main",
-                location_id=location.id, lot="SHARED" if same_lot else f"LOT-{order_id}",
+                location_id=location.id, lot=(lot_by_order or {}).get(order_id, "SHARED" if same_lot else f"LOT-{order_id}"),
                 evidence="Synthetic reviewed physical output"), warehouse_gateway=warehouse)
             await confirm_output(session, gateway, book[0], user, document.id, document.digest,
                                  warehouse_gateway=warehouse)
