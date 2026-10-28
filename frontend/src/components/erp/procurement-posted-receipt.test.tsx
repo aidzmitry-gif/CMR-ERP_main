@@ -151,8 +151,9 @@ it("recovers the saved command before exposing a create action and only retries 
   });
   vi.stubGlobal("fetch", fetcher);
   let createVisibleDuringRecovery: boolean | null = null;
-  const originalGet = Storage.prototype.getItem;
-  const read = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, key: string) {
+  const storagePrototype = Object.getPrototypeOf(sessionStorage) as Storage;
+  const originalGet = storagePrototype.getItem;
+  const read = vi.spyOn(storagePrototype, "getItem").mockImplementation(function (this: Storage, key: string) {
     if (key === journalKey && createVisibleDuringRecovery === null)
       createVisibleDuringRecovery = screen.queryByRole("button", { name: "Создать черновик исправления" }) !== null;
     return originalGet.call(this, key);
