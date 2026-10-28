@@ -8,7 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from core.domain.models import AuditLog, User
+from core.domain.models import AuditLog, Counterparty, User
 from core.runtime.app import create_app
 from core.services import auth as auth_mod
 from core.services.auth import (
@@ -163,6 +163,7 @@ async def test_managed_crm_identity_is_restricted_without_changing_legacy_role_m
 
     session.add(User(username="managed-crm", full_name="Synthetic CRM", keycloak_user_id="kc-managed-crm",
                      role="sales_head", status="active", expected_department="Продажи", expected_role="sales_head"))
+    session.add(Counterparty(name="Synthetic client"))
     await session.commit()
     claimed = CurrentUser("managed-crm", ["sales_head", "director"], "kc-managed-crm")
     effective = await resolve_effective_oidc_user(claimed, session)
