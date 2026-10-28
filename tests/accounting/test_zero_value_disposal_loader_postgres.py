@@ -15,6 +15,7 @@ from modules.accounting.zero_value_disposals import (
 )
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_zero_value_disposals_postgres import command, upgrade_0140, zeroed_output
+from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 pytestmark = pytest.mark.integration
 
@@ -30,8 +31,8 @@ async def receipt_with_database_basis(session, org_id, draft):
         session, org_id, "tester", draft.model_copy(update={"basis_digest": basis}))
 
 
-async def test_loader_replays_authenticated_history_and_respects_registration_cutoff(pg_factory, pg_book):
-    policy_id, output_id, line_id = await zeroed_output(pg_factory, pg_book)
+async def test_loader_replays_authenticated_history_and_respects_registration_cutoff(pg_factory, pg_book, issuance_pg):
+    policy_id, output_id, line_id = await zeroed_output(pg_factory, pg_book, api=issuance_pg[0])
     async with pg_factory() as session:
         await upgrade_0140(session)
         await receipt_with_database_basis(session, pg_book[0], command(policy_id, output_id, line_id))
@@ -100,14 +101,20 @@ async def test_loader_replays_authenticated_history_and_respects_registration_cu
             await load_authenticated_zero_value_disposals(session, pg_book[0] + 999)
 
 
-async def test_loader_requires_0140_schema(pg_factory, pg_book):
+@pytest.mark.parametrize("accounting_pg_revision", ["0139"], indirect=True)
+async def test_loader_requires_0140_schema(pg_factory, book):
+    # This pre-0140 control only needs an organization, not current catalogue accounts.
+    pg_book = book
+    async with pg_factory() as session:
+        session.add(Organization(id=book[0], name="Synthetic missing-schema company", unp="999999999"))
+        await session.commit()
     async with pg_factory() as session:
         with pytest.raises(AccountingError, match="migration 0140"):
             await load_authenticated_zero_value_disposals(session, pg_book[0])
 
 
-async def test_loader_preserves_dated_command_after_commit(pg_factory, pg_book):
-    policy_id, output_id, line_id = await zeroed_output(pg_factory, pg_book)
+async def test_loader_preserves_dated_command_after_commit(pg_factory, pg_book, issuance_pg):
+    policy_id, output_id, line_id = await zeroed_output(pg_factory, pg_book, api=issuance_pg[0])
     async with pg_factory() as session:
         await upgrade_0140(session)
         draft = parse_zero_value_command({
