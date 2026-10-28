@@ -612,6 +612,18 @@ describe("DealsWorkspace (канбан)", () => {
     expect(screen.queryByText(/Демо-данные/i)).not.toBeInTheDocument();
   });
 
+  it("does not report empty pipeline totals when the board is unavailable", () => {
+    const { rerender } = render(<DealsWorkspace initialStages={[]} initialKpis={[]} authError />);
+    expect(screen.getByText("Итоги по сделкам недоступны: нет доступа к доске.")).toBeInTheDocument();
+    expect(screen.queryByText(/В работе:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Сумма pipeline:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Взвешенный прогноз/)).not.toBeInTheDocument();
+    rerender(<DealsWorkspace initialStages={[]} initialKpis={[]} />);
+    expect(screen.queryByText("Итоги по сделкам недоступны: нет доступа к доске.")).not.toBeInTheDocument();
+    expect(screen.getByText(/В работе:/)).toHaveTextContent("0 сделок");
+    expect(screen.getByText(/Сумма pipeline:/)).toBeInTheDocument();
+  });
+
   it("keeps permitted deals visible with a separate KPI restriction message", () => {
     render(<DealsWorkspace initialStages={stages} initialKpis={[]} kpiAccessDenied />);
     expect(screen.getByRole("status")).toHaveTextContent("Общие показатели отдела недоступны");

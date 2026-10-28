@@ -1855,14 +1855,20 @@ export function DealsWorkspace({
                 </div>
               </section>
 
-              <PipelineRow
-                stages={stages}
-                now={now}
-                fmt={fmt}
-                chip={chip}
-                planGap={planGap}
-                marginForecast={marginForecast}
-              />
+              {authError ? (
+                <p role="status" className="mt-4 rounded-xl bg-surface px-4 py-3 text-[13px] text-muted shadow-card">
+                  Итоги по сделкам недоступны: нет доступа к доске.
+                </p>
+              ) : (
+                <PipelineRow
+                  stages={stages}
+                  now={now}
+                  fmt={fmt}
+                  chip={chip}
+                  planGap={planGap}
+                  marginForecast={marginForecast}
+                />
+              )}
             </>
           );
         })()}
