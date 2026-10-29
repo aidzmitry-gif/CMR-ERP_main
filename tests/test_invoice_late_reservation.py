@@ -17,8 +17,8 @@ from modules.wms.models import ReservationVersion, StockMovement
 from tests.test_invoice_issuance import create, seed
 
 
-async def late_reservation_flow(api, session, *, concurrent=False):
-    ids, base = await seed(api, session, physical="0")
+async def late_reservation_flow(api, session, *, concurrent=False, wms_enabled=False):
+    ids, base = await seed(api, session, physical="0", wms_enabled=wms_enabled)
     # An empty warehouse is not a synthetic zero-quantity movement.
     await session.execute(delete(StockMovement).where(StockMovement.organization_id == ids["org"]))
     await session.commit()
