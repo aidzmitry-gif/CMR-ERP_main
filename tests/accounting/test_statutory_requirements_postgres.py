@@ -1,6 +1,4 @@
 """PostgreSQL guards for append-only statutory requirements."""
-from pathlib import Path
-
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
@@ -14,18 +12,8 @@ pytestmark = pytest.mark.integration
 async def test_statutory_requirement_history_is_checked_and_immutable(pg_factory, pg_book):
     async with pg_factory() as session:
         async with session.begin():
-            def upgrade(connection):
-                from alembic.migration import MigrationContext
-                from alembic.operations import Operations
-
-                namespace = {}
-                migration = Path("migrations/versions/0157_statutory_requirement_catalog.py")
-                exec(migration.read_text(encoding="utf-8"), namespace)
-                with Operations.context(MigrationContext.configure(connection)):
-                    namespace["upgrade"]()
-
-            connection = await session.connection()
-            await connection.run_sync(upgrade)
+            # pg_factory installs the complete registered schema and its
+            # current guards; do not reinstall0157 over that database.
             requirement_id = await session.scalar(text("""
                 INSERT INTO accounting.statutory_requirement
                   (organization_id, kind, code, title, effective_from, revision, source_reference, evidence,
