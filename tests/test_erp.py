@@ -3,6 +3,10 @@
 
 import pytest_asyncio
 
+from modules.office.shipping_associations import (  # noqa: F401
+    OfficeInvoiceAssociation,
+    ShippingReviewAssignment,
+)
 from tests.reservation_source import event_context, invoice
 from tests.test_logistics_invoice_binding import exact as logistics_invoice  # noqa: F401
 
@@ -744,7 +748,12 @@ async def test_hr(api):
     assert [s["id"] for s in board["stages"]] == ["new", "invite", "tech", "offer", "hired"]
 
 
-async def test_office(api):
+async def test_office(api, session):
+    from core.domain.models import User
+
+    session.add(User(username="office-erp-test", full_name="Synthetic director", role="director", status="active"))
+    await session.commit()
+    api.headers["X-User"] = "office-erp-test"
     r = await api.post("/office/docs", json={"company": "ООО Альфа", "title": "Поставка", "amount": 850000})
     assert r.status_code == 201 and r.json()["stage"] == "ready"
     assert len((await api.get("/office/docs")).json()) >= 1
