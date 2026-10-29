@@ -63,6 +63,8 @@ async def test_prepare_contract_enriches_by_unp(api, session):
 
 
 async def test_render_prefills_from_deal(api, session):
+    session.add(Counterparty(name="ООО «МеталлПром»"))
+    await session.commit()
     await _make_template(api)
     deal = await _make_deal(api, counterparty="ООО «МеталлПром»")
     # позиция сделки с реальным SKU (shared kernel) — должна попасть в спецификацию
@@ -159,8 +161,10 @@ async def test_package_render_template_less_contract_cover(api):
     assert "Оформлен по форме клиента" in pkg.text
 
 
-async def test_prepare_contract_duplicate_409(api):
+async def test_prepare_contract_duplicate_409(api, session):
     """Повторная подготовка договора по сделке (активный уже есть) → 409."""
+    session.add(Counterparty(name="ООО «АльфаМеталл»"))
+    await session.commit()
     await _make_template(api)
     deal = await _make_deal(api, counterparty="ООО «АльфаМеталл»")
     first = await api.post(
@@ -175,8 +179,10 @@ async def test_prepare_contract_duplicate_409(api):
     assert dup.status_code == 409
 
 
-async def test_prepare_contract_graceful_unknown_unp(api):
+async def test_prepare_contract_graceful_unknown_unp(api, session):
     """УНП не в реестре → реквизиты минимум из сделки, без падения (graceful)."""
+    session.add(Counterparty(name="ООО «Без УНП»"))
+    await session.commit()
     await _make_template(api)
     deal = await _make_deal(api, counterparty="ООО «Без УНП»")
     r = await api.post(
@@ -188,7 +194,9 @@ async def test_prepare_contract_graceful_unknown_unp(api):
     assert "ООО «Без УНП»" in html  # имя покупателя из сделки
 
 
-async def test_prepare_contract_unknown_template_404(api):
+async def test_prepare_contract_unknown_template_404(api, session):
+    session.add(Counterparty(name="ООО «Аккумулятор»"))
+    await session.commit()
     deal = await _make_deal(api, counterparty="ООО «Аккумулятор»")
     r = await api.post(
         f"/sales/deals/{deal['id']}/contract", json={"template_code": "nope", "unp": ""}
@@ -240,8 +248,10 @@ async def test_invoice_without_price_quote_requires_pricing(api, session):
     assert inv.status_code == 422, inv.text
 
 
-async def test_render_order_kind_still_400(api):
+async def test_render_order_kind_still_400(api, session):
     """kind=order — не имеет печатной формы; понятная ошибка, не 500."""
+    session.add(Counterparty(name="ООО «Заказ»"))
+    await session.commit()
     deal = await _make_deal(api, counterparty="ООО «Заказ»")
     order = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "order"})
     assert order.status_code == 201, order.text
