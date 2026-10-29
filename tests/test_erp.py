@@ -168,10 +168,26 @@ async def test_wms_inventory(api, session, erp_organization):
     assert reedit.status_code == 409
 
     # RBAC: пересчёт (wms.count) только у склада; логистика (только wms.read) — 403
+    from core.domain.models import User
+
+    session.add_all([
+        User(username="erp-test-counter", full_name="Synthetic warehouse counter", role="warehouse", status="active"),
+        User(username="erp-test-logistician", full_name="Synthetic inventory reader", role="logistics", status="active"),
+    ])
+    await session.commit()
+    warehouse_headers = {"X-User": "erp-test-counter", "X-User-Roles": "warehouse"}
+    logistics_headers = {"X-User": "erp-test-logistician", "X-User-Roles": "logistics"}
+    # A module role alone does not authorize this company's journal.
+    assert (await api.post("/wms/inventory", json=payload, headers=warehouse_headers)).status_code == 403
+    for subject in ("erp-test-counter", "erp-test-logistician"):
+        grant = await api.put(f"/accounting/organizations/{erp_organization}/members",
+                              json={"subject": subject, "role": "reader"})
+        assert grant.status_code == 200, grant.text
+    warehouse_count = await api.post("/wms/inventory", json=payload,
+                                     headers=warehouse_headers)
+    assert warehouse_count.status_code == 201, warehouse_count.text
     assert (await api.post("/wms/inventory", json=payload,
-                           headers={"X-User-Roles": "warehouse"})).status_code == 201
-    assert (await api.post("/wms/inventory", json=payload,
-                           headers={"X-User-Roles": "logistics"})).status_code == 403
+                           headers=logistics_headers)).status_code == 403
 
 
 async def test_wms_operational(api, session, erp_organization):
@@ -394,6 +410,11 @@ async def test_wms_outbound(api, session, erp_organization):
     """Резерв из sales создаёт pick-задачи; упаковка (/pack) нейтральна для остатка."""
 
     from modules.wms.events import on_stock_reserved
+    from modules.wms.models import WarehouseDirectory
+
+    session.add(WarehouseDirectory(organization_id=erp_organization, name="Минск",
+        title="Synthetic outbound warehouse", wms_enabled=True, created_by="erp-test-owner"))
+    await session.commit()
 
     await invoice(session, 5, [{"sku_code": "ROLL-3", "qty": "10"}], erp_organization)
     await on_stock_reserved(
