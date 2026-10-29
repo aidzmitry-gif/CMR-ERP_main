@@ -69,7 +69,7 @@ async def unreserved_pg(issuance_pg):  # noqa: F811
             await apply_migration_action(session, "upgrade")
             await session.commit()
         else:
-            assert await session.scalar(text("SELECT version_num FROM alembic_version")) == "0198"
+            assert await session.scalar(text("SELECT version_num FROM alembic_version")) == "0200"
     yield api, factory
 
 

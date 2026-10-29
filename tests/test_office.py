@@ -54,12 +54,27 @@ async def test_carriers_catalog(api):
     assert own["name"] == "Свой транспорт" and own["heavy"] is True
 
 
-async def test_board_groups_by_stage(office_actor):
+async def test_board_groups_by_stage(office_actor, session):
+    from tests.test_office_draft_ownership import login
+
     api = office_actor
-    await api.post("/office/docs", json={"company": "ООО Бета", "amount": 100})
+    ready = await api.post("/office/docs", json={"company": "ООО Бета", "amount": 100})
+    assert ready.status_code == 201, ready.text
+    assert ready.json()["stage"] == "ready"
     board = (await api.get("/office/board")).json()
-    assert [s["id"] for s in board["stages"]] == ["ready", "shipped", "docs", "await_pay", "paid"]
+    assert [s["id"] for s in board["stages"]] == ["draft", "ready", "shipped", "docs", "await_pay", "paid"]
+    assert board["stages"][1]["count"] >= 1
+    assert ready.json()["id"] in {card["id"] for card in board["stages"][1]["cards"]}
+
+    await login(api, session, "office-board-author", "assistant")
+    created = await api.post("/office/docs", json={"company": "ООО Бета", "amount": 50})
+    assert created.status_code == 201, created.text
+    assert created.json()["stage"] == "draft"
+    board = (await api.get("/office/board")).json()
     assert board["stages"][0]["count"] >= 1
+    assert created.json()["id"] in {card["id"] for card in board["stages"][0]["cards"]}
+    assert all(created.json()["id"] not in {card["id"] for card in stage["cards"]}
+               for stage in board["stages"][1:])
 
 
 # --------------------------------------------------------------------------- #
