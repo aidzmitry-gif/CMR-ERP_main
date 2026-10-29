@@ -61,3 +61,22 @@ it("строит девять живых этапов из scoped заявок, 
   expect(screen.getByText("Отменённых заказов вне канбана: 1. Их можно проверить в разделе заказов поставщикам.")).toBeInTheDocument();
   expect(vi.mocked(fetch).mock.calls.flat().join(" ")).not.toContain("/procurement/board");
 });
+
+
+it("показывает источник дефицита только у подтверждённой автоматической заявки", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    if (String(input).includes("owned-sources?kind=request")) return json({
+      organization_id: 1,
+      items: requests.map((request, index) => ({ ...request, origin: index === 0 ? "deficit" : index === 1 ? "" : "unknown" })),
+      next_after_id: null,
+    }) as Response;
+    return original(input, init);
+  });
+  render(<ProcurementKanban suggestedOrg="1" />);
+  const automatic = (await screen.findByText("REQ-001")).closest("article")!;
+  expect(within(automatic).getByText("Авто: дефицит склада")).toBeInTheDocument();
+  const manual = screen.getByText("REQ-002").closest("article")!;
+  expect(within(manual).queryByText("Авто: дефицит склада")).toBeNull();
+  expect(screen.getAllByText("Авто: дефицит склада")).toHaveLength(1);
+});

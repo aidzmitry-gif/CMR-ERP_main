@@ -8,6 +8,8 @@ relay доставляет подписчику закупок (``on_stock_low``
 """
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -17,6 +19,9 @@ from core.runtime.app import create_app
 from core.runtime.deps import get_session
 from core.services.eventbus import EventContext
 from modules.procurement.models import PurchaseRequest
+from modules.procurement.ownership import (
+    PurchaseRequestCreation,  # noqa: F401 -- register scoped tables before the fixture.
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -143,20 +148,38 @@ async def test_stock_low_without_sku_code_skipped(deficit_app, session):
 
 
 async def test_origin_exposed_in_requests_and_board(api):
-    """PurchaseRequestOut несёт origin; на доске карточка авто-заявки имеет status_tag-бейдж."""
-    await api.post(
+    """Scoped source supplies the stored origin to the current Kanban."""
+    api.headers.update({"X-User": "origin-owner-test", "X-Expected-Principal": "origin-owner-test"})
+    organization = await api.post("/accounting/organizations", json={
+        "name": "Synthetic origin company", "unp": "999999983",
+    })
+    assert organization.status_code == 201, organization.text
+    org = organization.json()["id"]
+    prefix = f"/procurement/organizations/{org}"
+    listing = f"{prefix}/owned-sources?kind=request"
+    automatic = await api.post(
         "/procurement/requests/from-deficit",
         json={"sku_code": "SKU-B", "sku_title": "Бейдж", "deficit": 1, "reorder_qty": 5},
     )
-    # ручная заявка — без origin (бейджа быть не должно)
-    await api.post("/procurement/requests", json={"supplier": "S", "item": "Ручная", "qty": 1})
-
-    flat = (await api.get("/procurement/requests")).json()
-    by_item = {r["item"]: r for r in flat}
+    assert automatic.status_code == 201, automatic.text
+    assert (await api.get(listing)).json()["items"] == []
+    assigned = await api.post(f"{prefix}/purchase-ownership", json={
+        "kind": "request", "source_id": automatic.json()["id"],
+        "evidence": "Explicit synthetic deficit-request ownership",
+    })
+    assert assigned.status_code == 201, assigned.text
+    manual = await api.post(f"{prefix}/requests", json={
+        "request_key": str(uuid4()), "ownership_evidence": "Synthetic manual request",
+        "document": {"supplier": "S", "item": "Ручная", "qty": 1, "amount": "0.00"},
+    })
+    assert manual.status_code == 201, manual.text
+    hidden = await api.post("/procurement/requests/from-deficit", json={
+        "sku_code": "SKU-UNOWNED", "sku_title": "Не подтверждена", "deficit": 1,
+    })
+    assert hidden.status_code == 201, hidden.text
+    response = await api.get(listing)
+    assert response.status_code == 200, response.text
+    by_item = {row["item"]: row for row in response.json()["items"]}
     assert by_item["Бейдж"]["origin"] == "deficit"
     assert by_item["Ручная"]["origin"] == ""
-
-    board = (await api.get("/procurement/board")).json()
-    cards = {c["title"]: c for s in board["stages"] for c in s["cards"]}
-    assert cards["Бейдж"]["status_tag"] == "Авто: дефицит склада"
-    assert cards["Ручная"]["status_tag"] == ""  # ручная — без бейджа
+    assert "Не подтверждена" not in by_item
