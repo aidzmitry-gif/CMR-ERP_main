@@ -188,11 +188,12 @@ describe("SpravSkuCard", () => {
     expect(screen.getByText("истина — 1С")).toBeInTheDocument();
   });
 
-  it("таб «Склад» без остатков → честный EmptyState, а не нули", () => {
+  it("таб «Склад»: неизвестные остатки не означают отсутствие товара в 1С", () => {
     render(<SpravSkuCard card={clone({ stock: null })} />);
     fireEvent.click(screen.getByRole("button", { name: "Склад" }));
     expect(screen.getByText("🗄 Размещение, остатки и движение")).toBeInTheDocument();
-    expect(screen.getByText(/Остатков по этому товару в 1С нет/)).toBeInTheDocument();
+    expect(screen.getByText(/Нет подтверждённых данных об остатках по этому товару/)).toBeInTheDocument();
+    expect(screen.queryByText(/Остатков по этому товару в 1С нет/)).not.toBeInTheDocument();
   });
 
   it("таб «Закупка и партии» без партий → EmptyState (числа не выдумываем)", () => {

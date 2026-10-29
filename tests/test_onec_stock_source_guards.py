@@ -65,6 +65,24 @@ async def test_stock_http_refuses_unverified_old_rows(api, session, monkeypatch)
     assert "OLD-DEMO" not in response.text
 
 
+@pytest.mark.parametrize("path", ["/wms/stock", "/wms/reconciliation", "/wms/balances/valued"])
+async def test_unavailable_registered_source_is_not_a_connected_wms_mirror(api, session, monkeypatch, path):
+    from modules.integrations.module import IntegrationsModule
+    from tests.test_integrations_price_cost_register import _FakeCore
+
+    registered = _FakeCore("https://onec.example/odata")
+    IntegrationsModule().register(registered)
+    assert registered.services.onec.stock_source_available is False
+    monkeypatch.setattr(api._transport.app.state.core.services, "stock", registered.services.stock)
+    session.add(Sku(code="UNVERIFIED-SOURCE", title="Synthetic source guard", unit="шт"))
+    session.add(StockItem(sku_code="UNVERIFIED-SOURCE", warehouse="Old synthetic mirror", qty_available=5))
+    await session.commit()
+    response = await api.get(path)
+    assert response.status_code == 200, response.text
+    assert response.json()["gateway"] is False
+    assert response.json()["rows"] == []
+
+
 async def test_demo_opt_in_returns_independent_rows_and_still_cannot_write_finance():
     client = OneCClient(allow_demo=True)
     assert client.stock_source_available is True
@@ -93,11 +111,10 @@ async def test_registration_binds_source_and_scopes_demo(environment, url, avail
         core.config.environment = environment
     IntegrationsModule().register(core)
     assert core.services.onec.stock_source_available is available
-    assert core.services.stock._source is core.services.onec
-    if not available:
-        session = AsyncMock(spec=AsyncSession)
-        assert await core.services.stock.stock_by_sku(session, "OLD-DEMO") is None
-        session.execute.assert_not_awaited()
+    if available:
+        assert core.services.stock._source is core.services.onec
+    else:
+        assert core.services.stock is None
 
 
 @pytest.mark.parametrize("availability", [False, None, "true", 1])

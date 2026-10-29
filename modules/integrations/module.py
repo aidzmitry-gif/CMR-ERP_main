@@ -38,7 +38,9 @@ class IntegrationsModule(ModuleContract):
             from modules.integrations.price_cost import StockPriceCostSource
 
             core.services.price_cost = StockPriceCostSource()
-        core.services.stock = StockService(source=core.services.onec)
+        core.services.stock = (
+            StockService(source=core.services.onec) if core.services.onec.stock_source_available else None
+        )
         core.services.registry = RegistryClient(
             cfg.egr_base_url,
             allow_demo=getattr(cfg, "environment", "prod").lower() in {"dev", "development", "test"},
