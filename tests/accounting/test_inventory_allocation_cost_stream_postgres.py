@@ -259,70 +259,70 @@ async def test_mixed_production_late_cost_confirm_replay_and_historical_cutoff(p
                 await run_migration(session, "0145_inventory_allocation_cost_stream.py", "downgrade")
 
 
-@pytest.mark.parametrize("accounting_pg_revision", ["0139"], indirect=True)
+@pytest.mark.parametrize("accounting_pg_revision", ["0144"], indirect=True)
 async def test_0145_empty_roundtrip_retains_legacy_evidence_definitions(pg_factory):
+    from tests.accounting.historical_zero_sale import transition
+
+    query = text("SELECT pg_get_functiondef('accounting.output_cost_revision_evidence(integer,integer,date,integer,integer)'::regprocedure)")
     async with pg_factory() as session:
-        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
-                         "0142_zero_value_command_dates.py", "0143_zero_value_sales.py",
-                         "0144_inventory_explicit_allocation_guards.py"):
-            await run_migration(session, revision, "upgrade")
-        query = text("SELECT pg_get_functiondef('accounting.output_cost_revision_evidence(integer,integer,date,integer,integer)'::regprocedure)")
         before = await session.scalar(query)
-        await run_migration(session, "0145_inventory_allocation_cost_stream.py", "upgrade")
-        await run_migration(session, "0145_inventory_allocation_cost_stream.py", "downgrade")
+    await transition(pg_factory, "0145")
+    await transition(pg_factory, "0144", action="downgrade")
+    async with pg_factory() as session:
         assert await session.scalar(query) == before
         assert await session.scalar(text("SELECT to_regprocedure('accounting.inventory_allocation_cost_stream(integer,text,text,text,date,integer)')")) is None
-        await run_migration(session, "0145_inventory_allocation_cost_stream.py", "upgrade")
-        await session.commit()
+    await transition(pg_factory, "0145")
 
 
+async def _assert_legacy_revision_evidence(session):
+    # Recompute every historical cutoff, including entryless revision tokens.
+    # Stored bytes are separately checked after each original commit by replay.
+    verified = (await session.scalars(text("""
+        SELECT accounting.output_cost_revision_evidence(
+            organization_id, original_entry_id, (command->>'posting_date')::date,
+            entry_id, registration_token) = preview::jsonb->'ledger_evidence'
+        FROM accounting.production_output_cost_revision ORDER BY sequence
+    """))).all()
+    assert verified and all(value is True for value in verified)
+
+
+@pytest.mark.parametrize("accounting_pg_revision", ["0145"], indirect=True)
 @pytest.mark.parametrize("method", ["specific", "weighted_average"])
-async def test_0145_preserves_legacy_monetary_sale_and_correction_history(pg_factory, pg_book, method):
-    from tests.accounting.test_finished_goods_inventory_postgres import (
-        test_output_cost_preview_authenticates_late_wip_and_sale_destinations as legacy_scenario,
-    )
+async def test_0145_preserves_legacy_monetary_sale_and_correction_history(pg_factory, method):
+    from tests.accounting.historical_zero_sale import historical_session, replay
 
-    async with pg_factory() as session:
-        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
-                         "0142_zero_value_command_dates.py", "0143_zero_value_sales.py",
-                         "0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py"):
-            await run_migration(session, revision, "upgrade")
-        await session.commit()
-    await legacy_scenario(pg_factory, pg_book, method)
+    await replay(pg_factory, f"monetary_{method}.json", fixture_folder="inventory_stream_history")
+    async with historical_session(pg_factory) as session:
+        await _assert_legacy_revision_evidence(session)
+        sales_history = (await session.scalars(text(
+            "SELECT cost FROM accounting.inventory_sale_receipt ORDER BY entry_id"))).all()
+        assert [row["method"] for row in sales_history] == [method, method]
+        assert [row["issue_cost_byn"] for row in sales_history] == ["50.00", "60.00"]
+        revisions = (await session.execute(text(
+            "SELECT sequence,entry_id,posting FROM accounting.production_output_cost_revision ORDER BY sequence"))).all()
+        assert [row.sequence for row in revisions] == [1, 2, 3]
+        assert revisions[1].entry_id is None and revisions[1].posting is None
+        assert {(line["account"], line["side"], line["amount"]) for line in revisions[0].posting["lines"]} == {
+            ("20", "credit", "20.00"), ("43", "debit", "10.00"), ("90.4", "debit", "10.00")}
+        assert {(line["account"], line["side"], line["amount"]) for line in revisions[2].posting["lines"]} == {
+            ("20", "credit", "20.00"), ("90.4", "debit", "20.00")}
 
 
-async def test_0145_keeps_existing_zero_issue_late_cost(pg_factory, pg_book):
-    from modules.accounting.zero_value_disposals import (
-        preview_standalone_zero_value_issue_basis,
-        register_standalone_zero_value_issue,
-    )
-    from tests.accounting.test_zero_value_disposals_postgres import command, zeroed_output
+@pytest.mark.parametrize("accounting_pg_revision", ["0143"], indirect=True)
+async def test_0145_keeps_existing_zero_issue_late_cost(pg_factory):
+    from tests.accounting.historical_zero_sale import historical_session, replay
 
-    async with pg_factory() as session:
-        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
-                         "0142_zero_value_command_dates.py", "0143_zero_value_sales.py"):
-            await run_migration(session, revision, "upgrade")
-        await session.commit()
-    policy_id, output_id, line_id = await zeroed_output(pg_factory, pg_book)
-    async with pg_factory() as session:
-        draft = command(policy_id, output_id, line_id, destination_account="90.4", destination_dimensions={})
-        basis = await preview_standalone_zero_value_issue_basis(session, pg_book[0], draft)
-        await register_standalone_zero_value_issue(session, pg_book[0], "tester", draft.model_copy(update={"basis_digest": basis}))
-        for revision in ("0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py"):
-            await run_migration(session, revision, "upgrade")
-        await service.post(session, pg_book[0], PostingInput(source="legacy-zero-late-wip", source_version=1, operation="manual",
-            document_date="2026-10-31", operation_date="2026-10-31", posting_date="2026-10-31", policy_id=policy_id,
-            rule_version="synthetic", explanation="Legacy zero issue late cost", lines=[
-                LineInput(account="20", side="debit", amount="100", dimensions={"department": "SHOP", "order": "ORDER-42"}),
-                LineInput(account="60", side="credit", amount="100")]), "tester")
-        request = ProductionOutputCostPreviewInput(original_entry_id=output_id, posting_date="2026-10-31",
-                                                  request_evidence="Legacy zero receipt survives 0145")
-        preview = await preview_output_cost_correction(session, pg_book[0], "2026-10", request)
-        assert preview["trace"]["disposals"][0]["kind"] == "zero"
-        assert sorted(row["amount_byn"] for row in preview["destinations"]) == ["25.00", "75.00"]
-        await confirm_output_cost_correction(session, pg_book[0], "2026-10",
-            ProductionOutputCostConfirmInput(**request.model_dump(), request_key=uuid4(), basis_digest=preview["basis_digest"]), "tester")
-        await session.commit()
+    await replay(pg_factory, "zero_issue_0143_to_0145.json", fixture_folder="inventory_stream_history")
+    async with historical_session(pg_factory) as session:
+        await _assert_legacy_revision_evidence(session)
+        revision = (await session.execute(text(
+            "SELECT preview,posting FROM accounting.production_output_cost_revision ORDER BY sequence DESC LIMIT 1"))).one()
+        allocation = revision.preview["ledger_evidence"]["allocation"]
+        zero = [row for row in allocation if row["key"].startswith("zero:")]
+        assert len(zero) == 1 and Decimal(str(zero[0]["quantity"])) == Decimal("0.5")
+        assert sorted(Decimal(str(row["delta"])) for row in allocation) == [Decimal("25.00"), Decimal("75.00")]
+        assert {(line["account"], line["side"], line["amount"]) for line in revision.posting["lines"]} == {
+            ("20", "credit", "100.00"), ("43", "debit", "75.00"), ("90.4", "debit", "25.00")}
 
 
 async def test_pool_stream_preserves_real_production_output(pg_factory, pg_book, issuance_pg):

@@ -34,10 +34,11 @@ async def historical_session(factory):
         yield session
 
 
-async def transition(factory, revision):
+async def transition(factory, revision, *, action="upgrade"):
+    assert action in {"upgrade", "downgrade"}
     async with historical_session(factory) as session:
         target = session.bind.url.render_as_string(hide_password=False)
-    result = await asyncio.to_thread(subprocess.run, [sys.executable, '-m', 'alembic', 'upgrade', revision],
+    result = await asyncio.to_thread(subprocess.run, [sys.executable, '-m', 'alembic', action, revision],
         cwd=Path(__file__).resolve().parents[2], env={**os.environ, 'AIOS_DATABASE_URL': target, 'AIOS_ENVIRONMENT': 'dev'},
         capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr[-2500:]
@@ -45,8 +46,9 @@ async def transition(factory, revision):
         assert await session.scalar(text('SELECT version_num FROM alembic_version')) == revision
 
 
-async def replay(factory, filename, *, before_transition=None):
-    path = Path(__file__).with_name('fixtures') / 'zero_sale_history' / filename
+async def replay(factory, filename, *, before_transition=None, fixture_folder="zero_sale_history"):
+    assert fixture_folder in {'zero_sale_history', 'inventory_stream_history'}
+    path = Path(__file__).with_name('fixtures') / fixture_folder / filename
     data = json.loads(path.read_text(encoding='utf-8'))
     assert data['format'] == 1 and data['synthetic'] is True
     assert data['time_zone'] == 'Europe/Minsk'
@@ -61,7 +63,7 @@ async def replay(factory, filename, *, before_transition=None):
         if transaction['revision'] != revision:
             if before_transition is not None:
                 await before_transition(factory)
-            assert (revision, transaction['revision']) in {('0142', '0143'), ('0143', '0148')}
+            assert (revision, transaction['revision']) in {('0142', '0143'), ('0143', '0145'), ('0143', '0148')}
             await transition(factory, transaction['revision'])
             revision = transaction['revision']
         assert set(transaction['insert']) <= set(ORDER)
