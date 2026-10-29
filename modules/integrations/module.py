@@ -31,13 +31,14 @@ class IntegrationsModule(ModuleContract):
             cfg.onec_base_url,
             getattr(cfg, "onec_user", "") or "",
             getattr(cfg, "onec_password", "") or "",
+            allow_demo=getattr(cfg, "environment", "prod").lower() in {"dev", "development", "test"},
         )
         # Цена/себес для маржи/КП: только когда 1С сконфигурирована (иначе dev-mock/демо).
         if cfg.onec_base_url:
             from modules.integrations.price_cost import StockPriceCostSource
 
             core.services.price_cost = StockPriceCostSource()
-        core.services.stock = StockService()
+        core.services.stock = StockService(source=core.services.onec)
         core.services.registry = RegistryClient(
             cfg.egr_base_url,
             allow_demo=getattr(cfg, "environment", "prod").lower() in {"dev", "development", "test"},

@@ -12,6 +12,7 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.services.onec import OneCGateway
 from modules.integrations.models import Batch, StockItem
 
 # Порог FEFO-предупреждения по сроку годности — менее года до «годен до» (макет batch).
@@ -49,10 +50,23 @@ async def _locked_stock(session: AsyncSession, codes) -> dict[str, StockItem]:
 
 
 class StockService:
+    def __init__(self, *, source: OneCGateway | None = None) -> None:
+        # With no gateway this is an explicitly supplied local projection (e.g.
+        # an isolated test). Runtime registration always binds the actual source.
+        self._source = source
+
+    def _source_available(self) -> bool:
+        return self._source is None or getattr(self._source, "stock_source_available", False) is True
+
+    def _require_source(self) -> None:
+        if not self._source_available():
+            raise ValueError("Нет подтверждённого источника складских остатков 1С")
+
     async def lock_reservation_items(self, session: AsyncSession, items: list[dict]) -> None:
         """Lock all old/new stock before a transaction performs release + reserve."""
         quantities = _quantities(items)
         if quantities:
+            self._require_source()
             await _locked_stock(session, quantities)
 
     async def reserve(self, session: AsyncSession, items: list[dict]) -> list[dict]:
@@ -65,6 +79,7 @@ class StockService:
         quantities = _quantities(items)
         if not quantities:
             return []
+        self._require_source()
         rows = await _locked_stock(session, quantities)
         for code, qty in quantities.items():
             row = rows.get(code)
@@ -89,6 +104,7 @@ class StockService:
         quantities = _quantities(items)
         if not quantities:
             return []
+        self._require_source()
         rows = await _locked_stock(session, quantities)
         released: list[dict] = []
         for code, qty in quantities.items():
@@ -109,6 +125,8 @@ class StockService:
         если по коду остатков нет (отсутствие не маскируем нулём). ``cost`` — себестоимость
         из 1С (вход маржи); цена/себес берём из первой строки (одинаковы по складам в demo).
         """
+        if not self._source_available():
+            return None
         rows = (
             await session.execute(
                 select(StockItem).where(StockItem.sku_code == sku_code).order_by(StockItem.id)
