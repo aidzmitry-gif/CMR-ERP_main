@@ -1,16 +1,29 @@
 # CRM-REL-001 mixed release preparation
 
-Status: **CURRENT SOURCE PROFILE RENEWED; COPY BINDING LOCALLY VERIFIED**, `release_ready=false`. This route exports committed
+Status: **ACCEPTED PROFILE FROZEN; CANDIDATE SOURCE REBIND PENDING**, `release_ready=false`. This route exports committed
 backend sources for isolated verification. The dated image/migration/restore results
 below are historical; current runtime acceptance remains pending. It has no production
 apply command and does not modify or bootstrap `/opt/belakb-deploy-v1`.
 
-Backend application checkpoint: `e31dec4747d7a58de3877be30e3fbdc69266a0a5`.
+Frozen backend application checkpoint: `e31dec4747d7a58de3877be30e3fbdc69266a0a5`.
 Current frontend source checkpoint: `e31dec4747d7a58de3877be30e3fbdc69266a0a5`;
 its new immutable build is pending.
 The final package checkpoint must be an exact commit containing these ops files;
 its selected backend Git objects and ten module gitlinks must equal the accepted
 backend checkpoint. Working files and untracked files are never exported.
+
+Candidate source has since changed: local LOG-6
+`e273b7cb73e4d6f3fc48b293009227ee03ca64f8` adds a company-qualified import
+freight review through existing explicit source bindings. This read projection
+has local ASGI and owned PostgreSQL 16 acceptance; it does not establish posted
+costs or complete tariff/tender/audit coverage. The frontend/full cost feature
+remains open. No schema/configuration change is included in this slice.
+The accepted source58 package remains frozen and does not contain this addition.
+Rebind the final application checkpoint and exact module pins, then export the
+final accepted source delta before image verification. Do not relabel or rebuild
+the old accepted package as though it covered the new source. This is preparation
+status only; module/root publication, full exact-head CI, real source admission,
+copy/upgrade/separate restore and production release remain pending.
 
 29 October source profile: candidate Alembic head `0199`, chain `0194 → 0198 → 0199`.
 The existing PR63 dependency image is reused by exact ID
