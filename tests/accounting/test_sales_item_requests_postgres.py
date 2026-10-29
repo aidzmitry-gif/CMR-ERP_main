@@ -88,7 +88,7 @@ async def test_pg_item_request_rechecks_owner_after_lock_wait(issuance_pg, repla
         await session.commit()
         deal, sku = await seed(session)
         session.add(User(username="item-owner", full_name="Synthetic", employee_id=701,
-                         deal_visibility="own", status="active"))
+                         role="sales", deal_visibility="own", status="active"))
         await session.execute(update(Deal).where(Deal.id == deal).values(owner_id=701))
         await session.commit()
     body = {"sku_id": sku, "qty": "1.00", "request_key": str(uuid4())}
