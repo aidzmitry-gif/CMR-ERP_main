@@ -9,6 +9,7 @@ from uuid import uuid4
 from httpx import ASGITransport, AsyncClient
 
 from config.settings import get_settings
+from core.domain.models import Counterparty
 
 
 async def test_health_and_modules_on_postgres(pg_app):
@@ -19,9 +20,17 @@ async def test_health_and_modules_on_postgres(pg_app):
 
 
 async def test_deal_crud_on_postgres(pg_app):
+    factory = pg_app._transport.app.state.core.services.db.session_factory
+    async with factory() as seed:
+        party = Counterparty(name="ООО ПГ", unp=str(100000000 + uuid4().int % 800000000),
+                             requisites={"address": "Synthetic legal address"})
+        seed.add(party)
+        await seed.commit()
+        party_id = party.id
     r = await pg_app.post(
         "/sales/deals",
-        json={"number": "PG-DEAL-1", "title": "Интеграция", "counterparty": "ООО ПГ", "amount": 1000},
+        json={"number": "PG-DEAL-1", "title": "Интеграция", "counterparty": "ООО ПГ",
+              "counterparty_id": party_id, "amount": 1000},
     )
     assert r.status_code == 201
     deal_id = r.json()["id"]

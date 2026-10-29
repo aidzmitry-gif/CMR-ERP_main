@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select, text
 
-from core.domain.models import OutboxEvent
+from core.domain.models import Counterparty, OutboxEvent
 from modules.accounting.models import AccessGrant, Organization
 from modules.sales.accounting_ownership import DealOwnership
 from modules.sales.deal_loss import DealLossRequest, DealLossResolution
@@ -14,10 +14,17 @@ from modules.sales.models import Deal, DealStageEvent
 
 @pytest.mark.parametrize('outcome',['win','lose'])
 async def test_concurrent_close_has_one_event(pg_app,outcome):
-    created=await pg_app.post('/sales/deals',json={'number':uuid4().hex,'title':'Synthetic','counterparty':'Synthetic'})
+    factory=pg_app._transport.app.state.core.services.db.session_factory
+    async with factory() as seed:
+        party = Counterparty(name='Synthetic', unp=str(100000000 + uuid4().int % 800000000),
+                             requisites={'address': 'Synthetic legal address'})
+        seed.add(party)
+        await seed.commit()
+        party_id = party.id
+    created=await pg_app.post('/sales/deals',json={'number':uuid4().hex,'title':'Synthetic',
+        'counterparty':'Synthetic','counterparty_id':party_id})
     assert created.status_code==201
     deal_id=created.json()['id']
-    factory=pg_app._transport.app.state.core.services.db.session_factory
     command = {'reason_code': 'price'}
     headers = {}
     if outcome == 'lose':
