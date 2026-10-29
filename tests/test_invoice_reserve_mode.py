@@ -8,7 +8,9 @@ from sqlalchemy import delete, select, update
 from core.domain.models import OutboxEvent, Sku
 from modules.integrations.models import StockItem
 from modules.sales.documents import digest
+from modules.sales.invoice_issuance import InvoiceIssuanceReceipt
 from modules.sales.models import Deal, DealDocument, DealItem, PriceQuote
+from modules.wms.invoice_reservations import InvoiceReservation
 from modules.wms.models import StockMovement
 from tests.test_invoice_issuance import command as owned_command
 from tests.test_invoice_issuance import create as create_owned_invoice
@@ -88,55 +90,72 @@ async def events(session, event_type):
 
 
 async def test_on_order_without_stock_is_visible_frozen_and_idempotent(api, session, monkeypatch):
-    deal_id = await sale(session)
+    ids, base = await owned_sale(api, session)
+    await session.execute(delete(StockMovement))
+    await session.commit()
     services = api._transport.app.state.core.services
-    reserve = AsyncMock(wraps=services.stock.reserve)
-    prelock = AsyncMock(wraps=services.stock.lock_reservation_items)
+    reserve = AsyncMock(wraps=services.wms_reservations.reserve_invoice)
+    availability = AsyncMock(wraps=services.wms_reservations.invoice_availability)
     post = AsyncMock(wraps=services.onec.post_document)
-    monkeypatch.setattr(services.stock, "reserve", reserve)
-    monkeypatch.setattr(services.stock, "lock_reservation_items", prelock)
+    monkeypatch.setattr(services.wms_reservations, "reserve_invoice", reserve)
+    monkeypatch.setattr(services.wms_reservations, "invoice_availability", availability)
     monkeypatch.setattr(services.onec, "post_document", post)
-    result = await invoice(api, deal_id)
+    base["reserve_mode"] = "on_order"
+    preview = await api.post(f"/sales/deals/{ids['deal']}/invoice-preview", json=base)
+    assert preview.status_code == 200, preview.text
+    basis = preview.json()
+    command = {**base, "request_key": "on-order-first",
+               "expected_document_version": basis["document_version"],
+               "expected_basis_digest": basis["basis_digest"],
+               "allocations": [], "unreserved_confirmed": True}
+    first = await create_owned_invoice(api, ids, command)
+    assert first.status_code == 201, first.text
+    result = first.json()["document"]
     assert result["reserve_mode"] == "on_order" and result["reserve_status"] == "unreserved"
-    assert result["status"] == "posted" and result["amount"] == 240
-    doc = await session.get(DealDocument, result["id"])
+    assert result["status"] == "issued" and result["amount"] == 240
+    doc_id = result["id"]
+    doc = await session.get(DealDocument, doc_id)
     assert doc.reserved_at is None and doc.snapshot_json["reserve_mode"] == "on_order"
-    rendered = await api.get(f"/sales/documents/{doc.id}/render")
-    assert f'<div class="order"><b>{LABEL}</b></div>' in rendered.text
+    rendered = await api.get(f"/sales/documents/{doc_id}/render")
+    assert LABEL in rendered.text
     assert digest(rendered.text) == result["content_sha256"]
-    snapshot = (await api.get(f"/sales/documents/{doc.id}/snapshot")).json()
+    snapshot = (await api.get(f"/sales/documents/{doc_id}/snapshot")).json()
     assert snapshot["reserve_mode"] == "on_order" and snapshot["amount"] == "240.00"
-    doc_id = doc.id
-    # The existing ORM guard also protects the newly persisted choice.
     doc.terms_json = {"reserve_mode": "stock"}
     with pytest.raises(ValueError, match="неизменяем"):
         await session.commit()
     await session.rollback()
-    # Simulate out-of-band imported terms: the frozen snapshot still owns mode.
     await session.execute(update(DealDocument).where(DealDocument.id == doc_id).values(
         terms_json={"reserve_mode": "stock"},
     ))
     await session.commit()
-    doc = await session.get(DealDocument, doc_id)
-    assert (await invoice(api, deal_id))["id"] == doc.id
-    repeated = await api.post(f"/sales/documents/{doc.id}/issue")
-    assert repeated.json()["reserve_mode"] == "on_order"
-    assert (await api.get(f"/sales/documents/{doc.id}/render")).content == rendered.content
-    listed = (await api.get(f"/sales/deals/{deal_id}/documents")).json()
+    repeated = await create_owned_invoice(api, ids, command)
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json() == {**first.json(), "replayed": True}
+    assert repeated.json()["document"]["id"] == doc_id
+    assert (await api.get(f"/sales/documents/{doc_id}/render")).content == rendered.content
+    listed = (await api.get(f"/sales/deals/{ids['deal']}/documents")).json()
     assert listed[0]["reserve_mode"] == "on_order"
-    conflict = await api.post(f"/sales/deals/{deal_id}/documents", json={
-        "kind": "invoice", "reserve_mode": "stock", "request_key": "on-order-first",
+    conflict = await create_owned_invoice(api, ids, {
+        **command, "reserve_mode": "stock", "unreserved_confirmed": False,
+        "journal_complete": True, "evidence": "Different stock intent",
+        "allocations": [{"line_no": 1, "warehouse": "W", "qty": "2.00"}],
     })
     assert conflict.status_code == 409
+    assert conflict.json()["detail"] == "Issuance key already has a different request/scope"
     reserve.assert_not_awaited()
-    prelock.assert_not_awaited()
-    post.assert_awaited_once()
+    availability.assert_not_awaited()
+    post.assert_not_awaited()
     assert await events(session, "sales.stock.reserved") == []
-    posted = await events(session, "sales.document.posted")
-    assert len(posted) == 1 and posted[0].payload["amount"] == "240.00"
-    assert posted[0].payload["reserve_mode"] == "on_order"
-    assert posted[0].payload["reserve_status"] == "unreserved"
+    assert await events(session, "sales.document.posted") == []
+    issued = await events(session, "sales.invoice.issued")
+    assert len(issued) == 1 and issued[0].payload["amount"] == "240.00"
+    assert issued[0].payload["reserve_mode"] == "on_order"
+    assert issued[0].payload["reserve_status"] == "unreserved"
     assert (await session.scalars(select(StockItem))).all() == []
+    assert (await session.scalars(select(StockMovement))).all() == []
+    assert (await session.scalars(select(InvoiceReservation))).all() == []
+
 
 
 @pytest.mark.parametrize("mode", [None, "stock"])
@@ -200,21 +219,29 @@ async def test_legacy_issued_mode_is_stock_even_if_mutable_terms_say_on_order(ap
 
 
 async def test_default_stock_replay_preserves_legacy_request_hash(api, session):
-    deal_id = await sale(session, available=10)
-    payload = {"kind": "invoice", "request_key": "legacy-request"}
-    first = await api.post(f"/sales/deals/{deal_id}/documents", json=payload)
+    ids, base = await owned_sale(api, session)
+    payload, _ = await owned_command(api, ids, base, key="legacy-request")
+    # Frozen pre-mode ERP shape: no reserve_mode/unreserved_confirmed fields.
+    historical = {**payload, "deal_id": ids["deal"], "document_id": None,
+                  "operation": "erp_invoice_issue"}
+    expected_hash = digest(historical)
+    first = await create_owned_invoice(api, ids, payload)
     assert first.status_code == 201, first.text
-    doc = await session.get(DealDocument, first.json()["id"])
-    doc.request_hash = digest({"deal_id": deal_id, "operation": "create",
-                               **payload, "requested_by": ""})
-    await session.commit()
+    doc_id = first.json()["document"]["id"]
+    receipt = await session.get(InvoiceIssuanceReceipt, doc_id)
+    assert receipt.request_hash == expected_hash
     for retry in (payload, {**payload, "reserve_mode": "stock"}):
-        response = await api.post(f"/sales/deals/{deal_id}/documents", json=retry)
-        assert response.status_code == 201 and response.json()["id"] == doc.id
-        assert response.json()["reserve_mode"] == "stock"
+        response = await create_owned_invoice(api, ids, retry)
+        assert response.status_code == 200 and response.json()["document"]["id"] == doc_id
+        assert response.json()["document"]["reserve_mode"] == "stock"
+        assert response.json() == {**first.json(), "replayed": True}
+    doc = await session.get(DealDocument, doc_id)
     assert LABEL not in doc.original_html
-    assert (await session.scalar(select(StockItem))).qty_reserved == 2
+    reservation = await session.get(InvoiceReservation, doc_id)
+    assert sum(Decimal(row["qty"]) for row in reservation.snapshot["allocations"]) == Decimal("2")
+    assert receipt.request_hash == expected_hash
     assert len(await events(session, "sales.stock.reserved")) == 1
+
 
 
 async def test_revision_inherits_frozen_on_order_mode_and_conflicts_on_changed_retry(api, session):
