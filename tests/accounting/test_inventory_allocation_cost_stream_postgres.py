@@ -51,7 +51,8 @@ class TwoOutputs(SyntheticProduction):
                 "documents": [{"document_id": order_id + 59, "operation_date": "2026-10-10"}]}
 
 
-async def accepted_production_outputs(api, factory, book, *, same_lot, order_ids=(42, 43), lot_by_order=None):
+async def accepted_production_outputs(api, factory, book, *, same_lot, order_ids=(42, 43), lot_by_order=None,
+                                      sku_by_order=None, quantity_by_order=None):
     """Create the physical documents and WMS facts required by a current transfer."""
     from sqlalchemy import select
 
@@ -74,6 +75,8 @@ async def accepted_production_outputs(api, factory, book, *, same_lot, order_ids
     documents = {}
     assert order_ids and len(order_ids) == len(set(order_ids))
     assert lot_by_order is None or set(lot_by_order) <= set(order_ids)
+    assert sku_by_order is None or set(sku_by_order) <= set(order_ids)
+    assert quantity_by_order is None or set(quantity_by_order) <= set(order_ids)
     async with factory() as session:
         # pg_book copies explicit directory IDs from SQLite into this isolated DB.
         await session.execute(text(
@@ -82,17 +85,22 @@ async def accepted_production_outputs(api, factory, book, *, same_lot, order_ids
         ))
         location = Location(warehouse="Main", code="SYN-OUTPUT")
         sku = Sku(code="SYN-WIDGET", title="Synthetic widget", unit="шт", is_active=True)
+        other_skus = [Sku(code=code, title="Synthetic other widget", unit="шт", is_active=True)
+                      for code in sorted(set((sku_by_order or {}).values()) - {sku.code})]
         directory = WarehouseDirectory(organization_id=book[0], name="Main", title="Main warehouse",
                                        wms_enabled=True, created_by="tester")
-        session.add_all([location, sku, directory])
+        session.add_all([location, sku, directory, *other_skus])
         await session.flush()
         identities = {
             "warehouse_identity": {"id": directory.id, "name": directory.name, "title": directory.title},
             "sku_identity": {"id": sku.id, "code": sku.code, "title": sku.title, "unit": sku.unit},
         }
         for order_id in order_ids:
+            quantity = (quantity_by_order or {}).get(order_id, "2.00")
+            planned_quantity = int(Decimal(quantity))
+            assert Decimal(quantity) == planned_quantity
             order = ProductionOrder(id=order_id, number=f"SYN-OUTPUT-{order_id}",
-                                    product="Synthetic widget", qty=2)
+                                    product="Synthetic widget", qty=planned_quantity)
             session.add(order)
             await session.flush()
             digest = order_snapshot(order)[1]
@@ -100,7 +108,8 @@ async def accepted_production_outputs(api, factory, book, *, same_lot, order_ids
                 order_id=order_id, expected_digest=digest, evidence="Synthetic reviewed output owner"))
             document = await prepare_output(session, gateway, book[0], user, OutputCommand(
                 request_id=uuid4(), order_id=order_id, expected_order_digest=digest,
-                operation_date="2026-10-10", sku_code="SYN-WIDGET", quantity="2.00", warehouse="Main",
+                operation_date="2026-10-10", sku_code=(sku_by_order or {}).get(order_id, "SYN-WIDGET"),
+                quantity=quantity, warehouse="Main",
                 location_id=location.id, lot=(lot_by_order or {}).get(order_id, "SHARED" if same_lot else f"LOT-{order_id}"),
                 evidence="Synthetic reviewed physical output"), warehouse_gateway=warehouse)
             await confirm_output(session, gateway, book[0], user, document.id, document.digest,
@@ -110,16 +119,16 @@ async def accepted_production_outputs(api, factory, book, *, same_lot, order_ids
     assert await core.event_bus.relay_pending(
         factory, core.services, event_types=("production.output.confirmed",)) == len(order_ids)
     async with factory() as session:
-        arrivals = (await session.execute(select(Receipt.id, ReceiptLine.id).join(
+        arrivals = (await session.execute(select(Receipt.id, ReceiptLine.id, ReceiptLine.expected_qty).join(
             ReceiptLine, ReceiptLine.receipt_id == Receipt.id).where(
                 Receipt.organization_id == book[0], Receipt.warehouse == "Main"))).all()
         assert len(arrivals) == len(order_ids)
-    for receipt_id, line_id in arrivals:
+    for receipt_id, line_id, quantity in arrivals:
         path = f"/wms/receipts/{receipt_id}"
         detail = await api.get(path)
         assert detail.status_code == 200, detail.text
         qc = await api.post(path + "/qc", json={"expected_revision": detail.json()["qc_revision"],
-            "decisions": [{"line_id": line_id, "accepted_qty": "2.00", "rejected_qty": "0.00",
+            "decisions": [{"line_id": line_id, "accepted_qty": str(quantity), "rejected_qty": "0.00",
                            "reject_reason": "Synthetic complete acceptance"}]})
         assert qc.status_code == 200, qc.text
         accepted = await api.post(path + "/accept")

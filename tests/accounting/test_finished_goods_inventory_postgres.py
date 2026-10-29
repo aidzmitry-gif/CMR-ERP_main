@@ -95,6 +95,29 @@ async def _confirm_output(factory, book, method="specific", *, normative_verifie
     return policy_id
 
 
+async def _two_physical_outputs(factory, book, method, api, *, other_sku):
+    from modules.accounting.production_output_transfer import confirm_output_transfer
+    from tests.accounting.test_inventory_allocation_cost_stream_postgres import (
+        accepted_production_outputs,
+    )
+
+    policy_id = await _seed_production_book(factory, book, method)
+    await _seed_wip(factory, book, policy_id)
+    production, warehouse, documents, _ = await accepted_production_outputs(
+        api, factory, book, same_lot=False, lot_by_order={42: "LOT-1", 43: "LOT-2"},
+        sku_by_order={43: other_sku}, quantity_by_order={43: "1.00"})
+    command = transfer_input(policy_id).model_copy(update={"output_document_ids": [documents[42]]})
+    async with factory() as session:
+        preview = await prepare_output_transfer(session, book[0], "2026-10", command, production, warehouse)
+        confirmed = ProductionOutputTransferConfirmInput.model_validate({
+            **command.model_dump(mode="json"), "basis_digest": preview["basis_digest"], "digest": preview["digest"],
+        })
+        await confirm_output_transfer(session, book[0], "2026-10", confirmed, "tester",
+                                      production=production, warehouse_gateway=warehouse)
+        await session.commit()
+    return policy_id, production, warehouse, documents
+
+
 def sale_document(policy_id):
     return sales.SaleDocument.model_validate({
         "policy_id": policy_id, "posting_date": "2026-10-31", "account": "43", "warehouse": "Main",
@@ -399,7 +422,8 @@ async def test_output_cost_revision_downgrade_preserves_populated_history(pg_fac
         assert await session.get(Entry, entry_id) is not None
 
 
-async def test_empty_output_cost_revision_downgrades_and_upgrades(pg_factory, pg_book):
+@pytest.mark.parametrize("accounting_pg_revision", ["0139"], indirect=True)
+async def test_empty_output_cost_revision_downgrades_and_upgrades(pg_factory):
     async with pg_factory() as session:
         await _upgrade_output_cost_revision(session)
         await _run_output_cost_revision_migration(session, "downgrade")
@@ -598,22 +622,13 @@ async def test_finished_goods_manual_layer_is_not_an_output_source(pg_factory, p
 
 
 @pytest.mark.parametrize("method", ["specific", "fifo", "weighted_average"])
-async def test_unrelated_stale_output_does_not_block_selected_finished_goods(pg_factory, pg_book, method):
-    policy_id = await _confirm_output(pg_factory, pg_book, method)
-
-    class OtherProduction(SyntheticProduction):
-        async def cost_orders(self, _session, _organization_id, _order_ids):
-            return [{"order_id": 43, "product": "Other widget", "quantity": "1.00"}]
-
-        async def output_reconciliation(self, _session, _organization_id, _order_id, _warehouse):
-            return {"planned_quantity": "1.00", "confirmed_quantity": "1.00", "accepted_quantity": "1.00",
-                    "rejected_quantity": "0.00", "pending_quantity": "0.00", "sku_code": "OTHER-WIDGET",
-                    "unit": "шт", "lot": "LOT-2", "documents": [{"document_id": 102, "operation_date": "2026-10-10"}]}
-
-    other = OtherProduction()
+async def test_unrelated_stale_output_does_not_block_selected_finished_goods(pg_factory, pg_book, method, issuance_pg):
+    policy_id, other, warehouse, documents = await _two_physical_outputs(
+        pg_factory, pg_book, method, issuance_pg[0], other_sku="OTHER-WIDGET")
+    sale = await _physical_sale_document(pg_factory, pg_book, policy_id)
     command = ProductionOutputTransferConfirmInput.model_validate({
         "policy_id": policy_id, "order_id": 43, "analytical_order": "ORDER-43", "department": "SHOP",
-        "warehouse": "Main", "posting_date": "2026-10-31", "output_document_ids": [102],
+        "warehouse": "Main", "posting_date": "2026-10-31", "output_document_ids": [documents[43]],
         "basis_digest": "0" * 64, "digest": "0" * 64,
     })
     async with pg_factory() as session:
@@ -625,7 +640,7 @@ async def test_unrelated_stale_output_does_not_block_selected_finished_goods(pg_
                 LineInput(account="60", side="credit", amount="10.00", dimensions={}),
             ],
         ), "tester")
-        preview = await prepare_output_transfer(session, pg_book[0], "2026-10", command, other, object())
+        preview = await prepare_output_transfer(session, pg_book[0], "2026-10", command, other, warehouse)
         command = ProductionOutputTransferConfirmInput.model_validate({**command.model_dump(mode="json"),
                                                                          "basis_digest": preview["basis_digest"], "digest": preview["digest"]})
         await session.commit()
@@ -633,7 +648,7 @@ async def test_unrelated_stale_output_does_not_block_selected_finished_goods(pg_
         from modules.accounting.production_output_transfer import confirm_output_transfer
 
         await confirm_output_transfer(session, pg_book[0], "2026-10", command, "tester", production=other,
-                                      warehouse_gateway=object())
+                                      warehouse_gateway=warehouse)
         await service.post(session, pg_book[0], PostingInput(
             source="production:late-cost:43", source_version=1, operation="manual", document_date="2026-10-31",
             operation_date="2026-10-31", posting_date="2026-10-31", policy_id=policy_id,
@@ -642,25 +657,16 @@ async def test_unrelated_stale_output_does_not_block_selected_finished_goods(pg_
                 LineInput(account="60", side="credit", amount="10.00", dimensions={}),
             ],
         ), "tester")
-        assert (await sales.prepare(session, pg_book[0], sale_document(policy_id)))["cost"]["issue_cost_byn"] == "50.00"
+        assert (await sales.prepare(session, pg_book[0], sale))["cost"]["issue_cost_byn"] == "50.00"
 
 
-async def test_output_trace_maps_second_fifo_lot_to_aggregate_expense(pg_factory, pg_book):
-    policy_id = await _confirm_output(pg_factory, pg_book, "fifo")
-
-    class OtherProduction(SyntheticProduction):
-        async def cost_orders(self, _session, _organization_id, _order_ids):
-            return [{"order_id": 43, "product": "Other widget", "quantity": "1.00"}]
-
-        async def output_reconciliation(self, _session, _organization_id, _order_id, _warehouse):
-            return {"planned_quantity": "1.00", "confirmed_quantity": "1.00", "accepted_quantity": "1.00",
-                    "rejected_quantity": "0.00", "pending_quantity": "0.00", "sku_code": "SYN-WIDGET",
-                    "unit": "шт", "lot": "LOT-2", "documents": [{"document_id": 102, "operation_date": "2026-10-10"}]}
-
-    other = OtherProduction()
+async def test_output_trace_maps_second_fifo_lot_to_aggregate_expense(pg_factory, pg_book, issuance_pg):
+    policy_id, other, warehouse, documents = await _two_physical_outputs(
+        pg_factory, pg_book, "fifo", issuance_pg[0], other_sku="SYN-WIDGET")
+    physical_sale = await _physical_sale_document(pg_factory, pg_book, policy_id)
     command = ProductionOutputTransferConfirmInput.model_validate({
         "policy_id": policy_id, "order_id": 43, "analytical_order": "ORDER-43", "department": "SHOP",
-        "warehouse": "Main", "posting_date": "2026-10-31", "output_document_ids": [102],
+        "warehouse": "Main", "posting_date": "2026-10-31", "output_document_ids": [documents[43]],
         "basis_digest": "0" * 64, "digest": "0" * 64,
     })
     async with pg_factory() as session:
@@ -672,7 +678,7 @@ async def test_output_trace_maps_second_fifo_lot_to_aggregate_expense(pg_factory
                 LineInput(account="60", side="credit", amount="50.00", dimensions={}),
             ],
         ), "tester")
-        preview = await prepare_output_transfer(session, pg_book[0], "2026-10", command, other, object())
+        preview = await prepare_output_transfer(session, pg_book[0], "2026-10", command, other, warehouse)
         command = ProductionOutputTransferConfirmInput.model_validate({**command.model_dump(mode="json"),
                                                                          "basis_digest": preview["basis_digest"], "digest": preview["digest"]})
         await session.commit()
@@ -680,10 +686,10 @@ async def test_output_trace_maps_second_fifo_lot_to_aggregate_expense(pg_factory
         from modules.accounting.production_output_transfer import confirm_output_transfer
 
         await confirm_output_transfer(session, pg_book[0], "2026-10", command, "tester", production=other,
-                                      warehouse_gateway=object())
+                                      warehouse_gateway=warehouse)
         await session.commit()
     async with pg_factory() as session:
-        document = sales.SaleDocument.model_validate({**sale_document(policy_id).model_dump(mode="json"),
+        document = sales.SaleDocument.model_validate({**physical_sale.model_dump(mode="json"),
             "lot": "", "quantity": "3"})
         prepared = await sales.prepare(session, pg_book[0], document)
         assert prepared["cost"]["issue_cost_byn"] == "150.00"
