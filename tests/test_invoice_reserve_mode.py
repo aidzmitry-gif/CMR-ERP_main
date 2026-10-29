@@ -9,9 +9,10 @@ from core.domain.models import OutboxEvent, Sku
 from modules.integrations.models import StockItem
 from modules.sales.documents import digest
 from modules.sales.invoice_issuance import InvoiceIssuanceReceipt
-from modules.sales.models import Deal, DealDocument, DealItem, PriceQuote
+from modules.sales.models import DealDocument, DealItem
 from modules.wms.invoice_reservations import InvoiceReservation
 from modules.wms.models import StockMovement
+from tests.test_invoice_cancellation import cancel_request
 from tests.test_invoice_issuance import command as owned_command
 from tests.test_invoice_issuance import create as create_owned_invoice
 from tests.test_invoice_issuance import no_issue
@@ -58,29 +59,6 @@ async def test_printed_deadline_matches_frozen_calendar_date(api, session, monke
     assert reopened.text == original
     assert digest(original) == result["content_sha256"]
 
-
-
-async def sale(session, *, available=None):
-    deal = Deal(number="ON-ORDER", title="Goods on order", counterparty="Buyer")
-    sku = Sku(code="ON-ORDER", title="Ordered goods", unit="шт")
-    session.add_all([deal, sku])
-    await session.flush()
-    session.add_all([
-        DealItem(deal_id=deal.id, sku_id=sku.id, qty=2, unit_price=100),
-        PriceQuote(sku_code=sku.code, counterparty="Buyer", price=100),
-    ])
-    if available is not None:
-        session.add(StockItem(sku_code=sku.code, qty_available=available, qty_reserved=0))
-    await session.commit()
-    return deal.id
-
-
-async def invoice(api, deal_id, mode="on_order"):
-    response = await api.post(f"/sales/deals/{deal_id}/documents", json={
-        "kind": "invoice", "reserve_mode": mode, "request_key": "on-order-first",
-    })
-    assert response.status_code == 201, response.text
-    return response.json()
 
 
 async def events(session, event_type):
@@ -178,11 +156,13 @@ async def test_stock_mode_never_falls_back_to_on_order(api, session, mode, avail
 
 @pytest.mark.parametrize("kind", ["order", "contract"])
 async def test_on_order_only_accepts_invoices_for_create_and_revision(api, session, kind):
-    deal_id = await sale(session)
+    ids, _ = await owned_sale(api, session)
+    deal_id = ids["deal"]
     response = await api.post(f"/sales/deals/{deal_id}/documents", json={
         "kind": kind, "reserve_mode": "on_order",
     })
     assert response.status_code == 422, response.text
+    assert "под заказ" in response.text
     assert (await session.scalars(select(DealDocument))).all() == []
     old = DealDocument(deal_id=deal_id, kind=kind, number="LEGACY", status="posted")
     session.add(old)
@@ -195,16 +175,18 @@ async def test_on_order_only_accepts_invoices_for_create_and_revision(api, sessi
 
 
 async def test_unknown_mode_is_422(api, session):
-    deal_id = await sale(session)
-    response = await api.post(f"/sales/deals/{deal_id}/documents", json={
-        "kind": "invoice", "reserve_mode": "auto",
-    })
+    ids, base = await owned_sale(api, session)
+    command, _ = await owned_command(api, ids, base)
+    response = await create_owned_invoice(api, ids, {**command, "reserve_mode": "auto"})
     assert response.status_code == 422
+    assert any(error["loc"][-1] == "reserve_mode" for error in response.json()["detail"])
+
 
 
 @pytest.mark.parametrize("snapshot", [None, {}, {"kind": "invoice", "items": []}])
 async def test_legacy_issued_mode_is_stock_even_if_mutable_terms_say_on_order(api, session, snapshot):
-    deal_id = await sale(session)
+    ids, _ = await owned_sale(api, session)
+    deal_id = ids["deal"]
     old = DealDocument(deal_id=deal_id, kind="invoice", number="LEGACY", status="posted",
                        snapshot_json=snapshot, terms_json={"reserve_mode": "on_order"})
     session.add(old)
@@ -244,11 +226,38 @@ async def test_default_stock_replay_preserves_legacy_request_hash(api, session):
 
 
 
+async def _replacement_command(api, ids, base, *, doc_id=None, key):
+    if base.get("reserve_mode", "stock") == "stock":
+        command, _ = await owned_command(api, ids, base, doc_id=doc_id, key=key)
+        return command
+    preview = await api.post(f"/sales/deals/{ids['deal']}/invoice-preview", json={
+        **base, **({"document_id": doc_id} if doc_id else {}),
+    })
+    assert preview.status_code == 200, preview.text
+    basis = preview.json()
+    return {**base, "request_key": key, "expected_document_version": basis["document_version"],
+            "expected_basis_digest": basis["basis_digest"], "allocations": [], "unreserved_confirmed": True}
+
+
+async def _replacement_original(api, session, mode, physical="10"):
+    ids, base = await owned_sale(api, session, physical=physical)
+    base["reserve_mode"] = mode
+    command = await _replacement_command(api, ids, base, key="replacement-original")
+    response = await create_owned_invoice(api, ids, command)
+    assert response.status_code == 201, response.text
+    return ids, base, response.json()["document"]
+
+
+async def _cancel_original(api, session, ids, original):
+    await session.commit()
+    path, command = await cancel_request(api, ids["org"], original)
+    cancelled = await api.post(path, json=command)
+    assert cancelled.status_code == 201, cancelled.text
+    return cancelled.json()
+
+
 async def test_revision_inherits_frozen_on_order_mode_and_conflicts_on_changed_retry(api, session):
-    deal_id = await sale(session)
-    old = await invoice(api, deal_id)
-    old_row = await session.get(DealDocument, old["id"])
-    # A mismatched draft-terms import must not override the issued snapshot.
+    ids, base, old = await _replacement_original(api, session, "on_order")
     await session.execute(update(DealDocument).where(DealDocument.id == old["id"]).values(
         terms_json={"reserve_mode": "stock"},
     ))
@@ -263,16 +272,21 @@ async def test_revision_inherits_frozen_on_order_mode_and_conflicts_on_changed_r
     assert replay.json()["id"] == new["id"]
     conflict = await api.post(url, json={**payload, "reserve_mode": "stock"})
     assert conflict.status_code == 409
-    issued = await api.post(f"/sales/documents/{new['id']}/issue")
-    assert issued.status_code == 200 and issued.json()["reserve_status"] == "unreserved"
+    before = await api.post(f"/sales/deals/{ids['deal']}/invoice-preview", json={**base, "document_id": new["id"]})
+    assert before.status_code == 409
+    await _cancel_original(api, session, ids, old)
+    command = await _replacement_command(api, ids, base, doc_id=new["id"], key="inherit-mode-issue")
+    issued = await api.post(f"/sales/documents/{new['id']}/issue", json=command)
+    assert issued.status_code == 200 and issued.json()["document"]["reserve_status"] == "unreserved", issued.text
     assert (await session.get(DealDocument, new["id"])).snapshot_json["reserve_mode"] == "on_order"
+    old_row = await session.get(DealDocument, old["id"], populate_existing=True)
     assert old_row.superseded_by_id == new["id"] and old_row.reserve_status == "unreserved"
+    assert old_row.status == "cancelled"
     assert await events(session, "sales.stock.reserved") == []
 
 
 async def test_revision_on_order_to_stock_is_atomic_and_retryable(api, session):
-    deal_id = await sale(session)
-    old = await invoice(api, deal_id)
+    ids, base, old = await _replacement_original(api, session, "on_order", physical="1")
     old_id = old["id"]
     original = (await api.get(f"/sales/documents/{old_id}/render")).content
     revision = await api.post(f"/sales/documents/{old_id}/revision", json={
@@ -280,58 +294,69 @@ async def test_revision_on_order_to_stock_is_atomic_and_retryable(api, session):
     })
     assert revision.status_code == 201, revision.text
     new_id = revision.json()["id"]
+    await _cancel_original(api, session, ids, old)
+    base["reserve_mode"] = "stock"
+    command = await _replacement_command(api, ids, base, doc_id=new_id, key="switch-stock-issue")
     event_ids = list(await session.scalars(select(OutboxEvent.id).order_by(OutboxEvent.id)))
-    rejected = await api.post(f"/sales/documents/{new_id}/issue")
+    rejected = await api.post(f"/sales/documents/{new_id}/issue", json=command)
     assert rejected.status_code == 409, rejected.text
-    old_row, new_row = await session.get(DealDocument, old_id), await session.get(DealDocument, new_id)
+    old_row = await session.get(DealDocument, old_id, populate_existing=True)
+    new_row = await session.get(DealDocument, new_id, populate_existing=True)
     assert old_row.superseded_by_id is None and old_row.reserve_status == "unreserved"
     assert new_row.status == "draft" and new_row.reserve_mode == "stock"
     assert new_row.snapshot_json is None and new_row.original_html is None
     assert list(await session.scalars(select(OutboxEvent.id).order_by(OutboxEvent.id))) == event_ids
-    session.add(StockItem(sku_code="ON-ORDER", qty_available=10, qty_reserved=0))
+    session.add(StockMovement(organization_id=ids["org"], sku_code=ids["code"], warehouse="W",
+        kind="in", qty=Decimal("9"), reason="receipt"))
     await session.commit()
-    issued = await api.post(f"/sales/documents/{new_id}/issue")
+    issued = await api.post(f"/sales/documents/{new_id}/issue", json=command)
     assert issued.status_code == 200, issued.text
-    assert issued.json()["reserve_mode"] == "stock" and issued.json()["reserve_status"] == "reserved"
-    assert (await session.scalar(select(StockItem))).qty_reserved == Decimal("2")
+    assert issued.json()["document"]["reserve_mode"] == "stock"
+    assert issued.json()["document"]["reserve_status"] == "reserved"
+    reservation = await session.get(InvoiceReservation, new_id)
+    assert sum(Decimal(x["qty"]) for x in reservation.snapshot["allocations"]) == Decimal("2")
     assert len(await events(session, "sales.stock.reserved")) == 1
     assert (await api.get(f"/sales/documents/{old_id}/render")).content == original
 
 
 async def test_revision_stock_to_on_order_releases_only_old_basket(api, session, monkeypatch):
-    deal_id = await sale(session, available=10)
-    old = await invoice(api, deal_id, "stock")
+    from modules.wms.invoice_reservations import InvoiceReservationRelease
+
+    ids, base, old = await _replacement_original(api, session, "stock")
+    original = (await api.get(f"/sales/documents/{old['id']}/render")).content
     services = api._transport.app.state.core.services
-    reserve = AsyncMock(wraps=services.stock.reserve)
-    prelock = AsyncMock(wraps=services.stock.lock_reservation_items)
-    monkeypatch.setattr(services.stock, "reserve", reserve)
-    monkeypatch.setattr(services.stock, "lock_reservation_items", prelock)
+    reserve = AsyncMock(wraps=services.wms_reservations.reserve_invoice)
+    monkeypatch.setattr(services.wms_reservations, "reserve_invoice", reserve)
     revision = await api.post(f"/sales/documents/{old['id']}/revision", json={
         "reason": "Customer changed product", "request_key": "switch-to-order", "reserve_mode": "on_order",
     })
     assert revision.status_code == 201, revision.text
     new_id = revision.json()["id"]
-    # Replacement has a wholly different SKU with no stock row.
     replacement_sku = Sku(code="NEW-ORDER", title="New ordered product", unit="шт")
     session.add(replacement_sku)
     await session.flush()
-    replacement_item = await session.scalar(select(DealItem))
+    replacement_item = await session.get(DealItem, ids["item"])
     replacement_item.sku_id = replacement_sku.id
-    replacement_item.unit_price = Decimal("120")
-    session.add(PriceQuote(sku_code="NEW-ORDER", counterparty="Buyer", price=120))
     await session.commit()
-    issued = await api.post(f"/sales/documents/{new_id}/issue")
+    cancelled = await _cancel_original(api, session, ids, old)
+    release = await session.get(InvoiceReservationRelease, cancelled["release_id"])
+    assert release.document_id == old["id"]
+    assert [(line["sku_code"], Decimal(line["released_qty"])) for line in release.snapshot["lines"]] == [(ids["code"], Decimal("2"))]
+    base["reserve_mode"] = "on_order"
+    base["pricing"][0]["unit_price_net"] = "120.00"
+    command = await _replacement_command(api, ids, base, doc_id=new_id, key="switch-on-order-issue")
+    issued = await api.post(f"/sales/documents/{new_id}/issue", json=command)
     assert issued.status_code == 200, issued.text
-    assert issued.json()["reserve_status"] == "unreserved" and issued.json()["amount"] == 288
-    assert (await session.scalar(select(StockItem))).qty_reserved == 0
-    old_row = await session.get(DealDocument, old["id"])
+    assert issued.json()["document"]["reserve_status"] == "unreserved"
+    assert issued.json()["document"]["amount"] == 288
+    old_row = await session.get(DealDocument, old["id"], populate_existing=True)
     assert old_row.reserve_status == "released" and old_row.reserve_mode == "stock"
     assert old_row.superseded_by_id == new_id
     reserve.assert_not_awaited()
-    prelock.assert_awaited_once()
-    assert prelock.call_args.args[1] == [{"sku_code": "ON-ORDER", "qty": "2.00"}]
+    assert await session.get(InvoiceReservation, new_id) is None
     assert len(await events(session, "sales.stock.reserved")) == 1
     assert LABEL in (await api.get(f"/sales/documents/{new_id}/render")).text
+    assert (await api.get(f"/sales/documents/{old['id']}/render")).content == original
 
 
 async def test_stock_gateway_unavailable_requires_explicit_on_order(api, session, monkeypatch):
