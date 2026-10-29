@@ -2,12 +2,20 @@ from datetime import date
 from decimal import Decimal
 from uuid import uuid4
 
+import pytest_asyncio
 from sqlalchemy import select
 
 from modules.procurement.expected_reservations import ExpectedReservation, ExpectedReservationEvent
-from modules.procurement.models import PurchaseOrder
+from modules.procurement.models import PurchaseOrder, PurchaseOrderMilestone
 from modules.sales.models import Deal
 from tests.accounting.test_expected_reservations import payload, setup_expected
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def schedule_table(db):
+    # This bounded accounting fixture intentionally creates only consumed tables.
+    await db.run_sync(lambda session: PurchaseOrderMilestone.__table__.create(session.connection()))
+    await db.commit()
 
 
 async def test_deadlines_follow_explicit_reservations_and_keep_unknown_visible(client, db, book):
