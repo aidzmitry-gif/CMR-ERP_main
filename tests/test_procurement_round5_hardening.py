@@ -4,8 +4,8 @@
 (удали гард — тест упадёт), а не тавтология. Фоновый relay в тестах не крутится — гоняем
 ``relay_once`` вручную на той же in-memory сессии.
 
-Кейсы: (1) MRP-lite дедуп wms.stock.low между проходами relay; (2) обратный waterfall при
-недостижимом сроке (срок−буфер < сегодня) — риск + валидные (прошлые) даты, без падения и None;
+Кейсы: (1) MRP-lite дедуп wms.stock.low между проходами relay; (2) обзор связанного клиентского
+срока и явное сохранение плана: срок−буфер < сегодня — риск + валидные прошлые даты без None;
 (3) факт приёмки не перетирается более поздней оценкой в фасаде себестоимости; (4) reference→landed
 идемпотентен между батчами (одна строка, стабильное значение); (5) повторный resolve претензии не
 шлёт второе событие (finance не задваивает).
@@ -27,6 +27,7 @@ from core.runtime.app import create_app
 from core.runtime.deps import get_session
 from core.services.eventbus import EventContext
 from modules.procurement.models import LandedCost, PurchaseRequest
+from tests import test_procurement_ship_deadline as deadline_contract
 from tests.test_procurement_claims_ext import (
     _claim_events,
     _context,
@@ -37,6 +38,7 @@ from tests.test_procurement_claims_ext import (
 from tests.test_procurement_landed_cost import _scoped_landed_next_order, _scoped_landed_order
 
 pytestmark = pytest.mark.asyncio
+owned_deadline_order = deadline_contract.owned_deadline_order
 
 
 @pytest_asyncio.fixture
@@ -100,31 +102,46 @@ async def test_stock_low_dedup_across_relay_cycles(app2, session):
 # ───────────────────────── 2. Обратный waterfall: недостижимый срок ─────────────────────────
 
 
-async def test_plan_unreachable_deadline_risk_no_invalid_dates(app2, session):
+async def test_plan_unreachable_deadline_risk_no_invalid_dates(api, session, owned_deadline_order, monkeypatch):
     """Срок клиента − буфер < сегодня (физически не успеть) → at_risk, валидные (прошлые) даты,
     без падения и без None/отрицательных дат."""
-    client, core = app2
-    o = (await client.post(
-        "/procurement/orders",
-        json={"supplier": "S", "lines": [{"sku_code": "A", "qty": 5, "goods_value_byn": 500}]},
-    )).json()
-    today = datetime.now(timezone.utc).date()
+    from modules.procurement import customer_deadlines
+    from modules.procurement.models import PurchaseOrder
+    from modules.sales.models import Deal
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 10, 29, tzinfo=tz)
+
+    monkeypatch.setattr(customer_deadlines, "datetime", Clock)
+    context = owned_deadline_order
+    today = Clock.now(timezone.utc).date()
     soon = (today + timedelta(days=1)).isoformat()  # срок завтра → срок−буфер(3) = позавчера
-    core.event_bus.emit(session, "sales.deal.ship_deadline.set", {
-        "deal_id": 1, "number": "СД-1", "counterparty": "К", "ship_deadline": soon,
-        "items": [{"sku_code": "A", "qty": 5}],
-    })
-    await _relay(core, session)
-    r = await client.post(f"/procurement/orders/{o['id']}/plan",
-                          json={"transport_method_code": "truck"})  # target авто = срок−буфер
-    assert r.status_code == 200, r.text
-    plan = r.json()
-    assert plan["at_risk"] is True
-    assert plan["required_arrival"] < today.isoformat()  # крайний приход уже в прошлом
+    deal = await session.get(Deal, context["deal"])
+    deal.ship_deadline = soon
+    await session.commit()
+    reviewed = await deadline_contract._owned_review(api, context)
+    target = reviewed["earliest_required_arrival"]
+    assert target == (today - timedelta(days=2)).isoformat()
+    order = await session.get(PurchaseOrder, context["order"], populate_existing=True)
+    assert order.target_arrival_date is None  # чтение не сохраняет предложенную дату
+    await deadline_contract._owned_plan(api, context, target=target, method="truck")
+    response = await api.get(f"{context['prefix']}/orders/{context['order']}/plan")
+    assert response.status_code == 200, response.text
+    plan = response.json()
+    assert plan["organization_id"] == context["org"] and plan["order_id"] == context["order"]
+    assert plan["target_arrival_date"] == target
     dates = [m["planned_date"] for m in plan["milestones"]]
-    assert all(d is not None for d in dates)  # ни одной None/пропущенной даты
+    assert dates and all(d is not None for d in dates)  # ни одной None/пропущенной даты
     assert dates == sorted(dates)  # монотонный обратный waterfall (по возрастанию)
+    assert dates[-1] == target
     assert plan["start_date"] is not None and plan["start_date"] < dates[0]  # старт раньше первого этапа
+    risk = await deadline_contract._owned_review(api, context)
+    assert risk["at_risk"] is True and risk["risk_details"]["schedule_start_in_past"] is True
+    assert risk["risk_details"]["required_by"] == soon and risk["earliest_required_arrival"] < today.isoformat()
+    assert risk["risk_details"]["slack_days"] == 0  # риск старта, а не выдуманное опоздание
+    await deadline_contract._no_physical_writes(session)
 
 
 # ───────────────────────── 3. estimated не перетирает actual ─────────────────────────
