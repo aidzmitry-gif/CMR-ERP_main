@@ -116,9 +116,10 @@ def test_release_head_preserves_the_joint_revision_and_exact_frozen_parents():
     assert not duplicates, f"Duplicate migration revisions: {sorted(duplicates)}"
     assert not parents - set(definitions), f"Missing migration parents: {sorted(parents - set(definitions))}"
     assert {revision.revision for revision in scripts.walk_revisions()} == set(definitions)
-    # The approved release reuses 0198 directly after public 0194; the
-    # historical joint migration remains an ancestor, not the current tip.
-    assert scripts.get_heads() == ["0199"]
+    # The additive 0200 correction follows 0199; all frozen release and
+    # historical joint parents remain exact ancestors of the single head.
+    assert scripts.get_heads() == ["0200"]
+    assert scripts.get_revision("0200").down_revision == "0199"
     assert scripts.get_revision("0199").down_revision == "0198"
     assert scripts.get_revision("0198").down_revision == "0194"
     assert "crm_rel_001_auto_posting_01" in {
