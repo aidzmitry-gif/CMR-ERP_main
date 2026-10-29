@@ -5,6 +5,8 @@ backend sources for isolated verification. The dated image/migration/restore res
 below are historical; current runtime acceptance remains pending. It has no production
 apply command and does not modify or bootstrap `/opt/belakb-deploy-v1`.
 
+Pending source delta0200 after0199: overhead confirmation and month-close SQL now include the optional material account, with strict seven-field history compatibility. Both function baselines are checked; eight-field receipt or correction history prevents downgrade. Native acceptance:10/10 unique cases, original assertions unchanged; immutable legacy bytes/replay, empty and populated roundtrips, invalid-settings rejection and close races covered. This delta is absent from the frozen profile below and requires final source rebind, image, copy-upgrade/restore rehearsal and exact-head CI before production. No R6 replay. No impact on the WMS employee instruction: internal accounting verification only.
+
 Frozen backend application checkpoint: `e31dec4747d7a58de3877be30e3fbdc69266a0a5`.
 Current frontend source checkpoint: `e31dec4747d7a58de3877be30e3fbdc69266a0a5`;
 its new immutable build is pending.

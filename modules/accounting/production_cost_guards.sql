@@ -87,6 +87,7 @@ BEGIN
       'overhead_accounts', p.production_costing::jsonb->'overhead_accounts',
       'wip_account', p.production_costing::jsonb->>'wip_account',
       'finished_goods_account', p.production_costing::jsonb->>'finished_goods_account',
+      'material_inventory_account', p.production_costing::jsonb->>'material_inventory_account',
       'pool_dimensions', p.production_costing::jsonb->'pool_dimensions',
       'order_dimension', p.production_costing::jsonb->>'order_dimension',
       'rounding', p.production_costing::jsonb->>'rounding',
@@ -98,6 +99,12 @@ BEGIN
     saved := CASE WHEN latest.id IS NULL THEN r.review::jsonb->'snapshot'->'source'->'snapshot'
       ELSE latest.preview::jsonb->'snapshot'->'reviewed'->'snapshot'->'source'->'snapshot' END;
     settings := saved->'settings';
+    -- Preserve exact legacy evidence; normalize only an absent optional role.
+    IF jsonb_typeof(settings) = 'object'
+      AND NOT (settings ? 'material_inventory_account')
+      AND p.production_costing::jsonb->>'material_inventory_account' IS NULL THEN
+      settings := settings || jsonb_build_object('material_inventory_account', NULL);
+    END IF;
     IF p.id IS DISTINCT FROM (r.command->'review'->>'policy_id')::integer OR p.effective_from>first_day
       OR policy_settings IS DISTINCT FROM settings THEN
       RAISE EXCEPTION 'Production overhead sources changed or cannot be verified for %; repeat costing before closing', r.month;
