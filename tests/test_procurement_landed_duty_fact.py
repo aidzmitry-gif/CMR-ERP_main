@@ -24,29 +24,16 @@ import pytest
 
 import core.services.sku_master as sku_master_mod
 from modules.procurement.landed_cost import LandedCostService
+from tests.test_procurement_landed_cost import _scoped_landed_order
 
 pytestmark = pytest.mark.asyncio
 
 SVC = LandedCostService()
 
 
-async def _owned_order(api, payload):
-    api.headers["X-User"] = "procurement-owner-test"
-    created = await api.post("/procurement/orders", json=payload)
-    assert created.status_code == 201, created.text
-    books = (await api.get("/accounting/organizations")).json()
-    if not books:
-        company = await api.post("/accounting/organizations", json={"name": "Synthetic procurement company", "unp": "999999994"})
-        assert company.status_code == 201, company.text
-        books = [company.json()]
-    org = books[0]["id"]
-    assigned = await api.post(f"/procurement/organizations/{org}/purchase-ownership", json={
-        "kind": "order", "source_id": created.json()["id"], "evidence": "Explicit synthetic plan/fact fixture"
-    })
-    assert assigned.status_code == 201, assigned.text
-    api.headers["X-Expected-Organization"] = str(org)
-    api.headers["X-Expected-Principal"] = "procurement-owner-test"
-    return created.json()
+async def _owned_order(api, session, payload):
+    return await _scoped_landed_order(api, session, lines=payload["lines"],
+                                      freight_byn=payload.get("freight_byn", 0))
 
 
 def _patch_duty(monkeypatch, pct):
@@ -70,7 +57,7 @@ async def test_landed_plan_fact_reconcile(api, session, monkeypatch):
         "supplier": "Поставщик",
         "lines": [{"sku_code": "RECON-1", "qty": 10, "goods_value_byn": 1000}],
     }
-    order = await _owned_order(api, payload)
+    order = await _owned_order(api, session, payload)
 
     # ПЛАН: предпросмотр landed cost ДО приёмки (то, что видит закупщик в редакторе машины)
     org = api.headers["X-Expected-Organization"]
