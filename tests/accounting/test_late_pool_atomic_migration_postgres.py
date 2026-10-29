@@ -26,12 +26,12 @@ from modules.accounting.production_output_transfer import (
 from modules.accounting.schemas import LineInput, PostingInput
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_production_output_transfer_postgres import (
-    SyntheticProduction,
     _seed_production_book,
     _seed_wip,
     transfer_input,
 )
 from tests.accounting.test_zero_value_output_cost_postgres import run_migration
+from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 pytestmark = pytest.mark.integration
 
@@ -53,11 +53,12 @@ async def test_0153_up_down_up_without_v3_history(pg_factory):
         await session.commit()
 
 
-async def _v3_package_fixture(session, pg_book, policy_id):
-    await _upgrade_to_0153(session)
-    output_data = transfer_input(policy_id)
+async def _v3_package_fixture(session, pg_book, policy_id, production, warehouse, document_id):
+    # Current domain checks must use actual confirmed and accepted output
+    # documents on the registered schema, rather than replaying old migrations.
+    output_data = transfer_input(policy_id).model_copy(update={"output_document_ids": [document_id]})
     output_preview = await prepare_output_transfer(
-        session, pg_book[0], "2026-10", output_data, SyntheticProduction(), object())
+        session, pg_book[0], "2026-10", output_data, production, warehouse)
     output = await confirm_output_transfer(
         session,
         pg_book[0],
@@ -68,8 +69,8 @@ async def _v3_package_fixture(session, pg_book, policy_id):
             "digest": output_preview["digest"],
         }),
         "tester",
-        production=SyntheticProduction(),
-        warehouse_gateway=object(),
+        production=production,
+        warehouse_gateway=warehouse,
     )
     late_posting = PostingInput(
         source=f"accounting:late-pool-test:{pg_book[0]}",
@@ -121,7 +122,10 @@ async def _v3_package_fixture(session, pg_book, policy_id):
         "command_version": 3,
         "material_outputs": [{"output_entry_id": output.id, "amount_byn": "2.00"}],
     }
-    calculation = {"kind": "synthetic-v3", "shares": []}
+    # This fixture posts only WIP, so it has no inventory-value destinations.
+    # Current package verification requires that explicit empty array as well.
+    assert all(line.account not in {"10", "41"} for line in late_posting.lines)
+    calculation = {"kind": "synthetic-v3", "shares": [], "destinations": []}
     posting = late_posting.model_dump(mode="json")
     evidence = correction.preview["ledger_evidence"]
     preview = {
@@ -189,11 +193,17 @@ async def _bind_source_control(session, fixture):
     })
 
 
-async def test_0153_requires_complete_links_and_rejects_history_mutation(pg_factory, pg_book):
+async def test_0153_requires_complete_links_and_rejects_history_mutation(pg_factory, pg_book, issuance_pg):
+    from tests.accounting.test_inventory_allocation_cost_stream_postgres import (
+        accepted_production_outputs,
+    )
+
     policy_id = await _seed_production_book(pg_factory, pg_book)
     await _seed_wip(pg_factory, pg_book, policy_id, [("SHOP", "ORDER-42", "12.50")])
+    production, warehouse, documents, _ = await accepted_production_outputs(
+        issuance_pg[0], pg_factory, pg_book, same_lot=False, order_ids=(42,), lot_by_order={42: "LOT-1"})
     async with pg_factory() as session:
-        fixture = await _v3_package_fixture(session, pg_book, policy_id)
+        fixture = await _v3_package_fixture(session, pg_book, policy_id, production, warehouse, documents[42])
         with pytest.raises(DBAPIError, match="output links are incomplete"):
             async with session.begin_nested():
                 await _insert_package(session, fixture)
