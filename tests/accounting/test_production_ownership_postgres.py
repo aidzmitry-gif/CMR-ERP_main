@@ -498,11 +498,14 @@ async def test_production_receipt_unknown_sku_cannot_enter_stock(issuance_pg, pg
 
 async def test_production_receipt_explicit_qc_partial_acceptance(issuance_pg, pg_book):
     from core.domain.models import Sku
-    from modules.wms.models import Receipt, ReceiptLine, StockMovement, Task
+    from modules.wms.models import Receipt, ReceiptLine, StockMovement, Task, WarehouseDirectory
 
     api, factory = issuance_pg
     api.headers['X-User'] = 'tester'
     async with factory() as session:
+        await session.execute(text("SELECT setval(pg_get_serial_sequence('wms.warehouse_directory','id'), (SELECT max(id) FROM wms.warehouse_directory))"))
+        session.add(WarehouseDirectory(organization_id=pg_book[0], name='Main', title='Synthetic test warehouse',
+                                       wms_enabled=True, prohibit_negative_stock=True, created_by='tester'))
         session.add(Sku(code='SYN-OUTPUT', title='Synthetic output'))
         receipt = Receipt(organization_id=pg_book[0], number='SYN-QC-1', source='production', entity_ref='production:synthetic', warehouse='Main', status='pending_qc')
         session.add(receipt)
@@ -663,11 +666,14 @@ async def test_output_public_prepare_readback_and_principal_isolation(issuance_p
 
     from core.domain.models import OutboxEvent, Sku
     from modules.production.output_documents import OutputDocument
-    from modules.wms.models import Location, StockMovement
+    from modules.wms.models import Location, StockMovement, WarehouseDirectory
 
     api, factory = issuance_pg
     api.headers['X-User'] = 'tester'
     async with factory() as session:
+        await session.execute(text("SELECT setval(pg_get_serial_sequence('wms.warehouse_directory','id'), (SELECT max(id) FROM wms.warehouse_directory))"))
+        session.add(WarehouseDirectory(organization_id=pg_book[0], name='Main', title='Synthetic test warehouse',
+                                       wms_enabled=True, prohibit_negative_stock=True, created_by='tester'))
         order = ProductionOrder(number='SYN-OUTPUT-API', product='Planning product', qty=4)
         place = Location(warehouse='Main', code='OUTPUT-API')
         session.add_all([order, place, Sku(code='OUTPUT-API', title='Catalog product', unit='шт')])
@@ -939,7 +945,7 @@ async def test_production_output_final_qc_and_completion(issuance_pg, pg_book, f
 
     from core.domain.models import Sku
     from modules.production.output_documents import OutputCommand, confirm_output, prepare_output
-    from modules.wms.models import Location, Receipt, ReceiptLine, StockMovement
+    from modules.wms.models import Location, Receipt, ReceiptLine, StockMovement, WarehouseDirectory
     from modules.wms.production_arrivals import ProductionArrival
 
     api, factory = issuance_pg
@@ -947,6 +953,9 @@ async def test_production_output_final_qc_and_completion(issuance_pg, pg_book, f
     core = api._transport.app.state.core
     gateway, user = AccountingService(), CurrentUser('tester', ['director'])
     async with factory() as session:
+        await session.execute(text("SELECT setval(pg_get_serial_sequence('wms.warehouse_directory','id'), (SELECT max(id) FROM wms.warehouse_directory))"))
+        session.add(WarehouseDirectory(organization_id=pg_book[0], name='Main', title='Synthetic test warehouse',
+                                       wms_enabled=True, prohibit_negative_stock=True, created_by='tester'))
         order = ProductionOrder(number='FULL-REJECT', product='Synthetic rejected output', qty=1)
         place = Location(warehouse='Main', code='FULL-REJECT')
         session.add_all([order, place, Sku(code='FULL-REJECT', title='Synthetic output', unit='шт')])
