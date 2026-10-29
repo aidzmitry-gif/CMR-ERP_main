@@ -1,8 +1,8 @@
 """Synthetic automatic-account owners on migrated, test-owned PostgreSQL.
 
-The existing frozen proposal fixture remains unchanged. This wrapper applies
-the registered bank mapping and G26 policy migrations before seeding; it does not prove full CRM head,
-real document admission, statutory approval, month closing or OIDC.
+The shared fixture migrates each fresh owned database to the registered head.
+This wrapper verifies its bank and policy prerequisites before seeding; it does
+not prove real document admission, statutory approval, month closing or OIDC.
 """
 
 import asyncio
@@ -10,14 +10,10 @@ import re
 from copy import deepcopy
 from datetime import date
 from decimal import Decimal
-from importlib.util import module_from_spec, spec_from_file_location
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from fastapi import Request
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select, text
@@ -54,27 +50,19 @@ pytestmark = pytest.mark.integration
 async def automatic_pg(pg_factory, db, book):  # noqa: F811
     factory = pg_factory
 
-    def policy_migration(connection):
+    def registered_prerequisites(connection):
         assert re.fullmatch(r"acc_test_[a-f0-9]{32}", connection.scalar(text("SELECT current_database()")))
         assert connection.scalar(text("SELECT count(*) FROM finance.bank_transaction")) == 0
         assert connection.scalar(text("SELECT count(*) FROM pg_constraint WHERE conrelid='finance.bank_transaction'::regclass "
-                                      "AND conname IN ('bank_statement_direction','bank_statement_provenance')")) == 0
-        assert connection.scalar(text("SELECT to_regclass('finance.bank_statement_source_identity')")) is None
-        # The shared fixture uses current ORM columns with a pre-0135 guard.
-        # Reproduce only the empty legacy column prestate; real0135 adds all guards.
-        connection.execute(text("ALTER TABLE finance.bank_transaction DROP COLUMN direction, DROP COLUMN source_provider, "
-                                "DROP COLUMN source_external_id, DROP COLUMN source_kind, DROP COLUMN source_reference"))
-        with Operations.context(MigrationContext.configure(connection)):
-            for name in ("0135_full_bank_statement_sources", "0137_bank_account_mapping", "crm_rel_001_auto_posting_01"):
-                path = Path(__file__).resolve().parents[2] / f"migrations/versions/{name}.py"
-                spec = spec_from_file_location(name, path)
-                migration = module_from_spec(spec)
-                spec.loader.exec_module(migration)
-                migration.upgrade()
+                                      "AND conname IN ('bank_statement_direction','bank_statement_provenance')")) == 2
+        assert connection.scalar(text("SELECT to_regclass('finance.bank_statement_source_identity')")) is not None
+        assert connection.scalar(text("SELECT count(*) FROM information_schema.columns "
+                                      "WHERE table_schema='accounting' AND table_name='policy' "
+                                      "AND column_name='document_posting'")) == 1
 
     async with factory() as session:
         connection = await session.connection()
-        await connection.run_sync(policy_migration)
+        await connection.run_sync(registered_prerequisites)
         for model in (models.Organization, models.AccessGrant, models.Account, models.Policy,
                       Counterparty, Supplier, WarehouseDirectory):
             for row in (await db.scalars(select(model))).all():
@@ -202,6 +190,13 @@ async def test_pg_automatic_shipment_concurrent_exact_cost_and_authorized_saved_
         fake_receipt, _, options, _ = await shipment_setup(api, session, selected_book, posting)
         services.wms_reservations, services.sales_source = gateway, sales_source
         org = selected_book[0]
+        # This scenario deliberately exercises physical WMS release in its
+        # disposable database; an accounting lot alone does not enable WMS.
+        await session.execute(text("SELECT setval(pg_get_serial_sequence('wms.warehouse_directory', 'id'), "
+                                   "(SELECT max(id) FROM wms.warehouse_directory))"))
+        session.add(WarehouseDirectory(organization_id=org, name="W", title="Synthetic WMS warehouse",
+                                       is_active=True, created_by="tester", wms_enabled=True,
+                                       prohibit_negative_stock=True))
         await invoice(session, 27, [{"sku_code": "SKU", "qty": "1"}, {"sku_code": "SKU", "qty": "2"}], org)
         session.add(StockMovement(organization_id=org, sku_code="SKU", warehouse="W", kind="in", qty="3", reason="receipt"))
         await session.commit()
