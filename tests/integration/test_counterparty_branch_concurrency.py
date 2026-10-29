@@ -9,6 +9,7 @@ async def test_branch_patch_waiters_have_one_winner(pg_app):
     async with _synthetic(pg_app) as (factory, marker, unp, tasks):
         created = await pg_app.post("/system/mdm/counterparty", json={"manual": {
             "name": f"{marker}-base", "legal_name": "Verified synthetic name", "unp": unp,
+            "legal_address": "Synthetic legal address",
         }})
         assert created.status_code == 201, created.text
         parent = created.json()

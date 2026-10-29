@@ -32,7 +32,8 @@ async def test_same_source_id_cannot_cross_legal_and_branch_tables(pg_app, branc
         parent_id = parent.id
         session.add(CounterpartyAlias(counterparty_id=parent_id, source=source, external_ref='parent'))
         await session.commit()
-    legal = {'id': 'collision', 'unp': unp, 'name': source, 'legal_name': source}
+    legal = {'id': 'collision', 'unp': unp, 'name': source, 'legal_name': source,
+             'legal_address': 'Synthetic legal address'}
     branch = {'id': 'collision', 'record_kind': 'branch', 'parent_external_ref': 'parent', 'name': source}
 
     async def contender():
