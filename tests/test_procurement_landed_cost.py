@@ -62,8 +62,69 @@ async def _rows(session):
 # ───────────────────────── фиксация на приёмке + распределение ─────────────────────────
 
 
+async def _scoped_landed_order(api, session, *, lines, freight_byn=0):
+    from core.domain.models import Counterparty
+    from modules.procurement.models import Supplier
+    from modules.procurement.order_creation import PurchaseOrderCreation
+
+    connection = await session.connection()
+    await connection.run_sync(lambda sync: PurchaseOrderCreation.__table__.create(sync, checkfirst=True))
+    party = Counterparty(name="Поставщик", unp="999999993")
+    session.add(party)
+    await session.flush()
+    session.add(Supplier(counterparty_id=party.id, name=party.name, unp=party.unp, status="active"))
+    await session.commit()
+    api.headers["X-User"] = "procurement-owner-test"
+    org_response = await api.post("/accounting/organizations", json={
+        "name": "Synthetic procurement company", "unp": "999999994",
+    })
+    assert org_response.status_code == 201, org_response.text
+    org = org_response.json()["id"]
+    options = await api.get(f"/procurement/organizations/{org}/supplier-options", params={"q": party.name})
+    assert options.status_code == 200, options.text
+    supplier = next(item for item in options.json()["items"] if item["name"] == party.name)
+    api.headers["X-Expected-Organization"] = str(org)
+    api.headers["X-Expected-Principal"] = "procurement-owner-test"
+    created = await api.post(f"/procurement/organizations/{org}/orders", json={
+        "request_key": str(uuid4()), "ownership_evidence": "Synthetic landed-cost fixture",
+        "request_basis": None, "document": {
+            "supplier": supplier["name"], "supplier_id": supplier["id"], "supplier_unp": supplier["unp"],
+            "freight_byn": f"{Decimal(str(freight_byn)):.2f}",
+            "lines": [{"sku_code": line["sku_code"], "qty": f"{Decimal(str(line['qty'])):.2f}",
+                       "goods_value_byn": f"{Decimal(str(line['goods_value_byn'])):.2f}",
+                       "weight": f"{Decimal(str(line.get('weight', 0))):.3f}",
+                       "volume": f"{Decimal(str(line.get('volume', 0))):.4f}"} for line in lines],
+        },
+    })
+    assert created.status_code == 201, created.text
+    return {"id": created.json()["order_id"]}
+
+
+async def _scoped_landed_next_order(api, session, *, lines):
+    from modules.procurement.models import PurchaseOrder
+
+    org = api.headers["X-Expected-Organization"]
+    options = await api.get(f"/procurement/organizations/{org}/supplier-options", params={"q": "Поставщик"})
+    assert options.status_code == 200, options.text
+    supplier = next(item for item in options.json()["items"] if item["name"] == "Поставщик")
+    created = await api.post(f"/procurement/organizations/{org}/orders", json={
+        "request_key": str(uuid4()), "ownership_evidence": "Synthetic landed-cost fixture",
+        "request_basis": None, "document": {
+            "supplier": supplier["name"], "supplier_id": supplier["id"], "supplier_unp": supplier["unp"],
+            "freight_byn": "0.00",
+            "lines": [{"sku_code": line["sku_code"], "qty": f"{Decimal(str(line['qty'])):.2f}",
+                       "goods_value_byn": f"{Decimal(str(line['goods_value_byn'])):.2f}",
+                       "weight": "0.000", "volume": "0.0000"} for line in lines],
+        },
+    })
+    assert created.status_code == 201, created.text
+    order = await session.get(PurchaseOrder, created.json()["order_id"])
+    assert order is not None
+    return {"id": order.id, "number": order.number}
+
+
 async def test_receive_fixates_unit_cost_no_freight(api, session):
-    order = await _order(api, lines=[{"sku_code": "SKU-1", "qty": 10, "goods_value_byn": 1500}])
+    order = await _scoped_landed_order(api, session, lines=[{"sku_code": "SKU-1", "qty": 10, "goods_value_byn": 1500}])
     await _receive(api, order["id"])
 
     rows = await _rows(session)
@@ -78,8 +139,8 @@ async def test_receive_fixates_unit_cost_no_freight(api, session):
 
 async def test_freight_allocated_across_positions_by_weight(api, session):
     """Ключевая денежная фича: фрахт заказа распределяется на позиции (по весу)."""
-    order = await _order(
-        api,
+    order = await _scoped_landed_order(
+        api, session,
         freight_byn=200,
         lines=[
             {"sku_code": "A", "qty": 10, "goods_value_byn": 100, "weight": 6},
@@ -113,7 +174,7 @@ async def test_duplicate_sku_lines_aggregated(api, session):
 
 async def test_receive_emits_landed_cost_calculated(api, session):
     """Приёмка эмитит procurement.landed_cost.calculated по каждой номенклатуре (push для sales)."""
-    order = await _order(api, lines=[{"sku_code": "EMIT-1", "qty": 10, "goods_value_byn": 1500}])
+    order = await _scoped_landed_order(api, session, lines=[{"sku_code": "EMIT-1", "qty": 10, "goods_value_byn": 1500}])
     await _receive(api, order["id"])
 
     events = (
@@ -164,7 +225,7 @@ async def test_invalid_status_rejected(api):
 
 async def test_repeated_receive_no_duplicate(api, session):
     """Повторная приёмка (received→received, no-op) не плодит дубль и не падает (идемпотентность)."""
-    order = await _order(api, lines=[{"sku_code": "SKU-1", "qty": 10, "goods_value_byn": 1500}])
+    order = await _scoped_landed_order(api, session, lines=[{"sku_code": "SKU-1", "qty": 10, "goods_value_byn": 1500}])
     await _receive(api, order["id"])
     await _receive(api, order["id"])  # received→received — no-op, без новой фиксации
 
@@ -175,7 +236,7 @@ async def test_repeated_receive_no_duplicate(api, session):
 
 
 async def test_last_landed_cost_returns_dict(api, session):
-    order = await _order(api, lines=[{"sku_code": "SKU-9", "qty": 8, "goods_value_byn": 200}])
+    order = await _scoped_landed_order(api, session, lines=[{"sku_code": "SKU-9", "qty": 8, "goods_value_byn": 200}])
     await _receive(api, order["id"])
 
     got = await SVC.last_landed_cost(session, "SKU-9")
@@ -194,9 +255,9 @@ async def test_last_landed_cost_none_when_no_row(session):
 
 async def test_last_landed_cost_returns_latest_for_sku(api, session):
     """Два заказа по одному sku_code → отдаём последний по фиксации."""
-    o1 = await _order(api, lines=[{"sku_code": "SKU-7", "qty": 10, "goods_value_byn": 1000}])
+    o1 = await _scoped_landed_order(api, session, lines=[{"sku_code": "SKU-7", "qty": 10, "goods_value_byn": 1000}])
     await _receive(api, o1["id"])
-    o2 = await _order(api, lines=[{"sku_code": "SKU-7", "qty": 10, "goods_value_byn": 2000}])
+    o2 = await _scoped_landed_next_order(api, session, lines=[{"sku_code": "SKU-7", "qty": 10, "goods_value_byn": 2000}])
     await _receive(api, o2["id"])
 
     got = await SVC.last_landed_cost(session, "SKU-7")
@@ -206,7 +267,7 @@ async def test_last_landed_cost_returns_latest_for_sku(api, session):
 
 async def test_batch_returns_key_for_every_input(api, session):
     """Батч обязан вернуть ключ для КАЖДОГО входного кода (None, если строки нет)."""
-    order = await _order(api, lines=[{"sku_code": "SKU-A", "qty": 10, "goods_value_byn": 1000}])
+    order = await _scoped_landed_order(api, session, lines=[{"sku_code": "SKU-A", "qty": 10, "goods_value_byn": 1000}])
     await _receive(api, order["id"])
 
     got = await SVC.last_landed_cost_batch(session, ["SKU-A", "SKU-B", "SKU-A"])
