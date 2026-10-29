@@ -2,20 +2,14 @@
 # ruff: noqa: F811 -- imported PostgreSQL fixtures are registered by pytest.
 import hashlib
 import json
-import os
 import re
-import subprocess
-import sys
 from datetime import datetime
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import select, text
-from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from core.domain.models import Sku
 from core.services.auth import CurrentUser
@@ -38,59 +32,14 @@ from modules.accounting.schemas import LineInput, PostingInput
 from modules.production.accounting_ownership import ProductionOrderOwnership
 from modules.production.models import ProductionOrder
 from modules.production.output_documents import OutputCommand, confirm_output, prepare_output
-from modules.wms.models import Location
+from modules.wms.models import Location, WarehouseDirectory
 from modules.wms.reservation_gateway import WmsReservationService
-from tests.accounting.test_postgres import pg_book  # noqa: F401 -- pytest registration.
+from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401 -- pytest registration.
 from tests.accounting.test_production_output_transfer_postgres import (
     SyntheticProduction,
     _seed_production_book,
     transfer_input,
 )
-
-
-@pytest_asyncio.fixture
-async def pg_factory():
-    """Reuse disposable-DB ownership and full-migration integration patterns."""
-    raw = os.environ["ACCOUNTING_TEST_POSTGRES_URL"]
-    parsed = make_url(raw)
-    assert parsed.host == "127.0.0.1" and parsed.port == 55436 and parsed.database == "accounting_test"
-    inspected = subprocess.run(["docker", "inspect", "--format",
-        '{{.Id}} {{index .Config.Labels "codex.task"}} {{.State.Running}}', "crm-rel001-r362-pg"],
-        capture_output=True, check=True, timeout=10).stdout.decode().split()
-    assert len(inspected) == 3 and inspected[1:] == ["CRM-REL-001-R362", "true"]
-    database = "acc_test_" + uuid4().hex
-    admin = create_async_engine(raw, isolation_level="AUTOCOMMIT")
-    engine = None
-    created = False
-    try:
-        async with admin.connect() as connection:
-            await connection.execute(text(f'CREATE DATABASE "{database}"'))
-            created = True
-            await connection.execute(text(f'COMMENT ON DATABASE "{database}" IS \'crm-acc-fixture:{database}\''))
-        target = parsed.set(database=database).render_as_string(hide_password=False)
-        directory = Path(os.environ["R362_REPRO_EVIDENCE"]).parent
-        with (directory / f"per-test-full-migration-{database}.private.log").open("xb") as log:
-            subprocess.run([sys.executable, "-B", "-m", "alembic", "upgrade", "head"],
-                env=dict(os.environ, AIOS_ENVIRONMENT="dev", AIOS_DATABASE_URL=target),
-                stdout=log, stderr=subprocess.STDOUT, check=True, timeout=150)
-        engine = create_async_engine(parsed.set(database=database))
-        async with engine.connect() as connection:
-            version = await connection.scalar(text("SELECT version_num FROM alembic_version"))
-        assert version == "0193"
-        marker = {"alembicVersion": version, "ownedContainerId": inspected[0], "containerLabel": inspected[1],
-                  "database": database, "freshDatabase": True, "productionWrites": 0}
-        with Path(os.environ["R362_SCHEMA_EVIDENCE"]).open("x", encoding="utf-8") as handle:
-            json.dump(marker, handle, indent=2)
-        yield async_sessionmaker(engine, expire_on_commit=False)
-    finally:
-        if engine is not None:
-            await engine.dispose()
-        if created:
-            async with admin.connect() as connection:
-                marker = await connection.scalar(text("SELECT shobj_description(oid,'pg_database') FROM pg_database WHERE datname=:name"), {"name": database})
-                assert marker == "crm-acc-fixture:" + database
-                await connection.execute(text(f'DROP DATABASE "{database}"'))
-        await admin.dispose()
 
 
 def safe_failure(error):
@@ -120,16 +69,22 @@ def safe_failure(error):
     return result
 
 
-async def test_owned_output_confirm_exact_snapshot_postgres(pg_factory, pg_book):
+async def test_owned_output_confirm_exact_snapshot_postgres(pg_factory, pg_book, tmp_path):
     """Real ledger, ownership, immutable receipt and source controls; synthetic physical facts."""
-    evidence = Path(os.environ["R362_REPRO_EVIDENCE"])
-    proof = {"baseline": "ae71eb115816f670086c095bddefd29501a85d08", "testsPlanned": 1,
+    evidence = tmp_path / "owned-output-confirm.json"
+    proof = {"testsPlanned": 1,
              "productionWrites": 0, "humanLogin": False, "imageRebuilt": False,
              "fixture": "fresh marked full-head DB + pg_book + real output services + synthetic reconciliation",
              "previewPassed": False, "confirmAttempted": False, "confirmPassed": False}
     policy_id = await _seed_production_book(pg_factory, pg_book)
     documents = []
     async with pg_factory() as session:
+        # pg_book imports explicit IDs; advance only this disposable database's sequence.
+        await session.execute(text("SELECT setval(pg_get_serial_sequence('wms.warehouse_directory','id'), (SELECT max(id) FROM wms.warehouse_directory))"))
+        session.add(WarehouseDirectory(organization_id=pg_book[0], name="Main", title="Synthetic output warehouse",
+                                       is_active=True, wms_enabled=True, prohibit_negative_stock=True, created_by="tester"))
+        await session.flush()
+        proof["alembicVersion"] = await session.scalar(text("SELECT version_num FROM alembic_version"))
         order = ProductionOrder(id=42, number="ORDER-42", product="Synthetic widget", qty=10,
                                 stage="planned", created_at=datetime(2026, 10, 1))
         session.add(order)
