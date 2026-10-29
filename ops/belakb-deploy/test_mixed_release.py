@@ -104,9 +104,10 @@ class Guards(unittest.TestCase):
         self.assertIn('tests/__init__.py', package.PROOFS)
         self.assertIn('tests/integration/__init__.py', package.PROOFS)
         self.assertIn('docs/accounting/migration-proposal.py', package.PROOFS)
-        self.assertEqual(package.APPLICATION_CHECKPOINT, 'e31dec4747d7a58de3877be30e3fbdc69266a0a5')
+        self.assertEqual(package.APPLICATION_CHECKPOINT, 'e370d19cbf559a2f52ce8bf220087db1ec2e4763')
         self.assertEqual(package.PINS['procurement'], '95d8a9f0bf1350bfdc67a8d96215aed7f479322a')
-        self.assertEqual(package.HEAD, '0199')
+        self.assertEqual(package.HEAD, '0200')
+        self.assertEqual(package.PINS['logistics'], '6f66bf050d4ee00937e32df3c0e32c9a8559f7eb')
         self.assertIn('requirements.lock.txt', package.ROOT_FILES)
         for path in ('tests/private.py', 'tests/fixtures/customer.json', 'docs/accounting/private.py'):
             self.assertFalse(package.selected(path))

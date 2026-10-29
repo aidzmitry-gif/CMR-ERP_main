@@ -15,16 +15,16 @@ from pathlib import Path, PurePosixPath
 
 CHAIN = 'CRM-REL-001'
 OPT_IN = CHAIN + '-isolated-only'
-APPLICATION_CHECKPOINT = 'e31dec4747d7a58de3877be30e3fbdc69266a0a5'
+APPLICATION_CHECKPOINT = 'e370d19cbf559a2f52ce8bf220087db1ec2e4763'
 # Existing immutable PR63 image: 58 active candidate lock requirements verified.
 RUNTIME = 'sha256:da6b12c4a9b83f14e88026739609bd372820ae0a6f5fe44488b7b2834e69018a'
 RUNTIME_ALIAS = 'belakb-pr63-backend-runtime-deps:20261027-01'
-HEAD = '0199'
+HEAD = '0200'
 PINS = {
     'finance': 'e27167d3245c955f16aaf70c59d4bf9e085d5ee8',
     'hr': 'f8a6e0142f1920b07ec56818f42d156a602ff9c3',
     'leads': '9a304f771ba74369ded199168e0e1da3ad6348d2',
-    'logistics': '6923d2e021980ef2546f382364d38dc34a0fef29',
+    'logistics': '6f66bf050d4ee00937e32df3c0e32c9a8559f7eb',
     'marketing': 'd4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282',
     'procurement': '95d8a9f0bf1350bfdc67a8d96215aed7f479322a',
     'production': 'be7d7e198bf09cc41c642d22125db401da5adc48',

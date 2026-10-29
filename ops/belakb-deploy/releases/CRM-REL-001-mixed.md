@@ -1,5 +1,32 @@
 # CRM-REL-001 mixed release preparation
 
+Status: **CANDIDATE SOURCE BOUND; FULL CI AND RUNTIME GATES PENDING**, `release_ready=false`.
+
+Current application checkpoint: `e370d19cbf559a2f52ce8bf220087db1ec2e4763`.
+The existing strict exporter is rebound to this committed backend/import closure,
+all ten exact gitlinks and candidate Alembic head `0200` (`0194 → 0198 → 0199 → 0200`).
+LOG-6 is `6f66bf050d4ee00937e32df3c0e32c9a8559f7eb`; the other nine pins are unchanged.
+The package checkpoint must contain the updated exporter and have byte-identical
+selected application Git objects and gitlinks. Working/untracked files are excluded.
+
+Local preparation checks: 75/75 exporter/rehearsal guard tests pass on this
+profile rebind (3.487s). Docker, PostgreSQL and Git export are mocked in these
+guard tests. Full Ruff and a fresh real committed-source export are recorded in
+private phase89 evidence; image, production admission and restore stay pending.
+The old profile58 artifact remains frozen historical evidence below. Its image,
+manifest and copy results do not accept this later source. No source export is
+silently relabelled or rebuilt under the old identifier.
+
+Remaining: publish sanitized module/root objects; mandatory full CI for the exact
+package commit; build and verify one immutable backend image and frontend bundle;
+refresh actual runtime/cluster admission; rehearse upgrade on a copy and separately
+restore backup; independent release review; authorized switch and final user scenario.
+Production keeps 1C primary, WMS OFF and negative-stock guard ON. No R6 replay.
+No new runtime settings, migration numbers or employee workflow are introduced by
+this profile update; no impact on the WMS employee instruction.
+
+## Frozen profile58 and earlier source preparation (historical)
+
 Status: **ACCEPTED PROFILE FROZEN; CANDIDATE SOURCE REBIND PENDING**, `release_ready=false`. This route exports committed
 backend sources for isolated verification. The dated image/migration/restore results
 below are historical; current runtime acceptance remains pending. It has no production
