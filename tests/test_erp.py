@@ -38,32 +38,65 @@ async def erp_organization(api):
     return response.json()["id"]
 
 
-async def test_procurement(api, erp_organization):
-    r = await api.post(
-        "/procurement/requests", json={"supplier": "ООО Поставщик", "item": "Болты", "qty": 100}
-    )
-    assert r.status_code == 201
-    assert r.json()["stage"] == "need"
-    assert r.json()["number"].startswith("ЗАК-")
-    items = (await api.get("/procurement/requests")).json()
-    assert any(i["item"] == "Болты" for i in items)
-    # доска воронки: стадии по порядку, заявка в первой колонке
-    board = (await api.get("/procurement/board")).json()
+async def test_procurement(api, session, erp_organization):
+    from datetime import date
+    from uuid import uuid4
+
+    from core.runtime.funnel import build_board
+    from modules.procurement import routes
+    from modules.procurement.models import PurchaseRequest
+    from modules.procurement.ownership import PurchaseOwnership
+    from modules.procurement.stages import STAGES
+
+    path = f"/procurement/organizations/{erp_organization}/requests"
+    headers = {"X-Expected-Principal": "erp-test-owner"}
+    command = {"request_key": str(uuid4()),
+               "document": {"supplier": "ООО Поставщик", "item": "Болты", "qty": 100, "amount": "0.00"},
+               "ownership_evidence": "Synthetic ERP request belongs to this test company"}
+    created = await api.post(path, json=command, headers=headers)
+    assert created.status_code == 201, created.text
+    receipt = created.json()
+    assert receipt["stage"] == "need"
+    assert receipt["number"].startswith(f"ЗАК-{date.today().year}-")
+    owner = await session.get(PurchaseOwnership, receipt["ownership_id"])
+    assert (owner.organization_id, owner.kind, owner.source_id) == (erp_organization, "request", receipt["request_id"])
+
+    listing_path = f"/procurement/organizations/{erp_organization}/owned-sources?kind=request"
+    listing = await api.get(listing_path)
+    assert listing.status_code == 200, listing.text
+    items = listing.json()["items"]
+    item = next(i for i in items if i["id"] == receipt["request_id"])
+    assert item["item"] == "Болты" and item["quantity"] == "100" and item["stage"] == "need"
+    # Common reads stay retired; a company-scoped success must not reopen them.
+    assert (await api.get("/procurement/requests")).status_code == 410
+    assert (await api.get("/procurement/board")).status_code == 410
+    # Retain the existing card/stage projection assertions using the owned row.
+    row = await session.get(PurchaseRequest, receipt["request_id"])
+    board = build_board(STAGES, [row], routes._to_card).model_dump()
     assert [s["id"] for s in board["stages"]][0] == "need"
     assert sum(s["count"] for s in board["stages"]) >= 1
-    # балл поставщика на карточке — реальный (по supplier_id); без привязки поставщика — пусто
-    ownership = await api.post(
-        f"/procurement/organizations/{erp_organization}/purchase-ownership",
-        json={"kind": "request", "source_id": r.json()["id"],
-              "evidence": "Synthetic ERP request belongs to this test company"},
-    )
-    assert ownership.status_code == 201, ownership.text
-    moved = await api.patch(f"/procurement/requests/{r.json()['id']}", json={"stage": "nego"})
-    assert moved.status_code == 200, moved.text
-    assert moved.json()["stage"] == "nego"
-    board2 = (await api.get("/procurement/board")).json()
+
+    stage_path = path + f'/{receipt["request_id"]}/stage'
+    assert (await api.patch(stage_path, json={"expected_stage": "need", "stage": "nego"}, headers=headers)).status_code == 409
+    for expected, target in (("need", "sourcing"), ("sourcing", "nego")):
+        moved = await api.patch(stage_path, json={"expected_stage": expected, "stage": target}, headers=headers)
+        assert moved.status_code == 200, moved.text
+        assert moved.json()["stage"] == target
+    row = await session.get(PurchaseRequest, receipt["request_id"], populate_existing=True)
+    board2 = build_board(STAGES, [row], routes._to_card).model_dump()
     nego = next(s for s in board2["stages"] if s["id"] == "nego")
-    assert nego["cards"][0]["score"] == ""  # supplier_id не задан → балла нет (не заглушка «8.7»)
+    assert nego["count"] == 1 and nego["cards"][0]["id"] == receipt["request_id"]
+    assert nego["cards"][0]["score"] == ""  # no supplier_id means no invented supplier score
+    current = await api.get(listing_path)
+    assert current.status_code == 200, current.text
+    assert next(i for i in current.json()["items"] if i["id"] == receipt["request_id"])["stage"] == "nego"
+    replay = await api.post(path, json=command, headers=headers)
+    assert replay.status_code == 201 and replay.json() == receipt
+    other = await api.post("/accounting/organizations", json={"name": "Other synthetic ERP company", "unp": "999999993"})
+    assert other.status_code == 201, other.text
+    other_listing = await api.get(f'/procurement/organizations/{other.json()["id"]}/owned-sources?kind=request')
+    assert other_listing.status_code == 200, other_listing.text
+    assert all(i["id"] != receipt["request_id"] for i in other_listing.json()["items"])
 
 
 async def test_production(api):
