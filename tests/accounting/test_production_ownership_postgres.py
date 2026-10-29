@@ -475,11 +475,14 @@ async def test_production_creation_public_replay(issuance_pg, pg_book):
             assert await session.scalar(select(func.count()).select_from(model)) == 1
 
 async def test_production_receipt_unknown_sku_cannot_enter_stock(issuance_pg, pg_book):
-    from modules.wms.models import Receipt, ReceiptLine, StockMovement, Task
+    from modules.wms.models import Receipt, ReceiptLine, StockMovement, Task, WarehouseDirectory
 
     api, factory = issuance_pg
     api.headers['X-User'] = 'tester'
     async with factory() as session:
+        await session.execute(text("SELECT setval(pg_get_serial_sequence('wms.warehouse_directory','id'), (SELECT max(id) FROM wms.warehouse_directory))"))
+        session.add(WarehouseDirectory(organization_id=pg_book[0], name='Main', title='Synthetic test warehouse',
+                                       wms_enabled=True, created_by='tester'))
         receipt = Receipt(organization_id=pg_book[0], source='production', entity_ref='production:synthetic', warehouse='Main', status='pending_qc')
         session.add(receipt)
         await session.flush()
