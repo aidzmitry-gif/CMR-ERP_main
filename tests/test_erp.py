@@ -108,27 +108,62 @@ async def test_production(api):
     assert [s["id"] for s in board["stages"]][0] == "queue"
 
 
-async def test_wms(api, erp_organization):
-    r = await api.post("/wms/movements", json={"organization_id": erp_organization, "sku_code": "AKB-60", "kind": "in", "qty": 50})
-    assert r.status_code == 201
-    movements = (await api.get("/wms/movements")).json()
+async def test_wms(api, session, erp_organization):
+    from decimal import Decimal
+
+    from sqlalchemy import func, select
+
+    from core.domain.models import User
+    from modules.wms.models import WarehouseOp
+
+    # Explicit company/warehouse opening movement, not a supplier primary receipt.
+    r = await api.post("/wms/movements", json={"organization_id": erp_organization, "warehouse": "Минск",
+                        "sku_code": "AKB-60", "kind": "in", "qty": 50, "reason": "opening"})
+    assert r.status_code == 201, r.text
+    assert (r.json()["organization_id"], r.json()["warehouse"], r.json()["qty"]) == (erp_organization, "Минск", 50.0)
+    movements = (await api.get(f"/wms/movements?organization_id={erp_organization}&warehouse=Минск")).json()
     assert movements[0]["sku_code"] == "AKB-60" and movements[0]["kind"] == "in"
-    # воронка складских операций
+    # The retired unscoped writer cannot create a pretend warehouse operation.
+    assert await session.scalar(select(func.count()).select_from(WarehouseOp)) == 0
     op = await api.post("/wms/ops", json={"counterparty": "ООО Поставка", "title": "Металл", "items_count": 12, "amount": 500000})
-    assert op.status_code == 201 and op.json()["stage"] == "inbound"
-    moved = await api.patch(f"/wms/ops/{op.json()['id']}", json={"stage": "receiving"})
-    assert moved.json()["stage"] == "receiving"
-    assert len((await api.get("/wms/ops")).json()) >= 1
-    assert (await api.patch("/wms/ops/999999", json={"stage": "qc"})).status_code == 404
+    assert op.status_code == 409, op.text
+    assert await session.scalar(select(func.count()).select_from(WarehouseOp)) == 0
+    # Historical read compatibility has explicit legacy fixtures. Actual QC,
+    # acceptance and putaway/pick remain covered by unchanged test_wms_tasks.
+    waiting = WarehouseOp(number="ОП-LEGACY-1", counterparty="ООО Поставка", title="Металл",
+                          items_count=12, amount=Decimal("500000.00"), stage="inbound")
+    receiving = WarehouseOp(number="ОП-LEGACY-2", counterparty="ООО Поставка", title="Металл",
+                            items_count=12, amount=Decimal("500000.00"), stage="receiving")
+    session.add_all([waiting, receiving])
+    await session.commit()
+    moved = await api.patch(f"/wms/ops/{waiting.id}", json={"stage": "receiving"})
+    assert moved.status_code == 409, moved.text
+    assert (await api.patch("/wms/ops/999999", json={"stage": "qc"})).status_code == 409
+    await session.refresh(waiting)
+    await session.refresh(receiving)
+    assert waiting.stage == "inbound" and receiving.stage == "receiving"
+    assert waiting.items_count == receiving.items_count == 12
+    assert waiting.amount == receiving.amount == Decimal("500000.00")
+    assert await session.scalar(select(func.count()).select_from(WarehouseOp)) == 2
+    historical = (await api.get("/wms/ops")).json()
+    assert len(historical) >= 1
+    assert {row["id"] for row in historical} == {waiting.id, receiving.id}
     board = (await api.get("/wms/board")).json()
     assert [s["id"] for s in board["stages"]][0] == "inbound"
-    # на приёмке карточка получает soft-панель пересчёта и кнопку-действие
+    inbound = next(s for s in board["stages"] if s["id"] == "inbound")
+    assert inbound["count"] == 1 and inbound["cards"][0]["id"] == waiting.id
+    # Retain historical receiving-card details/action without claiming real QC.
     recv = next(s for s in board["stages"] if s["id"] == "receiving")
+    assert recv["count"] == 1 and recv["cards"][0]["id"] == receiving.id
     assert recv["cards"][0]["details"] and recv["cards"][0]["action"] == "Завершить приёмку"
     # RBAC воронки операций: чтение — wms.read (логистика ок), запись — wms.count (логистика 403)
-    assert (await api.get("/wms/ops", headers={"X-User-Roles": "logistics"})).status_code == 200
+    session.add(User(username="erp-history-logistician", full_name="Synthetic history reader", role="logistics", status="active"))
+    await session.commit()
+    logistics_headers = {"X-User": "erp-history-logistician", "X-User-Roles": "logistics"}
+    assert (await api.get("/wms/ops", headers=logistics_headers)).status_code == 200
     assert (await api.post("/wms/ops", json={"title": "x"},
-                           headers={"X-User-Roles": "logistics"})).status_code == 403
+                           headers=logistics_headers)).status_code == 403
+    assert await session.scalar(select(func.count()).select_from(WarehouseOp)) == 2
 
 
 async def test_wms_stock_mirror(api, session):
