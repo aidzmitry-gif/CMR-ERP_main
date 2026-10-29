@@ -1,0 +1,205 @@
+{
+  "format": 1,
+  "synthetic": true,
+  "reference_commit": "e3ffab79c3e1c233267a7373f97e1c2c62b3cf01",
+  "reference_submodules": {
+    "modules/finance": "afdf0134231a589c1d41c5e70e36a77a2ced50e7",
+    "modules/hr": "59204510f1d9b3cded7ac546b4e9f0e243e085de",
+    "modules/leads": "9a304f771ba74369ded199168e0e1da3ad6348d2",
+    "modules/logistics": "6923d2e021980ef2546f382364d38dc34a0fef29",
+    "modules/marketing": "d4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282",
+    "modules/procurement": "c2483d60b4bc22526cd8e2694053fd9eddfdc273",
+    "modules/production": "85c495fb8392d0ad0713c2f2c94b1df0f0a678bd",
+    "modules/sales": "da17212c414a9bc1773ffedbdc964e15c55fde5e",
+    "modules/service": "3d33800c44865cd7a7373b29192c5d59d3c4bec8",
+    "modules/wms": "ae6cd854dfe58c5de08f98a47f05e861780aae4d"
+  },
+  "source_node": "tests/accounting/test_zero_value_sale_postgres.py::test_zero_sale_persists_revenue_and_quantity_once[True-20]",
+  "initial_revision": "0143",
+  "final_revision": "0148",
+  "transactions": [
+    {
+      "revision": "0143",
+      "insert": {
+        "organization": [
+          "{\"id\":1,\"name\":\"Synthetic test company\",\"unp\":\"999999999\",\"generation\":0}"
+        ],
+        "access_grant": [
+          "{\"id\":1,\"organization_id\":1,\"subject\":\"tester\",\"role\":\"chief\"}"
+        ],
+        "account": [
+          "{\"id\":1,\"organization_id\":1,\"code\":\"41\",\"title\":\"Товары\",\"category\":\"asset\",\"valid_from\":\"2026-01-01\",\"required_dimensions\":[],\"currency_tracking\":true,\"quantity_tracking\":false,\"cash\":false,\"normative_ref\":\"synthetic\"}",
+          "{\"id\":10,\"organization_id\":1,\"code\":\"20\",\"title\":\"Synthetic WIP\",\"category\":\"asset\",\"valid_from\":\"2026-01-01\",\"required_dimensions\":[\"department\", \"order\"],\"currency_tracking\":false,\"quantity_tracking\":false,\"cash\":false,\"normative_ref\":\"Synthetic\"}",
+          "{\"id\":11,\"organization_id\":1,\"code\":\"43\",\"title\":\"Synthetic finished goods\",\"category\":\"asset\",\"valid_from\":\"2026-01-01\",\"required_dimensions\":[\"warehouse\", \"sku\", \"lot\"],\"currency_tracking\":false,\"quantity_tracking\":true,\"cash\":false,\"normative_ref\":\"Synthetic\"}",
+          "{\"id\":2,\"organization_id\":1,\"code\":\"51\",\"title\":\"Расчетный счет\",\"category\":\"asset\",\"valid_from\":\"2026-01-01\",\"required_dimensions\":[],\"currency_tracking\":true,\"quantity_tracking\":false,\"cash\":true,\"normative_ref\":\"synthetic\"}",
+          "{\"id\":3,\"organization_id\":1,\"code\":\"60\",\"title\":\"Поставщики\",\"category\":\"liability\",\"valid_from\":\"2026-01-01\",\"required_dimensions\":[],\"currency_tracking\":true,\"quantity_tracking\":false,\"cash\":false,\"normative_ref\":\"synthetic\"}",
+          "{\"id\":4,\"organization_id\":1,\"code\":\"62\",\"title\":\"Покупатели\",\"category\":\"asset\",\"valid_from\":\"2026-01-01\",\"required_dimensions\":[],\"currency_tracking\":true,\"quantity_tracking\":false,\"cash\":false,\"normative_ref\":\"synthetic\"}",
+          "{\"id\":5,\"organization_id\":1,\"code\":\"80\",\"title\":\"Капитал\",\"category\":\"equity\",\"valid_from\":\"2026-01-01\",\"required_dimensions\":[],\"currency_tracking\":true,\"quantity_tracking\":false,\"cash\":false,\"normative_ref\":\"synthetic\"}",
+          "{\"id\":6,\"organization_id\":1,\"code\":\"90.1\",\"title\":\"Доход\",\"category\":\"income\",\"valid_from\":\"2026-01-01\",\"required_dimensions\":[],\"currency_tracking\":true,\"quantity_tracking\":false,\"cash\":false,\"normative_ref\":\"synthetic\"}",
+          "{\"id\":7,\"organization_id\":1,\"code\":\"90.4\",\"title\":\"Себестоимость\",\"category\":\"expense\",\"valid_from\":\"2026-01-01\",\"required_dimensions\":[],\"currency_tracking\":true,\"quantity_tracking\":false,\"cash\":false,\"normative_ref\":\"synthetic\"}",
+          "{\"id\":8,\"organization_id\":1,\"code\":\"003\",\"title\":\"Имущество клиента\",\"category\":\"off_balance\",\"valid_from\":\"2026-01-01\",\"required_dimensions\":[],\"currency_tracking\":true,\"quantity_tracking\":false,\"cash\":false,\"normative_ref\":\"synthetic\"}",
+          "{\"id\":9,\"organization_id\":1,\"code\":\"25\",\"title\":\"Synthetic overhead\",\"category\":\"expense\",\"valid_from\":\"2026-01-01\",\"required_dimensions\":[\"department\"],\"currency_tracking\":false,\"quantity_tracking\":false,\"cash\":false,\"normative_ref\":\"Synthetic\"}"
+        ],
+        "policy": [
+          "{\"id\":1,\"organization_id\":1,\"effective_from\":\"2026-01-01\",\"reference\":\"TEST ONLY\",\"inventory_method\":\"specific\",\"allocation_basis\":\"direct_cost\",\"depreciation_method\":\"straight_line\",\"normative_reference\":\"synthetic control fixture\",\"normative_verified\":true,\"financial_closing\":null,\"currency_revaluation\":null,\"late_cost_allocation\":null,\"production_costing\":null,\"approved_by\":\"tester\"}",
+          "{\"id\":2,\"organization_id\":1,\"effective_from\":\"2026-10-01\",\"reference\":\"Synthetic production transfer policy\",\"inventory_method\":\"specific\",\"allocation_basis\":\"direct_cost\",\"depreciation_method\":\"straight_line\",\"normative_reference\":\"Synthetic only\",\"normative_verified\":false,\"financial_closing\":null,\"currency_revaluation\":null,\"late_cost_allocation\":null,\"production_costing\":{\"overhead_accounts\": [\"25\"], \"wip_account\": \"20\", \"finished_goods_account\": \"43\", \"pool_dimensions\": [\"department\"], \"order_dimension\": \"order\", \"rounding\": \"largest_remainder_cent\", \"reference\": \"Synthetic reviewed production transfer\"},\"approved_by\":\"tester\"}"
+        ]
+      },
+      "update": {}
+    },
+    {
+      "revision": "0143",
+      "insert": {
+        "period": [
+          "{\"id\":1,\"organization_id\":1,\"month\":\"2026-10\",\"closed\":false,\"generation\":1,\"closed_generation\":null,\"evidence\":{}}"
+        ],
+        "entry": [
+          "{\"id\":1,\"organization_id\":1,\"source\":\"production:wip:42\",\"source_version\":1,\"operation\":\"manual\",\"document_date\":\"2026-10-10\",\"operation_date\":\"2026-10-10\",\"posting_date\":\"2026-10-10\",\"policy_id\":2,\"rule_version\":\"synthetic-wip-v1\",\"explanation\":\"Synthetic reviewed WIP cost\",\"opening\":false,\"correction_of\":null,\"digest\":\"523c3c601b73b525df0af8cd991bf5d75743ae4512c17de15b57016c16f6fa56\",\"actor\":\"tester\",\"created_at\":\"2026-10-29T13:21:59.878035+03:00\"}"
+        ],
+        "line": [
+          "{\"id\":1,\"entry_id\":1,\"account_id\":10,\"account_code\":\"20\",\"account_title\":\"Synthetic WIP\",\"category\":\"asset\",\"cash\":false,\"side\":\"debit\",\"amount\":100.00,\"dimensions\":{\"department\": \"SHOP\", \"order\": \"ORDER-42\"},\"currency\":\"BYN\",\"original_amount\":null,\"rate\":null,\"rate_scale\":null,\"rate_date\":null,\"rate_source\":null,\"quantity\":null,\"cash_activity\":null}",
+          "{\"id\":2,\"entry_id\":1,\"account_id\":3,\"account_code\":\"60\",\"account_title\":\"Поставщики\",\"category\":\"liability\",\"cash\":false,\"side\":\"credit\",\"amount\":100.00,\"dimensions\":{},\"currency\":\"BYN\",\"original_amount\":null,\"rate\":null,\"rate_scale\":null,\"rate_date\":null,\"rate_source\":null,\"quantity\":null,\"cash_activity\":null}"
+        ],
+        "audit": [
+          "{\"id\":1,\"organization_id\":1,\"actor\":\"tester\",\"action\":\"posted\",\"detail\":{\"entry_id\": 1, \"digest\": \"523c3c601b73b525df0af8cd991bf5d75743ae4512c17de15b57016c16f6fa56\"},\"created_at\":\"2026-10-29T13:21:59.878035+03:00\"}"
+        ]
+      },
+      "update": {
+        "organization": [
+          "{\"id\":1,\"name\":\"Synthetic test company\",\"unp\":\"999999999\",\"generation\":1}"
+        ]
+      }
+    },
+    {
+      "revision": "0143",
+      "insert": {
+        "entry": [
+          "{\"id\":2,\"organization_id\":1,\"source\":\"production:output-transfer:1:42\",\"source_version\":1,\"operation\":\"production_output_transfer\",\"document_date\":\"2026-10-10\",\"operation_date\":\"2026-10-10\",\"posting_date\":\"2026-10-31\",\"policy_id\":2,\"rule_version\":\"production-output-transfer-v1\",\"explanation\":\"Перенос НЗП в готовую продукцию по наряду 42; SHOP\",\"opening\":false,\"correction_of\":null,\"digest\":\"2d467da89556e15901f8359af0dd2e4dbf787950a516e09c8be73ebfe0267ddc\",\"actor\":\"tester\",\"created_at\":\"2026-10-29T13:22:00.223151+03:00\"}"
+        ],
+        "line": [
+          "{\"id\":3,\"entry_id\":2,\"account_id\":11,\"account_code\":\"43\",\"account_title\":\"Synthetic finished goods\",\"category\":\"asset\",\"cash\":false,\"side\":\"debit\",\"amount\":100.00,\"dimensions\":{\"warehouse\": \"Main\", \"sku\": \"SYN-WIDGET\", \"lot\": \"LOT-1\"},\"currency\":\"BYN\",\"original_amount\":null,\"rate\":null,\"rate_scale\":null,\"rate_date\":null,\"rate_source\":null,\"quantity\":2.000000,\"cash_activity\":null}",
+          "{\"id\":4,\"entry_id\":2,\"account_id\":10,\"account_code\":\"20\",\"account_title\":\"Synthetic WIP\",\"category\":\"asset\",\"cash\":false,\"side\":\"credit\",\"amount\":100.00,\"dimensions\":{\"department\": \"SHOP\", \"order\": \"ORDER-42\"},\"currency\":\"BYN\",\"original_amount\":null,\"rate\":null,\"rate_scale\":null,\"rate_date\":null,\"rate_source\":null,\"quantity\":null,\"cash_activity\":null}"
+        ],
+        "production_output_transfer_receipt": [
+          "{\"entry_id\":2,\"organization_id\":1,\"order_id\":42,\"month\":\"2026-10\",\"command\":{\"policy_id\": 2, \"order_id\": 42, \"analytical_order\": \"ORDER-42\", \"department\": \"SHOP\", \"warehouse\": \"Main\", \"posting_date\": \"2026-10-31\", \"output_document_ids\": [101], \"basis_digest\": \"66a9ba32554a4b59bea9e4325197333fd3b7de8020469a54c37c376655b80fe4\", \"digest\": \"2d467da89556e15901f8359af0dd2e4dbf787950a516e09c8be73ebfe0267ddc\"},\"basis\":{\"organization_id\": 1, \"month\": \"2026-10\", \"policy_id\": 2, \"policy_reference\": \"Synthetic production transfer policy\", \"order\": {\"order_id\": 42, \"product\": \"Synthetic widget\", \"quantity\": \"2.00\"}, \"analytical_order\": \"ORDER-42\", \"warehouse\": \"Main\", \"output\": {\"planned_quantity\": \"2.00\", \"confirmed_quantity\": \"2.00\", \"accepted_quantity\": \"2.00\", \"rejected_quantity\": \"0.00\", \"pending_quantity\": \"0.00\", \"sku_code\": \"SYN-WIDGET\", \"unit\": \"\\u0448\\u0442\", \"lot\": \"LOT-1\", \"documents\": [{\"document_id\": 101, \"operation_date\": \"2026-10-10\"}]}, \"wip\": {\"account\": \"20\", \"balance_byn\": \"100.00\", \"source_lines\": [{\"entry_id\": 1, \"line_id\": 1, \"source\": \"production:wip:42\", \"posting_date\": \"2026-10-10\", \"side\": \"debit\", \"amount_byn\": \"100.00\", \"dimensions\": {\"department\": \"SHOP\", \"order\": \"ORDER-42\"}, \"opening\": false}], \"groups\": [{\"dimensions\": {\"department\": \"SHOP\", \"order\": \"ORDER-42\"}, \"balance_byn\": \"100.00\", \"source_lines\": [{\"entry_id\": 1, \"line_id\": 1, \"source\": \"production:wip:42\", \"posting_date\": \"2026-10-10\", \"side\": \"debit\", \"amount_byn\": \"100.00\", \"dimensions\": {\"department\": \"SHOP\", \"order\": \"ORDER-42\"}, \"opening\": false}]}], \"unit_cost_byn\": \"50.000000\"}, \"target\": {\"finished_goods_account\": \"43\"}, \"status\": \"ready_for_transfer_review\", \"explanation\": \"\\u0424\\u0438\\u0437\\u0438\\u0447\\u0435\\u0441\\u043a\\u0438\\u0439 \\u0432\\u044b\\u043f\\u0443\\u0441\\u043a \\u043f\\u0440\\u0438\\u043d\\u044f\\u0442 \\u043f\\u043e\\u043b\\u043d\\u043e\\u0441\\u0442\\u044c\\u044e \\u0438 \\u0441\\u0442\\u043e\\u0438\\u043c\\u043e\\u0441\\u0442\\u044c \\u041d\\u0417\\u041f \\u043d\\u0430\\u0439\\u0434\\u0435\\u043d\\u0430; \\u043f\\u0440\\u043e\\u0432\\u043e\\u0434\\u043a\\u0430 \\u0432\\u0441\\u0451 \\u0435\\u0449\\u0451 \\u0442\\u0440\\u0435\\u0431\\u0443\\u0435\\u0442 \\u043e\\u0442\\u0434\\u0435\\u043b\\u044c\\u043d\\u043e\\u0433\\u043e \\u043f\\u043e\\u0434\\u0442\\u0432\\u0435\\u0440\\u0436\\u0434\\u0435\\u043d\\u0438\\u044f.\", \"posting_available\": true, \"final_cost_certified\": false, \"scope\": \"production_output_cost_basis\", \"basis_digest\": \"66a9ba32554a4b59bea9e4325197333fd3b7de8020469a54c37c376655b80fe4\", \"candidate_transfer_byn\": \"100.00\", \"posting_document\": {\"source\": \"production:output-transfer:1:42\", \"source_version\": 1, \"operation\": \"production_output_transfer\", \"document_date\": \"2026-10-10\", \"operation_date\": \"2026-10-10\", \"posting_date\": \"2026-10-31\", \"policy_id\": 2, \"rule_version\": \"production-output-transfer-v1\", \"explanation\": \"\\u041f\\u0435\\u0440\\u0435\\u043d\\u043e\\u0441 \\u041d\\u0417\\u041f \\u0432 \\u0433\\u043e\\u0442\\u043e\\u0432\\u0443\\u044e \\u043f\\u0440\\u043e\\u0434\\u0443\\u043a\\u0446\\u0438\\u044e \\u043f\\u043e \\u043d\\u0430\\u0440\\u044f\\u0434\\u0443 42; SHOP\", \"lines\": [{\"account\": \"43\", \"side\": \"debit\", \"amount\": \"100.00\", \"dimensions\": {\"warehouse\": \"Main\", \"sku\": \"SYN-WIDGET\", \"lot\": \"LOT-1\"}, \"currency\": \"BYN\", \"original_amount\": null, \"rate\": null, \"rate_scale\": null, \"rate_date\": null, \"rate_source\": null, \"quantity\": \"2.00\", \"cash_activity\": null}, {\"account\": \"20\", \"side\": \"credit\", \"amount\": \"100.00\", \"dimensions\": {\"department\": \"SHOP\", \"order\": \"ORDER-42\"}, \"currency\": \"BYN\", \"original_amount\": null, \"rate\": null, \"rate_scale\": null, \"rate_date\": null, \"rate_source\": null, \"quantity\": null, \"cash_activity\": null}], \"opening\": false, \"correction_of\": null}, \"digest\": \"2d467da89556e15901f8359af0dd2e4dbf787950a516e09c8be73ebfe0267ddc\"},\"posting\":{\"source\": \"production:output-transfer:1:42\", \"source_version\": 1, \"operation\": \"production_output_transfer\", \"document_date\": \"2026-10-10\", \"operation_date\": \"2026-10-10\", \"posting_date\": \"2026-10-31\", \"policy_id\": 2, \"rule_version\": \"production-output-transfer-v1\", \"explanation\": \"\\u041f\\u0435\\u0440\\u0435\\u043d\\u043e\\u0441 \\u041d\\u0417\\u041f \\u0432 \\u0433\\u043e\\u0442\\u043e\\u0432\\u0443\\u044e \\u043f\\u0440\\u043e\\u0434\\u0443\\u043a\\u0446\\u0438\\u044e \\u043f\\u043e \\u043d\\u0430\\u0440\\u044f\\u0434\\u0443 42; SHOP\", \"lines\": [{\"account\": \"43\", \"side\": \"debit\", \"amount\": \"100.00\", \"dimensions\": {\"warehouse\": \"Main\", \"sku\": \"SYN-WIDGET\", \"lot\": \"LOT-1\"}, \"currency\": \"BYN\", \"original_amount\": null, \"rate\": null, \"rate_scale\": null, \"rate_date\": null, \"rate_source\": null, \"quantity\": \"2.00\", \"cash_activity\": null}, {\"account\": \"20\", \"side\": \"credit\", \"amount\": \"100.00\", \"dimensions\": {\"department\": \"SHOP\", \"order\": \"ORDER-42\"}, \"currency\": \"BYN\", \"original_amount\": null, \"rate\": null, \"rate_scale\": null, \"rate_date\": null, \"rate_source\": null, \"quantity\": null, \"cash_activity\": null}], \"opening\": false, \"correction_of\": null},\"basis_digest\":\"66a9ba32554a4b59bea9e4325197333fd3b7de8020469a54c37c376655b80fe4\",\"digest\":\"2d467da89556e15901f8359af0dd2e4dbf787950a516e09c8be73ebfe0267ddc\",\"actor\":\"tester\",\"created_at\":\"2026-10-29T13:22:00.223151+03:00\"}"
+        ],
+        "audit": [
+          "{\"id\":2,\"organization_id\":1,\"actor\":\"tester\",\"action\":\"posted\",\"detail\":{\"entry_id\": 2, \"digest\": \"2d467da89556e15901f8359af0dd2e4dbf787950a516e09c8be73ebfe0267ddc\"},\"created_at\":\"2026-10-29T13:22:00.223151+03:00\"}"
+        ]
+      },
+      "update": {
+        "organization": [
+          "{\"id\":1,\"name\":\"Synthetic test company\",\"unp\":\"999999999\",\"generation\":2}"
+        ],
+        "period": [
+          "{\"id\":1,\"organization_id\":1,\"month\":\"2026-10\",\"closed\":false,\"generation\":2,\"closed_generation\":null,\"evidence\":{}}"
+        ]
+      }
+    },
+    {
+      "revision": "0143",
+      "insert": {
+        "entry": [
+          "{\"id\":3,\"organization_id\":1,\"source\":\"production:reverse-wip:zero\",\"source_version\":1,\"operation\":\"manual\",\"document_date\":\"2026-10-31\",\"operation_date\":\"2026-10-31\",\"posting_date\":\"2026-10-31\",\"policy_id\":2,\"rule_version\":\"synthetic\",\"explanation\":\"Reverse all WIP\",\"opening\":false,\"correction_of\":null,\"digest\":\"d18feb48a1aecf895d2f473e432a9d4db97c50d689bd4e446bc6c1f148f6f2c7\",\"actor\":\"tester\",\"created_at\":\"2026-10-29T13:22:00.36985+03:00\"}",
+          "{\"id\":4,\"organization_id\":1,\"source\":\"production:output-cost-revision:1:2:1\",\"source_version\":1,\"operation\":\"production_output_cost_correction\",\"document_date\":\"2026-10-31\",\"operation_date\":\"2026-10-31\",\"posting_date\":\"2026-10-31\",\"policy_id\":2,\"rule_version\":\"production-output-cost-revision-v1\",\"explanation\":\"Reviewed late WIP correction\",\"opening\":false,\"correction_of\":2,\"digest\":\"6586c3525d7fe2c4a6974af3edb432ce4ffc864670ca3fc120c62df802f20d32\",\"actor\":\"tester\",\"created_at\":\"2026-10-29T13:22:00.36985+03:00\"}"
+        ],
+        "line": [
+          "{\"id\":5,\"entry_id\":3,\"account_id\":10,\"account_code\":\"20\",\"account_title\":\"Synthetic WIP\",\"category\":\"asset\",\"cash\":false,\"side\":\"credit\",\"amount\":100.00,\"dimensions\":{\"department\": \"SHOP\", \"order\": \"ORDER-42\"},\"currency\":\"BYN\",\"original_amount\":null,\"rate\":null,\"rate_scale\":null,\"rate_date\":null,\"rate_source\":null,\"quantity\":null,\"cash_activity\":null}",
+          "{\"id\":6,\"entry_id\":3,\"account_id\":3,\"account_code\":\"60\",\"account_title\":\"Поставщики\",\"category\":\"liability\",\"cash\":false,\"side\":\"debit\",\"amount\":100.00,\"dimensions\":{},\"currency\":\"BYN\",\"original_amount\":null,\"rate\":null,\"rate_scale\":null,\"rate_date\":null,\"rate_source\":null,\"quantity\":null,\"cash_activity\":null}",
+          "{\"id\":7,\"entry_id\":4,\"account_id\":10,\"account_code\":\"20\",\"account_title\":\"Synthetic WIP\",\"category\":\"asset\",\"cash\":false,\"side\":\"debit\",\"amount\":100.00,\"dimensions\":{\"order\": \"ORDER-42\", \"department\": \"SHOP\"},\"currency\":\"BYN\",\"original_amount\":null,\"rate\":null,\"rate_scale\":null,\"rate_date\":null,\"rate_source\":null,\"quantity\":null,\"cash_activity\":null}",
+          "{\"id\":8,\"entry_id\":4,\"account_id\":11,\"account_code\":\"43\",\"account_title\":\"Synthetic finished goods\",\"category\":\"asset\",\"cash\":false,\"side\":\"credit\",\"amount\":100.00,\"dimensions\":{\"lot\": \"LOT-1\", \"sku\": \"SYN-WIDGET\", \"warehouse\": \"Main\"},\"currency\":\"BYN\",\"original_amount\":null,\"rate\":null,\"rate_scale\":null,\"rate_date\":null,\"rate_source\":null,\"quantity\":null,\"cash_activity\":null}"
+        ],
+        "production_output_cost_revision": [
+          "{\"id\":1,\"organization_id\":1,\"original_entry_id\":2,\"sequence\":1,\"previous_id\":null,\"entry_id\":4,\"registration_token\":5,\"month\":\"2026-10\",\"request_key\":\"83d8d487-cbfa-441c-9e1a-21b135f97405\",\"command\":{\"original_entry_id\": 2, \"posting_date\": \"2026-10-31\", \"request_evidence\": \"Reviewed late WIP correction\", \"request_key\": \"83d8d487-cbfa-441c-9e1a-21b135f97405\", \"basis_digest\": \"b13b8f292a8d754b4e68fc5d08391660c33e1e3a1df5e9226eb4b9e6dc2fbcf0\"},\"preview\":{\"ledger_evidence\": {\"matrix\": [{\"side\": \"debit\", \"amount\": 100.00, \"account\": \"20\", \"dimensions\": {\"order\": \"ORDER-42\", \"department\": \"SHOP\"}}, {\"side\": \"credit\", \"amount\": 100.00000000000000000000, \"account\": \"43\", \"dimensions\": {\"lot\": \"LOT-1\", \"sku\": \"SYN-WIDGET\", \"warehouse\": \"Main\"}}], \"allocation\": [{\"key\": \"remaining\", \"book\": 100.00, \"delta\": -100.00000000000000000000, \"account\": \"43\", \"desired\": 0.00000000000000000000, \"quantity\": 2.000000, \"dimensions\": {\"lot\": \"LOT-1\", \"sku\": \"SYN-WIDGET\", \"warehouse\": \"Main\"}}], \"source_lines\": [{\"side\": \"debit\", \"amount\": 100.00, \"account\": \"20\", \"line_id\": 1, \"entry_id\": 1, \"dimensions\": {\"order\": \"ORDER-42\", \"department\": \"SHOP\"}, \"posting_date\": \"2026-10-10\"}, {\"side\": \"credit\", \"amount\": 100.00, \"account\": \"20\", \"line_id\": 5, \"entry_id\": 3, \"dimensions\": {\"order\": \"ORDER-42\", \"department\": \"SHOP\"}, \"posting_date\": \"2026-10-31\"}]}},\"posting\":{\"source\": \"production:output-cost-revision:1:2:1\", \"source_version\": 1, \"operation\": \"production_output_cost_correction\", \"document_date\": \"2026-10-31\", \"operation_date\": \"2026-10-31\", \"posting_date\": \"2026-10-31\", \"policy_id\": 2, \"rule_version\": \"production-output-cost-revision-v1\", \"explanation\": \"Reviewed late WIP correction\", \"lines\": [{\"account\": \"20\", \"side\": \"debit\", \"amount\": \"100.00\", \"dimensions\": {\"order\": \"ORDER-42\", \"department\": \"SHOP\"}, \"currency\": \"BYN\", \"original_amount\": null, \"rate\": null, \"rate_scale\": null, \"rate_date\": null, \"rate_source\": null, \"quantity\": null, \"cash_activity\": null}, {\"account\": \"43\", \"side\": \"credit\", \"amount\": \"100.00\", \"dimensions\": {\"lot\": \"LOT-1\", \"sku\": \"SYN-WIDGET\", \"warehouse\": \"Main\"}, \"currency\": \"BYN\", \"original_amount\": null, \"rate\": null, \"rate_scale\": null, \"rate_date\": null, \"rate_source\": null, \"quantity\": null, \"cash_activity\": null}], \"opening\": false, \"correction_of\": 2},\"actor\":\"tester\",\"created_at\":\"2026-10-29T13:22:00.36985+03:00\"}"
+        ],
+        "audit": [
+          "{\"id\":3,\"organization_id\":1,\"actor\":\"tester\",\"action\":\"posted\",\"detail\":{\"entry_id\": 3, \"digest\": \"d18feb48a1aecf895d2f473e432a9d4db97c50d689bd4e446bc6c1f148f6f2c7\"},\"created_at\":\"2026-10-29T13:22:00.36985+03:00\"}",
+          "{\"id\":4,\"organization_id\":1,\"actor\":\"tester\",\"action\":\"posted\",\"detail\":{\"entry_id\": 4, \"digest\": \"6586c3525d7fe2c4a6974af3edb432ce4ffc864670ca3fc120c62df802f20d32\"},\"created_at\":\"2026-10-29T13:22:00.36985+03:00\"}",
+          "{\"id\":5,\"organization_id\":1,\"actor\":\"tester\",\"action\":\"production_output_cost_revised\",\"detail\":{\"revision_id\": 1, \"entry_id\": 4, \"basis_digest\": \"b13b8f292a8d754b4e68fc5d08391660c33e1e3a1df5e9226eb4b9e6dc2fbcf0\"},\"created_at\":\"2026-10-29T13:22:00.36985+03:00\"}"
+        ]
+      },
+      "update": {
+        "organization": [
+          "{\"id\":1,\"name\":\"Synthetic test company\",\"unp\":\"999999999\",\"generation\":4}"
+        ],
+        "period": [
+          "{\"id\":1,\"organization_id\":1,\"month\":\"2026-10\",\"closed\":false,\"generation\":4,\"closed_generation\":null,\"evidence\":{}}"
+        ]
+      }
+    },
+    {
+      "revision": "0148",
+      "insert": {
+        "account": [
+          "{\"id\":12,\"organization_id\":1,\"code\":\"90.2\",\"title\":\"Synthetic VAT\",\"category\":\"income\",\"valid_from\":\"2026-01-01\",\"required_dimensions\":[],\"currency_tracking\":false,\"quantity_tracking\":false,\"cash\":false,\"normative_ref\":\"Synthetic\"}",
+          "{\"id\":13,\"organization_id\":1,\"code\":\"68.2\",\"title\":\"Synthetic VAT\",\"category\":\"liability\",\"valid_from\":\"2026-01-01\",\"required_dimensions\":[],\"currency_tracking\":false,\"quantity_tracking\":false,\"cash\":false,\"normative_ref\":\"Synthetic\"}"
+        ]
+      },
+      "update": {}
+    },
+    {
+      "revision": "0148",
+      "insert": {
+        "entry": [
+          "{\"id\":6,\"organization_id\":1,\"source\":\"sale:fg:1\",\"source_version\":1,\"operation\":\"inventory_sale\",\"document_date\":\"2026-10-31\",\"operation_date\":\"2026-10-31\",\"posting_date\":\"2026-10-31\",\"policy_id\":2,\"rule_version\":\"sale-v1:c46212154d8c0abf88c394566cb55a8b7228c8854e44b5dd05f529ac2334fa36\",\"explanation\":\"Synthetic finished-goods sale\",\"opening\":false,\"correction_of\":null,\"digest\":\"ced32b6966d6a7eada199455ee0496d561a124c6dc131bef6947f5e0a6edc3bc\",\"actor\":\"tester\",\"created_at\":\"2026-10-29T13:22:04.427137+03:00\"}"
+        ],
+        "line": [
+          "{\"id\":10,\"entry_id\":6,\"account_id\":6,\"account_code\":\"90.1\",\"account_title\":\"Доход\",\"category\":\"income\",\"cash\":false,\"side\":\"credit\",\"amount\":120.00,\"dimensions\":{\"vat_rate\": \"20\", \"vat_basis\": \"Synthetic explicit zero VAT basis\"},\"currency\":\"BYN\",\"original_amount\":null,\"rate\":null,\"rate_scale\":null,\"rate_date\":null,\"rate_source\":null,\"quantity\":null,\"cash_activity\":null}",
+          "{\"id\":11,\"entry_id\":6,\"account_id\":12,\"account_code\":\"90.2\",\"account_title\":\"Synthetic VAT\",\"category\":\"income\",\"cash\":false,\"side\":\"debit\",\"amount\":20.00,\"dimensions\":{\"vat_rate\": \"20\", \"vat_basis\": \"Synthetic explicit zero VAT basis\"},\"currency\":\"BYN\",\"original_amount\":null,\"rate\":null,\"rate_scale\":null,\"rate_date\":null,\"rate_source\":null,\"quantity\":null,\"cash_activity\":null}",
+          "{\"id\":12,\"entry_id\":6,\"account_id\":13,\"account_code\":\"68.2\",\"account_title\":\"Synthetic VAT\",\"category\":\"liability\",\"cash\":false,\"side\":\"credit\",\"amount\":20.00,\"dimensions\":{\"vat_rate\": \"20\", \"vat_basis\": \"Synthetic explicit zero VAT basis\"},\"currency\":\"BYN\",\"original_amount\":null,\"rate\":null,\"rate_scale\":null,\"rate_date\":null,\"rate_source\":null,\"quantity\":null,\"cash_activity\":null}",
+          "{\"id\":9,\"entry_id\":6,\"account_id\":4,\"account_code\":\"62\",\"account_title\":\"Покупатели\",\"category\":\"asset\",\"cash\":false,\"side\":\"debit\",\"amount\":120.00,\"dimensions\":{\"counterparty\": \"buyer\", \"contract\": \"contract\", \"settlement_document\": \"sale:fg:1\"},\"currency\":\"BYN\",\"original_amount\":null,\"rate\":null,\"rate_scale\":null,\"rate_date\":null,\"rate_source\":null,\"quantity\":null,\"cash_activity\":null}"
+        ],
+        "inventory_sale_receipt": [
+          "{\"entry_id\":6,\"organization_id\":1,\"command\":{\"net_amount\": \"100.00\", \"vat_rate\": \"20\", \"vat_basis\": \"Synthetic explicit zero VAT basis\", \"buyer_account\": \"62\", \"revenue_account\": \"90.1\", \"vat_revenue_account\": \"90.2\", \"vat_payable_account\": \"68.2\", \"buyer_dimensions\": {\"counterparty\": \"buyer\", \"contract\": \"contract\", \"settlement_document\": \"sale:fg:1\"}, \"revenue_dimensions\": {}, \"vat_dimensions\": {}, \"policy_id\": 2, \"posting_date\": \"2026-10-31\", \"account\": \"43\", \"warehouse\": \"Main\", \"sku\": \"SYN-WIDGET\", \"lot\": \"LOT-1\", \"quantity\": \"0.5\", \"source\": \"sale:fg:1\", \"source_version\": 1, \"document_date\": \"2026-10-31\", \"operation_date\": \"2026-10-31\", \"expense_account\": \"90.4\", \"expense_dimensions\": {}, \"explanation\": \"Synthetic finished-goods sale\"},\"cost\":{\"organization_id\": 1, \"policy_id\": 2, \"method\": \"specific\", \"basis_digest\": \"b871d97fd4ec81ebe2d8b1c6a1dceefa2d25b3d74b4cbf5a8cf6bc963c694ce3\", \"posting_date\": \"2026-10-31\", \"account\": \"43\", \"dimensions\": {\"warehouse\": \"Main\", \"sku\": \"SYN-WIDGET\", \"lot\": \"LOT-1\"}, \"inventory_dimensions\": {\"warehouse\": \"Main\", \"sku\": \"SYN-WIDGET\", \"lot\": \"LOT-1\"}, \"book_quantity\": \"2.000000\", \"book_value_byn\": \"0.00\", \"issue_quantity\": \"0.500000\", \"issue_cost_byn\": \"0.00\", \"remaining_quantity\": \"1.500000\", \"remaining_value_byn\": \"0.00\", \"inventory_layers\": [{\"lot\": \"LOT-1\", \"quantity\": \"0.5\", \"amount_byn\": \"0.00\", \"dimensions\": {\"warehouse\": \"Main\", \"sku\": \"SYN-WIDGET\", \"lot\": \"LOT-1\"}}], \"evidence\": [{\"entry_id\": 2, \"line_id\": 3, \"source\": \"production:output-transfer:1:42\", \"source_version\": 1, \"side\": \"debit\", \"quantity\": \"2.000000\", \"amount_byn\": \"100.00\"}, {\"entry_id\": 4, \"line_id\": 8, \"source\": \"production:output-cost-revision:1:2:1\", \"source_version\": 1, \"side\": \"credit\", \"quantity\": null, \"amount_byn\": \"100.00\"}], \"status\": \"preview\", \"stock_reserved\": false, \"posted\": false, \"final_cost_certified\": false, \"normative_verified\": false},\"posting\":{\"source\": \"sale:fg:1\", \"source_version\": 1, \"operation\": \"inventory_sale\", \"document_date\": \"2026-10-31\", \"operation_date\": \"2026-10-31\", \"posting_date\": \"2026-10-31\", \"policy_id\": 2, \"rule_version\": \"sale-v1:c46212154d8c0abf88c394566cb55a8b7228c8854e44b5dd05f529ac2334fa36\", \"explanation\": \"Synthetic finished-goods sale\", \"lines\": [{\"account\": \"62\", \"side\": \"debit\", \"amount\": \"120.00\", \"dimensions\": {\"counterparty\": \"buyer\", \"contract\": \"contract\", \"settlement_document\": \"sale:fg:1\"}, \"currency\": \"BYN\", \"original_amount\": null, \"rate\": null, \"rate_scale\": null, \"rate_date\": null, \"rate_source\": null, \"quantity\": null, \"cash_activity\": null}, {\"account\": \"90.1\", \"side\": \"credit\", \"amount\": \"120.00\", \"dimensions\": {\"vat_rate\": \"20\", \"vat_basis\": \"Synthetic explicit zero VAT basis\"}, \"currency\": \"BYN\", \"original_amount\": null, \"rate\": null, \"rate_scale\": null, \"rate_date\": null, \"rate_source\": null, \"quantity\": null, \"cash_activity\": null}, {\"account\": \"90.2\", \"side\": \"debit\", \"amount\": \"20.00\", \"dimensions\": {\"vat_rate\": \"20\", \"vat_basis\": \"Synthetic explicit zero VAT basis\"}, \"currency\": \"BYN\", \"original_amount\": null, \"rate\": null, \"rate_scale\": null, \"rate_date\": null, \"rate_source\": null, \"quantity\": null, \"cash_activity\": null}, {\"account\": \"68.2\", \"side\": \"credit\", \"amount\": \"20.00\", \"dimensions\": {\"vat_rate\": \"20\", \"vat_basis\": \"Synthetic explicit zero VAT basis\"}, \"currency\": \"BYN\", \"original_amount\": null, \"rate\": null, \"rate_scale\": null, \"rate_date\": null, \"rate_source\": null, \"quantity\": null, \"cash_activity\": null}], \"opening\": false, \"correction_of\": null},\"digest\":\"ced32b6966d6a7eada199455ee0496d561a124c6dc131bef6947f5e0a6edc3bc\",\"actor\":\"tester\",\"created_at\":\"2026-10-29T13:22:04.427137+03:00\"}"
+        ],
+        "inventory_zero_value_disposal_receipt": [
+          "{\"id\":1,\"organization_id\":1,\"source\":\"sale:fg:1\",\"source_version\":1,\"operation\":\"inventory_sale\",\"entry_id\":6,\"registration_token\":6,\"posting_date\":\"2026-10-31\",\"policy_id\":2,\"command\":{\"operation\": \"inventory_sale\", \"source\": \"sale:fg:1\", \"source_version\": 1, \"posting_date\": \"2026-10-31\", \"policy_id\": 2, \"basis_digest\": \"6f372ccc9a0251ce9076d4e2850e0b71c7b38aecc1f25d6b487a19d5d4e89588\", \"destination_account\": \"90.4\", \"destination_dimensions\": {}, \"inventory_layers\": [{\"source_entry_id\": 2, \"source_line_id\": 3, \"inventory_account\": \"43\", \"inventory_dimensions\": {\"warehouse\": \"Main\", \"sku\": \"SYN-WIDGET\", \"lot\": \"LOT-1\"}, \"quantity\": \"0.5\"}], \"explanation\": \"Synthetic finished-goods sale\", \"command_version\": 3, \"document_date\": \"2026-10-31\", \"operation_date\": \"2026-10-31\", \"sale_document\": {\"net_amount\": \"100.00\", \"vat_rate\": \"20\", \"vat_basis\": \"Synthetic explicit zero VAT basis\", \"buyer_account\": \"62\", \"revenue_account\": \"90.1\", \"vat_revenue_account\": \"90.2\", \"vat_payable_account\": \"68.2\", \"buyer_dimensions\": {\"counterparty\": \"buyer\", \"contract\": \"contract\", \"settlement_document\": \"sale:fg:1\"}, \"revenue_dimensions\": {}, \"vat_dimensions\": {}, \"policy_id\": 2, \"posting_date\": \"2026-10-31\", \"account\": \"43\", \"warehouse\": \"Main\", \"sku\": \"SYN-WIDGET\", \"lot\": \"LOT-1\", \"quantity\": \"0.5\", \"source\": \"sale:fg:1\", \"source_version\": 1, \"document_date\": \"2026-10-31\", \"operation_date\": \"2026-10-31\", \"expense_account\": \"90.4\", \"expense_dimensions\": {}, \"explanation\": \"Synthetic finished-goods sale\"}},\"basis_digest\":\"6f372ccc9a0251ce9076d4e2850e0b71c7b38aecc1f25d6b487a19d5d4e89588\",\"digest\":\"edffc854e879588e64d9c29ff981b3bbbea7ade0af968014d9609660d59f9bac\",\"actor\":\"tester\",\"created_at\":\"2026-10-29T13:22:04.427137+03:00\"}"
+        ],
+        "audit": [
+          "{\"id\":6,\"organization_id\":1,\"actor\":\"tester\",\"action\":\"posted\",\"detail\":{\"entry_id\": 6, \"digest\": \"ced32b6966d6a7eada199455ee0496d561a124c6dc131bef6947f5e0a6edc3bc\"},\"created_at\":\"2026-10-29T13:22:04.427137+03:00\"}"
+        ]
+      },
+      "update": {
+        "organization": [
+          "{\"id\":1,\"name\":\"Synthetic test company\",\"unp\":\"999999999\",\"generation\":5}"
+        ],
+        "period": [
+          "{\"id\":1,\"organization_id\":1,\"month\":\"2026-10\",\"closed\":false,\"generation\":5,\"closed_generation\":null,\"evidence\":{}}"
+        ]
+      }
+    },
+    {
+      "revision": "0148",
+      "insert": {
+        "entry": [
+          "{\"id\":7,\"organization_id\":1,\"source\":\"sale-zero-late-wip\",\"source_version\":1,\"operation\":\"manual\",\"document_date\":\"2026-10-31\",\"operation_date\":\"2026-10-31\",\"posting_date\":\"2026-10-31\",\"policy_id\":2,\"rule_version\":\"synthetic\",\"explanation\":\"Late production cost after zero sale\",\"opening\":false,\"correction_of\":null,\"digest\":\"065a1bd4b2e0edea63128dcb0b76eafc9484624c730338c44d093418adfefa1f\",\"actor\":\"tester\",\"created_at\":\"2026-10-29T13:22:04.897843+03:00\"}",
+          "{\"id\":8,\"organization_id\":1,\"source\":\"production:output-cost-revision:1:2:2\",\"source_version\":1,\"operation\":\"production_output_cost_correction\",\"document_date\":\"2026-10-31\",\"operation_date\":\"2026-10-31\",\"posting_date\":\"2026-10-31\",\"policy_id\":2,\"rule_version\":\"production-output-cost-revision-v1\",\"explanation\":\"Reviewed late WIP correction\",\"opening\":false,\"correction_of\":2,\"digest\":\"5800dc77643cc2b47f4af795119acb83b5ee1abeb3c6d463565dfd92ee678fa1\",\"actor\":\"tester\",\"created_at\":\"2026-10-29T13:22:04.897843+03:00\"}"
+        ],
+        "line": [
+          "{\"id\":13,\"entry_id\":7,\"account_id\":10,\"account_code\":\"20\",\"account_title\":\"Synthetic WIP\",\"category\":\"asset\",\"cash\":false,\"side\":\"debit\",\"amount\":100.00,\"dimensions\":{\"department\": \"SHOP\", \"order\": \"ORDER-42\"},\"currency\":\"BYN\",\"original_amount\":null,\"rate\":null,\"rate_scale\":null,\"rate_date\":null,\"rate_source\":null,\"quantity\":null,\"cash_activity\":null}",
+          "{\"id\":14,\"entry_id\":7,\"account_id\":3,\"account_code\":\"60\",\"account_title\":\"Поставщики\",\"category\":\"liability\",\"cash\":false,\"side\":\"credit\",\"amount\":100.00,\"dimensions\":{},\"currency\":\"BYN\",\"original_amount\":null,\"rate\":null,\"rate_scale\":null,\"rate_date\":null,\"rate_source\":null,\"quantity\":null,\"cash_activity\":null}",
+          "{\"id\":15,\"entry_id\":8,\"account_id\":10,\"account_code\":\"20\",\"account_title\":\"Synthetic WIP\",\"category\":\"asset\",\"cash\":false,\"side\":\"credit\",\"amount\":100.00,\"dimensions\":{\"order\": \"ORDER-42\", \"department\": \"SHOP\"},\"currency\":\"BYN\",\"original_amount\":null,\"rate\":null,\"rate_scale\":null,\"rate_date\":null,\"rate_source\":null,\"quantity\":null,\"cash_activity\":null}",
+          "{\"id\":16,\"entry_id\":8,\"account_id\":11,\"account_code\":\"43\",\"account_title\":\"Synthetic finished goods\",\"category\":\"asset\",\"cash\":false,\"side\":\"debit\",\"amount\":75.00,\"dimensions\":{\"lot\": \"LOT-1\", \"sku\": \"SYN-WIDGET\", \"warehouse\": \"Main\"},\"currency\":\"BYN\",\"original_amount\":null,\"rate\":null,\"rate_scale\":null,\"rate_date\":null,\"rate_source\":null,\"quantity\":null,\"cash_activity\":null}",
+          "{\"id\":17,\"entry_id\":8,\"account_id\":7,\"account_code\":\"90.4\",\"account_title\":\"Себестоимость\",\"category\":\"expense\",\"cash\":false,\"side\":\"debit\",\"amount\":25.00,\"dimensions\":{},\"currency\":\"BYN\",\"original_amount\":null,\"rate\":null,\"rate_scale\":null,\"rate_date\":null,\"rate_source\":null,\"quantity\":null,\"cash_activity\":null}"
+        ],
+        "production_output_cost_revision": [
+          "{\"id\":2,\"organization_id\":1,\"original_entry_id\":2,\"sequence\":2,\"previous_id\":1,\"entry_id\":8,\"registration_token\":9,\"month\":\"2026-10\",\"request_key\":\"8af8dcdc-72e8-427d-91c0-25ef5875bd26\",\"command\":{\"original_entry_id\": 2, \"posting_date\": \"2026-10-31\", \"request_evidence\": \"Reviewed late WIP correction\", \"request_key\": \"8af8dcdc-72e8-427d-91c0-25ef5875bd26\", \"basis_digest\": \"14f11712eac2f947d90febf45f530465de4e3fa73c512a2a3e9a680d465a13f9\"},\"preview\":{\"ledger_evidence\": {\"matrix\": [{\"side\": \"credit\", \"amount\": 100.00, \"account\": \"20\", \"dimensions\": {\"order\": \"ORDER-42\", \"department\": \"SHOP\"}}, {\"side\": \"debit\", \"amount\": 75.00000000000000000000, \"account\": \"43\", \"dimensions\": {\"lot\": \"LOT-1\", \"sku\": \"SYN-WIDGET\", \"warehouse\": \"Main\"}}, {\"side\": \"debit\", \"amount\": 25.0000000000000000, \"account\": \"90.4\", \"dimensions\": {}}], \"allocation\": [{\"key\": \"remaining\", \"book\": 0.00000000000000000000, \"delta\": 75.00000000000000000000, \"account\": \"43\", \"desired\": 75.0000000000000000, \"quantity\": 1.500000, \"dimensions\": {\"lot\": \"LOT-1\", \"sku\": \"SYN-WIDGET\", \"warehouse\": \"Main\"}}, {\"key\": \"zero:1:6\", \"book\": 0, \"delta\": 25.0000000000000000, \"account\": \"90.4\", \"desired\": 25.0000000000000000, \"quantity\": 0.5, \"dimensions\": {}}], \"source_lines\": [{\"side\": \"debit\", \"amount\": 100.00, \"account\": \"20\", \"line_id\": 1, \"entry_id\": 1, \"dimensions\": {\"order\": \"ORDER-42\", \"department\": \"SHOP\"}, \"posting_date\": \"2026-10-10\"}, {\"side\": \"credit\", \"amount\": 100.00, \"account\": \"20\", \"line_id\": 5, \"entry_id\": 3, \"dimensions\": {\"order\": \"ORDER-42\", \"department\": \"SHOP\"}, \"posting_date\": \"2026-10-31\"}, {\"side\": \"debit\", \"amount\": 100.00, \"account\": \"20\", \"line_id\": 13, \"entry_id\": 7, \"dimensions\": {\"order\": \"ORDER-42\", \"department\": \"SHOP\"}, \"posting_date\": \"2026-10-31\"}]}},\"posting\":{\"source\": \"production:output-cost-revision:1:2:2\", \"source_version\": 1, \"operation\": \"production_output_cost_correction\", \"document_date\": \"2026-10-31\", \"operation_date\": \"2026-10-31\", \"posting_date\": \"2026-10-31\", \"policy_id\": 2, \"rule_version\": \"production-output-cost-revision-v1\", \"explanation\": \"Reviewed late WIP correction\", \"lines\": [{\"account\": \"20\", \"side\": \"credit\", \"amount\": \"100.00\", \"dimensions\": {\"order\": \"ORDER-42\", \"department\": \"SHOP\"}, \"currency\": \"BYN\", \"original_amount\": null, \"rate\": null, \"rate_scale\": null, \"rate_date\": null, \"rate_source\": null, \"quantity\": null, \"cash_activity\": null}, {\"account\": \"43\", \"side\": \"debit\", \"amount\": \"75.00\", \"dimensions\": {\"lot\": \"LOT-1\", \"sku\": \"SYN-WIDGET\", \"warehouse\": \"Main\"}, \"currency\": \"BYN\", \"original_amount\": null, \"rate\": null, \"rate_scale\": null, \"rate_date\": null, \"rate_source\": null, \"quantity\": null, \"cash_activity\": null}, {\"account\": \"90.4\", \"side\": \"debit\", \"amount\": \"25.00\", \"dimensions\": {}, \"currency\": \"BYN\", \"original_amount\": null, \"rate\": null, \"rate_scale\": null, \"rate_date\": null, \"rate_source\": null, \"quantity\": null, \"cash_activity\": null}], \"opening\": false, \"correction_of\": 2},\"actor\":\"tester\",\"created_at\":\"2026-10-29T13:22:04.897843+03:00\"}"
+        ],
+        "audit": [
+          "{\"id\":7,\"organization_id\":1,\"actor\":\"tester\",\"action\":\"posted\",\"detail\":{\"entry_id\": 7, \"digest\": \"065a1bd4b2e0edea63128dcb0b76eafc9484624c730338c44d093418adfefa1f\"},\"created_at\":\"2026-10-29T13:22:04.897843+03:00\"}",
+          "{\"id\":8,\"organization_id\":1,\"actor\":\"tester\",\"action\":\"posted\",\"detail\":{\"entry_id\": 8, \"digest\": \"5800dc77643cc2b47f4af795119acb83b5ee1abeb3c6d463565dfd92ee678fa1\"},\"created_at\":\"2026-10-29T13:22:04.897843+03:00\"}",
+          "{\"id\":9,\"organization_id\":1,\"actor\":\"tester\",\"action\":\"production_output_cost_revised\",\"detail\":{\"revision_id\": 2, \"entry_id\": 8, \"basis_digest\": \"14f11712eac2f947d90febf45f530465de4e3fa73c512a2a3e9a680d465a13f9\"},\"created_at\":\"2026-10-29T13:22:04.897843+03:00\"}"
+        ]
+      },
+      "update": {
+        "organization": [
+          "{\"id\":1,\"name\":\"Synthetic test company\",\"unp\":\"999999999\",\"generation\":7}"
+        ],
+        "period": [
+          "{\"id\":1,\"organization_id\":1,\"month\":\"2026-10\",\"closed\":false,\"generation\":7,\"closed_generation\":null,\"evidence\":{}}"
+        ]
+      }
+    }
+  ],
+  "time_zone": "Europe/Minsk"
+}
