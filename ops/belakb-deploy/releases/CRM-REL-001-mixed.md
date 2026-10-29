@@ -1,16 +1,31 @@
 # CRM-REL-001 mixed release preparation
 
-Status: **CURRENT SOURCE RENEWAL IN PROGRESS**, `release_ready=false`. This route exports committed
+Status: **CURRENT SOURCE PROFILE RENEWED; COPY ROUTE BLOCKED**, `release_ready=false`. This route exports committed
 backend sources for isolated verification. The dated image/migration/restore results
 below are historical; current runtime acceptance remains pending. It has no production
 apply command and does not modify or bootstrap `/opt/belakb-deploy-v1`.
 
-Backend application checkpoint: `e52994932a56c7f371c3d120234ba83a9a0a17a1`.
-Current frontend source checkpoint: `e52994932a56c7f371c3d120234ba83a9a0a17a1`;
+Backend application checkpoint: `e31dec4747d7a58de3877be30e3fbdc69266a0a5`.
+Current frontend source checkpoint: `e31dec4747d7a58de3877be30e3fbdc69266a0a5`;
 its new immutable build is pending.
 The final package checkpoint must be an exact commit containing these ops files;
 its selected backend Git objects and ten module gitlinks must equal the accepted
 backend checkpoint. Working files and untracked files are never exported.
+
+29 October source profile: candidate Alembic head `0199`, chain `0194 → 0198 → 0199`.
+The existing PR63 dependency image is reused by exact ID
+`sha256:da6b12c4a9b83f14e88026739609bd372820ae0a6f5fe44488b7b2834e69018a`.
+Read-only runtime checks matched all 58 active pinned candidate dependencies.
+The image verifier also checks the runtime filesystem layer prefix, unchanged
+image environment and final user `10001:10001`; source export includes the lock
+file. This is preparation evidence; image build/probe and full CI remain pending.
+
+**Copy admission blocker:** the existing `rehearse_mixed_copy.py` still names the
+legacy app and database `aios` with baseline `0116`. Fresh read-only checks found
+that the running accepted backend uses a different database at `0194`. Bind the
+copy route to that backend's measured container/configuration and database before
+running it. A legacy baseline must not be supplied to obtain a passing rehearsal.
+No copy, dump, migration, production apply or R6 replay was performed for this renewal.
 
 ## Immutable backend source and image
 

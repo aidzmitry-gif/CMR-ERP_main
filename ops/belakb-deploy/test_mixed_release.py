@@ -84,12 +84,14 @@ class Guards(unittest.TestCase):
                         dependency = module.replace('.', '/') + '.py'
                         if (repo / dependency).is_file() and dependency not in seen:
                             pending.append(dependency)
-        self.assertEqual(len(seen), 14)
+        self.assertEqual(len(seen), 25)
         self.assertIn('tests/__init__.py', package.PROOFS)
         self.assertIn('tests/integration/__init__.py', package.PROOFS)
         self.assertIn('docs/accounting/migration-proposal.py', package.PROOFS)
-        self.assertEqual(package.APPLICATION_CHECKPOINT, 'd96e7b5b1fae0a3ac01dbbc5fd90702cb75cd0fc')
-        self.assertEqual(package.PINS['procurement'], 'd8f50e89d5f4fbb796715594a9eb6d1740623dfe')
+        self.assertEqual(package.APPLICATION_CHECKPOINT, 'e31dec4747d7a58de3877be30e3fbdc69266a0a5')
+        self.assertEqual(package.PINS['procurement'], '95d8a9f0bf1350bfdc67a8d96215aed7f479322a')
+        self.assertEqual(package.HEAD, '0199')
+        self.assertIn('requirements.lock.txt', package.ROOT_FILES)
         for path in ('tests/private.py', 'tests/fixtures/customer.json', 'docs/accounting/private.py'):
             self.assertFalse(package.selected(path))
 
@@ -105,14 +107,16 @@ class Guards(unittest.TestCase):
             output = Path(directory) / 'new'
             manifest = package.prepare(Path(directory) / 'repo', 'c' * 40, output)
             recipe = (output / 'context' / 'Dockerfile').read_text()
-            self.assertLess(recipe.index('rm -rf /app'), recipe.index('COPY source/'))
-            self.assertEqual(package.RUNTIME_ALIAS, 'crm-rel-001-g06-runtime:469fbba3826e')
+            self.assertLess(recipe.index('rm -rf /app'), recipe.index('COPY --chown=10001:10001 source/'))
+            self.assertEqual(package.RUNTIME_ALIAS, 'belakb-pr63-backend-runtime-deps:20261027-01')
             self.assertEqual(recipe.splitlines()[0], 'FROM ' + package.RUNTIME_ALIAS)
             self.assertEqual(manifest['runtime_image'], package.RUNTIME)
             self.assertIn('LABEL crm-rel-001-source=' + package.digest(manifest['files']), recipe)
             self.assertIn('crm-rel-001-package=' + manifest['package_checkpoint'], recipe)
             self.assertNotIn('pip install', recipe)
             self.assertNotIn('apt', recipe)
+            self.assertIn('USER 0\nWORKDIR /app\n', recipe)
+            self.assertIn('USER 10001:10001\nEXPOSE 8000', recipe)
             self.assertEqual(manifest['gitlinks'], package.PINS)
             self.assertTrue(names <= manifest['files'].keys())
             self.assertEqual(manifest['frontend']['status'], 'PENDING_PRODUCTION_OIDC_PACKAGE')
@@ -145,6 +149,60 @@ class Guards(unittest.TestCase):
         manifest = {'gitlinks': package.PINS, 'application_checkpoint': package.APPLICATION_CHECKPOINT}
         with self.assertRaisesRegex(package.Blocked, 'TEST_RUNTIME_IS_NOT_RELEASE_IMAGE'):
             package.verify_image(manifest, package.RUNTIME, state_root=Path('/explicit-private'))
+
+    def _image_case(self):
+        manifest = {'gitlinks': package.PINS, 'application_checkpoint': package.APPLICATION_CHECKPOINT,
+                    'files': {'main.py': 'a' * 64}, 'package_checkpoint': 'c' * 40}
+        image = 'sha256:' + 'f' * 64
+        runtime = {'Id': package.RUNTIME, 'Architecture': 'amd64',
+                   'Config': {'User': '10001:10001', 'Env': ['LANG=C.UTF-8']},
+                   'RootFS': {'Layers': ['sha256:' + '1' * 64]}}
+        info = {'Id': image, 'Architecture': 'amd64',
+                'Config': {'User': '10001:10001', 'Env': ['LANG=C.UTF-8'], 'WorkingDir': '/app',
+                           'Entrypoint': ['docker/app-entrypoint.sh'], 'Labels': {
+                               'crm-rel-001-source': package.digest(manifest['files']),
+                               'crm-rel-001-package': manifest['package_checkpoint']}},
+                'RootFS': {'Layers': [*runtime['RootFS']['Layers'], 'sha256:' + '2' * 64]}}
+        return manifest, image, runtime, info
+
+    def test_final_image_root_user_is_refused_before_any_probe(self):
+        manifest, image, runtime, info = self._image_case()
+        info['Config']['User'] = '0'
+        with patch.object(package, 'inspect', side_effect=lambda key: runtime if key == package.RUNTIME else info), \
+                patch.object(package, 'probe') as probe:
+            with self.assertRaisesRegex(package.Blocked, 'IMAGE_NONROOT'):
+                package.verify_image(manifest, image, state_root=Path('/explicit-private'))
+            probe.assert_not_called()
+
+    def test_runtime_alias_layer_drift_is_refused_before_any_probe(self):
+        manifest, image, runtime, info = self._image_case()
+        info['RootFS']['Layers'][0] = 'sha256:' + '3' * 64
+        with patch.object(package, 'inspect', side_effect=lambda key: runtime if key == package.RUNTIME else info), \
+                patch.object(package, 'probe') as probe:
+            with self.assertRaisesRegex(package.Blocked, 'IMAGE_RUNTIME_LAYERS'):
+                package.verify_image(manifest, image, state_root=Path('/explicit-private'))
+            probe.assert_not_called()
+
+    def test_runtime_environment_drift_is_refused_before_any_probe(self):
+        manifest, image, runtime, info = self._image_case()
+        info['Config']['Env'].append('UNREVIEWED_RUNTIME_SETTING=true')
+        with patch.object(package, 'inspect', side_effect=lambda key: runtime if key == package.RUNTIME else info), \
+                patch.object(package, 'probe') as probe:
+            with self.assertRaisesRegex(package.Blocked, 'IMAGE_RUNTIME_ENVIRONMENT'):
+                package.verify_image(manifest, image, state_root=Path('/explicit-private'))
+            probe.assert_not_called()
+
+    def test_accepted_runtime_boundary_still_requires_source_and_dependency_probes(self):
+        manifest, image, runtime, info = self._image_case()
+        result = {'status': 'IMMUTABLE_BACKEND_IMAGE_VERIFIED', 'source_sha256': package.digest(manifest['files']),
+                  'head': package.HEAD}
+        with patch.object(package, 'inspect', side_effect=lambda key: runtime if key == package.RUNTIME else info), \
+                patch.object(package, 'probe', side_effect=[b'', json.dumps(result).encode()]) as probe:
+            accepted = package.verify_image(manifest, image, state_root=Path('/explicit-private'))
+            self.assertEqual(probe.call_count, 2)
+            self.assertFalse(accepted['release_ready'])
+            self.assertEqual(accepted['production_changes'], 0)
+            self.assertIn('LOCK_DEPENDENCY_MISMATCH', package.IMAGE_PROBE)
 
     def test_probe_timeout_still_attempts_owned_cleanup(self):
         with fixtures() as directory, \

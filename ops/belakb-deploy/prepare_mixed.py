@@ -15,25 +15,26 @@ from pathlib import Path, PurePosixPath
 
 CHAIN = 'CRM-REL-001'
 OPT_IN = CHAIN + '-isolated-only'
-APPLICATION_CHECKPOINT = 'd96e7b5b1fae0a3ac01dbbc5fd90702cb75cd0fc'
-RUNTIME = 'sha256:469fbba3826e14647fb9b03280843ff591fc6f875244bb17e08f51043ef21319'
-RUNTIME_ALIAS = 'crm-rel-001-g06-runtime:469fbba3826e'
-HEAD = 'crm_rel_001_native_docs_01'
+APPLICATION_CHECKPOINT = 'e31dec4747d7a58de3877be30e3fbdc69266a0a5'
+# Existing immutable PR63 image: 58 active candidate lock requirements verified.
+RUNTIME = 'sha256:da6b12c4a9b83f14e88026739609bd372820ae0a6f5fe44488b7b2834e69018a'
+RUNTIME_ALIAS = 'belakb-pr63-backend-runtime-deps:20261027-01'
+HEAD = '0199'
 PINS = {
-    'finance': '59832b2f14a2ee02d8db266a67f8206616bdcd94',
+    'finance': 'e27167d3245c955f16aaf70c59d4bf9e085d5ee8',
     'hr': 'f8a6e0142f1920b07ec56818f42d156a602ff9c3',
     'leads': '9a304f771ba74369ded199168e0e1da3ad6348d2',
     'logistics': '6923d2e021980ef2546f382364d38dc34a0fef29',
     'marketing': 'd4ed67fdc9b41e7abc370112e1a3fa8a3fe1e282',
-    'procurement': 'd8f50e89d5f4fbb796715594a9eb6d1740623dfe',
+    'procurement': '95d8a9f0bf1350bfdc67a8d96215aed7f479322a',
     'production': 'be7d7e198bf09cc41c642d22125db401da5adc48',
-    'sales': '0c447381a3f95b8f576dc2bcf92f267bc22ba2ee',
+    'sales': '6ed2d42985105e49e48f963d515fddf48b3a5c90',
     'service': '3d33800c44865cd7a7373b29192c5d59d3c4bec8',
-    'wms': '59de6378f91b803e849c5966b4c606df2b190e9a',
+    'wms': '7b25baa38959f0bd054dda03f2ca7eddff7fba54',
 }
 PREFIXES = ('config/', 'connectors/', 'core/', 'integrations/', 'modules/',
             'migrations/', 'docker/', 'scripts/')
-ROOT_FILES = {'main.py', 'alembic.ini', 'requirements.txt', 'pyproject.toml', 'Dockerfile'}
+ROOT_FILES = {'main.py', 'alembic.ini', 'requirements.txt', 'requirements.lock.txt', 'pyproject.toml', 'Dockerfile'}
 CLOSURE_FILES = {'ops/sales_mail/__init__.py', 'ops/sales_mail/config.py',
                  'ops/sales_mail/queue.py', 'ops/sales_mail/relay.py'}
 PROOFS = {
@@ -56,6 +57,17 @@ PROOFS = {
     'tests/integration/test_purchase_foreign_receipts_postgres.py',
     'tests/reservation_source.py',
     'tests/test_invoice_issuance.py',
+    'tests/test_document_concurrency.py',
+    'tests/test_invoice_cancellation.py',
+    'tests/test_invoice_physical_shipments.py',
+    'tests/test_invoice_reservation_release.py',
+    'tests/test_invoice_stock_allocation.py',
+    'tests/test_logistics_invoice_binding.py',
+    'tests/test_logistics_withdrawal.py',
+    'tests/test_office_shipping_associations.py',
+    'tests/test_sales_contract.py',
+    'tests/test_sales_shipping_associations.py',
+    'tests/test_shipping_payload.py',
     'docs/accounting/migration-proposal.py',
 }
 
@@ -206,8 +218,11 @@ def prepare(repo, package_checkpoint, output):
     labels = (f'LABEL crm-rel-001-source={digest(files)} '
               f'crm-rel-001-package={package_checkpoint}\n')
     (context / 'Dockerfile').write_text(
-        f'FROM {RUNTIME_ALIAS}\nWORKDIR /app\nRUN rm -rf /app && mkdir /app\n'
-        'COPY source/ /app/\nRUN chmod +x /app/docker/app-entrypoint.sh\n' + labels +
+        f'FROM {RUNTIME_ALIAS}\nUSER 0\nWORKDIR /app\n'
+        'RUN rm -rf /app && mkdir /app && chown 10001:10001 /app\n'
+        'COPY --chown=10001:10001 source/ /app/\n'
+        'RUN chmod +x /app/docker/app-entrypoint.sh && mkdir -p /app/data && chown 10001:10001 /app/data\n' + labels +
+        'USER 10001:10001\n' +
         'EXPOSE 8000\nENTRYPOINT ["docker/app-entrypoint.sh"]\n', encoding='utf8')
     return manifest
 
@@ -595,6 +610,12 @@ for line in (root/'requirements.txt').read_text().splitlines():
  if not line: continue
  r=Requirement(line)
  if r.marker is None or r.marker.evaluate(): assert Version(m.version(r.name)) in r.specifier, 'DEPENDENCY_MISMATCH'
+for line in (root/'requirements.lock.txt').read_text().splitlines():
+ line=line.strip()
+ if not line or line.startswith(('#','--hash=')): continue
+ r=Requirement(line.removesuffix(chr(92)).strip())
+ assert r.url is None and len(r.specifier)==1 and all(s.operator=='==' and '*' not in s.version for s in r.specifier), 'LOCK_NOT_EXACT'
+ if r.marker is None or r.marker.evaluate(): assert Version(m.version(r.name)) in r.specifier, 'LOCK_DEPENDENCY_MISMATCH'
 for name in ['main','pypdf','lxml.etree']: importlib.import_module(name)
 from weasyprint import HTML
 from pypdf import PdfReader
@@ -615,11 +636,22 @@ def verify_image(manifest, image, *, state_root):
     info = inspect(image)
     require(info['Id'] == image and info['Architecture'] == 'amd64', 'IMAGE_IDENTITY')
     config = info['Config']
+    require(config.get('User') == '10001:10001', 'IMAGE_NONROOT')
     require(config['WorkingDir'] == '/app' and config['Entrypoint'] ==
             ['docker/app-entrypoint.sh'], 'IMAGE_ENTRYPOINT')
     require(config['Labels'].get('crm-rel-001-source') == digest(manifest['files']) and
             config['Labels'].get('crm-rel-001-package') == manifest['package_checkpoint'],
             'IMAGE_PROVENANCE')
+    runtime = inspect(RUNTIME)
+    require(runtime['Id'] == RUNTIME and runtime['Architecture'] == 'amd64' and
+            runtime['Config'].get('User') == '10001:10001', 'IMAGE_RUNTIME_IDENTITY')
+    runtime_layers = runtime.get('RootFS', {}).get('Layers')
+    layers = info.get('RootFS', {}).get('Layers')
+    require(isinstance(runtime_layers, list) and runtime_layers and isinstance(layers, list) and
+            len(layers) > len(runtime_layers) and layers[:len(runtime_layers)] == runtime_layers,
+            'IMAGE_RUNTIME_LAYERS')
+    require(sorted(config.get('Env') or []) == sorted(runtime['Config'].get('Env') or []),
+            'IMAGE_RUNTIME_ENVIRONMENT')
     probe(image, 'import subprocess; subprocess.run(["python","-m","pip","check"],check=True)',
           state_root=state_root)
     result = json.loads(probe(image, IMAGE_PROBE, json.dumps(manifest).encode(), state_root=state_root))
