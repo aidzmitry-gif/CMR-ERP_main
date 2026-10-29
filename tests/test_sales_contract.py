@@ -361,6 +361,8 @@ async def test_prepare_contract_unknown_template_404(api, session):
 
 async def test_render_invoice_uses_real_deal_data(api, session):
     """kind=invoice → печатная форма счёта (sales-invoice-template.html), не договор."""
+    session.add(Counterparty(name='ООО «АвтоЗапчасть»'))
+    await session.commit()
     deal = await _make_deal(api, counterparty="ООО «АвтоЗапчасть»")
     session.add(Sku(code="AKB-77", title="АКБ 6СТ-77", unit="шт"))
     session.add(StockItem(sku_code="AKB-77", qty_available=2, qty_reserved=0))
@@ -373,9 +375,9 @@ async def test_render_invoice_uses_real_deal_data(api, session):
     await session.flush()
     await session.commit()
 
-    inv = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
+    inv = await _issue_contract_invoice(api, session, deal)
     assert inv.status_code == 201, inv.text
-    doc = inv.json()
+    doc = inv.json()["document"]
     assert doc["kind"] == "invoice"
 
     r = await api.get(f"/sales/documents/{doc['id']}/render")
@@ -452,6 +454,76 @@ _TINY_PNG_DATA_URL = (
 )
 
 
+async def _logo_original_flow(api, session):
+    from modules.sales.invoice_issuance import verified_receipt
+    from modules.sales.models import DealDocument
+    from tests.test_invoice_issuance import command, create
+
+    uploaded = await api.put("/sales/branding", json={"logo_data_url": _TINY_PNG_DATA_URL})
+    assert uploaded.status_code == 200, uploaded.text
+    deal = await _package_deal(api, session, counterparty="Synthetic frozen-logo buyer")
+    ids, base = await _scoped_invoice_request(api, session, deal)
+    payload, preview = await command(api, ids, base, key="frozen-logo-original")
+    assert preview["basis_digest"] == payload["expected_basis_digest"]
+    issued = await create(api, ids, payload)
+    assert issued.status_code == 201, issued.text
+    doc_id = issued.json()["document"]["id"]
+    original = await api.get(f"/sales/documents/{doc_id}/render")
+    assert original.status_code == 200
+    assert f'<img src="{_TINY_PNG_DATA_URL}"' in original.text
+    # Whitespace is valid in embedded PNG base64; changing its stored URI must
+    # not rewrite the already issued original or its exact request replay.
+    replacement = _TINY_PNG_DATA_URL.replace("base64,", "base64,\n")
+    changed = await api.put("/sales/branding", json={"logo_data_url": replacement})
+    assert changed.status_code == 200 and changed.json()["logo_data_url"] == replacement
+    replayed = await create(api, ids, payload)
+    assert replayed.status_code == 200 and replayed.json()["replayed"] is True
+    assert replayed.json()["content_sha256"] == issued.json()["content_sha256"]
+    again = await api.get(f"/sales/documents/{doc_id}/render")
+    assert again.content == original.content
+    doc = await session.get(DealDocument, doc_id, populate_existing=True)
+    receipt = await verified_receipt(session, doc, ids["org"])
+    assert receipt is not None and receipt.content_sha256 == issued.json()["content_sha256"]
+    return original.text
+
+
+async def test_invoice_logo_original_is_frozen_on_replay(api, session, tmp_path):
+    original = await _logo_original_flow(api, session)
+    (tmp_path / "invoice-logo-original.html").write_text(original, encoding="utf-8")
+
+
+async def test_invoice_does_not_use_another_sellers_logo(api, session):
+    from tests.test_invoice_issuance import command, create, seed
+
+    assert (await api.put("/sales/branding", json={"logo_data_url": _TINY_PNG_DATA_URL})).status_code == 200
+    ids, base = await seed(api, session, suffix="-foreign-logo")
+    payload, _ = await command(api, ids, base)
+    issued = await create(api, ids, payload)
+    assert issued.status_code == 201, issued.text
+    rendered = await api.get(f"/sales/documents/{issued.json()['document']['id']}/render")
+    assert rendered.status_code == 200 and "Bound seller-foreign-logo" in rendered.text
+    assert '<div class="logo">' not in rendered.text and _TINY_PNG_DATA_URL not in rendered.text
+
+
+async def test_invoice_unsafe_logo_cannot_become_an_original(api, session):
+    from sqlalchemy import func
+
+    from modules.sales.models import DealDocument
+    from modules.wms.invoice_reservations import InvoiceReservation
+    from tests.test_invoice_issuance import command, create
+
+    uploaded = await api.put("/sales/branding", json={"logo_data_url": "data:image/svg+xml;base64,PHN2Zy8+"})
+    assert uploaded.status_code == 200, uploaded.text
+    deal = await _package_deal(api, session, counterparty="Synthetic unsafe-logo buyer")
+    ids, base = await _scoped_invoice_request(api, session, deal)
+    payload, _ = await command(api, ids, base)
+    refused = await create(api, ids, payload)
+    assert refused.status_code == 422, refused.text
+    assert "Внешние ресурсы" in refused.text
+    assert await session.scalar(select(func.count()).select_from(DealDocument)) == 0
+    assert await session.scalar(select(func.count()).select_from(InvoiceReservation)) == 0
+
+
 async def test_branding_honest_empty_before_upload(api):
     """Нет загруженного факсимиле — все поля null (честный None), не 404."""
     r = await api.get("/sales/branding")
@@ -496,6 +568,8 @@ async def test_render_invoice_includes_uploaded_logo(api, session):
         await api.put("/sales/branding", json={"logo_data_url": _TINY_PNG_DATA_URL})
     ).status_code == 200
 
+    session.add(Counterparty(name='ООО «СЛого»'))
+    await session.commit()
     deal = await _make_deal(api, counterparty="ООО «СЛого»")
     session.add(Sku(code="AKB-99", title="АКБ 6СТ-99", unit="шт"))
     session.add(StockItem(sku_code="AKB-99", qty_available=1, qty_reserved=0))
@@ -506,14 +580,16 @@ async def test_render_invoice_includes_uploaded_logo(api, session):
     session.add(PriceQuote(sku_code=sku.code, counterparty=deal["counterparty"], price=Decimal("100")))
     await session.commit()
 
-    inv = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
-    r = await api.get(f"/sales/documents/{inv.json()['id']}/render")
+    inv = await _issue_contract_invoice(api, session, deal)
+    r = await api.get(f"/sales/documents/{inv.json()['document']['id']}/render")
     assert r.status_code == 200, r.text
     assert f'<img src="{_TINY_PNG_DATA_URL}"' in r.text
 
 
 async def test_render_invoice_no_logo_block_when_not_uploaded(api, session):
     """Лого не загружено — честно нет <div class="logo"> (не битая картинка)."""
+    session.add(Counterparty(name='ООО «БезЛого»'))
+    await session.commit()
     deal = await _make_deal(api, counterparty="ООО «БезЛого»")
     session.add(Sku(code="AKB-100", title="АКБ 6СТ-100", unit="шт"))
     session.add(StockItem(sku_code="AKB-100", qty_available=1, qty_reserved=0))
@@ -524,8 +600,8 @@ async def test_render_invoice_no_logo_block_when_not_uploaded(api, session):
     session.add(PriceQuote(sku_code=sku.code, counterparty=deal["counterparty"], price=Decimal("100")))
     await session.commit()
 
-    inv = await api.post(f"/sales/deals/{deal['id']}/documents", json={"kind": "invoice"})
-    r = await api.get(f"/sales/documents/{inv.json()['id']}/render")
+    inv = await _issue_contract_invoice(api, session, deal)
+    r = await api.get(f"/sales/documents/{inv.json()['document']['id']}/render")
     assert r.status_code == 200, r.text
     assert '<div class="logo">' not in r.text
 
