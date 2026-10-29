@@ -587,7 +587,10 @@ async def test_material_allocation_requires_migration(pg_factory, pg_book, metho
     _, movement_id, _ = await seed_physical_issue(pg_factory, pg_book, order_id)
     data = posting_input(policy_id).model_copy(update={"order_id": order_id, "wms_movement_id": movement_id})
     async with pg_factory() as session:
-        await run_migration(session, "0140_zero_value_disposals.py", "upgrade")
+        # Model missing migration capabilities inside this isolated transaction;
+        # the current ORM fixture cannot be loaded into the historical schema.
+        await session.execute(text("DROP FUNCTION accounting.production_material_allocation_version()"))
+        await session.execute(text("DROP FUNCTION accounting.production_material_zero_allocation_version()"))
         with pytest.raises(service.AccountingError, match="migration 0150"):
             await prepare_material_zero_issue(session, pg_book[0], "2026-10", data, SyntheticProduction())
         with pytest.raises(service.AccountingError, match="migration 0149"):
