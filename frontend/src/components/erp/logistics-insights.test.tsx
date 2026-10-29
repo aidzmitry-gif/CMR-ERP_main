@@ -1,195 +1,162 @@
-﻿import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Компонент клиентский: единственная зависимость данных — @/lib/logistics-api (все фетчи
-// graceful, отдают null/[]). Мокаем её, чтобы дёргать ветки состояний детерминированно.
-// formatByn (@/lib/format) и мелкие UI-примитивы (logistics-ui) — реальные (чистые, лёгкие).
-vi.mock("@/lib/logistics-api", () => ({
-  fetchCostInsights: vi.fn(),
-  seedZones: vi.fn(),
-  seedTariffs: vi.fn(),
-  seedAudit: vi.fn(),
-  seedRfq: vi.fn(),
-  awardRfq: vi.fn(),
+vi.mock("@/lib/logistics-owned-costs", async importOriginal => ({
+  ...await importOriginal<typeof import("@/lib/logistics-owned-costs")>(),
+  fetchCostCatalog: vi.fn(), fetchOwnedCostReview: vi.fn(),
 }));
 
 import { LogisticsInsights } from "@/components/erp/logistics-insights";
-import * as api from "@/lib/logistics-api";
-import type { CostInsights } from "@/lib/logistics-api";
-import { formatByn } from "@/lib/format";
+import { LogisticsReadError } from "@/lib/logistics-api";
+import * as api from "@/lib/logistics-owned-costs";
 
-function makeInsights(over: Partial<CostInsights> = {}): CostInsights {
-  return {
-    reference_weight_kg: 30,
-    potential_savings: 812,
-    best_savings_zone: "Z1",
-    tender_savings_total: 445,
-    audit_to_recover: 137,
-    import_freight_total: 9600,
-    import_freight_avg: 3200,
-    import_freight_count: 3,
-    zones: [
-      {
-        zone_code: "Z1",
-        zone_name: "Минск",
-        carriers: 4,
-        cheapest_carrier: "DELINE",
-        cheapest_carrier_name: "Деловые Линии",
-        cheapest_total: 55,
-        avg_total: 70,
-        max_total: 92,
-        spread_pct: 24,
-      },
-      {
-        zone_code: "Z2",
-        zone_name: "Брест",
-        carriers: 3,
-        cheapest_carrier: "SDEK",
-        cheapest_carrier_name: "СДЭК",
-        cheapest_total: 61,
-        avg_total: 64,
-        max_total: 68,
-        spread_pct: 5,
-      },
-    ],
-    tenders: [
-      {
-        rfq_number: "RFQ-77",
-        route: "Минск → Гомель",
-        carrier: "Деловые Линии",
-        baseline: 500,
-        awarded: 380,
-        saved: 120,
-        saved_pct: 24,
-      },
-    ],
-    recommendations: ["Переключить зону Z1 на самого дешёвого перевозчика"],
-    ...over,
-  };
+function catalog(principal = "A"): api.CostCatalog {
+  return { version: 1, principal, items: [{ id: 1, name: "Company One", unp: "111111111" }, { id: 2, name: "Company Two", unp: "222222222" }] };
 }
-
-const asMock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
-
-// formatByn использует ru-RU NumberFormat → неразрывные пробелы в разрядах ("9 600").
-// testing-library нормализует пробелы в DOM, но не в строке-матчере → приводим обе стороны.
-const norm = (s: string) => s.replace(/\s/g, " ");
-const byn = (v: number) => norm(formatByn(v));
+function review(org = 1, principal = "A", amount = "17000.00", average = "8500.00"): api.OwnedCostReview {
+  return { version: 1, organization_id: org, principal, status: "partial", complete_cost_coverage: false,
+    source: "explicit_own_logistics_imports", posting_status: "not_verified", unavailable_sections: ["tariffs", "tenders", "audit"],
+    import_freight: { status: "known", qualified_import_count: 3, warehouse_import_count: 2, known_count: 2,
+      unpriced_count: 0, excluded_nonwarehouse_count: 1, known_total: amount, total: amount, known_average: average } };
+}
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  return { promise: new Promise<T>(done => { resolve = done; }), resolve: (value: T) => resolve(value) };
+}
+async function choose(org = "1") {
+  const select = await screen.findByLabelText("Юрлицо аналитики");
+  fireEvent.change(select, { target: { value: org } });
+  return select;
+}
+async function knownShown(amount = "17000.00") {
+  await waitFor(() => expect(within(screen.getByText("Известный фрахт").parentElement!).getByText(moneyText(amount))).toBeInTheDocument());
+}
+function moneyText(amount: string) { return api.formatFreightByn(amount).replace(/\s/g, " "); }
+function noAmount(amount = "17000.00") { expect(screen.queryAllByText(moneyText(amount))).toHaveLength(0); }
 
 beforeEach(() => {
-  vi.clearAllMocks();
-  asMock(api.fetchCostInsights).mockResolvedValue(makeInsights());
+  vi.mocked(api.fetchCostCatalog).mockReset().mockResolvedValue(catalog());
+  vi.mocked(api.fetchOwnedCostReview).mockReset().mockImplementation(async selected => review(selected.organization_id, selected.principal));
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  vi.spyOn(document, "hidden", "get").mockReturnValue(false);
 });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-describe("LogisticsInsights", () => {
-  it("показывает индикатор загрузки, пока не пришли данные", () => {
-    asMock(api.fetchCostInsights).mockReturnValue(new Promise(() => {})); // не резолвится
+describe("company-owned LogisticsInsights", () => {
+  it("waits for the authorized company catalog", () => {
+    vi.mocked(api.fetchCostCatalog).mockReturnValue(new Promise(() => {}));
     render(<LogisticsInsights />);
-    expect(screen.getByText("Загрузка…")).toBeInTheDocument();
+    expect(screen.getByText("Проверка доступа к юрлицам…")).toBeInTheDocument();
+    expect(api.fetchOwnedCostReview).not.toHaveBeenCalled();
   });
-
-  it("null от API (backend недоступен) → честное сообщение об ошибке, а не пустая аналитика", async () => {
-    asMock(api.fetchCostInsights).mockResolvedValue(null);
+  it("requires an explicit company selection", async () => {
     render(<LogisticsInsights />);
-    expect(await screen.findByText(/Не удалось загрузить аналитику экономии/)).toBeInTheDocument();
-    // это НЕ пустое состояние с засевом — кнопки засева тут быть не должно
-    expect(screen.queryByRole("button", { name: /Заполнить демо/ })).not.toBeInTheDocument();
+    expect(await screen.findByLabelText("Юрлицо аналитики")).toHaveValue("");
+    expect(api.fetchOwnedCostReview).not.toHaveBeenCalled();
+    await choose(); await knownShown();
+    expect(api.fetchOwnedCostReview).toHaveBeenCalledWith({ organization_id: 1, principal: "A" }, expect.any(AbortSignal));
   });
-
-  it("пустой список зон → пустое состояние с кнопкой засева демо-данных", async () => {
-    asMock(api.fetchCostInsights).mockResolvedValue(makeInsights({ zones: [] }));
+  it("keeps an empty company catalog separate from zero expenses", async () => {
+    vi.mocked(api.fetchCostCatalog).mockResolvedValue({ ...catalog(), items: [] });
     render(<LogisticsInsights />);
-    expect(
-      await screen.findByText(/Нет данных для аналитики стоимости/),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Заполнить демо-данными/ })).toBeInTheDocument();
+    expect(await screen.findByText("Нет доступных юрлиц для просмотра затрат.")).toBeInTheDocument();
+    expect(api.fetchOwnedCostReview).not.toHaveBeenCalled();
+    expect(screen.queryByText(/0,00 Br/)).not.toBeInTheDocument();
   });
-
-  it("рендерит KPI-плитки с суммами в BYN и строки зон с самым дешёвым перевозчиком", async () => {
+  it("shows a catalog denial without any cost data", async () => {
+    vi.mocked(api.fetchCostCatalog).mockRejectedValue(new LogisticsReadError(403));
     render(<LogisticsInsights />);
-    // KPI: потенциал/торг/аудит/фрахт — суммы форматируются formatByn
-    expect(await screen.findByText(formatByn(812))).toBeInTheDocument();
-    expect(screen.getByText(formatByn(445))).toBeInTheDocument();
-    expect(screen.getByText(formatByn(137))).toBeInTheDocument();
-    expect(screen.getByText(byn(9600))).toBeInTheDocument(); // разряды: неразрывный пробел
-
-    // строки зон: имя дешёвого перевозчика и его цена
-    // «Деловые Линии» встречается и в зоне, и в тендерах → берём все
-    expect(screen.getAllByText("Деловые Линии").length).toBeGreaterThan(0);
-    expect(screen.getByText("СДЭК")).toBeInTheDocument(); // только в строке зоны Z2
-    expect(screen.getByText(formatByn(55))).toBeInTheDocument();
-
-    // разброс пилюлей: 24% и 5% (toFixed(0))
-    expect(screen.getByText("24%")).toBeInTheDocument();
-    expect(screen.getByText("5%")).toBeInTheDocument();
-
-    // рекомендация выведена
-    expect(screen.getByText(/Переключить зону Z1/)).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Недостаточно прав");
+    expect(api.fetchOwnedCostReview).not.toHaveBeenCalled();
+    noAmount();
   });
-
-  it("плитка «К возврату (аудит)» краснеет при долге и зеленеет при нуле", async () => {
-    // долг > 0 → tone red
-    const { unmount } = render(<LogisticsInsights />);
-    const debtLabel = await screen.findByText("К возврату (аудит)");
-    const debtValue = debtLabel.parentElement?.querySelector("div.text-red-600");
-    expect(debtValue).not.toBeNull();
-    expect(debtValue).toHaveTextContent(formatByn(137));
-    unmount();
-
-    // ноль → tone emerald (не красный)
-    asMock(api.fetchCostInsights).mockResolvedValue(makeInsights({ audit_to_recover: 0 }));
-    render(<LogisticsInsights />);
-    const zeroLabel = await screen.findByText("К возврату (аудит)");
-    expect(zeroLabel.parentElement?.querySelector("div.text-red-600")).toBeNull();
-    expect(zeroLabel.parentElement?.querySelector("div.text-emerald-600")).not.toBeNull();
+  it("shows exact qualified amounts and explicitly unavailable remaining sections", async () => {
+    render(<LogisticsInsights />); await choose(); await knownShown();
+    expect(within(screen.getByText("Средний известный фрахт").parentElement!).getByText(moneyText("8500.00"))).toBeInTheDocument();
+    expect(within(screen.getByText("Поставок с известной ценой").parentElement!).getByText("2")).toBeInTheDocument();
+    expect(screen.getByText(/Охват затрат неполный/)).toBeInTheDocument();
+    expect(screen.getByText(/Бухгалтерские проводки этим отчётом не подтверждены/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Показатель не определён/)).toHaveLength(3);
+    expect(screen.queryByRole("button", { name: /демо/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "5 кг" })).not.toBeInTheDocument();
   });
-
-  it("переключение эталонного веса перезапрашивает аналитику под новый вес", async () => {
-    render(<LogisticsInsights />);
-    await screen.findByText("СДЭК"); // данные пришли
-    expect(api.fetchCostInsights).toHaveBeenCalledWith(30); // маунт: дефолт 30 кг
-
-    fireEvent.click(screen.getByRole("button", { name: "5 кг" }));
-
-    await waitFor(() => expect(api.fetchCostInsights).toHaveBeenCalledWith(5));
+  it("shows unknown amounts when no source has been qualified", async () => {
+    const value = review();
+    value.import_freight = { status: "unknown", qualified_import_count: 0, warehouse_import_count: 0,
+      known_count: 0, unpriced_count: 0, excluded_nonwarehouse_count: 0, known_total: null, total: null, known_average: null };
+    vi.mocked(api.fetchOwnedCostReview).mockResolvedValue(value);
+    render(<LogisticsInsights />); await choose();
+    expect(await screen.findByText(/Нет подтверждённых источников для расчёта/)).toBeInTheDocument();
+    expect(within(screen.getByText("Известный фрахт").parentElement!).getByText("Не определён")).toBeInTheDocument();
+    expect(screen.queryByText(/0,00 Br/)).not.toBeInTheDocument();
   });
-
-  it("«Обновить демо» из пустого состояния засевает данные, заключает демо-тендер и показывает аналитику", async () => {
-    // сначала пусто → показ EmptyState с засевом
-    asMock(api.fetchCostInsights).mockResolvedValueOnce(makeInsights({ zones: [] }));
-    asMock(api.seedRfq).mockResolvedValue({ id: 51 });
-    asMock(api.awardRfq).mockResolvedValue({});
-    // после засева load(weight) снова тянет аналитику — теперь с данными
-    asMock(api.fetchCostInsights).mockResolvedValue(makeInsights());
-
-    render(<LogisticsInsights />);
-    const seedBtn = await screen.findByRole("button", { name: /Заполнить демо-данными/ });
-    fireEvent.click(seedBtn);
-
-    await waitFor(() => expect(api.seedZones).toHaveBeenCalled());
-    expect(api.seedTariffs).toHaveBeenCalled();
-    expect(api.seedAudit).toHaveBeenCalled();
-    expect(api.seedRfq).toHaveBeenCalled();
-    // seedRfq вернул тендер → его заключаем (awardRfq по id), появляется экономия торга
-    expect(api.awardRfq).toHaveBeenCalledWith(51);
-
-    // после засева таблица зон отрисована
-    expect(await screen.findByText("СДЭК")).toBeInTheDocument();
+  it("keeps a known subtotal while the whole qualified total is unknown", async () => {
+    const value = review();
+    Object.assign(value.import_freight, { status: "partial", qualified_import_count: 4, warehouse_import_count: 3, unpriced_count: 1, total: null });
+    vi.mocked(api.fetchOwnedCostReview).mockResolvedValue(value);
+    render(<LogisticsInsights />); await choose(); await knownShown();
+    expect(screen.getByRole("alert")).toHaveTextContent("Не оценён фрахт поставок: 1");
+    expect(within(screen.getByText("Итог по подтверждённым поставкам").parentElement!).getByText("Не определён")).toBeInTheDocument();
   });
-
-  it("рендерит таблицу экономии по заключённым тендерам", async () => {
-    render(<LogisticsInsights />);
-    expect(await screen.findByText("Экономия по заключённым тендерам")).toBeInTheDocument();
-    const table = screen.getByText("RFQ-77").closest("table") as HTMLElement;
-    expect(within(table).getByText("Минск → Гомель")).toBeInTheDocument();
-    // сэкономлено + процент в одной ячейке
-    expect(within(table).getByText(formatByn(120))).toBeInTheDocument();
-    expect(within(table).getByText(/\(24%\)/)).toBeInTheDocument();
+  it("removes A amounts immediately while company B is loading", async () => {
+    const pending = deferred<api.OwnedCostReview>();
+    vi.mocked(api.fetchOwnedCostReview).mockResolvedValueOnce(review()).mockReturnValueOnce(pending.promise);
+    render(<LogisticsInsights />); const select = await choose(); await knownShown();
+    fireEvent.change(select, { target: { value: "2" } });
+    noAmount(); expect(screen.getByText("Загрузка фрахта выбранного юрлица…")).toBeInTheDocument();
+    await act(async () => pending.resolve(review(2, "A", "600.00", "300.00")));
+    await knownShown("600.00"); noAmount();
   });
-
-  it("без заключённых тендеров блок экономии торга не рендерится", async () => {
-    asMock(api.fetchCostInsights).mockResolvedValue(makeInsights({ tenders: [] }));
+  it("ignores delayed responses across A-B-A including identical company IDs", async () => {
+    const oldA = deferred<api.OwnedCostReview>(), oldB = deferred<api.OwnedCostReview>();
+    vi.mocked(api.fetchOwnedCostReview).mockReturnValueOnce(oldA.promise).mockReturnValueOnce(oldB.promise)
+      .mockResolvedValueOnce(review(1, "A", "200.00", "100.00"));
+    render(<LogisticsInsights />); const select = await choose();
+    await waitFor(() => expect(api.fetchOwnedCostReview).toHaveBeenCalledTimes(1));
+    fireEvent.change(select, { target: { value: "2" } });
+    await waitFor(() => expect(api.fetchOwnedCostReview).toHaveBeenCalledTimes(2));
+    fireEvent.change(select, { target: { value: "1" } }); await knownShown("200.00");
+    await act(async () => { oldA.resolve(review()); oldB.resolve(review(2, "A", "600.00", "300.00")); });
+    await knownShown("200.00"); noAmount(); noAmount("600.00");
+  });
+  it("clears accepted amounts before a refresh that denies access", async () => {
+    render(<LogisticsInsights />); await choose(); await knownShown();
+    vi.mocked(api.fetchOwnedCostReview).mockRejectedValueOnce(new LogisticsReadError(403));
+    fireEvent.click(screen.getByRole("button", { name: "Обновить" })); noAmount();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Недостаточно прав"); noAmount();
+  });
+  it("hides on blur and reloads authorization and costs on focus", async () => {
+    render(<LogisticsInsights />); await choose(); await knownShown();
+    fireEvent.blur(window);
+    expect(screen.getByText("Данные скрыты до проверки доступа.")).toBeInTheDocument(); noAmount();
+    fireEvent.focus(window);
+    await waitFor(() => expect(api.fetchCostCatalog).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(api.fetchOwnedCostReview).toHaveBeenCalledTimes(2)); await knownShown();
+  });
+  it("requires a fresh selection after the authenticated principal changes", async () => {
+    render(<LogisticsInsights />); await choose(); await knownShown();
+    vi.mocked(api.fetchCostCatalog).mockResolvedValueOnce(catalog("B"));
+    fireEvent.blur(window); fireEvent.focus(window);
+    await waitFor(() => expect(screen.getByLabelText("Юрлицо аналитики")).toHaveValue(""));
+    expect(api.fetchOwnedCostReview).toHaveBeenCalledTimes(1); noAmount();
+    await choose(); await knownShown();
+    expect(vi.mocked(api.fetchOwnedCostReview).mock.calls.at(-1)?.[0]).toEqual({ organization_id: 1, principal: "B" });
+  });
+  it("ignores a catalog from the previous focus epoch", async () => {
+    const old = deferred<api.CostCatalog>();
+    vi.mocked(api.fetchCostCatalog).mockReturnValueOnce(old.promise).mockResolvedValueOnce({
+      ...catalog("B"), items: [{ id: 2, name: "Fresh current company", unp: "" }],
+    });
     render(<LogisticsInsights />);
-    await screen.findByText("Деловые Линии"); // данные пришли
-    expect(screen.queryByText("Экономия по заключённым тендерам")).not.toBeInTheDocument();
+    fireEvent.blur(window); fireEvent.focus(window);
+    expect(await screen.findByRole("option", { name: "Fresh current company" })).toBeInTheDocument();
+    await act(async () => old.resolve(catalog("A")));
+    expect(screen.queryByRole("option", { name: /Company One/ })).not.toBeInTheDocument();
+    expect(api.fetchOwnedCostReview).not.toHaveBeenCalled();
+  });
+  it("refuses an envelope that belongs to another selected identity", async () => {
+    vi.mocked(api.fetchOwnedCostReview).mockResolvedValue(review(2));
+    render(<LogisticsInsights />); await choose();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось подтвердить владельца ответа"); noAmount();
   });
 });

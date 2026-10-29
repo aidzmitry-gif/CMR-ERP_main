@@ -13,11 +13,17 @@ its selected backend Git objects and ten module gitlinks must equal the accepted
 backend checkpoint. Working files and untracked files are never exported.
 
 Candidate source has since changed: local LOG-6
-`e273b7cb73e4d6f3fc48b293009227ee03ca64f8` adds a company-qualified import
+`6f66bf050d4ee00937e32df3c0e32c9a8559f7eb` adds a company-qualified import
 freight review through existing explicit source bindings. This read projection
 has local ASGI and owned PostgreSQL 16 acceptance; it does not establish posted
-costs or complete tariff/tender/audit coverage. The frontend/full cost feature
-remains open. No schema/configuration change is included in this slice.
+costs or complete tariff/tender/audit coverage. Its frontend now reads the current
+authorized company catalog and requires explicit selection. Identity and selection
+changes fence stale responses; exact monetary values and unknown totals stay separate.
+Phase65 local acceptance: client21 and component14 cases, identity API5, owned
+PostgreSQL1, actual synthetic browser1 plus dev-login setup1; TypeScript/ESLint clean.
+Evidence: `G01AV-logistics-cost-ui-65.json` in the private ERP-READY-001 evidence folder.
+Full tariff/tender/audit cost functionality remains open. No schema/configuration
+change or WMS instruction change is included in this slice.
 The accepted source58 package remains frozen and does not contain this addition.
 Rebind the final application checkpoint and exact module pins, then export the
 final accepted source delta before image verification. Do not relabel or rebuild

@@ -40,7 +40,11 @@ async def test_native_decimal_ownership_unknowns_and_readonly_projection(issuanc
         await add_import(api, session, foreign, "999999.00")
         for amount in ("0.01", "0.02"):
             await add_import(api, session, cents, amount)
-    result = await review(api, own)
+    response = await api.get(f"/logistics/organizations/{own}/cost-insights")
+    assert response.status_code == 200, response.text
+    assert response.json()["principal"] == "issuer"
+    assert response.headers["Cache-Control"] == "private, no-store"
+    result = response.json()["import_freight"]
     assert result["total"] == "17000.00" and result["known_count"] == 2
     assert result["known_average"] == "8500.00" and result["excluded_nonwarehouse_count"] == 1
     assert (await review(api, foreign))["total"] == "999999.00"
