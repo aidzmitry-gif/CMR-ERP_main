@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from sqlalchemy import func, select, update
 
+from core.domain.models import User
 from modules.accounting.models import AccessGrant, Entry, ShipmentAccountingReceipt, SourceControl
 from modules.wms.models import StockMovement
 from tests.accounting.test_postgres import pg_factory  # noqa: F401
@@ -23,7 +24,12 @@ async def test_source_lot_draft_reload_and_preview_preserve_pending_act(physical
 
     async with factory() as session:
         await session.execute(update(AccessGrant).where(AccessGrant.organization_id == org).values(role="accountant"))
+        session.add_all([
+            User(username="shipment-financier", full_name="Synthetic shipment financier", role="finance", status="active"),
+            AccessGrant(organization_id=org, subject="shipment-financier", role="accountant"),
+        ])
         await session.commit()
+    api.headers["X-User"] = "shipment-financier"
     api.headers["X-User-Roles"] = "finance"
     assert (await api.get(physical)).status_code == 403
     source_url = root + f"/shipments/{act['source_key']}/source"
