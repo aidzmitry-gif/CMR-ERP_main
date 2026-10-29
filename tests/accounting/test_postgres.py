@@ -2104,7 +2104,7 @@ async def test_addressed_invoice_allocations_cannot_overbook_concurrently(pg_fac
     async with pg_factory() as session:
         for document_id in (1, 2):
             await invoice(session, document_id, [{"sku_code": "A", "qty": "5"}], pg_book[0])
-        session.add(StockMovement(organization_id=pg_book[0], sku_code="A", warehouse="W",
+        session.add(StockMovement(organization_id=pg_book[0], sku_code="A", warehouse="warehouse1",
                                   kind="in", qty="6", reason="receipt"))
         await session.commit()
     async def allocate(document_id):
@@ -2113,7 +2113,7 @@ async def test_addressed_invoice_allocations_cannot_overbook_concurrently(pg_fac
             source = await SalesReservationSource().invoice_reservation(session, document_id)
             try:
                 await reserve(session, pg_book[0], source, ReserveInput(allocations=[
-                    {"line_no": 1, "warehouse": "W", "qty": "5"}], journal_complete=True,
+                    {"line_no": 1, "warehouse": "warehouse1", "qty": "5"}], journal_complete=True,
                     evidence="Synthetic physical journal"), actor)
                 await session.commit()
                 return 201
@@ -2123,10 +2123,14 @@ async def test_addressed_invoice_allocations_cannot_overbook_concurrently(pg_fac
     assert sorted(await asyncio.gather(allocate(1), allocate(2))) == [201, 409]
     async with pg_factory() as session:
         assert len((await session.scalars(select(InvoiceReservation))).all()) == 1
+        reservation = await session.scalar(select(InvoiceReservation))
+        assert reservation.execution_modes == {"warehouse1": False}
         rows = (await session.scalars(select(ReservationVersion))).all()
         assert len(rows) == 1 and rows[0].qty == 5 and rows[0].organization_id == pg_book[0]
+        assert rows[0].warehouse == "warehouse1"
         physical = (await session.scalars(select(StockMovement))).all()
         assert len(physical) == 1 and physical[0].qty == 6
+        assert physical[0].warehouse == "warehouse1" and physical[0].organization_id == pg_book[0]
 
 
 async def test_wms_concurrent_accept_preserves_owner_without_duplicate_moves(pg_factory, pg_book):
