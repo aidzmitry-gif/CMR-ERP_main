@@ -11,7 +11,9 @@ import pytest
 from sqlalchemy import select
 
 from core.domain.models import Counterparty, OutboxEvent
-from modules.procurement import scoped_claims  # noqa: F401 -- register tables before the session fixture.
+from modules.procurement import (
+    scoped_claims,  # noqa: F401 -- register tables before the session fixture.
+)
 from modules.procurement.models import Supplier
 
 pytestmark = pytest.mark.asyncio
