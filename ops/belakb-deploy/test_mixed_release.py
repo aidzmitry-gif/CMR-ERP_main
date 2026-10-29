@@ -32,6 +32,22 @@ def fixtures():
         shutil.rmtree(resolved)
 
 
+def source_fixture():
+    database = 'erp_current_production'
+    baseline = {'schema': ['0194'], 'app_id': 'a' * 64, 'app_image': package.RUNTIME,
+                'pg_id': 'b' * 64, 'runtime_sha256': package.digest({}), 'database': database}
+    live = {'Id': baseline['app_id'], 'Image': baseline['app_image'], 'Mounts': [],
+            'State': {'Running': True}, 'Config': {'Env': [
+                'AIOS_DATABASE_URL=postgresql+psycopg://fixture:fixture@fresh-pg:5432/' + database]},
+            'NetworkSettings': {'Networks': {'production': {'IPAddress': '172.20.0.3'}}}}
+    prod = {'Id': baseline['pg_id'], 'Name': '/fresh-postgres', 'Image': copy.PG_IMAGE,
+            'Mounts': [], 'State': {'Running': True}, 'NetworkSettings': {'Networks': {
+                'production': {'IPAddress': '172.20.0.2', 'Aliases': ['fresh-pg']}}}}
+    observed = {'database': database, 'schema': ['0194'], 'read_only': 'on',
+                'system_identifier': '1234567890123456789'}
+    return baseline, live, prod, observed
+
+
 class Guards(unittest.TestCase):
     def test_cli_requires_explicit_opt_in_before_any_command(self):
         for module in (package, copy):
@@ -437,8 +453,7 @@ class Guards(unittest.TestCase):
             manifest, contract, baseline_path = (base / name for name in ('manifest', 'contract', 'baseline'))
             manifest.write_text('{}')
             contract.write_text('{}')
-            baseline = {'schema': ['0116'], 'app_id': 'live-app', 'app_image': 'live-image',
-                        'pg_id': 'live-pg', 'runtime_sha256': package.digest({})}
+            baseline, live, prod, observed = source_fixture()
             baseline_path.write_text(json.dumps(baseline))
             args = argparse.Namespace(output=base / 'private-new', manifest=manifest, data_contract=contract,
                 baseline=baseline_path, manifest_sha256=package.file_sha(manifest),
@@ -452,6 +467,9 @@ class Guards(unittest.TestCase):
                 return identity
 
             def execute(argv, **kwargs):
+                self.assertEqual(argv, ['docker', 'exec', baseline['pg_id'], 'pg_dump', '-U', 'aios',
+                    '-d', baseline['database'], '-Fc', '--lock-wait-timeout=10000'])
+                events.append('dump-current-database')
                 kwargs['stdout'].write(b'PGDMP fixture')
                 return subprocess.CompletedProcess(argv, 0, b'', b'')
 
@@ -465,16 +483,20 @@ class Guards(unittest.TestCase):
                     raise package.Blocked('UPGRADE_FAILED' if fail_upgrade is True else fail_upgrade)
 
             def current_schema(container, database):
-                return [package.HEAD] if database == 'aios_copy' and 'upgrade' in events else ['0116']
+                self.assertIn(database, (baseline['database'], 'aios_copy', 'aios_before'))
+                if database == baseline['database']:
+                    self.assertEqual(container, baseline['pg_id'])
+                return [package.HEAD] if database == 'aios_copy' and 'upgrade' in events else ['0194']
 
             def inspect_live(name):
-                if name == 'aios-app-1' and 'cleanup' in events:
+                self.assertIn(name, (baseline['app_id'], baseline['pg_id']))
+                if name == baseline['app_id'] and 'cleanup' in events:
                     events.append('baseline-after-cleanup')
                     if baseline_failure:
                         raise package.Blocked('FINAL_BASELINE_UNAVAILABLE')
-                return {'Id': baseline['app_id' if name == 'aios-app-1' else 'pg_id'],
-                        'Image': baseline['app_image'] if name == 'aios-app-1' else copy.PG_IMAGE,
-                        'Mounts': [], 'State': {'Running': not (baseline_drift and 'cleanup' in events)}}
+                result = dict(live if name == baseline['app_id'] else prod)
+                result['State'] = {'Running': not (baseline_drift and 'cleanup' in events)}
+                return result
 
             def cleanup(*unused):
                 events.append('cleanup')
@@ -490,6 +512,8 @@ class Guards(unittest.TestCase):
                 for name, replacement in (
                     ('SERVER_ROOT', base), ('verify_image', lambda *a, **kw: {'status': 'verified'}),
                     ('inspect', inspect_live),
+                    ('observe_backend', lambda container: dict(observed)),
+                    ('value', lambda *a: [observed['system_identifier']]),
                     ('projection', lambda info: {}), ('schema', current_schema), ('create_copy', create),
                     ('restore', lambda container, db: events.append('restore-' + container + '-' + db)),
                     ('specs', lambda container: [{'schema': 'public', 'table': 't', 'columns': ['id'], 'numeric': [], 'keys': ['id']}]),
@@ -516,6 +540,8 @@ class Guards(unittest.TestCase):
         self.assertGreater(events.index('restore-second-aios_before'), events.index('create-second'))
         self.assertEqual(events[-1], 'baseline-after-cleanup')
         self.assertTrue(receipt['live_baseline_unchanged'])
+        self.assertEqual(events.count('dump-current-database'), 1)
+        self.assertEqual(receipt['source_identity']['database'], 'erp_current_production')
         self.assertFalse(receipt['release_ready'])
 
     def test_upgrade_failure_is_nonzero_and_cleanup_receipt_is_honest(self):
@@ -603,9 +629,9 @@ class Guards(unittest.TestCase):
         # Preflight only; no owned output/container can be created before installation.
         with fixtures() as directory:
             base = Path(directory)
+            baseline, live, prod, observed = source_fixture()
             for name, body in (('manifest', '{}'), ('contract', '{}'), ('baseline', json.dumps({
-                    'schema': ['0116'], 'app_id': 'app', 'app_image': 'image',
-                    'pg_id': 'pg', 'runtime_sha256': package.digest({})}))):
+                    **baseline}))):
                 (base / name).write_text(body)
             args = argparse.Namespace(output=base / 'new', manifest=base / 'manifest',
                 data_contract=base / 'contract', baseline=base / 'baseline',
@@ -623,10 +649,7 @@ class Guards(unittest.TestCase):
             with patch.object(copy, 'SERVER_ROOT', base), \
                     patch.object(copy.os, 'geteuid', return_value=0, create=True), \
                     patch.object(copy.socket, 'gethostname', return_value='localhost.localdomain'), \
-                    patch.object(copy, 'inspect', side_effect=[{'Id': 'app', 'Image': 'image', 'Mounts': [], 'State': {'Running': True}},
-                        {'Id': 'pg', 'Image': copy.PG_IMAGE, 'Mounts': [], 'State': {'Running': True}}]), \
-                    patch.object(copy, 'projection', return_value={}), \
-                    patch.object(copy, 'schema', return_value=['0116']), \
+                    patch.object(copy, 'admit_source', return_value=(live, prod, observed)), \
                     patch.object(copy.signal, 'getsignal', return_value=copy.signal.SIG_DFL), \
                     patch.object(copy.signal, 'signal', side_effect=install), \
                     patch.object(copy, 'protected_new_directory') as create:
@@ -640,9 +663,124 @@ class Guards(unittest.TestCase):
         code, receipt, events = self.exercise_rehearsal(baseline_drift=True)
         self.assertEqual(code, 1)
         self.assertEqual(receipt['status'], 'LIVE_BASELINE_UNCONFIRMED')
-        self.assertEqual(receipt['baseline_safe_code'], 'LIVE_CHANGED_EXTERNALLY')
+        self.assertEqual(receipt['baseline_safe_code'], 'LIVE_BASELINE_DRIFT')
         self.assertFalse(receipt['live_baseline_unchanged'])
         self.assertEqual(events[-1], 'baseline-after-cleanup')
+
+
+class SourceAdmission(unittest.TestCase):
+    @contextlib.contextmanager
+    def source(self, fixture=None, *, cluster=None, body=None):
+        baseline, live, prod, observed = fixture or source_fixture()
+        with patch.object(copy, 'inspect', side_effect=[live, prod]) as inspect_live, \
+                patch.object(copy, 'projection', return_value={}), \
+                patch.object(copy, 'run', return_value=json.dumps(observed).encode() if body is None else body) as run, \
+                patch.object(copy, 'value', return_value=cluster or [observed['system_identifier']]) as value, \
+                patch.object(copy, 'schema', return_value=baseline['schema']) as schema:
+            yield baseline, inspect_live, run, value, schema
+
+    def test_current_backend_database_cluster_and_readonly_binding(self):
+        with self.source() as (baseline, inspect_live, run, value, schema):
+            live, prod, observed = copy.admit_source(baseline)
+            self.assertEqual(inspect_live.call_args_list[0].args, (baseline['app_id'],))
+            self.assertEqual(inspect_live.call_args_list[1].args, (baseline['pg_id'],))
+            self.assertEqual((live['Id'], prod['Id']), (baseline['app_id'], baseline['pg_id']))
+            self.assertEqual(observed['database'], baseline['database'])
+            self.assertEqual(observed['read_only'], 'on')
+            run.assert_called_once_with(['docker', 'exec', baseline['app_id'], 'python', '-B', '-c',
+                                         copy.BACKEND_SOURCE_PROBE], timeout=60)
+            compile(copy.BACKEND_SOURCE_PROBE, '<read-only backend source probe>', 'exec')
+            self.assertIn('default_transaction_read_only=on', copy.BACKEND_SOURCE_PROBE)
+            value.assert_called_once_with(baseline['pg_id'], baseline['database'],
+                                         'SELECT system_identifier::text FROM pg_control_system()')
+            schema.assert_called_once_with(baseline['pg_id'], baseline['database'])
+
+    def test_legacy_database_refuses_before_source_query(self):
+        fixture = source_fixture()
+        fixture[0]['database'] = 'aios'
+        with self.source(fixture) as (baseline, _, run, value, schema):
+            with self.assertRaisesRegex(package.Blocked, 'LIVE_DATABASE_URL_SHAPE'):
+                copy.admit_source(baseline)
+            run.assert_not_called()
+            value.assert_not_called()
+            schema.assert_not_called()
+
+    def test_foreign_database_host_and_disjoint_network_refuse(self):
+        for kind in ('host', 'network'):
+            fixture = source_fixture()
+            if kind == 'host':
+                fixture[1]['Config']['Env'][0] = fixture[1]['Config']['Env'][0].replace('fresh-pg', 'other-pg')
+            else:
+                fixture[2]['NetworkSettings']['Networks'] = {'other': {'Aliases': ['fresh-pg']}}
+            with self.subTest(kind=kind), self.source(fixture) as (baseline, _, run, value, schema):
+                with self.assertRaisesRegex(package.Blocked, 'LIVE_DATABASE_NETWORK_MISMATCH'):
+                    copy.admit_source(baseline)
+                run.assert_not_called()
+                value.assert_not_called()
+                schema.assert_not_called()
+
+    def test_legacy_schema_refuses_before_inspect(self):
+        fixture = source_fixture()
+        fixture[0]['schema'] = ['0116']
+        with self.source(fixture) as (baseline, inspect_live, run, _, _):
+            with self.assertRaisesRegex(package.Blocked, 'MEASURED_BASELINE_HEAD_REQUIRED'):
+                copy.admit_source(baseline)
+            inspect_live.assert_not_called()
+            run.assert_not_called()
+
+    def test_invalid_container_database_image_or_hash_refuses_before_inspect(self):
+        for key, altered in (('app_id', 'aios-app-1'), ('pg_id', 'b' * 12), ('pg_id', 'x' * 64),
+                             ('pg_id', 'a' * 64), ('app_id', None), ('runtime_sha256', 'invalid'),
+                             ('app_image', 'sha256:' + 'e' * 64), ('database', 'db/name'),
+                             ('database', '-option'), ('database', 'a' * 64)):
+            fixture = source_fixture()
+            fixture[0][key] = altered
+            with self.subTest(key=key, altered=altered), self.source(fixture) as (baseline, inspect_live, run, _, _):
+                with self.assertRaisesRegex(package.Blocked, 'SOURCE_BASELINE_SHAPE'):
+                    copy.admit_source(baseline)
+                inspect_live.assert_not_called()
+                run.assert_not_called()
+
+    def test_selected_postgres_cluster_must_match_backend_observation(self):
+        with self.source(cluster=['9876543210123456789']) as (baseline, _, _, _, _):
+            with self.assertRaisesRegex(package.Blocked, 'LIVE_DATABASE_IDENTITY_MISMATCH'):
+                copy.admit_source(baseline)
+
+    def test_ambiguous_or_redirecting_database_urls_refuse_without_secret_output(self):
+        for kind in ('duplicate', 'missing', 'query', 'encoded-path', 'port', 'malformed-port', 'whitespace'):
+            fixture = source_fixture()
+            env = fixture[1]['Config']['Env']
+            if kind == 'duplicate':
+                env.append(env[0])
+            elif kind == 'missing':
+                env.clear()
+            elif kind == 'query':
+                env[0] += '?dbname=other'
+            elif kind == 'encoded-path':
+                env[0] += '%2fother'
+            elif kind in ('port', 'malformed-port'):
+                env[0] = env[0].replace(':5432/', ':6543/' if kind == 'port' else ':bad/')
+            else:
+                env[0] += '\n'
+            with self.subTest(kind=kind), self.source(fixture) as (baseline, _, run, _, _):
+                with self.assertRaises((package.Blocked, ValueError)) as error:
+                    copy.admit_source(baseline)
+                self.assertRegex(str(error.exception), '^[A-Z_]+$')
+                run.assert_not_called()
+
+    def test_backend_database_schema_readonly_and_observation_shape_must_match(self):
+        for key, altered in (('database', 'aios'), ('schema', ['0116']), ('read_only', 'off'),
+                             ('system_identifier', 'unknown')):
+            fixture = source_fixture()
+            fixture[3][key] = altered
+            with self.subTest(key=key), self.source(fixture) as (baseline, _, _, _, _):
+                with self.assertRaisesRegex(package.Blocked, 'LIVE_DATABASE_IDENTITY_MISMATCH'):
+                    copy.admit_source(baseline)
+        for body in (b'{invalid', b'[]', b'{}', b'null', b'\xff'):
+            with self.subTest(body=body), self.source(body=body) as (baseline, _, _, _, _):
+                with self.assertRaises((package.Blocked, ValueError)) as error:
+                    copy.admit_source(baseline)
+                self.assertEqual(str(error.exception), 'BACKEND_SOURCE_OBSERVATION_SHAPE')
 
 
 class IntakeQuiescence(unittest.TestCase):

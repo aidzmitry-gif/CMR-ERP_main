@@ -11,11 +11,13 @@ import subprocess
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 from prepare_mixed import (
     CHAIN,
     HEAD,
     OPT_IN,
+    RUNTIME,
     digest,
     file_sha,
     inspect,
@@ -32,6 +34,94 @@ from prepare_mixed import (
 
 PG_IMAGE = 'sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc'
 SERVER_ROOT = Path('/opt/cmr-erp-rehearsals/CRM-REL-001')
+SOURCE_HEAD = '0194'
+BACKEND_SOURCE_PROBE = """
+import json
+try:
+    import psycopg
+    from sqlalchemy.engine import make_url
+    from config.settings import get_settings
+    u = make_url(get_settings().database_url)
+    with psycopg.connect(host=u.host, port=u.port or 5432, dbname=u.database,
+            user=u.username, password=u.password, connect_timeout=10,
+            options='-c default_transaction_read_only=on -c statement_timeout=10000') as c:
+        result = {
+            'database': c.execute('SELECT current_database()').fetchone()[0],
+            'schema': [r[0] for r in c.execute('SELECT version_num FROM alembic_version ORDER BY version_num')],
+            'read_only': c.execute('SHOW transaction_read_only').fetchone()[0],
+            'system_identifier': c.execute('SELECT system_identifier::text FROM pg_control_system()').fetchone()[0],
+        }
+    print(json.dumps(result))
+except Exception:
+    raise SystemExit('BACKEND_SOURCE_OBSERVATION_FAILED') from None
+"""
+
+
+def source_database(live, prod, database):
+    # Inspect secrets stay in memory; neither URLs nor raw errors enter receipts.
+    env = live.get('Config', {}).get('Env') or []
+    urls = [item.partition('=')[2] for item in env
+            if isinstance(item, str) and item.startswith('AIOS_DATABASE_URL=')]
+    require(len(urls) == 1, 'LIVE_DATABASE_URL_AMBIGUOUS')
+    try:
+        require(not any(c.isspace() or ord(c) < 32 for c in urls[0]), 'LIVE_DATABASE_URL_SHAPE')
+        url = urlsplit(urls[0])
+        require(url.scheme in ('postgresql', 'postgres', 'postgresql+psycopg',
+                              'postgresql+asyncpg', 'postgresql+psycopg2') and
+                url.hostname and url.username and url.password is not None and
+                (url.port or 5432) == 5432 and not url.query and not url.fragment and
+                unquote(url.path) == '/' + database, 'LIVE_DATABASE_URL_SHAPE')
+        hostname = url.hostname.lower()
+    except (ValueError, UnicodeError):
+        raise ValueError('LIVE_DATABASE_URL_SHAPE') from None
+    app_networks = live.get('NetworkSettings', {}).get('Networks') or {}
+    pg_networks = prod.get('NetworkSettings', {}).get('Networks') or {}
+    endpoints = set()
+    for name in set(app_networks).intersection(pg_networks):
+        network = pg_networks[name]
+        endpoints.update(str(item).lower() for item in
+                         [network.get('IPAddress'), network.get('GlobalIPv6Address'),
+                          prod.get('Name', '').lstrip('/'),
+                          *(network.get('Aliases') or []), *(network.get('DNSNames') or [])] if item)
+    require(hostname in endpoints, 'LIVE_DATABASE_NETWORK_MISMATCH')
+
+
+def observe_backend(container):
+    body = run(['docker', 'exec', container, 'python', '-B', '-c', BACKEND_SOURCE_PROBE], timeout=60)
+    try:
+        result = json.loads(body)
+    except (ValueError, UnicodeError):
+        raise ValueError('BACKEND_SOURCE_OBSERVATION_SHAPE') from None
+    require(isinstance(result, dict) and
+            set(result) == {'database', 'schema', 'read_only', 'system_identifier'},
+            'BACKEND_SOURCE_OBSERVATION_SHAPE')
+    return result
+
+
+def admit_source(baseline):
+    require(isinstance(baseline, dict) and baseline.get('schema') == [SOURCE_HEAD],
+            'MEASURED_BASELINE_HEAD_REQUIRED')
+    require(all(isinstance(baseline.get(key), str) and re.fullmatch('[a-f0-9]{64}', baseline[key])
+                for key in ('app_id', 'pg_id', 'runtime_sha256')) and
+            baseline['app_id'] != baseline['pg_id'] and baseline.get('app_image') == RUNTIME and
+            isinstance(baseline.get('database'), str) and
+            re.fullmatch('[a-zA-Z_][a-zA-Z_0-9]{0,62}', baseline['database']), 'SOURCE_BASELINE_SHAPE')
+    live, prod = inspect(baseline['app_id']), inspect(baseline['pg_id'])
+    require(live['State']['Running'] and live['Id'] == baseline['app_id'] and
+            live['Image'] == baseline['app_image'] and
+            digest(projection(live)) == baseline['runtime_sha256'], 'LIVE_BASELINE_DRIFT')
+    require(prod['State']['Running'] and prod['Id'] == baseline['pg_id'] and
+            prod['Image'] == PG_IMAGE, 'LIVE_POSTGRES_DRIFT')
+    source_database(live, prod, baseline['database'])
+    observed = observe_backend(baseline['app_id'])
+    cluster = value(baseline['pg_id'], baseline['database'],
+                    'SELECT system_identifier::text FROM pg_control_system()')
+    require(observed['database'] == baseline['database'] and observed['schema'] == baseline['schema'] and
+            observed['read_only'] == 'on' and isinstance(observed['system_identifier'], str) and
+            re.fullmatch('[1-9][0-9]{0,19}', observed['system_identifier']) and
+            cluster == [observed['system_identifier']], 'LIVE_DATABASE_IDENTITY_MISMATCH')
+    require(schema(baseline['pg_id'], baseline['database']) == baseline['schema'], 'LIVE_SCHEMA_DRIFT')
+    return live, prod, observed
 
 
 def quote(value):
@@ -216,14 +306,7 @@ def rehearsal(args):
     manifest = json.loads(args.manifest.read_bytes())
     contract = json.loads(args.data_contract.read_bytes())
     baseline = json.loads(args.baseline.read_bytes())
-    require(baseline['schema'] == ['0116'], 'MEASURED_BASELINE_HEAD_REQUIRED')
-    live = inspect('aios-app-1')
-    prod = inspect('aios-postgres-1')
-    require(live['State']['Running'] and prod['State']['Running'] and
-            live['Id'] == baseline['app_id'] and live['Image'] == baseline['app_image'] and
-            digest(projection(live)) == baseline['runtime_sha256'], 'LIVE_BASELINE_DRIFT')
-    require(prod['Id'] == baseline['pg_id'] and prod['Image'] == PG_IMAGE, 'LIVE_POSTGRES_DRIFT')
-    require(schema('aios-postgres-1', 'aios') == baseline['schema'], 'LIVE_SCHEMA_DRIFT')
+    live, prod, source_identity = admit_source(baseline)
     production_mounts = {m['Source'] for m in prod['Mounts'] + live['Mounts']}
     saved_handlers = {}
     cleaning = False
@@ -248,13 +331,14 @@ def rehearsal(args):
                    'manifest_sha256': args.manifest_sha256,
                    'data_contract_sha256': args.data_contract_sha256,
                    'baseline_sha256': args.baseline_sha256, 'production_changes': 0,
+                   'source_identity': source_identity,
                    'backup_kind': 'consistent live-read copy; not write-frozen production rollback backup',
                    'release_ready': False}
         try:
             receipt['image_proof'] = verify_image(manifest, args.image, state_root=args.output)
             with dump.open('xb') as handle:
-                result = subprocess.run(['docker', 'exec', 'aios-postgres-1', 'pg_dump', '-U', 'aios',
-                    '-d', 'aios', '-Fc', '--lock-wait-timeout=10000'], stdout=handle,
+                result = subprocess.run(['docker', 'exec', baseline['pg_id'], 'pg_dump', '-U', 'aios',
+                    '-d', baseline['database'], '-Fc', '--lock-wait-timeout=10000'], stdout=handle,
                     stderr=subprocess.PIPE, timeout=300)
             require(result.returncode == 0, 'READ_DUMP_FAILED_OUTPUT_REDACTED')
             dump.chmod(0o600)
@@ -311,12 +395,8 @@ def rehearsal(args):
                 receipt['owned_resources_removed'] = False
                 receipt['cleanup_safe_code'] = str(error) if re.fullmatch('[A-Z_0-9]+', str(error)) else type(error).__name__
             try:
-                current, current_pg = inspect('aios-app-1'), inspect('aios-postgres-1')
-                require(current['State']['Running'] and current_pg['State']['Running'] and
-                        current['Id'] == baseline['app_id'] and current['Image'] == baseline['app_image'] and
-                        digest(projection(current)) == baseline['runtime_sha256'] and
-                        current_pg['Id'] == baseline['pg_id'] and current_pg['Image'] == PG_IMAGE and
-                        schema('aios-postgres-1', 'aios') == baseline['schema'], 'LIVE_CHANGED_EXTERNALLY')
+                _, _, current_identity = admit_source(baseline)
+                require(current_identity == source_identity, 'LIVE_CHANGED_EXTERNALLY')
                 receipt['live_baseline_unchanged'] = True
             except Exception as error:
                 receipt['live_baseline_unchanged'] = False

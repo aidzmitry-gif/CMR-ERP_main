@@ -1,6 +1,6 @@
 # CRM-REL-001 mixed release preparation
 
-Status: **CURRENT SOURCE PROFILE RENEWED; COPY ROUTE BLOCKED**, `release_ready=false`. This route exports committed
+Status: **CURRENT SOURCE PROFILE RENEWED; COPY BINDING LOCALLY VERIFIED**, `release_ready=false`. This route exports committed
 backend sources for isolated verification. The dated image/migration/restore results
 below are historical; current runtime acceptance remains pending. It has no production
 apply command and does not modify or bootstrap `/opt/belakb-deploy-v1`.
@@ -20,12 +20,19 @@ The image verifier also checks the runtime filesystem layer prefix, unchanged
 image environment and final user `10001:10001`; source export includes the lock
 file. This is preparation evidence; image build/probe and full CI remain pending.
 
-**Copy admission blocker:** the existing `rehearse_mixed_copy.py` still names the
-legacy app and database `aios` with baseline `0116`. Fresh read-only checks found
-that the running accepted backend uses a different database at `0194`. Bind the
-copy route to that backend's measured container/configuration and database before
-running it. A legacy baseline must not be supplied to obtain a passing rehearsal.
-No copy, dump, migration, production apply or R6 replay was performed for this renewal.
+**Copy binding correction:** `rehearse_mixed_copy.py` now requires measured full
+backend/PostgreSQL IDs, the accepted PR63 backend image, runtime projection hash,
+database name and baseline `0194`. It refuses the legacy `0116` profile before
+inspect, output or copying. The configured database must match a PostgreSQL
+endpoint on a shared Docker network. A read-only observation inside the backend
+must also match the selected PostgreSQL cluster system identifier, database and
+schema; missing privileges refuse admission and never trigger a rights change.
+Dump and final readback use those admitted IDs and database. URLs/passwords stay
+in memory; failure messages contain safe codes only. All 75 local guard tests
+passed, including the retained restore/cleanup/interruption gates. Docker/SQL are
+mocked in these tests: actual source admission, image build/probe, copy, upgrade,
+separate restore, full CI and independent review remain pending. No server run,
+copy, dump, migration, production apply or R6 replay was performed for this correction.
 
 ## Immutable backend source and image
 
@@ -33,8 +40,9 @@ No copy, dump, migration, production apply or R6 replay was performed for this r
 --package-checkpoint <final-40-hex-commit> --output <new-absolute-directory-outside-repo>`
 exports `context/source`, `context/Dockerfile` and a hash-bound `manifest.json`.
 The source roots are config, connectors, core, integrations, modules, migrations,
-docker and scripts, plus main.py, requirements.txt, alembic.ini, pyproject.toml,
-the committed Dockerfile and the two accepted integration proof programs.
+docker and scripts, plus main.py, requirements.txt, requirements.lock.txt,
+alembic.ini, pyproject.toml, the committed Dockerfile and exact proof/import
+closure files enumerated in `prepare_mixed.PROOFS`.
 Sales runtime imports additionally require exactly the committed files
 `ops/sales_mail/{__init__.py,config.py,queue.py,relay.py}`. The rest of ops is excluded.
 Each pinned module exports committed code/template/schema assets, including SQL guards. Root docs,
@@ -45,7 +53,7 @@ runtime assets outside these declared roots before accepting source closure.
 
 Root builds the generated context with `docker build --network=none --pull=false`.
 It uses dependency runtime
-`sha256:469fbba3826e14647fb9b03280843ff591fc6f875244bb17e08f51043ef21319`;
+`sha256:da6b12c4a9b83f14e88026739609bd372820ae0a6f5fe44488b7b2834e69018a`;
 the whole inherited `/app` is removed before COPY. No apt/pip installation occurs.
 The cached runtime already passed pip/native PDF probes, but is not a release image.
 
@@ -55,7 +63,7 @@ The cached runtime already passed pip/native PDF probes, but is not a release im
 requires an existing private 0700 owner directory on server. It repeats pip check, exact file hashes/no stale files,
 entrypoint/provenance, requirements compatibility, imports, Alembic head and
 native Cyrillic PDF extraction. These probes have no source bind or network access.
-The required head is `crm_rel_001_native_catalog_01`.
+The required current head is `0199`.
 
 Every probe fsyncs an atomic private JSON record containing name, owner, immutable
 image, network and cidfile **before Docker create**, and uses `--cidfile` to retain
@@ -73,9 +81,12 @@ permission errors, mixed messages, timeouts and other failures are rejected.
 
 ## Fresh copy and independent restore
 
-Root supplies a current hash-bound baseline JSON with `schema: ["0116"]`, exact
-`app_id`, `app_image`, `pg_id`, and `runtime_sha256` using the existing v1 runtime
-projection. Current IDs/config hashes must be remeasured before execution.
+Root supplies a current private hash-bound baseline JSON with `schema: ["0194"]`,
+exact full 64-hex `app_id` and `pg_id`, accepted PR63 `app_image`, `database`, and
+`runtime_sha256` using the existing v1 runtime projection. Database names must be
+plain PostgreSQL identifiers (at most 63 characters). Current IDs/config hashes
+must be remeasured before execution. Do not reuse the legacy `aios` database;
+the selected database must be the one actually used by the accepted backend.
 
 The hash-bound data contract is `{ "format": 1, "chain": "CRM-REL-001",
 "transformations": [], "link_checks": [{"name": "<accepted-key-invariant>",
@@ -98,7 +109,7 @@ copy, not a write-frozen production rollback backup.
 
 The first PostgreSQL owns a fresh anonymous volume, `network=none`, no published
 ports and only the readonly private dump bind. Both reference and upgrade DBs are
-actually restored at 0116. The candidate image upgrades the isolated DB through
+actually restored at 0194. The candidate image upgrades the isolated DB through
 its shared loopback network namespace, then original-column hashes/counts/sums,
 exact declared transformations and links are checked. Alembic is executed twice.
 A separately created PostgreSQL is restored from the original dump **after** the
