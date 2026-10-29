@@ -192,7 +192,13 @@ async def prepare_zero_command(session, org_id, document, *, procurement=None):
             "SELECT accounting.zero_value_allocation_basis(:org,CAST(:command AS jsonb),2147483647)"
         ), {"org": org_id, "command": canonical_json(command.model_dump(mode="json"))})
         return command.model_copy(update={"basis_digest": basis})
-    command = ZeroValueSaleCommand.model_validate({**checked["command"], "command_version": 3,
+    quantity_command = checked["command"]
+    if quantity_command.get("command_version") == 6:
+        # The checked V6 issue embeds an InventoryIssueDocument. Its full sale
+        # counterpart (including directory identities) belongs in sale_document;
+        # retaining the issue-only document would violate the V3 sale schema.
+        quantity_command = {key: value for key, value in quantity_command.items() if key != "document"}
+    command = ZeroValueSaleCommand.model_validate({**quantity_command, "command_version": 3,
         "operation": "inventory_sale", "sale_document": document.model_dump(mode="json")})
     basis = await session.scalar(text("SELECT accounting.zero_value_disposal_basis(:org,CAST(:command AS jsonb),2147483647)"),
                                  {"org": org_id, "command": canonical_json(command.model_dump(mode="json"))})

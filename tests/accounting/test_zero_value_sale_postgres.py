@@ -36,6 +36,7 @@ from modules.accounting.zero_value_disposals import (
 )
 from tests.accounting.test_finished_goods_inventory_postgres import (
     _output_cost_command,
+    _physical_sale_document,
     sale_document,
 )
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
@@ -76,7 +77,20 @@ async def test_zero_sale_persists_revenue_and_quantity_once(pg_factory, pg_book,
                              "0148_zero_value_allocated_sales.py"):
                 await run_migration(session, revision, "upgrade")
             await session.commit()
-    document = sale_document(policy_id).model_copy(update={"quantity": Decimal("0.5"), "vat_rate": Decimal(vat_rate)})
+    await _zero_sale_contract(pg_factory, pg_book, policy_id, output_id, vat_rate)
+
+
+@pytest.mark.parametrize("vat_rate", ["0", "20"])
+async def test_current_zero_sale_persists_revenue_and_quantity_once(pg_factory, pg_book, issuance_pg, vat_rate):
+    policy_id, output_id, _ = await zeroed_output(pg_factory, pg_book, api=issuance_pg[0])
+    document = await _physical_sale_document(pg_factory, pg_book, policy_id)
+    document = document.model_copy(update={"quantity": Decimal("0.5"), "vat_rate": Decimal(vat_rate)})
+    await _zero_sale_contract(pg_factory, pg_book, policy_id, output_id, vat_rate, document)
+
+
+async def _zero_sale_contract(pg_factory, pg_book, policy_id, output_id, vat_rate, document=None):
+    if document is None:
+        document = sale_document(policy_id).model_copy(update={"quantity": Decimal("0.5"), "vat_rate": Decimal(vat_rate)})
     async with pg_factory() as session:
         if vat_rate == "20":
             for code, category in (("90.2", "income"), ("68.2", "liability")):
@@ -100,6 +114,10 @@ async def test_zero_sale_persists_revenue_and_quantity_once(pg_factory, pg_book,
         response = await client.post(base + "/posting-preview", json=document.model_dump(mode="json"))
         assert response.status_code == 200, response.text
         prepared = response.json()
+        if document.warehouse_identity is not None and document.sku_identity is not None:
+            assert prepared["zero_value_command"]["command_version"] == 3
+            assert "document" not in prepared["zero_value_command"]
+            assert prepared["zero_value_command"]["sale_document"] == document.model_dump(mode="json")
         assert prepared["cost"]["issue_cost_byn"] == "0.00"
 
     async def confirm_once():
