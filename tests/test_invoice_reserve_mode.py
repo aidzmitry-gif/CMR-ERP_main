@@ -4,12 +4,17 @@ from decimal import Decimal
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 
 from core.domain.models import OutboxEvent, Sku
 from modules.integrations.models import StockItem
 from modules.sales.documents import digest
 from modules.sales.models import Deal, DealDocument, DealItem, PriceQuote
+from modules.wms.models import StockMovement
+from tests.test_invoice_issuance import command as owned_command
+from tests.test_invoice_issuance import create as create_owned_invoice
+from tests.test_invoice_issuance import no_issue
+from tests.test_invoice_issuance import seed as owned_sale
 
 LABEL = "Под заказ — товар не зарезервирован"
 
@@ -115,16 +120,19 @@ async def test_on_order_without_stock_is_visible_frozen_and_idempotent(api, sess
 @pytest.mark.parametrize("mode", [None, "stock"])
 @pytest.mark.parametrize("available", [None, 1])
 async def test_stock_mode_never_falls_back_to_on_order(api, session, mode, available):
-    deal_id = await sale(session, available=available)
-    payload = {"kind": "invoice"}
+    ids, base = await owned_sale(api, session, physical=str(available or 1))
+    if available is None:
+        await session.execute(delete(StockMovement))
+        await session.commit()
+    payload, _ = await owned_command(api, ids, base)
     if mode is not None:
         payload["reserve_mode"] = mode
-    result = await api.post(f"/sales/deals/{deal_id}/documents", json=payload)
+    before = list(await session.scalars(select(StockMovement.qty).order_by(StockMovement.id)))
+    result = await create_owned_invoice(api, ids, payload)
     assert result.status_code == 409, result.text
-    assert (await session.scalars(select(DealDocument))).all() == []
+    await no_issue(session)
     assert (await session.scalars(select(OutboxEvent))).all() == []
-    if available is not None:
-        assert (await session.scalar(select(StockItem))).qty_reserved == 0
+    assert list(await session.scalars(select(StockMovement.qty).order_by(StockMovement.id))) == before
 
 
 @pytest.mark.parametrize("kind", ["order", "contract"])
@@ -278,9 +286,23 @@ async def test_revision_stock_to_on_order_releases_only_old_basket(api, session,
 
 
 async def test_stock_gateway_unavailable_requires_explicit_on_order(api, session, monkeypatch):
-    deal_id = await sale(session)
-    monkeypatch.setattr(api._transport.app.state.core.services, "stock", None)
-    rejected = await api.post(f"/sales/deals/{deal_id}/documents", json={"kind": "invoice"})
+    ids, base = await owned_sale(api, session, physical="10")
+    stock_command, _ = await owned_command(api, ids, base)
+    monkeypatch.setattr(api._transport.app.state.core.services, "wms_reservations", None)
+    rejected = await create_owned_invoice(api, ids, stock_command)
     assert rejected.status_code == 503, rejected.text
-    assert (await session.scalars(select(DealDocument))).all() == []
-    assert (await invoice(api, deal_id))["reserve_status"] == "unreserved"
+    await no_issue(session)
+    unreserved_basis = {**base, "reserve_mode": "on_order"}
+    preview = await api.post(f"/sales/deals/{ids['deal']}/invoice-preview", json=unreserved_basis)
+    assert preview.status_code == 200, preview.text
+    basis = preview.json()
+    assert basis["availability"] is None
+    result = await create_owned_invoice(api, ids, {
+        **unreserved_basis, "request_key": "explicit-on-order-gateway-unavailable",
+        "expected_document_version": basis["document_version"],
+        "expected_basis_digest": basis["basis_digest"],
+        "allocations": [], "unreserved_confirmed": True,
+    })
+    assert result.status_code == 201, result.text
+    assert result.json()["document"]["reserve_status"] == "unreserved"
+    assert await events(session, "sales.stock.reserved") == []
