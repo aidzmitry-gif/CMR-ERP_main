@@ -1,10 +1,11 @@
 "use client";
 
 import clsx from "clsx";
-import { FileText, Truck } from "lucide-react";
+import { FileText, Truck, UserCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { OfficeDelivery } from "@/components/erp/office-delivery";
+import { OfficeReviewQueue } from "@/components/erp/office-review-queue";
 import {
   DEMO_DELIVERIES,
   OFFICE_CARRIERS,
@@ -15,7 +16,7 @@ import {
   type OfficeDocApi,
 } from "@/lib/office-delivery";
 
-type Tab = "docs" | "delivery";
+type Tab = "docs" | "delivery" | "reviewers";
 
 function TabButton({
   active,
@@ -139,6 +140,9 @@ export function OfficeView({
         >
           Доставка
         </TabButton>
+        <TabButton active={tab === "reviewers"} onClick={() => setTab("reviewers")} icon={UserCheck}>
+          Проверяющие
+        </TabButton>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
@@ -146,6 +150,7 @@ export function OfficeView({
         <div className={tab === "delivery" ? "contents" : "hidden"}>
           <OfficeDelivery deliveries={deliveries} carriers={carriers} onAssignCarrier={assignCarrier} />
         </div>
+        {tab === "reviewers" && <OfficeReviewQueue />}
       </div>
     </div>
   );

@@ -118,7 +118,8 @@ def test_release_head_preserves_the_joint_revision_and_exact_frozen_parents():
     assert {revision.revision for revision in scripts.walk_revisions()} == set(definitions)
     # The approved release reuses 0198 directly after public 0194; the
     # historical joint migration remains an ancestor, not the current tip.
-    assert scripts.get_heads() == ["0198"]
+    assert scripts.get_heads() == ["0199"]
+    assert scripts.get_revision("0199").down_revision == "0198"
     assert scripts.get_revision("0198").down_revision == "0194"
     assert "crm_rel_001_auto_posting_01" in {
         revision.revision for revision in scripts.walk_revisions(head="0194")

@@ -761,7 +761,7 @@ async def test_office(api, session):
     assert moved.json()["stage"] == "paid"
     assert (await api.patch("/office/docs/999999", json={"stage": "paid"})).status_code == 404
     board = (await api.get("/office/board")).json()
-    assert [s["id"] for s in board["stages"]][0] == "ready"
+    assert [s["id"] for s in board["stages"]][:2] == ["draft", "ready"]
     assert sum(s["count"] for s in board["stages"]) >= 1
 
 

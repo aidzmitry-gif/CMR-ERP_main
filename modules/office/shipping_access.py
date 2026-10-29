@@ -1,4 +1,4 @@
-"""OfficeDoc scope is persisted assignment or verified linked deal, never owner text."""
+"""Office scope uses verified draft authors, reviewer assignments or linked deals."""
 from fastapi import HTTPException
 from sqlalchemy import select
 
@@ -46,6 +46,11 @@ async def authorize_doc(core, session, doc, user, permission, *, reviewer=False)
         # Confirmation always requires a current explicit reviewer, even chief.
         raise HTTPException(404, "Office shipping document not found")
     if has_permission(core, user, "office.shipping.review.assign"):
+        return actor, revision
+    if (association is None and doc.stage == "draft" and (assignment is None or not assignment.subject)
+            and doc.draft_owner_subject == actor):
+        # Author scope ends when a reviewer is assigned or an invoice is bound.
+        # It never satisfies reviewer=True or changes reviewer permissions.
         return actor, revision
     if doc.deal_id is not None:
         try:

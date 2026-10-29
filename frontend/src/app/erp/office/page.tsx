@@ -10,7 +10,7 @@ export default function OfficePage() {
         board={
           <FunnelBoard
             title="Офис-менеджер"
-            subtitle="Документы по сделкам: готово к отгрузке → отгружено → документы → оплата."
+            subtitle="Свои черновики → назначение проверяющего → документы по сделкам и оплата."
             boardPath="/office/board"
             createPath="/office/docs"
             patchPath="/office/docs"
