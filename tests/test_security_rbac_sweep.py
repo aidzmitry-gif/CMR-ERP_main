@@ -227,7 +227,9 @@ async def test_write_routes_allowed_for_owner_role(client, write_routes):
     false_blocks: list[str] = []
     for method, url, package, _denier in write_routes:
         resp = await client.request(method, url, headers={"X-User-Roles": _OWNER_ROLE})
-        source_book_route = package == "procurement" and url.startswith("/procurement/organizations/")
+        source_book_route = package in {"sales", "procurement", "production"} and url.startswith(
+            f"/{package}/organizations/"
+        )
         if (package == "accounting" or source_book_route) and resp.status_code == 403:
             # Role-only request has no identity. This exact domain refusal proves
             # the module gate passed; director must not bypass book-level checks.
