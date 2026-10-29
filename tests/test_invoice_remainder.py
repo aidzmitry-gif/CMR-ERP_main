@@ -12,7 +12,7 @@ from modules.sales.reservation_source import SalesReservationSource
 from modules.wms.invoice_remainder import RemainderRelease, RemainderReleaseLine
 from modules.wms.invoice_reservations import ReserveInput, invoice_availability, reserve
 from modules.wms.invoice_shipments import PhysicalShipmentAct
-from modules.wms.models import StockMovement, Task
+from modules.wms.models import StockMovement, Task, WarehouseDirectory
 from modules.wms.reservation_events import apply
 from tests.reservation_source import invoice
 from tests.test_invoice_physical_shipments import endpoint, request
@@ -23,6 +23,9 @@ async def prepared_six(api, session):
     response = await api.post('/accounting/organizations', json={"name": "Remainder test", "unp": "999999978"})
     assert response.status_code == 201, response.text
     org = response.json()['id']
+    session.add(WarehouseDirectory(organization_id=org, name="W", title="Synthetic remainder warehouse",
+                                   created_by="allocator", wms_enabled=True, prohibit_negative_stock=True))
+    await session.flush()
     await invoice(session, 1, [{"sku_code": "A", "qty": "3"}, {"sku_code": "A", "qty": "3"}], org)
     session.add(StockMovement(organization_id=org, sku_code="A", warehouse="W", kind="in", qty=10, reason="receipt"))
     await session.commit()
