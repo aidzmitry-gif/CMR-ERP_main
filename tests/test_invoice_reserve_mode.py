@@ -1,5 +1,4 @@
 """Explicit on-order invoices preserve their choice without inventing stock."""
-from datetime import datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock
 
@@ -21,19 +20,42 @@ LABEL = "Под заказ — товар не зарезервирован"
 
 @pytest.mark.parametrize("mode", ["stock", "on_order"])
 async def test_printed_deadline_matches_frozen_calendar_date(api, session, monkeypatch, mode):
-    from modules.sales import routes
+    from modules.sales import documents
 
-    monkeypatch.setattr(routes, "_utcnow", lambda: datetime(2026, 9, 10, 12))
-    monkeypatch.setenv("AIOS_INVOICE_VALID_DAYS", "5")
-    deal_id = await sale(session, available=10)
-    result = await invoice(api, deal_id, mode)
+    ids, base = await owned_sale(api, session)
+    base.update(document_date="2026-09-10", valid_until="2026-09-15")
+    if mode == "stock":
+        command, _ = await owned_command(api, ids, base)
+    else:
+        base["reserve_mode"] = "on_order"
+        preview = await api.post(f"/sales/deals/{ids['deal']}/invoice-preview", json=base)
+        assert preview.status_code == 200, preview.text
+        basis = preview.json()
+        command = {**base, "request_key": "expiry-on-order",
+                   "expected_document_version": basis["document_version"],
+                   "expected_basis_digest": basis["basis_digest"],
+                   "allocations": [], "unreserved_confirmed": True}
+    issued = await create_owned_invoice(api, ids, command)
+    assert issued.status_code == 201, issued.text
+    result = issued.json()["document"]
     assert result["valid_until"] == "2026-09-15"
     url = f"/sales/documents/{result['id']}/render"
-    original = (await api.get(url)).text
+    response = await api.get(url)
+    assert response.status_code == 200, response.text
+    original = response.text
     assert "Счёт действителен до 15.09.2026 включительно." in original
     assert "банковских дней" not in original
     monkeypatch.setenv("AIOS_INVOICE_VALID_DAYS", "30")
-    assert (await api.get(url)).text == original
+
+    def reject_rerender(*args, **kwargs):
+        raise AssertionError("An issued original must not be rendered again")
+
+    monkeypatch.setattr(documents, "render_erp_invoice", reject_rerender)
+    reopened = await api.get(url)
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.text == original
+    assert digest(original) == result["content_sha256"]
+
 
 
 async def sale(session, *, available=None):
