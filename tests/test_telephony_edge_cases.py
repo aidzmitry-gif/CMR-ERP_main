@@ -72,7 +72,11 @@ async def test_form_body_overrides_query_and_preserves_encoded_values(api, sessi
     assert "token" not in event.payload
 
 
-def test_slow_sse_subscriber_does_not_drop_other_subscribers_or_old_cards(caplog):
+def test_slow_sse_subscriber_does_not_drop_other_subscribers_or_old_cards(caplog, monkeypatch):
+    # In-process Alembic fileConfig disables existing application loggers.
+    # Own this test's logging state regardless of earlier migration tests.
+    monkeypatch.setattr(calls.logger, "disabled", False)
+    caplog.set_level("WARNING", logger=calls.logger.name)
     owner = 981
     slow, healthy = calls.subscribe(owner), calls.subscribe(owner)
     sentinel = {"call_id": "OLD"}
