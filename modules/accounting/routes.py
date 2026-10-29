@@ -1994,7 +1994,7 @@ async def production_output_transfer_status(org_id: int, month: str, order_id: i
         raise HTTPException(404, 'Production output transfer outcome not found')
     entry = await ctx[0].get(Entry, receipt.entry_id)
     if entry is None or entry.organization_id != org_id or entry.source != f'production:output-transfer:{org_id}:{order_id}' \
-            or entry.operation != 'production_output_transfer' or entry.digest != receipt.digest:
+            or entry.operation != 'production_output_transfer' or entry.source_version != 1 or entry.digest != receipt.digest:
         raise HTTPException(409, 'Production output transfer receipt is inconsistent')
     response.headers['Cache-Control'] = 'private, no-store'
     return {'organization_id': org_id, 'month': month, 'actor': receipt.actor, 'order_id': order_id,
