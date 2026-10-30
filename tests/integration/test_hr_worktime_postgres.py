@@ -126,6 +126,8 @@ def migration_command(factory, *args):
 async def test_database_protects_recorded_work_and_refuses_lossy_downgrade(pg_factory, monkeypatch):
     c = await seed(pg_factory, monkeypatch)
     async with pg_factory() as session:
+        accepted_revision = await session.scalar(text("SELECT version_num FROM alembic_version"))
+    async with pg_factory() as session:
         row = await w.start(session, c.actors["worker"], w.Command(employee_id=1, request_key=uuid4()), c.bus)
         await session.commit()
         c.clock[0] += timedelta(hours=9)
@@ -141,11 +143,13 @@ async def test_database_protects_recorded_work_and_refuses_lossy_downgrade(pg_fa
     result = await asyncio.to_thread(migration_command, pg_factory, "downgrade", "0200")
     assert result.returncode != 0 and "Cannot downgrade recorded worktime" in result.stderr
     async with pg_factory() as session:
-        assert await session.scalar(text("SELECT version_num FROM alembic_version")) == "0201"
+        assert await session.scalar(text("SELECT version_num FROM alembic_version")) == accepted_revision
         assert await session.scalar(select(func.count()).select_from(WorktimeDay)) == 1
 
 
 async def test_empty_migration_roundtrip_retains_one_head(pg_factory):
+    async with pg_factory() as session:
+        accepted_revision = await session.scalar(text("SELECT version_num FROM alembic_version"))
     result = await asyncio.to_thread(migration_command, pg_factory, "downgrade", "0200")
     assert result.returncode == 0, result.stderr[-1000:]
     async with pg_factory() as session:
@@ -153,7 +157,7 @@ async def test_empty_migration_roundtrip_retains_one_head(pg_factory):
     result = await asyncio.to_thread(migration_command, pg_factory, "upgrade", "head")
     assert result.returncode == 0, result.stderr[-1000:]
     async with pg_factory() as session:
-        assert await session.scalar(text("SELECT version_num FROM alembic_version")) == "0201"
+        assert await session.scalar(text("SELECT version_num FROM alembic_version")) == accepted_revision
         assert await session.scalar(text("SELECT count(*) FROM hr.work_session")) == 0
 
 

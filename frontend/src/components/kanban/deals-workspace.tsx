@@ -18,6 +18,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Children, useEffect, useId, useMemo, useRef, useState, type RefObject } from "react";
 import { FunnelTotals } from "@/components/funnel-totals";
 import { CreateDealModal } from "@/components/kanban/create-deal-modal";
+import { StageHeading, type StageDefinitionPatch } from "@/components/kanban/stage-heading";
 import { DealCard, type DealCardPatch } from "@/components/kanban/deal-card";
 import { CallWindow } from "@/components/calls/call-window";
 import { DealDrawerPreview } from "@/components/kanban/deal-drawer-preview";
@@ -505,12 +506,14 @@ function DraggableDeal({
 
 function Column({
   stage,
+  onStageSaved,
   onAdd,
   fmt,
   stuckCount = 0,
   children,
 }: {
   stage: Stage;
+  onStageSaved: (patch: StageDefinitionPatch) => void;
   onAdd: () => void;
   fmt: (value: number) => string;
   /** Застрявших сделок в колонке (isStuck) — янтарный счётчик в шапке при N>0. */
@@ -532,7 +535,7 @@ function Column({
         <div className="h-1" style={{ backgroundColor: stage.color }} />
         <div className="px-4 py-3">
           <div className="flex items-center justify-between gap-2 font-semibold text-ink">
-            <span className="truncate">{stage.title}</span>
+            <StageHeading stage={stage} onSaved={onStageSaved} />
             <span className="shrink-0 rounded-md bg-sunken px-2 text-xs font-semibold leading-5 text-faint">
               {stage.count}
             </span>
@@ -701,6 +704,7 @@ function FunnelSection({
                 key={stage.id}
                 stage={stage}
                 fmt={fmt}
+                onStageSaved={(patch) => setStages((previous) => previous.map((row) => row.id === stage.id ? { ...row, ...patch } : row))}
                 stuckCount={extrasByDeal.filter(([, x]) => x.stuck).length}
                 onAdd={() => onAddDeal(stage.id, stages)}
               >
@@ -2165,6 +2169,7 @@ export function DealsWorkspace({
                   key={stage.id}
                   stage={stage}
                   fmt={fmt}
+                  onStageSaved={(patch) => setStages((previous) => previous.map((row) => row.id === stage.id ? { ...row, ...patch } : row))}
                   stuckCount={
                     now == null ? 0 : stage.deals.filter((d) => isStuck(d, stage.id, now)).length
                   }

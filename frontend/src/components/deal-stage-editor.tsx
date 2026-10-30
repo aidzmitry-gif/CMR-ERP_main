@@ -23,6 +23,7 @@ type Status = "loading" | "error" | "ready";
 const EMPTY_NEW: StageRow = {
   code: "",
   title: "",
+  description: "",
   sort_order: 0,
   probability: 0,
   kind: "normal",
@@ -63,6 +64,7 @@ export function DealStageEditor() {
     setNotice(null);
     const ok = await updateStage(row.code, {
       title: row.title,
+      description: row.description ?? "",
       sort_order: row.sort_order,
       probability: row.probability,
       kind: row.kind,
@@ -155,6 +157,15 @@ export function DealStageEditor() {
                       value={r.title}
                       onChange={(e) => patchRow(r.code, { title: e.target.value })}
                       className="w-44 rounded-md border border-line bg-canvas px-2 py-1"
+                    />
+                    <textarea
+                      aria-label={`Описание стадии «${r.title}»`}
+                      placeholder="Описание стадии"
+                      value={r.description ?? ""}
+                      maxLength={2000}
+                      rows={3}
+                      onChange={(e) => patchRow(r.code, { description: e.target.value })}
+                      className="mt-1 block w-44 rounded-md border border-line bg-canvas px-2 py-1 text-xs"
                     />
                   </td>
                   <td className="px-3 py-1.5">
@@ -254,6 +265,12 @@ export function DealStageEditor() {
                 </option>
               ))}
             </select>
+          </label>
+          <label className="text-[11px] text-muted">
+            Описание стадии
+            <textarea rows={2} maxLength={2000} value={draft.description ?? ""}
+              onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+              className="mt-0.5 block w-52 rounded-md border border-line bg-canvas px-2 py-1 text-sm" />
           </label>
           <label className="text-[11px] text-muted">
             Вероятн. %

@@ -56,6 +56,7 @@ interface ApiDeal {
 interface ApiStage {
   id: string;
   title: string;
+  description?: string;
   color: string;
   count: number;
   sum: number;
@@ -125,6 +126,7 @@ export async function fetchBoardResult(
         data.stages.map((s) => ({
           id: s.id,
           title: s.title,
+          description: typeof s.description === "string" ? s.description : "",
           color: s.color,
           count: s.count,
           sum: s.sum,
@@ -141,6 +143,7 @@ export async function fetchBoardResult(
 export interface StageRow {
   code: string;
   title: string;
+  description?: string;
   sort_order: number;
   probability: number;
   kind: "normal" | "won" | "cond_lost" | "lost";

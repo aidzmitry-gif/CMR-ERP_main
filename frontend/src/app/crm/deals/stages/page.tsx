@@ -17,7 +17,7 @@ export default function DealStagesPage() {
           </Link>
           <h1 className="mb-1 text-[19px] font-extrabold text-ink">Редактор стадий воронки</h1>
           <p className="mb-4 text-[12.5px] text-muted">
-            Имя, порядок колонок, вероятность, тип и цвет стадий. Изменения сразу применяются к доске.
+            Имя, описание, порядок колонок, вероятность, тип и цвет стадий. Описание показывается в подсказке на доске.
           </p>
           <DealStageEditor />
         </div>
