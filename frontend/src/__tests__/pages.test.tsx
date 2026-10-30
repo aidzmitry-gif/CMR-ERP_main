@@ -37,7 +37,6 @@ vi.mock("@/components/channels", () => ({ ChannelButtons: () => <div>channels</d
 vi.mock("@/components/kanban/lose-deal-modal", () => ({ DealLossControl: () => <div>loss-control</div> }));
 vi.mock("@/components/erp/procurement-request-plan", () => ({ ProcurementRequestPlan: ({ suggestedOrg }: { suggestedOrg?: string }) => <div>procurement-plan:{suggestedOrg ?? ""}</div> }));
 vi.mock("@/components/erp/procurement-kanban", () => ({ ProcurementKanban: ({ suggestedOrg }: { suggestedOrg?: string }) => <div>procurement-kanban:{suggestedOrg ?? ""}</div> }));
-vi.mock("@/components/erp/procurement-nav", () => ({ ProcurementNav: () => <div>procurement-nav</div> }));
 vi.mock("@/components/deal-actions", () => ({ DealActions: () => <div>actions</div> }));
 vi.mock("@/components/deal-ai-assistant", () => ({ DealAiAssistant: () => <div>ai</div> }));
 vi.mock("@/components/deal-approvals", () => ({ DealApprovals: () => <div>approvals</div> }));

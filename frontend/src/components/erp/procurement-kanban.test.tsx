@@ -1,5 +1,5 @@
 import { configureCompany,render,resetCompany,waitForCompany } from "@/test/installation-company";
-import { screen,waitFor,within } from "@testing-library/react";
+import { fireEvent,screen,waitFor,within } from "@testing-library/react";
 import { afterEach,beforeEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
 vi.mock("@/lib/instance-organization", async () => {
  const fixture = await import("@/test/installation-company");
@@ -89,3 +89,40 @@ it("показывает источник дефицита только у по�
 });
 
 configureBeforeEach(() => resetCompany(1));
+
+it("searches loaded documents without new requests and keeps the same cards in list view", async () => {
+  render(<ProcurementKanban />);
+  await screen.findByText("REQ-001");
+  await waitFor(() => expect(screen.getByRole("button", { name: "Обновить канбан" })).not.toBeDisabled());
+  const calls = vi.mocked(fetch).mock.calls.length;
+  fireEvent.change(screen.getByRole("textbox", { name: "Поиск по закупкам, поставщикам, SKU" }), { target: { value: "REQ-003" } });
+  expect(screen.getByText("REQ-003")).toBeInTheDocument();
+  expect(screen.queryByText("REQ-001")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Список", exact: true }));
+  expect(screen.getByLabelText("Список закупок")).toContainElement(screen.getByText("REQ-003"));
+  expect(vi.mocked(fetch).mock.calls).toHaveLength(calls);
+  fireEvent.change(screen.getByRole("textbox", { name: "Поиск по закупкам, поставщикам, SKU" }), { target: { value: "" } });
+  expect(screen.getByText("REQ-001")).toBeInTheDocument();
+});
+
+it("does not replace a failed load with empty stages or zero KPI values", async () => {
+  vi.mocked(fetch).mockResolvedValue(json({ detail: "Недоступно" }, 503) as Response);
+  render(<ProcurementKanban />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("503");
+  expect(screen.queryByText("Нет документов на этом этапе.")).not.toBeInTheDocument();
+  const summary = screen.getByLabelText("Оперативный обзор закупок");
+  expect(within(summary).getByText("Заявки в работе").nextElementSibling).toHaveTextContent("—");
+  expect(screen.getByRole("button", { name: "Обновить канбан" })).not.toBeDisabled();
+});
+
+it("marks partial counts and does not present prototype AI results as facts", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes("owned-sources?kind=request")
+    ? json({ organization_id: 1, items: requests, next_after_id: 6 }) as Response : original(input, init));
+  render(<ProcurementKanban />);
+  await screen.findByText("REQ-001");
+  await waitFor(() => expect(within(screen.getByLabelText("Оперативный обзор закупок")).getByText("Заявки в работе").nextElementSibling).toHaveTextContent("5+"));
+  expect(screen.getByRole("button", { name: "Загрузить ещё заявки" })).toBeInTheDocument();
+  expect(screen.getAllByText("Нет подтверждённых данных")).toHaveLength(2);
+  expect(screen.queryByText(/1,85|210 000|93%/)).not.toBeInTheDocument();
+});

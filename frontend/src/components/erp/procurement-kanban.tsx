@@ -3,8 +3,10 @@
 import { InstanceOrganizationGate } from "@/components/instance-organization-gate";
 
 import { Button } from "@/components/ui/button";
+import { ArrowRight, CheckCheck, ClipboardCheck, Coins, LayoutGrid, List, MessagesSquare, Package, RefreshCw, Search, ShoppingCart, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { useEffect,useRef,useState } from "react";
+import { useEffect,useRef,useState,type CSSProperties } from "react";
+import styles from "./procurement-kanban.module.css";
 
 
 type Identity = { organization_id: number; principal: string; can_manage: boolean };
@@ -47,6 +49,9 @@ type Card = {
   action?: { requestId: number; stage: "need" | "sourcing" | "nego" | "analysis" };
   note?: string;
   origin?: string;
+  supplier?: string;
+  quantity?: string;
+  amount?: string;
 };
 
 const prefix = (org: number) => `/api/procurement/organizations/${org}`;
@@ -68,6 +73,7 @@ const nextRequestStage: Record<"need" | "sourcing" | "nego" | "analysis", "sourc
   nego: "analysis",
   analysis: "approval",
 };
+const stageColors = ["#3B82F6", "#8B5CF6", "#F59E0B", "#06B6D4", "#EC4899", "#14B8A6", "#6366F1", "#F97316", "#22C55E"];
 
 function errorText(error: unknown) {
   return error instanceof Error ? error.message : "Не удалось проверить закупки";
@@ -126,6 +132,9 @@ function cardsFor(org: number, requests: RequestRow[], orders: OrderRow[], chain
       href: stage === "approval" ? `/erp/procurement/orders?org=${org}&request=${request.id}` : `/erp/procurement/planning?org=${org}`,
       action,
       origin: request.origin,
+      supplier: request.supplier || "Поставщик не указан",
+      quantity: request.quantity,
+      amount: request.planned_amount,
       note: request.due_date ? `Плановая дата: ${request.due_date}` : undefined,
     });
   }
@@ -146,10 +155,9 @@ function cardsFor(org: number, requests: RequestRow[], orders: OrderRow[], chain
 }
 
 export function ProcurementKanban(props: { suggestedOrg?: string }) {
-  return <InstanceOrganizationGate>{org => <section className="space-y-4 p-6">
-    <div className="space-y-1"><h1 className="text-xl font-semibold">Закупки · обзор и воронка</h1><p>Обзор и канбан показывают документы юрлица установки. Этапы поставки и приёмки строятся из фактического статуса заказа и цепочки первичных документов.</p></div>
+  return <div className={styles.workspace}><InstanceOrganizationGate>{org => <section aria-label="Рабочее место закупок">
     {props.suggestedOrg && props.suggestedOrg !== String(org.id) ? <p role="alert">Юрлицо ссылки не совпадает с настройкой установки.</p> : <CompanyKanban key={org.id} org={org.id} />}
-  </section>}</InstanceOrganizationGate>;
+  </section>}</InstanceOrganizationGate></div>;
 }
 
 function CompanyKanban({ org }: { org: number }) {
@@ -159,7 +167,9 @@ function CompanyKanban({ org }: { org: number }) {
   const [requestNext, setRequestNext] = useState<number | null>(null);
   const [orderNext, setOrderNext] = useState<number | null>(null);
   const [chains, setChains] = useState<Record<number, ChainState>>({});
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
+  const [query, setQuery] = useState("");
+  const [view, setView] = useState<"board" | "list">("board");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const generation = useRef(0);
@@ -254,20 +264,75 @@ function CompanyKanban({ org }: { org: number }) {
     { label: "Завершено", stages: ["done"] as StageId[], href: `/erp/procurement/orders?org=${org}` },
   ];
   const partial = requestNext !== null || orderNext !== null;
-  return <div className="space-y-4">
+  const available = !!identity && !error;
+  const ready = available && !busy;
+  const filteredCards = cards.filter(card => `${card.title} ${card.subtitle} ${card.meta}`.toLocaleLowerCase("ru").includes(query.trim().toLocaleLowerCase("ru")));
+  const count = (stages: StageId[]) => ready ? `${cards.filter(card => stages.includes(card.stage)).length}${partial ? "+" : ""}` : "—";
+  const metrics = [
+    { label: "Заявки в работе", value: count(requestStages), caption: "По загруженным документам", Icon: ShoppingCart, tone: "blue" },
+    { label: "План по сумме закупок", value: "—", caption: "План не подключён", Icon: Coins, tone: "green" },
+    { label: "Экономия (AI)", value: "—", caption: "Нет подтверждённых данных", Icon: Sparkles, tone: "violet" },
+    { label: "Переговоры AI (актив.)", value: "—", caption: "Нет подтверждённых данных", Icon: MessagesSquare, tone: "amber" },
+    { label: "Приёмка / QC", value: count(["qc"]), caption: "Ожидают подтверждения приёмки", Icon: ClipboardCheck, tone: "cyan" },
+  ];
+  function renderCard(card: Card) {
+    return <article key={card.id} className={styles.card}>
+      <Link className={styles.cardNumber} href={card.href}>{card.title}<ArrowRight size={14} aria-hidden /></Link>
+      <p className={styles.cardTitle}>{card.subtitle}</p>
+      {card.supplier && <p className={styles.supplier}><Package size={13} aria-hidden />{card.supplier}</p>}
+      {card.origin === "deficit" && <p className={styles.sourceBadge}>Авто: дефицит склада</p>}
+      {card.quantity !== undefined ? <>
+        <div className={styles.cardRow}><span>Количество</span><strong>{card.quantity} шт.</strong></div>
+        <div className={styles.cardRow}><span>Оценка суммы</span><strong className={styles.amount}>{card.amount}</strong></div>
+        <p className={styles.cardMeta}>Валюта не задана</p>
+      </> : <p className={styles.cardMeta}>{card.meta}</p>}
+      {card.note && <p className={styles.cardNote}>{card.note}</p>}
+      {card.action && <div className={styles.cardFooter}><Button size="sm" variant="ghost" disabled={busy || !identity?.can_manage} onClick={() => advance(card.action!)}>Далее: {stageTitles[nextRequestStage[card.action.stage]]}<ArrowRight size={13} aria-hidden /></Button></div>}
+    </article>;
+  }
+  return <div className={styles.dashboard}>
     {!identity && !error && <p role="status">Загрузка документов закупок…</p>}
-    {error && <p role="alert">{error}</p>}
-    {notice && <p role="status">{notice}</p>}
-    {identity && !identity.can_manage && <p>Доступен просмотр. Перевод заявки между этапами доступен главному бухгалтеру этого юрлица с доступом к закупкам.</p>}
-    {identity && <section aria-label="Оперативный обзор закупок" className="space-y-3 rounded-xl border border-line bg-sunken/40 p-3"><div><h2 className="font-semibold">Оперативный обзор</h2><p className="text-sm text-muted">Счётчики построены из документов, уже загруженных для выбранного юрлица; они не подменяют план, фактическую себестоимость или статусы поставщиков.</p></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{overview.map((item) => <Link key={item.label} href={item.href} className="rounded-lg border border-line bg-surface p-3 hover:border-accent"><p className="text-sm text-muted">{item.label}</p><p className="mt-1 text-2xl font-semibold">{cards.filter(card => item.stages.includes(card.stage)).length}</p></Link>)}</div>{partial && <p className="text-sm text-muted">Показана первая страница документов. Загрузите остальные строки ниже, прежде чем использовать счётчики для контроля.</p>}</section>}
-    <div className="flex flex-wrap gap-3"><Button disabled={busy || !identity} variant="secondary" onClick={() => run(refresh)}>Обновить канбан</Button><Link className="self-center text-accent underline" href={`/erp/procurement/planning?org=${org}`}>Открыть план закупок</Link><Link className="self-center text-accent underline" href={`/erp/procurement/receipts?org=${org}`}>Открыть накладные на поступление</Link></div>
-    <div className="grid auto-cols-[minmax(252px,1fr)] grid-flow-col gap-3 overflow-x-auto pb-3" aria-label="Канбан закупок">
-      {(Object.keys(stageTitles) as StageId[]).map(stage => <section key={stage} aria-label={`Колонка ${stageTitles[stage]}`} className="min-h-[250px] space-y-3 rounded-xl border border-line bg-sunken/40 p-3"><header className="flex items-center justify-between gap-2"><h2 className="font-semibold">{stageTitles[stage]}</h2><span className="rounded-full bg-surface px-2 py-0.5 text-xs text-muted">{cards.filter(card => card.stage === stage).length}</span></header>
-        {cards.filter(card => card.stage === stage).map(card => <article key={card.id} className="space-y-2 rounded-lg border border-line bg-surface p-3 shadow-sm"><Link className="block font-medium text-accent underline" href={card.href}>{card.title}</Link><p className="text-sm">{card.subtitle}</p>{card.origin === "deficit" && <p className="inline-block rounded bg-accent/10 px-2 py-1 text-xs">Авто: дефицит склада</p>}<p className="text-xs text-muted">{card.meta}</p>{card.note && <p className="text-xs text-muted">{card.note}</p>}{card.action && <Button size="sm" disabled={busy || !identity?.can_manage} onClick={() => advance(card.action!)}>Далее: {stageTitles[nextRequestStage[card.action.stage]]}</Button>}</article>)}
-        {!cards.some(card => card.stage === stage) && <p className="text-sm text-muted">Нет документов на этом этапе.</p>}
+    {error && <p role="alert" className={styles.error}>{error}</p>}
+    {notice && <p role="status" className={styles.notice}>{notice}</p>}
+    <section aria-label="Показатели закупок">
+      <div className={styles.sectionHeading}><h2>План — Факт</h2><span>По документам нашей организации</span></div>
+      <div className={styles.kpis}>{metrics.map(({ label, value, caption, Icon, tone }) => <div className={styles.kpi} key={label}>
+        <div className={styles.kpiHeading}><span className={`${styles.kpiIcon} ${styles[tone]}`}><Icon size={18} aria-hidden /></span><h3>{label}</h3></div>
+        <p className={styles.kpiValue}>{value}</p><div className={styles.kpiLine} aria-hidden /><p className={styles.kpiCaption}>{caption}</p>
+      </div>)}</div>
+    </section>
+    <div className={styles.controlBar}><span className={styles.controlIcon}><CheckCheck size={19} aria-hidden /></span>
+      <p><strong>Контроль закупок</strong> Поставка и приёмка подтверждаются статусом заказа и первичными документами.{ready ? ` На согласовании: ${count(["approval"])}.` : " Документы ещё не подтверждены."}</p>
+      <Link href={`/erp/procurement/receipts?org=${org}`}>Проверить приёмку<ArrowRight size={14} aria-hidden /></Link>
+    </div>
+    <div className={styles.boardTools}>
+      <h2>Воронка закупок</h2>
+      <div className={styles.segment} role="group" aria-label="Вид закупок">
+        <button type="button" aria-label="Канбан" aria-pressed={view === "board"} onClick={() => setView("board")}><LayoutGrid size={17} aria-hidden /></button>
+        <button type="button" aria-label="Список" aria-pressed={view === "list"} onClick={() => setView("list")}><List size={18} aria-hidden /></button>
+      </div>
+      <span className={styles.statusPill}><span />На согласовании: {count(["approval"])}</span>
+      <div className={styles.toolActions}>
+        <label className={styles.search}><Search size={16} aria-hidden /><input aria-label="Поиск по закупкам, поставщикам, SKU" placeholder="Поиск по закупкам, поставщикам, SKU…" value={query} onChange={event => setQuery(event.target.value)} /></label>
+        <Button disabled={busy} variant="secondary" icon={<RefreshCw size={15} />} onClick={() => run(refresh)}>Обновить канбан</Button>
+      </div>
+    </div>
+    {query.trim() && <p className={styles.scopeNote}>Поиск среди загруженных документов: {available ? filteredCards.length : "—"}. Показатели выше относятся ко всем загруженным документам.</p>}
+    {busy && identity && <p role="status">Обновление документов закупок…</p>}
+    <div className={view === "board" ? styles.board : styles.list} aria-label={view === "board" ? "Канбан закупок" : "Список закупок"}>
+      {(Object.keys(stageTitles) as StageId[]).map((stage, index) => <section key={stage} aria-label={`Колонка ${stageTitles[stage]}`} className={styles.column} style={{ "--stage-color": stageColors[index] } as CSSProperties}>
+        <header className={styles.columnHead}><h2><span className={styles.stagePin} aria-hidden />{index + 1} · {stageTitles[stage]}</h2><p><strong>{available ? filteredCards.filter(card => card.stage === stage).length : "—"}</strong> документов{partial ? " · загружено не всё" : ""}</p></header>
+        <div className={styles.columnBody}>{available && filteredCards.filter(card => card.stage === stage).map(renderCard)}
+          {(!available || !filteredCards.some(card => card.stage === stage)) && <p className={styles.empty}>{!available ? error ? "Данные недоступны." : "Загрузка документов…" : query.trim() ? "Нет совпадений на этом этапе." : partial ? "Нет среди загруженных документов." : "Нет документов на этом этапе."}</p>}
+        </div>
       </section>)}
     </div>
-    {(requestNext !== null || orderNext !== null) && <div className="flex flex-wrap gap-3"><p className="self-center text-sm text-muted">Показана первая страница документов; незагруженные строки не считаются пустыми этапами.</p>{requestNext !== null && <Button disabled={busy} variant="secondary" onClick={() => loadMore("request", requestNext)}>Загрузить ещё заявки</Button>}{orderNext !== null && <Button disabled={busy} variant="secondary" onClick={() => loadMore("order", orderNext)}>Загрузить ещё заказы</Button>}</div>}
-    {cancelled > 0 && <p className="text-sm text-muted">Отменённых заказов вне канбана: {cancelled}. Их можно проверить в разделе заказов поставщикам.</p>}
+    {partial && <div className={styles.pagination}><p>Показана первая страница документов; незагруженные строки не считаются пустыми этапами.</p>{requestNext !== null && <Button disabled={busy} variant="secondary" onClick={() => loadMore("request", requestNext)}>Загрузить ещё заявки</Button>}{orderNext !== null && <Button disabled={busy} variant="secondary" onClick={() => loadMore("order", orderNext)}>Загрузить ещё заказы</Button>}</div>}
+    <section aria-label="Оперативный обзор закупок" className={styles.summary}>
+      <div className={styles.sectionHeading}><h2>Итоги по воронке закупок</h2><span>По загруженным документам{partial ? " · данные неполные" : ""}</span></div>
+      <div className={styles.summaryGrid}>{overview.map(item => <Link key={item.label} href={item.href}><p>{item.label}</p><p className={styles.summaryValue}>{count(item.stages)}</p></Link>)}</div>
+      {available && cancelled > 0 && <p className={styles.scopeNote}>Отменённых заказов вне канбана: {cancelled}. Их можно проверить в разделе заказов поставщикам.</p>}
+    </section>
+    {identity && !identity.can_manage && <p className={styles.scopeNote}>Доступен просмотр. Перевод заявки между этапами доступен главному бухгалтеру этого юрлица с доступом к закупкам.</p>}
   </div>;
 }

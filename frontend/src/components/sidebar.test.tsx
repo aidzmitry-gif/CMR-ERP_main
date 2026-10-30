@@ -50,6 +50,16 @@ vi.mock("next/navigation", () => ({
 import { Sidebar } from "@/components/sidebar";
 
 describe("Sidebar", () => {
+  it.each(["/erp/procurement/planning", "/erp/procurement/orders/12", "/erp/procurement/rfq"])("keeps procurement navigation on %s", async (path) => {
+    mockUsePathname.mockReturnValue(path);
+    render(<Sidebar allowedSlugs={["procurement"]} />);
+    const group = await screen.findByRole("group", { name: "Разделы закупок" });
+    expect(group).toContainElement(screen.getByRole("link", { name: "Накладные на поступление" }));
+    const active = path.includes("/orders/") ? "Заказы и машины" : path.endsWith("/rfq") ? "Запросы цен (RFQ)" : "План закупок";
+    expect(screen.getByRole("link", { name: active })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Обзор и воронка" })).not.toHaveAttribute("aria-current");
+  });
+
   it("shows unavailable access without exposing fallback module links", async () => {
     render(<Sidebar accessUnavailable allowedSlugs={["home", "crm"]} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить разделы");

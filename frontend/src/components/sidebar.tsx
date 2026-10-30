@@ -388,6 +388,7 @@ export function Sidebar({ allowedSlugs, accessUnavailable = false, userName, rol
   function moduleActive(m: ModuleItem): boolean {
     if (m.slug === "crm") return crmActive;
     if (m.slug === "marketing") return marketingActive;
+    if (m.slug === "procurement") return pathname === "/erp/procurement" || pathname.startsWith("/erp/procurement/");
     if (m.slug === "spravochniki") return pathname.startsWith("/erp/spravochniki");
     return !!m.href && pathname === m.href;
   }
@@ -691,7 +692,7 @@ export function Sidebar({ allowedSlugs, accessUnavailable = false, userName, rol
             const rowCls = clsx(
               "group relative flex items-center gap-3 rounded-lg text-sm font-medium transition-colors",
               showFull ? "px-3 py-2" : "h-10 justify-center",
-              active ? "bg-accent-soft text-accent-ink" : "text-muted hover:bg-sunken",
+              active ? m.slug === "procurement" ? "bg-accent text-white shadow-sm" : "bg-accent-soft text-accent-ink" : "text-muted hover:bg-sunken",
               editing && showFull && "cursor-grab active:cursor-grabbing",
               isDragSrc && "opacity-40",
             );
@@ -734,14 +735,14 @@ export function Sidebar({ allowedSlugs, accessUnavailable = false, userName, rol
                 {/* Подменю активного модуля — в раскрытом виде. В edit-mode подразделы
                     тоже становятся draggable (см. handleSubDrag*). */}
                 {showFull && m.sub && active && (
-                  <div className="mb-1 mt-1 flex flex-col">
+                  <div role="group" aria-label={m.slug === "procurement" ? "Разделы закупок" : `${m.label}: разделы`} className={clsx("mb-1 mt-1 flex flex-col", m.slug === "procurement" && "ml-5 border-l border-line pl-1")}>
                     {applySubOrder(m.sub, subOrder[m.slug]).map((s) => {
                       const sactive = subActive(s.href);
                       const isSubDragSrc =
                         draggingSub?.module === m.slug && draggingSub?.label === s.label;
                       const scls = clsx(
                         "flex items-center gap-2 rounded-lg py-1.5 pr-3 text-sm",
-                        editing ? "pl-4" : "pl-11",
+                        editing ? "pl-4" : m.slug === "procurement" ? "pl-3 text-[13px]" : "pl-11",
                         sactive
                           ? "font-medium text-accent-ink"
                           : "text-muted hover:bg-sunken",
@@ -757,7 +758,7 @@ export function Sidebar({ allowedSlugs, accessUnavailable = false, userName, rol
                               aria-hidden
                             />
                           )}
-                          <span className="truncate">{s.label}</span>
+                          <span className={m.slug === "procurement" ? "min-w-0 leading-5" : "truncate"}>{s.label}</span>
                         </>
                       );
                       return (
@@ -770,7 +771,7 @@ export function Sidebar({ allowedSlugs, accessUnavailable = false, userName, rol
                           onDragEnd={handleSubDragEnd}
                         >
                           {s.href && !editing ? (
-                            <Link href={s.href} className={scls}>
+                            <Link href={s.href} className={scls} aria-current={sactive ? "page" : undefined}>
                               {subBody}
                             </Link>
                           ) : (
