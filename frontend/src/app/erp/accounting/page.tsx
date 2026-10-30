@@ -6,5 +6,5 @@ export default async function AccountingPage({ searchParams }: { searchParams?: 
   const params = searchParams ? await searchParams : {};
   const suggestedOrg = typeof params.org === "string" ? params.org : undefined;
   const suggestedEntry = typeof params.entry === "string" ? params.entry : undefined;
-  return <AppShell crumbs={["ERP", "Бухгалтерия"]}><Link className="m-4 text-accent underline" href="/erp/accounting/stock-issues">Списание по накладной</Link><AccountingView suggestedOrg={suggestedOrg} suggestedEntry={suggestedEntry} /></AppShell>;
+  return <AppShell crumbs={["ERP", "Бухгалтерия"]}><Link className="m-4 text-accent underline" href="/erp/accounting/stock-issues">Списание по накладной</Link><Link className="m-4 text-accent underline" href="/erp/accounting/opening-stock">Ввод начальных остатков товаров</Link><AccountingView suggestedOrg={suggestedOrg} suggestedEntry={suggestedEntry} /></AppShell>;
 }

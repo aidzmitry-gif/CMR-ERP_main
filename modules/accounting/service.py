@@ -212,8 +212,12 @@ async def validate_posting(session, org_id, data: PostingInput, *, inventory_pur
                            payroll_accrual_import=False,
                            payroll_statutory_import=False,
                            fixed_asset_depreciation=False, repair_accounting=False,
-                           fx_revaluation=False, settlement_offset=False):
+                           fx_revaluation=False, settlement_offset=False, stock_opening=False):
     await reject_correction_receipt_source(session, org_id, data.source)
+    if (data.operation == "stock_opening" or data.source.startswith("stock-opening:")) and not stock_opening:
+        raise AccountingError("Stock opening requires its dedicated preview and confirmation")
+    if stock_opening and (data.operation != "stock_opening" or not data.opening or data.correction_of):
+        raise AccountingError("Invalid internal stock opening")
     if data.operation == "inventory_purchase" and not inventory_purchase:
         raise AccountingError("Inventory purchases require a saved Procurement primary receipt")
     if inventory_purchase and (data.operation != "inventory_purchase" or data.opening):
@@ -409,7 +413,7 @@ async def post(session, org_id, data: PostingInput, actor, event_bus=None, *, in
                payroll_accrual_import=False,
                payroll_statutory_import=False,
                fixed_asset_depreciation=False, repair_accounting=False,
-               fx_revaluation=False, settlement_offset=False):
+               fx_revaluation=False, settlement_offset=False, stock_opening=False):
     org = await lock_organization(session, org_id)
     await reject_correction_receipt_source(session, org_id, data.source)
     existing = await session.scalar(select(Entry).where(
@@ -432,7 +436,7 @@ async def post(session, org_id, data: PostingInput, actor, event_bus=None, *, in
                                         fixed_asset_depreciation=fixed_asset_depreciation,
                                         repair_accounting=repair_accounting,
                                         fx_revaluation=fx_revaluation,
-                                        settlement_offset=settlement_offset)
+                                        settlement_offset=settlement_offset, stock_opening=stock_opening)
     period = await period_for(session, org_id, data.posting_date.strftime("%Y-%m"))
     entry = Entry(**data.model_dump(exclude={"lines"}), organization_id=org_id,
                   digest=checksum, actor=actor)

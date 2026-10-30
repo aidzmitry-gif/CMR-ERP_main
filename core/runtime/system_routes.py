@@ -28,7 +28,7 @@ from core.domain.models import (
 )
 from core.domain.reference import NomenclatureCategory, SkuVersion, VatRate
 from core.runtime.access import roles_from_request
-from core.runtime.deps import get_session
+from core.runtime.deps import get_core, get_session
 from core.services import (
     counterparty_branches,
     mdm,
@@ -39,7 +39,8 @@ from core.services import (
     sku_master,
     tnved,
 )
-from core.services.auth import CurrentUser, require_permission
+from core.services.auth import CurrentUser, get_current_user, require_permission
+from core.services.instance_organization import resolve_instance_organization
 from core.services.registry import RegistryError
 
 #: предел подъёма по дереву групп при построении breadcrumb (защита от цикла parent_id).
@@ -59,6 +60,16 @@ router = APIRouter(tags=["system"])
 # `system.write` есть только у супер-ролей (Админ/director/commercial), см. has_permission.
 # Гость и обычные роли получают 403. SECURITY.md P0-2.
 SYSTEM_WRITE = "system.write"
+
+
+@router.get("/system/instance-organization")
+async def instance_organization(core=Depends(get_core), session=Depends(get_session),
+                                user=Depends(get_current_user)):
+    # A legacy illustrative default is not an installation configuration.
+    explicit = "seller_unp" in core.config.model_fields_set
+    return await resolve_instance_organization(
+        session, user, core.services.accounting, core.config.seller_unp if explicit else None,
+    )
 
 
 @router.get("/health")
