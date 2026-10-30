@@ -38,6 +38,7 @@ function mockApi({ failIssue = false, failLoad = false, free = "2.00" as string 
 }
 async function fill(mode = "stock") {
   await waitForCompany();
+  await screen.findByLabelText("Валюта");
   for (const [label, value] of [["Валюта", "BYN"], ["Дата счёта", "2026-09-10"], ["Действителен до", "2026-09-15"], ["Цена строки 11", "100.00"], ["Ставка строки 11", "0.00"], ["Основание цен и ставок", "Согласовано явно"]]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
   await prepare();
   fireEvent.change(screen.getByLabelText("Режим выпуска"), { target: { value: mode } });
@@ -94,9 +95,20 @@ describe("invoice dialog", () => {
     expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
   it("renders exact parties and explicit known allocation then opens a saved original link", async () => {
-    const fetch = mockApi(), close = vi.fn(); render(<InvoiceIssuanceDialog dealId="1" onClose={close} />);
-  await waitForCompany();
-    await fill();
+    const fetch = mockApi(), close = vi.fn();
+    const implementation = fetch.getMockImplementation()!;
+    let releaseItems!: (value: ReturnType<typeof response>) => void;
+    const heldItems = new Promise<ReturnType<typeof response>>((resolve) => { releaseItems = resolve; });
+    fetch.mockImplementation((url, init) => url.endsWith("/items") ? heldItems : implementation(url, init));
+    render(<InvoiceIssuanceDialog dealId="1" onClose={close} />);
+    await waitForCompany();
+    let fillingState = "pending";
+    const filling = fill().then(() => { fillingState = "filled"; return null; }, (error: unknown) => { fillingState = "failed"; return error; });
+    // The installation context is ready while the invoice item request is still held.
+    await act(async () => {});
+    try { expect(fillingState).toBe("pending"); }
+    finally { await act(async () => { releaseItems(response(items)); }); }
+    expect(await filling).toBeNull();
     expect(screen.getByText(/Продавец: Точный продавец/)).toBeInTheDocument();
     expect(screen.getByText(/Покупатель: Связанный покупатель/)).toBeInTheDocument();
     expect(screen.getByText("Выпустить счёт и зарезервировать")).toBeDisabled();
