@@ -31,6 +31,7 @@ test("procurement keeps navigation on the left and renders the approved board de
   await expect(page.getByRole("combobox")).toHaveCount(0);
   await expect(page.getByLabel("Канбан закупок").getByRole("region")).toHaveCount(9);
   await page.screenshot({ path: testInfo.outputPath("procurement-desktop.png"), fullPage: true });
+  await testInfo.attach("procurement-desktop", { path: testInfo.outputPath("procurement-desktop.png"), contentType: "image/png" });
 
   await page.getByRole("textbox", { name: "Поиск по закупкам, поставщикам, SKU" }).fill("SKU-219");
   await page.getByRole("button", { name: "Список", exact: true }).click();
@@ -46,4 +47,5 @@ test("procurement keeps navigation on the left and renders the approved board de
   await expect(page.getByRole("link", { name: receipt.number, exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("procurement-mobile.png"), fullPage: true });
+  await testInfo.attach("procurement-mobile", { path: testInfo.outputPath("procurement-mobile.png"), contentType: "image/png" });
 });

@@ -291,6 +291,17 @@ function CompanyKanban({ org }: { org: number }) {
     </article>;
   }
   return <div className={styles.dashboard}>
+    <header className={styles.pageHeader}>
+      <div>
+        <p className={styles.eyebrow}>Рабочее место закупщика</p>
+        <h1>Обзор и воронка</h1>
+        <p className={styles.pageDescription}>От потребности до подтверждённой приёмки.</p>
+      </div>
+      <div className={styles.pageActions}>
+        <Link href={`/erp/procurement/planning?org=${org}`}><ShoppingCart size={16} aria-hidden />План закупок</Link>
+        <Link href={`/erp/procurement/orders?org=${org}`}>Заказы и поставки<ArrowRight size={15} aria-hidden /></Link>
+      </div>
+    </header>
     {!identity && !error && <p role="status">Загрузка документов закупок…</p>}
     {error && <p role="alert" className={styles.error}>{error}</p>}
     {notice && <p role="status" className={styles.notice}>{notice}</p>}
