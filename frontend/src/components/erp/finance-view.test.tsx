@@ -69,7 +69,6 @@ const LEDGER_REPORT = {
 };
 
 function ledgerResponses() {
-  responders["accounting/organizations"] = [{ id: 7, name: "Организация", unp: "123" }];
   responders["accounting/organizations/7/reports"] = LEDGER_REPORT;
 }
 
@@ -79,6 +78,7 @@ beforeEach(() => {
   fetchMock.mockImplementation((input: unknown) => Promise.resolve(respond(String(input))));
   // Безопасные значения по умолчанию для всех эндпоинтов (summary-таб стреляет на маунте).
   responders = {
+    "system/instance-organization": { configuration: "platform_settings", revision: 1, organization: { id: 7, name: "Организация", unp: "123456789" } },
     "finance/summary": SUMMARY,
     "finance/payments": [],
     "finance/aging": { as_of: "2026-07-18", currency: "BYN", ar: { buckets: {}, total: "0.00" }, ap: { buckets: {}, total: "0.00" } },
@@ -316,8 +316,8 @@ describe("FinanceView", () => {
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "Баланс" }));
 
-    await screen.findByRole("option", { name: "Организация · 123" });
-    fireEvent.change(screen.getByLabelText("Организация баланса"), { target: { value: "7" } });
+    await screen.findByText("Организация · УНП 123456789");
+    expect(screen.queryByRole("combobox", { name: /Организация/ })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Начало периода баланса"), { target: { value: "2026-09-01" } });
     fireEvent.change(screen.getByLabelText("Конец периода баланса"), { target: { value: "2026-09-30" } });
     fireEvent.click(screen.getByRole("button", { name: "Применить" }));
@@ -333,8 +333,8 @@ describe("FinanceView", () => {
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "P&L" }));
 
-    await screen.findByRole("option", { name: "Организация · 123" });
-    fireEvent.change(screen.getByLabelText("Организация P&L"), { target: { value: "7" } });
+    await screen.findByText("Организация · УНП 123456789");
+    expect(screen.queryByRole("combobox", { name: /Организация/ })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Начало периода P&L"), { target: { value: "2026-09-01" } });
     fireEvent.change(screen.getByLabelText("Конец периода P&L"), { target: { value: "2026-09-30" } });
     fireEvent.click(screen.getByRole("button", { name: "Применить" }));
@@ -502,8 +502,8 @@ describe("FinanceView", () => {
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "ДДС" }));
 
-    await screen.findByRole("option", { name: "Организация · 123" });
-    fireEvent.change(screen.getByLabelText("Организация ДДС"), { target: { value: "7" } });
+    await screen.findByText("Организация · УНП 123456789");
+    expect(screen.queryByRole("combobox", { name: /Организация/ })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Начало периода ДДС"), { target: { value: "2026-09-01" } });
     fireEvent.change(screen.getByLabelText("Конец периода ДДС"), { target: { value: "2026-09-30" } });
     fireEvent.click(screen.getByRole("button", { name: "Применить" }));
@@ -604,14 +604,13 @@ describe("FinanceView", () => {
   });
 
   it("вкладка «P&L» показывает ошибку доступа к бухгалтерской книге", async () => {
-    responders["accounting/organizations"] = [{ id: 7, name: "Организация", unp: "123" }];
-    responders["accounting/organizations/7/reports"] = "error";
+      responders["accounting/organizations/7/reports"] = "error";
     render(<FinanceView />);
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "P&L" }));
 
-    await screen.findByRole("option", { name: "Организация · 123" });
-    fireEvent.change(screen.getByLabelText("Организация P&L"), { target: { value: "7" } });
+    await screen.findByText("Организация · УНП 123456789");
+    expect(screen.queryByRole("combobox", { name: /Организация/ })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Начало периода P&L"), { target: { value: "2026-09-01" } });
     fireEvent.change(screen.getByLabelText("Конец периода P&L"), { target: { value: "2026-09-30" } });
     fireEvent.click(screen.getByRole("button", { name: "Применить" }));
@@ -620,14 +619,13 @@ describe("FinanceView", () => {
   });
 
   it("вкладка «Баланс» показывает ошибку при сбое сети", async () => {
-    responders["accounting/organizations"] = [{ id: 7, name: "Организация", unp: "123" }];
-    responders["accounting/organizations/7/reports"] = "error";
+      responders["accounting/organizations/7/reports"] = "error";
     render(<FinanceView />);
     await screen.findByText("Касса (ДДС-lite)");
     fireEvent.click(screen.getByRole("button", { name: "Баланс" }));
 
-    await screen.findByRole("option", { name: "Организация · 123" });
-    fireEvent.change(screen.getByLabelText("Организация баланса"), { target: { value: "7" } });
+    await screen.findByText("Организация · УНП 123456789");
+    expect(screen.queryByRole("combobox", { name: /Организация/ })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Начало периода баланса"), { target: { value: "2026-09-01" } });
     fireEvent.change(screen.getByLabelText("Конец периода баланса"), { target: { value: "2026-09-30" } });
     fireEvent.click(screen.getByRole("button", { name: "Применить" }));

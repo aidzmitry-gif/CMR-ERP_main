@@ -1,5 +1,11 @@
+import { resetCompany } from "@/test/installation-company";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/instance-organization", async () => {
+  const fixture = await import("@/test/installation-company");
+  return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
 vi.mock("@/lib/api", () => ({
   fetchDealItems: vi.fn(),
@@ -28,6 +34,7 @@ import * as margin from "@/lib/margin";
 
 const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 beforeEach(() => {
+  resetCompany(1);
   vi.clearAllMocks();
   vi.mocked(margin.fetchDealMargin).mockResolvedValue(null);
 });
@@ -67,7 +74,7 @@ describe("DealItems", () => {
     render(<DealItems dealId="1" />);
     expect(await screen.findByText("Аккумулятор 60")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByDisplayValue("2"), { target: { value: "7" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Количество Аккумулятор 60", exact: true }), { target: { value: "7" } });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить позицию Аккумулятор 60" }));
     await waitFor(() => expect(api.updateDealItemIfCurrent).toHaveBeenCalledWith(5, 7, 1200, item.edit_token));
 

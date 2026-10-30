@@ -1,3 +1,4 @@
+import { configureInstallationCompany } from "./installation-company";
 import { expect, test } from "@playwright/test";
 
 test("срок клиента переносится в черновик плана закупки", async ({ page }, testInfo) => {
@@ -55,6 +56,7 @@ test("срок клиента переносится в черновик пла�
   expect(await ordered.json()).toMatchObject({ organization_id: org.id, order_id: order.id, outcome: "applied", effect: { from: "draft", to: "ordered" } });
   const detail = await get(`/procurement/organizations/${org.id}/orders/${order.id}`);
   await post(`/procurement/organizations/${org.id}/expected-reservations`, { order_id: order.id, order_line_id: detail.lines[0].id, deal_id: deal.id, qty: "5.00", request_key: crypto.randomUUID(), evidence: "Synthetic customer reservation" });
+  await configureInstallationCompany(page, org.id);
   await page.goto(`/erp/procurement/orders/${order.id}?org=${org.id}`);
   await expect(page.getByLabel("В Минске до", { exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Проверить клиентские сроки" }).click();

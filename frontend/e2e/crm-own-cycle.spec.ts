@@ -1,3 +1,4 @@
+import { configureInstallationCompany } from "./installation-company";
 import { expect,test } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { writeFile } from "node:fs/promises";
@@ -107,7 +108,9 @@ test("own: клиент → контакт → сделка → задача/и�
     director: "Synthetic director", evidence: "Synthetic E2E profile", confirmed: true,
   } });
   expect(profile.status(), await profile.text()).toBe(201);
+  await configureInstallationCompany(accounting, fixture.organization);
   await accounting.close();
+  await page.reload();
   await page.getByRole("checkbox", { name: "Под заказ — без резерва" }).check();
   await page.getByRole("button", { name: "Сформировать", exact: true }).click();
   await expect(page.getByLabel("Юрлицо", { exact: true })).toHaveCount(0);

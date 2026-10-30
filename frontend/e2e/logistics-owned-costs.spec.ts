@@ -1,3 +1,4 @@
+import { configureInstallationCompany } from "./installation-company";
 import { expect, test } from "@playwright/test";
 
 test("фрахт выбранного юрлица отделён от чужих и неоценённых поставок", async ({ page }, testInfo) => {
@@ -27,14 +28,13 @@ test("фрахт выбранного юрлица отделён от чужи�
   await source(999999, other.id); await source(777777, null);
   await source(333333, own.id, "customer");
 
+  await configureInstallationCompany(page, own.id);
   await page.goto("/erp/logistics");
   await page.getByRole("button", { name: "Экономия", exact: true }).click();
   const report = page.getByRole("region", { name: "Аналитика стоимости по юрлицу" });
   const selector = report.getByLabel("Юрлицо аналитики");
-  await expect(selector).toHaveValue("");
-  await expect(report.getByText("Известный фрахт", { exact: true })).toHaveCount(0);
+  await expect(selector).toHaveCount(0);
   const tile = (label: string) => report.getByText(label, { exact: true }).locator("..");
-  await selector.selectOption(String(own.id));
   await expect(tile("Известный фрахт")).toHaveText(/Известный фрахт\s*17\s000,00 Br/);
   await expect(tile("Поставок с известной ценой")).toHaveText(/Поставок с известной ценой\s*2/);
   await expect(tile("Средний известный фрахт")).toHaveText(/Средний известный фрахт\s*8\s500,00 Br/);
@@ -45,10 +45,14 @@ test("фрахт выбранного юрлица отделён от чужи�
   expect((await page.request.get("/api/logistics/cost-insights")).status()).toBe(409);
   await page.screenshot({ path: testInfo.outputPath("company-qualified-freight.png"), fullPage: true });
 
-  await selector.selectOption(String(other.id));
+  await configureInstallationCompany(page, other.id);
+  await page.reload();
+  await page.getByRole("button", { name: "Экономия", exact: true }).click();
   await expect(tile("Известный фрахт")).toHaveText(/999\s999,00 Br/);
   await expect(report).not.toContainText(/17\s000,00 Br/);
-  await selector.selectOption(String(own.id));
+  await configureInstallationCompany(page, own.id);
+  await page.reload();
+  await page.getByRole("button", { name: "Экономия", exact: true }).click();
   await expect(tile("Известный фрахт")).toHaveText(/17\s000,00 Br/);
   await source(0, own.id);
   await report.getByRole("button", { name: "Обновить", exact: true }).click();

@@ -4,6 +4,11 @@ export async function fetchInstanceOrganization(): Promise<InstanceOrganization>
   let response: Response;
   try { response = await fetch("/api/system/instance-organization", { cache: "no-store" }); }
   catch { throw new Error("Не удалось загрузить юрлицо установки. Повторите загрузку."); }
+  return readInstanceOrganization(response);
+}
+
+/** The same verified response contract is used by client and server readers. */
+export async function readInstanceOrganization(response: Response): Promise<InstanceOrganization> {
   if (!response.ok) {
     const errors: Record<number, string> = {
       401: "Войдите в систему.",

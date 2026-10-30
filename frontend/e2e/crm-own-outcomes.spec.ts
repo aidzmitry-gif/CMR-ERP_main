@@ -1,3 +1,4 @@
+import { configureInstallationCompany } from "./installation-company";
 import { expect, test, type APIResponse, type Response } from '@playwright/test';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -58,7 +59,9 @@ for (const mode of ['stock', 'on_order'] as const) {
       bik: 'TEST BIK', director: 'Synthetic director', evidence: 'Synthetic E2E profile', confirmed: true,
     } });
     expect(profile.status(), await profile.text()).toBe(201);
+    await configureInstallationCompany(accounting, fixture.organization);
     await accounting.close();
+    await page.reload();
     const invoiceBase = { reserve_mode: mode, organization_id: fixture.organization, currency: 'BYN',
       document_date: '2026-09-10', valid_until: '2026-09-15',
       pricing: [{ item_id: fixture.item, unit_price_net: '125.50', vat_rate: '20.00' }],

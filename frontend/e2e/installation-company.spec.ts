@@ -31,5 +31,16 @@ test("a Settings change blocks the old company's draft and reload adopts the new
     await expect(item).toHaveValue("");
     const configured = await page.request.get("/api/system/instance-organization");
     expect((await configured.json()).organization.id).toBe(second.id);
+
+    // SSR must use the saved company even when the URL supplies no organization.
+    for (const route of ["/erp/wms/inventory", "/erp/wms/cycle-counts"]) {
+      await page.goto(route);
+      await expect(page.getByText(`${second.name} · УНП ${second.unp}`, { exact: true })).toBeVisible();
+      await expect(page.getByLabel("Юрлицо", { exact: true })).toHaveCount(0);
+      await expect(page.getByRole("alert").filter({ hasText: /\S/ })).toHaveCount(0);
+      await expect(page.getByText(route.endsWith("/inventory") ? "Инвентаризаций пока нет" : "Планов пока нет", { exact: true })).toBeVisible();
+      await page.goto(`${route}?organization_id=${first.id}`);
+      await expect(page.getByRole("alert").filter({ hasText: "Юрлицо ссылки не совпадает" })).toBeVisible();
+    }
   } finally { await settings.close(); }
 });
