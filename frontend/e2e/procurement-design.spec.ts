@@ -41,6 +41,31 @@ test("procurement keeps navigation on the left and renders the approved board de
   await expect(left.getByRole("link", { name: "План закупок", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(left.getByRole("link", { name: "Обзор и воронка", exact: true })).toBeVisible();
 
+  // A read failure never exposes backend details; recovery is an explicit user action.
+  const planSources = `**/api/procurement/organizations/${organization.id}/owned-sources?*`;
+  let planRecovery = false;
+  let planReads = 0;
+  await page.route(planSources, async route => {
+    expect(route.request().method()).toBe("GET");
+    planReads += 1;
+    if (planRecovery) await route.fulfill({ json: { organization_id: organization.id, items: [], next_after_id: null } });
+    else await route.fulfill({ status: 500, contentType: "text/plain", body: "PRIVATE_PLAN_BACKEND_DETAILS" });
+  });
+  await page.reload();
+  const planAlert = page.getByRole("alert").filter({ hasText: "Не удалось выполнить запрос" });
+  await expect(planAlert).toContainText("HTTP 500");
+  await expect(planAlert).not.toContainText("PRIVATE_PLAN_BACKEND_DETAILS");
+  await expect(page.getByText("На загруженной странице заявок нет.", { exact: true })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("plan-safe-error.png"), fullPage: true });
+  await testInfo.attach("plan-safe-error", { path: testInfo.outputPath("plan-safe-error.png"), contentType: "image/png" });
+  planRecovery = true;
+  await page.getByRole("button", { name: "Обновить документы", exact: true }).click();
+  await expect(planAlert).toHaveCount(0);
+  await expect(page.getByText("На загруженной странице заявок нет.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Создать заявку", exact: true })).toBeEnabled();
+  console.log("PLAN_SAFE_READS", JSON.stringify({ reads: planReads, manualRefreshClicks: 1, commandWrites: 0 }));
+  await page.unroute(planSources);
+
   await page.goto("/erp/procurement");
   await page.setViewportSize({ width: 390, height: 844 });
   await left.getByRole("button", { name: "Свернуть меню", exact: true }).click();

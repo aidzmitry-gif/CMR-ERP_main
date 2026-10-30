@@ -23,12 +23,20 @@ const prefix = (org: number) => `/api/procurement/organizations/${org}`;
 const journalKey = (org: number, principal: string) => `procurement-request:v1:${org}:${encodeURIComponent(principal)}`;
 
 async function api<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, { cache: "no-store", ...options });
+  let response: Response;
+  try { response = await fetch(url, { cache: "no-store", ...options }); }
+  catch { throw new Error("Не удалось связаться с сервером. Результат операции не подтверждён."); }
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`Ошибка ${response.status}: ${detail}`);
+    const safe: Record<number, string> = {
+      401: "Сессия истекла. Войдите снова, чтобы проверить результат операции.",
+      403: "Нет доступа к плану закупок. Проверьте права учётной записи.",
+      409: "Данные или состояние документа изменились. Обновите документы перед дальнейшей работой.",
+      422: "Не удалось принять запрос. Проверьте поля и состояние документа.",
+    };
+    throw new Error(safe[response.status] ?? `Не удалось выполнить запрос (HTTP ${response.status}). Результат операции не подтверждён.`);
   }
-  return response.json() as Promise<T>;
+  try { return await response.json() as T; }
+  catch { throw new Error("Ответ сервера не подтверждён. Проверьте результат перед дальнейшей работой."); }
 }
 function validCommand(command: Command) {
   const d = command.document;
@@ -77,6 +85,7 @@ function CompanyPlan({ org }: { org: number }) {
   const [journal, setJournal] = useState<Journal | null>(null);
   const [storageBlocked, setStorageBlocked] = useState(false);
   const [requests, setRequests] = useState<Source[]>([]);
+  const [hasDocumentSnapshot, setHasDocumentSnapshot] = useState(false);
   const [orders, setOrders] = useState<Source[]>([]);
   const [requestNext, setRequestNext] = useState<number | null>(null);
   const [orderNext, setOrderNext] = useState<number | null>(null);
@@ -105,6 +114,7 @@ function CompanyPlan({ org }: { org: number }) {
     const [r, o] = await Promise.all([page("request"), page("order")]);
     if (!active(token)) return;
     setRequests(r.items); setRequestNext(r.next_after_id); setOrders(o.items); setOrderNext(o.next_after_id);
+    setHasDocumentSnapshot(true);
     setSelectedRequest(""); setSelectedOrder("");
   }
   useEffect(() => {
@@ -195,7 +205,7 @@ function CompanyPlan({ org }: { org: number }) {
       {row.stage === "approval" && <Link className="text-accent underline" href={`/erp/procurement/orders?org=${org}&request=${row.id}`}>Создать заказ из {row.number}</Link>}
       {stages.includes(row.stage ?? "") && row.stage !== "approval" && <Button disabled={busy || !identity?.can_manage} onClick={() => void run(token => mutate(`/requests/${row.id}/stage`, "PATCH", { expected_stage: row.stage, stage: stages[stages.indexOf(row.stage!) + 1] }, token))}>Далее: {titles[stages[stages.indexOf(row.stage!) + 1]]} · {row.number}</Button>}
     </article>)}
-    {identity && !requests.length && <p>На загруженной странице заявок нет.</p>}
+    {identity && hasDocumentSnapshot && !requests.length && <p>На загруженной странице заявок нет.</p>}
     {requestNext !== null && <Button disabled={busy} onClick={() => more("request", requestNext)}>Ещё заявки</Button>}
     <fieldset disabled={busy || !identity?.can_manage} className="space-y-2 rounded border border-line p-3"><legend>Связь с существующим заказом</legend>
       <Select aria-label="Согласованная заявка" value={selectedRequest} onChange={e => setSelectedRequest(e.target.value)}><option value="">Выберите заявку</option>{requests.filter(r => r.stage === "approval").map(r => <option key={r.id} value={r.id}>{r.number}</option>)}</Select>
