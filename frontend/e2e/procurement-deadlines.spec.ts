@@ -2,6 +2,7 @@ import { configureInstallationCompany } from "./installation-company";
 import { expect, test } from "@playwright/test";
 
 test("срок клиента переносится в черновик плана закупки", async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
   const stamp = Date.now();
   const post = async (url: string, data: unknown) => {
     const r = await page.request.post(`/api${url}`, { data });
@@ -85,4 +86,33 @@ test("срок клиента переносится в черновик пла�
   expect(riskReview.risk_details.items[0]).toMatchObject({ number: deal.number, penalty_rate_pct: "1.00", penalty_cap_pct: "10.00" });
   await testInfo.attach("customer-deadline-risk.json", { body: JSON.stringify(riskReview), contentType: "application/json" });
   await page.screenshot({ path: testInfo.outputPath("customer-deadline-saved.png"), fullPage: true });
+  for (const view of [
+    { name: "order-desktop", width: 1440, height: 1000, dark: false },
+    { name: "order-mobile", width: 390, height: 844, dark: false },
+    { name: "order-dark", width: 1440, height: 1000, dark: true },
+  ]) {
+    await page.setViewportSize({ width: view.width, height: view.height });
+    const left = page.getByRole("complementary").first();
+    if (view.width < 600 && await left.getByRole("button", { name: "Свернуть меню", exact: true }).isVisible()) {
+      await left.getByRole("button", { name: "Свернуть меню", exact: true }).click();
+    }
+    if (view.dark) await page.getByRole("button", { name: "Включить тёмную тему", exact: true }).click();
+    await page.getByRole("heading", { name: /Состав заказа/ }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`${view.name}.png`), fullPage: true });
+    await testInfo.attach(view.name, { path: testInfo.outputPath(`${view.name}.png`), contentType: "image/png" });
+    await testInfo.attach(`${view.name}-width.json`, { body: JSON.stringify(await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth }))), contentType: "application/json" });
+    if (view.width < 600) {
+      const positions = page.getByRole("region", { name: "Позиции заказа", exact: true });
+      await positions.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: testInfo.outputPath("order-mobile-table.png"), fullPage: true });
+      await testInfo.attach("order-mobile-table", { path: testInfo.outputPath("order-mobile-table.png"), contentType: "image/png" });
+      for (let key = 0; key < 20; key++) await positions.press("ArrowRight");
+      await page.screenshot({ path: testInfo.outputPath("order-mobile-table-scrolled.png"), fullPage: true });
+      await testInfo.attach("order-mobile-table-scrolled", { path: testInfo.outputPath("order-mobile-table-scrolled.png"), contentType: "image/png" });
+      await testInfo.attach("order-mobile-table-scroll.json", { body: JSON.stringify(await positions.evaluate(node => ({ scrollLeft: node.scrollLeft, scrollWidth: node.scrollWidth, clientWidth: node.clientWidth, focused: node === document.activeElement }))), contentType: "application/json" });
+    }
+    await page.getByRole("heading", { name: /История изменений ·/ }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`${view.name}-history.png`), fullPage: true });
+    await testInfo.attach(`${view.name}-history`, { path: testInfo.outputPath(`${view.name}-history.png`), contentType: "image/png" });
+  }
 });

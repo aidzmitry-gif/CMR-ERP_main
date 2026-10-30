@@ -12,10 +12,24 @@ import { ProcurementPurchaseChain } from "./procurement-purchase-chain";
 
 import { editorJournal,type Attempt,type Scope } from "@/lib/procurement-editor-journal";
 import { useUnsavedDocumentGuard } from "@/lib/use-unsaved-document-guard";
+import styles from "./procurement-machine-editor.module.css";
 
 const STATUS: Record<string, string> = { draft: "Черновик", ordered: "Заказан", shipped: "Отгружен", customs: "Таможня", received: "Принят", cancelled: "Отменён" };
 const CHANGE_LABELS: Record<string, string> = { freight_byn: "Фрахт, BYN", supplier: "Поставщик", supplier_id: "Поставщик из справочника", eta_date: "Дата прибытия", status: "Статус", plan: "План поставки" };
-const changeValue = (value: unknown) => value === null ? "—" : typeof value === "object" ? JSON.stringify(value) : String(value);
+const changeValue = (value: unknown, field: string) => {
+  if (value === null) return "—";
+  if (typeof value !== "object") return String(value);
+  if (field === "plan" && !Array.isArray(value)) {
+    const labels: Record<string, string> = { transport_method_code: "Способ перевозки", target_arrival_date: "В Минске до" };
+    return Object.entries(value).map(([key, item]) => {
+      const display = key === "transport_method_code" && item === "truck" ? "Машина"
+        : key === "transport_method_code" && item === "container" ? "Контейнер"
+          : item === null ? "—" : typeof item === "object" ? JSON.stringify(item) : String(item);
+      return `${labels[key] ?? key}: ${display}`;
+    }).join(" · ");
+  }
+  return JSON.stringify(value);
+};
 const message = (e: unknown) => e instanceof Error ? e.message : "Не удалось выполнить действие";
 
 const reserveUnits = (value: string) => { const [whole, fraction] = value.split("."); return BigInt(whole) * 100n + BigInt(fraction); };
@@ -25,9 +39,9 @@ const maxReserve = (left: string, right: string) => {
 };
 export function ProcurementMachineEditor({ orderId, suggestedOrg }: { orderId: number; suggestedOrg?: string }) {
   const [, setPending] = useState(false);
-  return <InstanceOrganizationGate>{org => <main className="w-full space-y-4 overflow-auto p-6">
+  return <main className={styles.workspace}><InstanceOrganizationGate>{org => <>
     {suggestedOrg && suggestedOrg !== String(org.id) ? <p role="alert">Юрлицо ссылки не совпадает с настройкой установки.</p> : <Editor key={`${org.id}/${orderId}`} org={org.id} orderId={orderId} onPendingChange={setPending} />}
-  </main>}</InstanceOrganizationGate>;
+  </>}</InstanceOrganizationGate></main>;
 }
 function Editor({ org, orderId, onPendingChange }: { org: number; orderId: number; onPendingChange: (pending: boolean) => void }) {
   const router = useRouter();
@@ -233,39 +247,50 @@ function Editor({ org, orderId, onPendingChange }: { org: number; orderId: numbe
     try { clearDealDemandAllocation(allocationRecovery); setAllocationRecovery(null); setNotice("Сохранённая команда распределения закрыта без изменения заказа."); }
     catch (e) { setError(message(e)); }
   }
-  return <section className="space-y-4" aria-label="Редактор заказа">
+  return <section className={styles.editor} aria-label="Редактор заказа">
+    <header className={styles.header}>
+      <div><p className={styles.eyebrow}>Закупки · заказ поставщику</p><h1>{order ? `Состав заказа ${order.number}` : "Заказ поставщику"}</h1>
+        {order && <p className={styles.orderMeta}>{order.supplier || "Поставщик не указан"} · {STATUS[order.status]} {order.eta_date && `· ETA ${order.eta_date}`}</p>}
+      </div>
+      <div className={styles.actions}>
+        <button disabled={busy} onClick={() => void refreshReview()}>Проверить состав</button>
+        <button className={styles.primary} disabled={busy || uncertain || needsPreparation || !order} onClick={() => void saveAndClose()}>Сохранить и закрыть</button>
+      </div>
+    </header>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    <button disabled={busy} onClick={() => void refreshReview()}>Проверить состав</button>
-    <button disabled={busy || uncertain || needsPreparation || !order} onClick={() => void saveAndClose()}>Сохранить и закрыть</button>
     {uncertain && unknownNotice && <p role="status">Исход команды не подтверждён сервером. Обновление состава не разрешает повторную запись.</p>}
     {!legacy && attempt?.state === "pending" && <div><p>UUID: {JSON.parse(attempt.body).request_key}</p><button disabled={busy || !scope?.can_manage} onClick={() => void recover(false)}>Повторить сохранённую команду</button><button disabled={busy || !scope?.can_manage} onClick={() => void recover(true)}>Сверить и закрыть неисполненную</button></div>}
     {attempt?.state === "settled" && <p>Квитанция: {attempt.result?.outcome === "applied" ? "выполнено" : "отказ без изменения заказа"}. Это результат сохранённой команды, а не текущее состояние заказа.</p>}
     {allocationRecovery && <div role="status"><p>Сохранённая команда распределения резерва требует повторной проверки. Повторите кнопку у той же сделки или закройте команду после сверки.</p><button disabled={busy} onClick={closeAllocationAttempt}>Закрыть сохранённую команду</button></div>}
     {needsPreparation && <button disabled={busy || legacy} onClick={() => { setPrepared(true); setNotice("Проверьте данные и явно отправьте новую команду."); }}>Подготовить новую попытку</button>}
     {busy && <p>Проверяем данные…</p>}
-    {order && <><h1 className="text-xl font-semibold">Состав заказа {order.number}</h1><p>{order.supplier || "Поставщик не указан"} · {STATUS[order.status]} {order.eta_date && `· ETA ${order.eta_date}`}</p>
+    {order && <>
       {!scope?.can_manage && <p>Доступен просмотр. Для изменений нужны права главного бухгалтера.</p>}
       {["received", "cancelled"].includes(order.status) && <p>Состав принятого или отменённого заказа не редактируется.</p>}
-      <label>Фрахт партии, BYN<input className="ml-2 rounded border p-2" inputMode="decimal" value={freight} onChange={e => setFreight(e.target.value)} disabled={readonly} /></label><button disabled={readonly || !freightDirty} onClick={saveFreight}>Сохранить фрахт</button>
-      <p className="rounded border border-amber-400 p-2 text-sm">Предварительный резерв относится к ожидаемой поставке: товар ещё не на складе и физический остаток или резерв не изменяются.</p>
-      <table className="w-full text-left"><thead><tr>{["Номенклатура", "Кол-во", "Предварительный резерв", "Товар, BYN", "Вес, кг", "Объём, м³", "Себест/шт", ""].map((s, i) => <th key={i}>{s}</th>)}</tr></thead><tbody>
+      <section className={styles.panel} aria-label="Состав и стоимость заказа">
+      <div className={styles.compositionHeading}><div><h2>Товары и доставка</h2><p>Состав партии и подтверждённые данные заказа</p></div>
+      <div className={styles.freight}><label>Фрахт партии, BYN<input inputMode="decimal" value={freight} onChange={e => setFreight(e.target.value)} disabled={readonly} /></label><button disabled={readonly || !freightDirty} onClick={saveFreight}>Сохранить фрахт</button></div></div>
+      <p className={styles.reserveNotice}>Предварительный резерв относится к ожидаемой поставке: товар ещё не на складе и физический остаток или резерв не изменяются.</p>
+      <p className={styles.scrollHint}>Все столбцы доступны при горизонтальной прокрутке таблицы.</p>
+      <div className={styles.tableScroll} role="region" aria-label="Позиции заказа" tabIndex={0}><table className={styles.itemsTable}><thead><tr>{["Номенклатура", "Кол-во", "Предварительный резерв", "Товар, BYN", "Вес, кг", "Объём, м³", "Себест/шт", "Действия"].map((s, i) => <th key={i}>{s}</th>)}</tr></thead><tbody>
         {!order.lines.length && <tr><td colSpan={8}>Позиций нет — добавьте первую ниже.</td></tr>}
-        {order.lines.map(line => { const r = expected?.lines.find(x => x.order_line_id === line.id); const d = demandOrder?.lines.find(x => x.order_line_id === line.id); return <tr key={line.id}><td>{line.sku_code}</td><td>{line.qty}</td><td>{r ? <div aria-label={`Предварительный резерв ${line.sku_code}`}><div title={`Заказано ${r.ordered}; принято ${r.accepted}`}>Ожидается {r.expected} · клиентам {r.expected_reserved} · свободно {r.free_expected}</div><div className="text-[11px] text-faint">по накладным {r.accepted} · принято складом {r.warehouse_accepted} · уже переведено {r.converted} · доступно после приёмки {r.physical_convertible} · ожидают сверки {r.pending_conversion_count}</div></div> : "Прогноз предварительного резерва недоступен"}{d && <div className="text-[11px] text-faint">под заказ клиентам {d.client_ordered} · свободно для клиента {d.free_for_client}{r && ` · свободно ожидается ${r.free_expected}`}</div>}{d?.candidates.length ? <div className="mt-1 space-y-1 text-[11px]"><span className="block">Свободные потребности:</span>{d.candidates.map(candidate => { const available = r ? maxReserve(d.free_for_client, r.free_expected) : d.free_for_client; const qty = maxReserve(candidate.free_qty, available); const target = candidate.document_id === null ? `сделка №${candidate.deal_id} · счёт не указан` : `сделка №${candidate.deal_id} · счёт ID ${candidate.document_id}`; return <div key={candidate.demand_id} className="flex flex-wrap items-center gap-1"><span>{target}: {candidate.free_qty} шт.</span><button disabled={noCommand || ["received", "cancelled"].includes(order.status) || qty === "0.00"} onClick={() => void allocate(line.id, candidate, qty)}>Закрепить ожидаемые {qty}</button></div>; })}</div> : null}</td><td>{line.goods_value_byn}</td><td>{line.weight}</td><td>{line.volume}</td><td>{unit.has(line.sku_code) ? formatNumber(Number(unit.get(line.sku_code))) : "—"}</td><td><button aria-label="Удалить позицию" disabled={readonly} onClick={() => void perform("delete_line", { line_id: line.id })}>Удалить</button></td></tr>; })}
-      </tbody></table>
-      {preview && <p>Итого landed: {preview.total_landed_byn} BYN</p>}
-      <fieldset disabled={readonly} className="flex flex-wrap gap-2"><legend>Новая позиция</legend><label>Поиск номенклатуры<input className="block rounded border p-2" value={skuSearch} onChange={e => setSkuSearch(e.target.value)} /></label><label>Номенклатура из справочника<select aria-label="Номенклатура из справочника" className="block rounded border p-2" value={selectedSku?.id ?? ""} onChange={e => { const row = skuOptions?.items.find(item => String(item.id) === e.target.value) ?? null; setSelectedSku(row); setDraft(current => ({ ...current, sku_code: row?.code ?? "" })); }}><option value="">Выберите товар</option>{selectedSku && !skuOptions?.items.some(item => item.id === selectedSku.id) && <option value={selectedSku.id}>{selectedSku.code} · {selectedSku.title} · {selectedSku.unit}</option>}{skuOptions?.items.map(item => <option key={item.id} value={item.id}>{item.code} · {item.title} · {item.unit}</option>)}</select></label>{skuOptions?.truncated && <p>Показаны первые 50 товаров. Уточните поиск.</p>}{skuError && <p role="alert">Справочник недоступен: {skuError}</p>}{([['qty', 'Количество'], ['goods_value_byn', 'Стоимость товара'], ['weight', 'Вес'], ['volume', 'Объём']] as const).map(([key, label]) => <label key={key}>{label}<input className="block rounded border p-2" value={draft[key]} onChange={e => setDraft({ ...draft, [key]: e.target.value })} /></label>)}<button onClick={add}>Добавить позицию</button></fieldset>
-      <fieldset disabled={noCommand || ["received", "cancelled"].includes(order.status)}><legend>Статус машины</legend><label>Новый статус<select value={status} onChange={e => { setStatus(e.target.value); setStatusTouched(true); }}>{Object.entries(STATUS).filter(([s]) => s !== "draft").map(([s, label]) => <option key={s} value={s}>{label}</option>)}</select></label><button onClick={() => void saveStatus()}>Изменить статус</button></fieldset>
-      <fieldset disabled={noCommand}><legend>План машины</legend><label>Способ перевозки<select value={method} onChange={e => setMethod(e.target.value)}><option value="truck">Машина</option><option value="container">Контейнер</option></select></label><label>В Минске до<input type="date" value={target} onChange={e => setTarget(e.target.value)} /></label><button onClick={() => { if (!target) { setError("Укажите дату «В Минске до»"); return; } void perform("plan", { transport_method_code: method, target_arrival_date: target }); }}>Пересчитать план</button></fieldset>
-      <p>Клиентские сроки и штрафы не проверены.</p><ProcurementCustomerDeadlines key={`${org}:${orderId}:${JSON.stringify(plan)}:${JSON.stringify(expected)}`} org={org} orderId={orderId} disabled={noCommand} onUseDate={setTarget} />{plan && <><p>Всего дней: {plan.total_days}. Начало: {plan.start_date ?? "не задано"}</p>{plan.schedule_start_in_past && <p>Дата начала собственного графика уже прошла.</p>}{plan.milestones.map(x => <p key={x.stage}>{x.title}: план {x.planned_date ?? "—"}, факт {x.actual_date ?? "—"}</p>)}</>}
-      <ProcurementPurchaseChain org={org} orderId={orderId} />
-      <section aria-label="История изменений заказа" className="space-y-2 rounded border border-line p-3">
+        {order.lines.map(line => { const r = expected?.lines.find(x => x.order_line_id === line.id); const d = demandOrder?.lines.find(x => x.order_line_id === line.id); return <tr key={line.id}><td>{line.sku_code}</td><td>{line.qty}</td><td>{r ? <div aria-label={`Предварительный резерв ${line.sku_code}`}><div title={`Заказано ${r.ordered}; принято ${r.accepted}`}>Ожидается {r.expected} · клиентам {r.expected_reserved} · свободно {r.free_expected}</div><div className={styles.reserveDetail}>по накладным {r.accepted} · принято складом {r.warehouse_accepted} · уже переведено {r.converted} · доступно после приёмки {r.physical_convertible} · ожидают сверки {r.pending_conversion_count}</div></div> : "Прогноз предварительного резерва недоступен"}{d && <div className={styles.reserveDetail}>под заказ клиентам {d.client_ordered} · свободно для клиента {d.free_for_client}{r && ` · свободно ожидается ${r.free_expected}`}</div>}{d?.candidates.length ? <div className="mt-1 space-y-1 text-[11px]"><span className="block">Свободные потребности:</span>{d.candidates.map(candidate => { const available = r ? maxReserve(d.free_for_client, r.free_expected) : d.free_for_client; const qty = maxReserve(candidate.free_qty, available); const target = candidate.document_id === null ? `сделка №${candidate.deal_id} · счёт не указан` : `сделка №${candidate.deal_id} · счёт ID ${candidate.document_id}`; return <div key={candidate.demand_id} className="flex flex-wrap items-center gap-1"><span>{target}: {candidate.free_qty} шт.</span><button disabled={noCommand || ["received", "cancelled"].includes(order.status) || qty === "0.00"} onClick={() => void allocate(line.id, candidate, qty)}>Закрепить ожидаемые {qty}</button></div>; })}</div> : null}</td><td>{line.goods_value_byn}</td><td>{line.weight}</td><td>{line.volume}</td><td>{unit.has(line.sku_code) ? formatNumber(Number(unit.get(line.sku_code))) : "—"}</td><td><button aria-label="Удалить позицию" disabled={readonly} onClick={() => void perform("delete_line", { line_id: line.id })}>Удалить</button></td></tr>; })}
+      </tbody></table></div>
+      {preview && <p className={styles.total}>Итого landed: {preview.total_landed_byn} BYN</p>}
+      </section>
+      <fieldset disabled={readonly} className={`${styles.panel} ${styles.newLine}`}><legend>Новая позиция</legend><label>Поиск номенклатуры<input className="block rounded border p-2" value={skuSearch} onChange={e => setSkuSearch(e.target.value)} /></label><label>Номенклатура из справочника<select aria-label="Номенклатура из справочника" className="block rounded border p-2" value={selectedSku?.id ?? ""} onChange={e => { const row = skuOptions?.items.find(item => String(item.id) === e.target.value) ?? null; setSelectedSku(row); setDraft(current => ({ ...current, sku_code: row?.code ?? "" })); }}><option value="">Выберите товар</option>{selectedSku && !skuOptions?.items.some(item => item.id === selectedSku.id) && <option value={selectedSku.id}>{selectedSku.code} · {selectedSku.title} · {selectedSku.unit}</option>}{skuOptions?.items.map(item => <option key={item.id} value={item.id}>{item.code} · {item.title} · {item.unit}</option>)}</select></label>{skuOptions?.truncated && <p>Показаны первые 50 товаров. Уточните поиск.</p>}{skuError && <p role="alert">Справочник недоступен: {skuError}</p>}{([['qty', 'Количество'], ['goods_value_byn', 'Стоимость товара'], ['weight', 'Вес'], ['volume', 'Объём']] as const).map(([key, label]) => <label key={key}>{label}<input className="block rounded border p-2" value={draft[key]} onChange={e => setDraft({ ...draft, [key]: e.target.value })} /></label>)}<button className={styles.primary} onClick={add}>Добавить позицию</button></fieldset>
+      <div className={styles.planningGrid}><fieldset className={styles.panel} disabled={noCommand || ["received", "cancelled"].includes(order.status)}><legend>Статус машины</legend><label>Новый статус<select value={status} onChange={e => { setStatus(e.target.value); setStatusTouched(true); }}>{Object.entries(STATUS).filter(([s]) => s !== "draft").map(([s, label]) => <option key={s} value={s}>{label}</option>)}</select></label><button onClick={() => void saveStatus()}>Изменить статус</button></fieldset>
+      <fieldset className={styles.panel} disabled={noCommand}><legend>План машины</legend><label>Способ перевозки<select value={method} onChange={e => setMethod(e.target.value)}><option value="truck">Машина</option><option value="container">Контейнер</option></select></label><label>В Минске до<input type="date" value={target} onChange={e => setTarget(e.target.value)} /></label><button onClick={() => { if (!target) { setError("Укажите дату «В Минске до»"); return; } void perform("plan", { transport_method_code: method, target_arrival_date: target }); }}>Пересчитать план</button></fieldset></div>
+      <section className={`${styles.panel} ${styles.schedule}`} aria-label="Сроки поставки"><h2>Сроки поставки и обязательства</h2><p>Клиентские сроки и штрафы не проверены.</p><ProcurementCustomerDeadlines key={`${org}:${orderId}:${JSON.stringify(plan)}:${JSON.stringify(expected)}`} org={org} orderId={orderId} disabled={noCommand} onUseDate={setTarget} />{plan && <><p>Всего дней: {plan.total_days}. Начало: {plan.start_date ?? "не задано"}</p>{plan.schedule_start_in_past && <p>Дата начала собственного графика уже прошла.</p>}{plan.milestones.map(x => <p key={x.stage}>{x.title}: план {x.planned_date ?? "—"}, факт {x.actual_date ?? "—"}</p>)}</>}
+      </section><div className={styles.related}><ProcurementPurchaseChain org={org} orderId={orderId} /></div>
+      <section aria-label="История изменений заказа" className={`${styles.panel} ${styles.history}`}>
         <h2 className="font-semibold">История изменений · {order.number}</h2>
         {historyError && <p role="alert">История недоступна: {historyError}</p>}
         {history && history.items.length === 0 && <p>Изменений пока нет.</p>}
         {history?.items.map((item) => <article key={item.id} className="border-t border-line pt-2 text-sm">
           <p>№ {item.id} · {item.changed_at} · {item.changed_by}</p>
           {item.changes.map((change, index) => <p key={`${change.field}/${index}`}>
-            {CHANGE_LABELS[change.field] ?? change.field}: {change.before_unknown ? "прежнее значение не сохранено" : changeValue(change.before)} → {changeValue(change.after)}
+            {CHANGE_LABELS[change.field] ?? change.field}: {change.before_unknown ? "прежнее значение не сохранено" : changeValue(change.before, change.field)} → {changeValue(change.after, change.field)}
           </p>)}
         </article>)}
         {history?.next_after_id !== null && history && <button disabled={historyBusy} onClick={() => void moreHistory()}>Ещё изменения</button>}
