@@ -2,8 +2,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/link", () => ({
-  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
+  default: ({ children, href, ...props }: { children: React.ReactNode; href: string; title?: string }) => (
+    <a href={href} {...props}>{children}</a>
   ),
 }));
 vi.mock("@/lib/api", () => ({ fetchEvents: vi.fn() }));
@@ -15,6 +15,12 @@ const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 beforeEach(() => vi.clearAllMocks());
 
 describe("Topbar", () => {
+  it("shows the signed-in user's initials and opens their profile", () => {
+    render(<Topbar crumbs={["ERP"]} userName="Дмитрий Сергеевич" />);
+    expect(screen.getByRole("link", { name: "ДС" })).toHaveAttribute("href", "/profile");
+    expect(screen.getByTitle("Дмитрий Сергеевич — Моя карточка")).toHaveTextContent("ДС");
+    expect(screen.queryByText("ИП")).not.toBeInTheDocument();
+  });
   it("показывает хлебные крошки", () => {
     render(<Topbar crumbs={["CRM", "Сделки"]} />);
     expect(screen.getByText("CRM")).toBeInTheDocument();

@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
-import { writeFile } from "node:fs/promises";
+import { expect,test } from "@playwright/test";
 import { execFileSync } from "node:child_process";
+import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 test("own: клиент → контакт → сделка → задача/история → счёт под заказ и чужой доступ", async ({ page, context, browser, baseURL }) => {
@@ -110,7 +110,7 @@ test("own: клиент → контакт → сделка → задача/и�
   await accounting.close();
   await page.getByRole("checkbox", { name: "Под заказ — без резерва" }).check();
   await page.getByRole("button", { name: "Сформировать", exact: true }).click();
-  await page.getByLabel("Юрлицо", { exact: true }).selectOption(String(fixture.organization));
+  await expect(page.getByLabel("Юрлицо", { exact: true })).toHaveCount(0);
   await page.getByText("Проверить принадлежность", { exact: true }).click();
   await page.getByText("Продолжить к счёту", { exact: true }).click();
   for (const [label, value] of [["Валюта", "BYN"], ["Дата счёта", "2026-09-10"], ["Действителен до", "2026-09-15"],

@@ -1,6 +1,8 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { configureCompany,render,resetCompany } from "@/test/installation-company";
+import { act,fireEvent,screen } from "@testing-library/react";
+import { afterEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
 import { AccountingView } from "./accounting-view";
+vi.mock("@/lib/instance-organization", async () => { const fixture = await import("@/test/installation-company"); return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization }; });
 
 afterEach(() => vi.unstubAllGlobals());
 const ok = (data: unknown) => ({ ok: true, status: 200, json: async () => data });
@@ -20,11 +22,13 @@ async function open() {
 }
 it("home integration freezes organization, dates and tabs through unknown response then unlocks after receipt", async () => {
   let resolve!: (v: unknown) => void; const pending = new Promise((r) => { resolve = r; }); let count = 0; const f = api(() => ++count === 1 ? pending : Promise.resolve(ok(receipt))); vi.stubGlobal("fetch", f); await open(); fireEvent.click(screen.getByRole("button", { name: "Подтвердить версию реквизитов" }));
-  expect(screen.getByLabelText("Организация")).toBeDisabled(); expect(screen.getByLabelText("Начало периода")).toBeDisabled(); expect(screen.getByRole("button", { name: "Банк и платежи" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Рабочее место" })).toBeDisabled();
-  await act(async () => resolve({ ok: false, status: 503 })); await screen.findByRole("button", { name: "Повторить сохранённый запрос" }); expect(screen.getByLabelText("Организация")).toBeDisabled(); fireEvent.click(screen.getByRole("button", { name: "Повторить сохранённый запрос" })); await screen.findByLabelText("Фактически сохранена версия 1"); expect(screen.getByLabelText("Организация")).toBeEnabled();
+  expect(screen.queryByRole("combobox", { name: "Организация", exact: true })).not.toBeInTheDocument(); expect(screen.getByLabelText("Начало периода")).toBeDisabled(); expect(screen.getByRole("button", { name: "Банк и платежи" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Рабочее место" })).toBeDisabled();
+  await act(async () => resolve({ ok: false, status: 503 })); await screen.findByRole("button", { name: "Повторить сохранённый запрос" }); expect(screen.queryByRole("combobox", { name: "Организация", exact: true })).not.toBeInTheDocument(); fireEvent.click(screen.getByRole("button", { name: "Повторить сохранённый запрос" })); await screen.findByLabelText("Фактически сохранена версия 1"); expect(screen.queryByRole("combobox", { name: "Организация", exact: true })).not.toBeInTheDocument();
   const posts = f.mock.calls.filter(([, init]) => init?.method === "POST"); expect(posts).toHaveLength(2); expect(posts[0][1]?.body).toBe(posts[1][1]?.body);
-  fireEvent.change(screen.getByLabelText("Организация"), { target: { value: "8" } }); expect(screen.queryByLabelText("Фактически сохранена версия 1")).not.toBeInTheDocument(); expect(screen.getByLabelText("Дата действующих реквизитов")).toHaveValue("");
+  await configureCompany(8); await screen.findByText(/включительно: 0\./); fireEvent.click(screen.getByRole("button", { name: "Закрытие месяца" })); fireEvent.click(screen.getByRole("button", { name: "Реквизиты продавца" })); expect(screen.queryByLabelText("Фактически сохранена версия 1")).not.toBeInTheDocument(); expect(screen.getByLabelText("Дата действующих реквизитов")).toHaveValue("");
 });
 it("first explicit chief denial releases existing workspace navigation", async () => {
-  vi.stubGlobal("fetch", api(async () => ({ ok: false, status: 403 }))); await open(); fireEvent.click(screen.getByRole("button", { name: "Подтвердить версию реквизитов" })); expect(await screen.findByRole("alert")).toHaveTextContent("403:"); expect(screen.getByLabelText("Организация")).toBeEnabled(); expect(screen.getByRole("button", { name: "Рабочее место" })).toBeEnabled(); expect(screen.queryByText(/сохранена сервером/)).not.toBeInTheDocument();
+  vi.stubGlobal("fetch", api(async () => ({ ok: false, status: 403 }))); await open(); fireEvent.click(screen.getByRole("button", { name: "Подтвердить версию реквизитов" })); expect(await screen.findByRole("alert")).toHaveTextContent("403:"); expect(screen.queryByRole("combobox", { name: "Организация", exact: true })).not.toBeInTheDocument(); expect(screen.getByRole("button", { name: "Рабочее место" })).toBeEnabled(); expect(screen.queryByText(/сохранена сервером/)).not.toBeInTheDocument();
 });
+
+configureBeforeEach(() => resetCompany(7));

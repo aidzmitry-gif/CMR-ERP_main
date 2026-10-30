@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { userInitials } from "@/lib/user-initials";
 import { Bell, HelpCircle } from "lucide-react";
 import { ChatsPanel } from "@/components/chats-panel";
 import { useEffect, useState } from "react";
@@ -61,8 +63,10 @@ function IconButton({
 export function Topbar({
   crumbs,
   headerActions,
+  userName = "",
 }: {
   crumbs: string[];
+  userName?: string;
   /** Доп. контент правее хлебных крошек, в одну строку (напр. переключатель ЮЛ, «Стадии»). */
   headerActions?: React.ReactNode;
 }) {
@@ -105,9 +109,9 @@ export function Topbar({
         >
           <HelpCircle size={19} />
         </IconButton>
-        <span className="ml-1 flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-slate-500 to-slate-700 text-xs font-semibold text-white">
-          ИП
-        </span>
+        <Link href="/profile" title={userName ? `${userName} — Моя карточка` : "Моя карточка"} className="ml-1 flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-slate-500 to-slate-700 text-xs font-semibold text-white">
+          {userInitials(userName)}
+        </Link>
       </div>
 
       {open && (

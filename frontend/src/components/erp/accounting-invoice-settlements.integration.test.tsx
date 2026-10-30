@@ -1,5 +1,7 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { configureCompany,render,resetCompany } from "@/test/installation-company";
+import { act,fireEvent,screen } from "@testing-library/react";
+import { afterEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
+vi.mock("@/lib/instance-organization", async () => { const fixture = await import("@/test/installation-company"); return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization }; });
 
 import { AccountingView } from "./accounting-view";
 
@@ -24,7 +26,10 @@ it("opens invoice settlements from the accountant home and resets the invoice on
   fireEvent.click(screen.getByRole("button", { name: "Открыть расчёты счёта" }));
   await screen.findByLabelText("Итоги расчётов");
   expect(screen.getByText("Счёт ID 77 · юрлицо 7")).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Организация"), { target: { value: "8" } });
+  await configureCompany(8);
+  await screen.findByText(/включительно: 0\./);
+  fireEvent.click(screen.getByRole("button", { name: "Банк и платежи" }));
+  fireEvent.click(screen.getByRole("button", { name: "Оплаты счетов" }));
   expect(screen.getByLabelText("ID счёта")).toHaveValue("");
   expect(screen.queryByLabelText("Итоги расчётов")).not.toBeInTheDocument();
   expect(fetchMock.mock.calls.filter(([url]) => url.includes("/api/sales/"))).toHaveLength(1);
@@ -52,10 +57,12 @@ it("locks organization and workspace navigation throughout an uncertain allocati
     fireEvent.change(screen.getByLabelText(label), { target: { value } });
   }
   fireEvent.click(screen.getByRole("button", { name: "Подтвердить распределение" }));
-  expect(screen.getByLabelText("Организация")).toBeDisabled();
+  expect(screen.queryByRole("combobox", { name: "Организация", exact: true })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Рабочее место" })).toBeDisabled();
   await act(async () => rejectPost(new Error("Connection lost")));
-  expect(screen.getByLabelText("Организация")).toBeDisabled();
+  expect(screen.queryByRole("combobox", { name: "Организация", exact: true })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Рабочее место" })).toBeDisabled();
   expect(screen.getByLabelText("Ключ распределения")).toHaveValue("K1");
 });
+
+configureBeforeEach(() => resetCompany(7));

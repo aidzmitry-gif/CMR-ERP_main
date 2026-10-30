@@ -1,7 +1,7 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { InvoiceDealPreparation } from "./invoice-deal-preparation";
 import { loadOwnership } from "@/lib/deal-ownership-api";
+import { act,cleanup,fireEvent,render,screen,waitFor } from "@testing-library/react";
+import { afterEach,beforeEach,expect,it,vi } from "vitest";
+import { InvoiceDealPreparation } from "./invoice-deal-preparation";
 const snapshot = { deal_id: 1, number: "D1", counterparty: "Display", owner_id: null, documents: [] };
 const client = { id: 12, name: "Exact buyer", unp: "123", revision: 1, is_active: true, merged_into_id: null };
 const bindingSnapshot = { organization_id: 7, deal: { id: 1, number: "D1", counterparty: "Display", owner_id: null }, client, documents: [] };
@@ -89,7 +89,7 @@ it("unknown ownership survives reopen; later 409 retains exact command until suc
 it("pending ownership blocks another org after reopen", async () => {
   const f = fixture(); render(view()); await inspect(); await screen.findByLabelText("Основание принадлежности организации"); f.mockRejectedValueOnce(new Error("lost")); await claim();
   await screen.findByText("Повторить исходное подтверждение организации"); cleanup(); f.mockClear(); render(view("8"));
-  await screen.findByText("Вернуться к организации #7"); expect(f).not.toHaveBeenCalled();
+  expect(await screen.findByRole("alert")).toHaveTextContent("настройк"); expect(f).not.toHaveBeenCalled();
   expect(screen.queryByText("Проверить принадлежность")).toBeNull();
 });
 it.each(["org", "deal", "close"])("ignores late ownership preview after %s changes", async kind => {

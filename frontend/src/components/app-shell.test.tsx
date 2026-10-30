@@ -14,7 +14,7 @@ vi.mock("@/components/sidebar", () => ({
   ),
 }));
 vi.mock("@/components/topbar", () => ({
-  Topbar: ({ crumbs }: { crumbs: string[] }) => <div data-testid="topbar">{crumbs.join("/")}</div>,
+  Topbar: ({ crumbs, userName }: { crumbs: string[]; userName: string }) => <div data-testid="topbar" data-user-name={userName}>{crumbs.join("/")}</div>,
 }));
 vi.mock("@/components/calls/active-call-provider", () => ({
   ActiveCallProvider: ({ children, enabled }: { children: ReactNode; enabled?: boolean }) => (
@@ -101,6 +101,7 @@ describe("AppShell", () => {
     render(ui);
     expect(screen.getByTestId("sidebar")).toBeInTheDocument();
     expect(screen.getByTestId("topbar")).toHaveTextContent("CRM/Лиды");
+    expect(screen.getByTestId("topbar")).toHaveAttribute("data-user-name", "Харькович Д.С.");
     expect(screen.getByText("содержимое страницы")).toBeInTheDocument();
   });
 

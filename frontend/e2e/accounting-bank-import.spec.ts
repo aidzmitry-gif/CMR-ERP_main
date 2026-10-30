@@ -1,5 +1,6 @@
+import { expect,test } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { expect, test } from "@playwright/test";
+import { configureInstallationCompany } from "./installation-company";
 
 test("импорт выписки сохраняет аналитику из формы", async ({ page }, testInfo) => {
   const stamp = Date.now();
@@ -8,7 +9,9 @@ test("импорт выписки сохраняет аналитику из ф�
   const org = await response.json();
   execFileSync("python", ["e2e/seed_bank_import.py", String(org.id)], { timeout: 30000, env: { ...process.env, AIOS_E2E_SEED: "1" } });
   await page.goto("/erp/accounting");
-  await page.getByLabel("Организация", { exact: true }).selectOption(String(org.id));
+  await configureInstallationCompany(page, org.id);
+  await page.reload();
+  await expect(page.getByLabel("Организация", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Банк и платежи", exact: true }).click();
   await page.getByRole("button", { name: "Импорт выписки", exact: true }).click();
   const row = page.getByRole("row").filter({ hasText: `E2E-BANK-${org.id}` });

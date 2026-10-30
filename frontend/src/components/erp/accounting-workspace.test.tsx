@@ -1,6 +1,8 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { render,resetCompany } from "@/test/installation-company";
+import { act,fireEvent,screen } from "@testing-library/react";
+import { afterEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
 import { AccountingView } from "./accounting-view";
+vi.mock("@/lib/instance-organization", async () => { const fixture = await import("@/test/installation-company"); return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization }; });
 
 afterEach(() => vi.unstubAllGlobals());
 it("keeps the book mounted while confirmation is pending and refreshes the workspace afterwards", async () => {
@@ -21,9 +23,11 @@ it("keeps the book mounted while confirmation is pending and refreshes the works
   fireEvent.click(await screen.findByText("Pending source · 2026-09"));
   fireEvent.click(screen.getByText("Подтвердить пакет и повторить проведение"));
   expect(screen.getByRole("button", { name: "Рабочее место", exact: true })).toBeDisabled();
-  expect(screen.getByLabelText("Организация", { exact: true })).toBeDisabled();
+  expect(screen.queryByRole("combobox", { name: "Организация", exact: true })).not.toBeInTheDocument();
   await act(async () => { finish(); await delayed; });
   await screen.findByText("Документ проверен и проведён.");
   fireEvent.click(screen.getByRole("button", { name: "Рабочее место", exact: true }));
   await screen.findByText(/включительно: 0\./);
 });
+
+configureBeforeEach(() => resetCompany(1));

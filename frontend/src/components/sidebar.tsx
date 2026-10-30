@@ -1,5 +1,6 @@
 "use client";
 
+import { userInitials } from "@/lib/user-initials";
 import clsx from "clsx";
 import {
   AlertCircle,
@@ -224,17 +225,6 @@ const MODULES: ModuleItem[] = [
   },
   { slug: "it", label: "IT и настройки", Icon: Settings, href: "/erp/settings" },
 ];
-
-function initials(name: string): string {
-  return name
-    .replace(/[«».·/]/g, " ")
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join("")
-    .toUpperCase();
-}
 
 // localStorage-ключи пользовательских настроек сайдбара.
 // TODO(Step B): collapsed → cookie (как THEME_INIT_SCRIPT), уберёт width-флэш при первой отрисовке.
@@ -832,7 +822,7 @@ export function Sidebar({ allowedSlugs, accessUnavailable = false, userName, rol
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 text-xs font-semibold text-white"
               title={`${userName} — Моя карточка`}
             >
-              {initials(userName)}
+              {userInitials(userName)}
             </Link>
             {showFull && (
               <>

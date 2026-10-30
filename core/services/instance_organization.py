@@ -12,7 +12,7 @@ async def resolve_instance_organization(session, user, gateway, unp: str | None)
     if not user.username or user.username == GUEST or GUEST in user.roles:
         raise HTTPException(401, "Войдите в систему.")
     if not isinstance(unp, str) or not re.fullmatch(r"[0-9]{9}", unp.strip()):
-        raise HTTPException(503, "Юрлицо установки не настроено: задайте AIOS_SELLER_UNP в настройках сервера.")
+        raise HTTPException(503, "Юрлицо установки не настроено: выберите нашу организацию в настройках платформы.")
     if gateway is None or not callable(getattr(gateway, "source_organizations", None)):
         raise HTTPException(503, "Сервис юридических лиц недоступен.")
     # The existing gateway filters by this authenticated principal's grants.

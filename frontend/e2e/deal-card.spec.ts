@@ -1,6 +1,7 @@
+import { expect,test } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
-import { expect, test } from "@playwright/test";
+import { configureInstallationCompany } from "./installation-company";
 
 // Критический путь карточки: создать сделку → проверить реквизиты → выпустить счёт ERP с резервом.
 // Самодостаточно (на пустой доске CI карточек нет — создаём свою).
@@ -49,8 +50,9 @@ test("карточка сделки: выпуск счёта ERP с резерв
     bik: "TEST BIK", director: "Synthetic director", evidence: "Synthetic E2E approved seller profile", confirmed: true,
   } });
   expect(profile.status(), await profile.text()).toBe(201);
+  await configureInstallationCompany(page, fixture.organization);
   await page.getByRole("button", { name: /Сформировать/ }).click();
-  await page.getByLabel("Юрлицо", { exact: true }).selectOption(String(fixture.organization));
+  await expect(page.getByLabel("Юрлицо", { exact: true })).toHaveCount(0);
   await page.getByText("Проверить принадлежность", { exact: true }).click();
   await page.getByText("Продолжить к счёту", { exact: true }).click();
   for (const [label, value] of [["Валюта", "BYN"], ["Дата счёта", "2026-09-10"], ["Действителен до", "2026-09-15"],
@@ -81,7 +83,7 @@ test("карточка сделки: выпуск счёта ERP с резерв
   await dealRegister.screenshot({ path: testInfo.outputPath("deal-document-register.png") });
   await page.goto(`/erp/spravochniki/counterparty/${fixture.buyer}`);
   const clientRegister = page.getByRole("region", { name: "Документы клиента по юрлицу", exact: true });
-  await clientRegister.getByLabel("Юрлицо документов клиента", { exact: true }).selectOption(String(fixture.organization));
+  await expect(clientRegister.getByLabel("Юрлицо документов клиента", { exact: true })).toHaveCount(0);
   await expect(clientRegister.getByRole("article", { name: `Документ клиента ${invoices[0].id}`, exact: true })).toBeVisible();
   await clientRegister.screenshot({ path: testInfo.outputPath("client-document-register.png") });
   // Partial shipment and release use the same invoice; released stock is not a full shipment.
@@ -204,8 +206,9 @@ test("счёт под заказ: потерянный ответ, повтор 
   } });
   expect(profile.status(), await profile.text()).toBe(201);
   await page.getByRole("checkbox", { name: "Под заказ — без резерва", exact: true }).check();
+  await configureInstallationCompany(page, fixture.organization);
   await page.getByRole("button", { name: /Сформировать/ }).click();
-  await page.getByLabel("Юрлицо", { exact: true }).selectOption(String(fixture.organization));
+  await expect(page.getByLabel("Юрлицо", { exact: true })).toHaveCount(0);
   await page.getByText("Проверить принадлежность", { exact: true }).click();
   await page.getByText("Продолжить к счёту", { exact: true }).click();
   for (const [label, value] of [["Валюта", "BYN"], ["Дата счёта", "2026-09-10"], ["Действителен до", "2026-09-15"],

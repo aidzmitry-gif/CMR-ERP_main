@@ -75,7 +75,7 @@ async def test_http_context_uses_only_explicit_server_setting(explicit, expected
     app.dependency_overrides[get_current_user] = lambda: USER
 
     async def unused_session():
-        yield None
+        yield SimpleNamespace(get=AsyncMock(return_value=None))
 
     app.dependency_overrides[get_session] = unused_session
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://synthetic") as client:

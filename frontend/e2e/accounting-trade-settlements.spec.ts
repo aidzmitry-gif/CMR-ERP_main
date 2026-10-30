@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { configureInstallationCompany } from "./installation-company";
 
-import { expect, test } from "@playwright/test";
+import { expect,test } from "@playwright/test";
 
 test("60/62: бухгалтер видит документ и скачивает только согласованную внутреннюю расшифровку", async ({ page }, testInfo) => {
   const stamp = Date.now();
@@ -55,7 +56,9 @@ test("60/62: бухгалтер видит документ и скачивае�
   });
 
   await page.goto("/erp/accounting");
-  await page.getByLabel("Организация", { exact: true }).selectOption(String(orgA.id));
+  await configureInstallationCompany(page, orgA.id);
+  await page.reload();
+  await expect(page.getByLabel("Организация", { exact: true })).toHaveCount(0);
   await page.getByLabel("Начало периода").fill("2026-09-01");
   await page.getByLabel("Конец периода").fill("2026-09-30");
   await page.getByRole("navigation", { name: "Разделы бухгалтерии" }).getByRole("button", { name: "Отчёты" }).click();
@@ -116,7 +119,13 @@ test("60/62: бухгалтер видит документ и скачивае�
   }]);
   await page.screenshot({ path: testInfo.outputPath("trade-comparison.png"), fullPage: true });
 
-  await page.getByLabel("Организация", { exact: true }).selectOption(String(orgB.id));
+  await configureInstallationCompany(page, orgB.id);
+  await page.reload();
+  await expect(page.getByLabel("Организация", { exact: true })).toHaveCount(0);
+  await page.getByLabel("Начало периода").fill("2026-09-01");
+  await page.getByLabel("Конец периода").fill("2026-09-30");
+  await page.getByRole("navigation", { name: "Разделы бухгалтерии" }).getByRole("button", { name: "Отчёты" }).click();
+  await page.getByRole("button", { name: "Расчёты 60/62", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: "Расхождение с ОСВ" })).toBeVisible();
   await expect(page.getByText("synthetic-difference.csv", { exact: false })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Скачать черновой протокол сравнения" })).toHaveCount(0);

@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach,expect,it,vi } from "vitest";
 import { fetchInstanceOrganization } from "./instance-organization";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -29,9 +29,18 @@ it("keeps denied access distinct from an empty document list", async () => {
 });
 it("shows configuration failure without trusting server response text", async () => {
   serve({ detail: "synthetic-private-message" }, 503);
-  await expect(fetchInstanceOrganization()).rejects.toThrow(/настройки сервера/);
+  await expect(fetchInstanceOrganization()).rejects.toThrow(/настройки платформы/);
 });
 it("reports a network failure without selecting a fallback", async () => {
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("synthetic-private-message")));
   await expect(fetchInstanceOrganization()).rejects.toThrow("Не удалось загрузить юрлицо установки. Повторите загрузку.");
+});
+
+it("accepts the persisted platform seller and keeps its revision", async () => {
+  serve({ configuration: "platform_settings", revision: 3, organization });
+  expect(await fetchInstanceOrganization()).toEqual({ ...organization, revision: 3 });
+});
+it.each([0, -1, true, null])("refuses an invalid persisted revision %s", async revision => {
+  serve({ configuration: "platform_settings", revision, organization });
+  await expect(fetchInstanceOrganization()).rejects.toThrow(/некорректное/);
 });

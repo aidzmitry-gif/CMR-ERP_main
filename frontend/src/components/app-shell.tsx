@@ -80,7 +80,7 @@ export async function AppShell({
         <div className="flex h-screen overflow-hidden max-md:[&>aside:first-child]:w-14">
           <Sidebar allowedSlugs={allowedSlugs} accessUnavailable={accessUnavailable} userName={userName} roleTitle={roleTitle} />
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            <Topbar crumbs={crumbs} headerActions={headerActions} />
+            <Topbar crumbs={crumbs} headerActions={headerActions} userName={userName} />
             {/* Вертикальный скролл на уровне оболочки: страницы без своего overflow-контейнера
                 (справочники и т.п.) прокручиваются здесь; страницы со своим <main overflow-auto>
                 (доска сделок) скроллят сами — вложенный скролл корректен. min-h-0 нужен, чтобы

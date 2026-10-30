@@ -1,5 +1,6 @@
+import { expect,test } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { expect, test } from "@playwright/test";
+import { configureInstallationCompany } from "./installation-company";
 
 test("строка списания проходит из формы выписки в проводку один раз", async ({ page }, testInfo) => {
   const stamp = Date.now();
@@ -16,7 +17,9 @@ test("строка списания проходит из формы выпис�
   });
   expect(account.ok(), await account.text()).toBeTruthy();
   await page.goto("/erp/accounting");
-  await page.getByLabel("Организация", { exact: true }).selectOption(String(org.id));
+  await configureInstallationCompany(page, org.id);
+  await page.reload();
+  await expect(page.getByLabel("Организация", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Банк и платежи", exact: true }).click();
   await page.getByRole("button", { name: "Импорт выписки", exact: true }).click();
   await page.getByText("Добавить строку из выписки", { exact: true }).click();

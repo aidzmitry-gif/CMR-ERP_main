@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test";
+import { expect,test } from "@playwright/test";
+import { configureInstallationCompany } from "./installation-company";
 
 test("CSV проверяется и сохраняется без повторных операций", async ({ page }, testInfo) => {
   const stamp = Date.now();
@@ -8,7 +9,9 @@ test("CSV проверяется и сохраняется без повторн
   expect(created.ok(), await created.text()).toBeTruthy();
   const org = await created.json();
   await page.goto("/erp/accounting");
-  await page.getByLabel("Организация", { exact: true }).selectOption(String(org.id));
+  await configureInstallationCompany(page, org.id);
+  await page.reload();
+  await expect(page.getByLabel("Организация", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Банк и платежи", exact: true }).click();
   await page.getByRole("button", { name: "Импорт выписки", exact: true }).click();
   await page.getByText("Загрузить выписку CSV", { exact: true }).click();

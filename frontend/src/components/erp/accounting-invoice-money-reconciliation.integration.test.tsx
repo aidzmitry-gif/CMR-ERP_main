@@ -1,6 +1,8 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { render,resetCompany } from "@/test/installation-company";
+import { act,fireEvent,screen } from "@testing-library/react";
+import { afterEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
 import { AccountingView } from "./accounting-view";
+vi.mock("@/lib/instance-organization", async () => { const fixture = await import("@/test/installation-company"); return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization }; });
 
 afterEach(() => vi.unstubAllGlobals());
 const review = { organization_id: 7, document_id: 77, review_date: "2026-09-09", basis_digest: "a".repeat(64), money_state: "no_receipts", blockers: [], required_history_from: "2026-09-01", required_history_through: "2026-09-09", can_confirm_money_history: true, fulfillment_required: true, records: [] };
@@ -31,15 +33,15 @@ async function open() {
 it("uncertain reconciliation locks allocation, selection and accounting navigation until receipt", async () => {
   const pending = deferred(); let calls = 0; const f = api(() => ++calls === 1 ? pending.promise : Promise.resolve(ok(receipt))); vi.stubGlobal("fetch", f); await open();
   fireEvent.click(screen.getByRole("button", { name: "Подтвердить денежную историю" }));
-  expect(screen.getByLabelText("Организация")).toBeDisabled(); expect(screen.getByLabelText("ID счёта")).toBeDisabled(); expect(screen.getByRole("button", { name: "Рабочее место" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Подтвердить распределение" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Обновить расчёты" })).toBeDisabled();
+  expect(screen.queryByRole("combobox", { name: "Организация", exact: true })).not.toBeInTheDocument(); expect(screen.getByLabelText("ID счёта")).toBeDisabled(); expect(screen.getByRole("button", { name: "Рабочее место" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Подтвердить распределение" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Обновить расчёты" })).toBeDisabled();
   await act(async () => pending.resolve({ ok: false, status: 503 })); await screen.findByRole("button", { name: "Повторить сверку с тем же ключом" });
-  expect(screen.getByLabelText("Организация")).toBeDisabled(); expect(screen.getByLabelText("Номер счёта для поиска")).toBeDisabled(); expect(screen.getByLabelText("Ключ распределения")).toBeDisabled();
-  fireEvent.click(screen.getByRole("button", { name: "Повторить сверку с тем же ключом" })); await screen.findByRole("button", { name: "Новая сверка" }); expect(screen.getByLabelText("Организация")).toBeEnabled(); expect(screen.getByRole("button", { name: "Подтвердить распределение" })).toBeEnabled();
+  expect(screen.queryByRole("combobox", { name: "Организация", exact: true })).not.toBeInTheDocument(); expect(screen.getByLabelText("Номер счёта для поиска")).toBeDisabled(); expect(screen.getByLabelText("Ключ распределения")).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Повторить сверку с тем же ключом" })); await screen.findByRole("button", { name: "Новая сверка" }); expect(screen.queryByRole("combobox", { name: "Организация", exact: true })).not.toBeInTheDocument(); expect(screen.getByRole("button", { name: "Подтвердить распределение" })).toBeEnabled();
 });
 it("uncertain allocation blocks already open reconciliation without its read cleanup unlocking navigation", async () => {
   const pending = deferred(); vi.stubGlobal("fetch", api(() => pending.promise)); await open(); fireEvent.click(screen.getByRole("button", { name: "Подтвердить распределение" }));
   expect(screen.getByRole("button", { name: "Подтвердить денежную историю" })).toBeDisabled(); await act(async () => pending.resolve({ ok: false, status: 503 }));
-  expect(screen.getByLabelText("Организация")).toBeDisabled(); expect(screen.getByRole("button", { name: "Обновить сверку" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Подтвердить денежную историю" })).toBeDisabled();
+  expect(screen.queryByRole("combobox", { name: "Организация", exact: true })).not.toBeInTheDocument(); expect(screen.getByRole("button", { name: "Обновить сверку" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Подтвердить денежную историю" })).toBeDisabled();
 });
 it.each(["allocation", "reconciliation"])("same-tick competing mutations: %s acquires sole ownership", async (first) => {
   const pending = deferred(); const f = api(() => pending.promise); vi.stubGlobal("fetch", f); await open();
@@ -47,7 +49,7 @@ it.each(["allocation", "reconciliation"])("same-tick competing mutations: %s acq
   act(() => { fireEvent.click(first === "allocation" ? a : r); fireEvent.click(first === "allocation" ? r : a); });
   await act(async () => {});
   const posts = f.mock.calls.filter(([, init]) => init?.method === "POST"); expect(posts).toHaveLength(1); expect(posts[0][0]).toMatch(first === "allocation" ? /\/settlements$/ : /\/money-reconciliation$/);
-  await act(async () => pending.resolve({ ok: false, status: 503 })); expect(screen.getByLabelText("Организация")).toBeDisabled();
+  await act(async () => pending.resolve({ ok: false, status: 503 })); expect(screen.queryByRole("combobox", { name: "Организация", exact: true })).not.toBeInTheDocument();
 });
 it("confirmed allocation refreshes money review and clears previous completeness checkbox", async () => {
   vi.stubGlobal("fetch", api(() => Promise.resolve(ok({ id: 6, direction: "receipt", amount: "10.00" })))); await open();
@@ -66,3 +68,5 @@ it("late money GET predating an allocation cannot replace the refreshed facts", 
   await open(); fireEvent.focus(window); fireEvent.click(screen.getByRole("button", { name: "Подтвердить распределение" })); await screen.findByText("Полученные средства возвращены не полностью.");
   await act(async () => stale.resolve(ok(review))); expect(screen.getByText("Полученные средства возвращены не полностью.")).toBeInTheDocument(); expect(screen.getByRole("button", { name: "Подтвердить денежную историю" })).toBeDisabled();
 });
+
+configureBeforeEach(() => resetCompany(7));

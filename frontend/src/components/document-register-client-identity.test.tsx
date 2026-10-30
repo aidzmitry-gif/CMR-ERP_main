@@ -1,8 +1,10 @@
-import { render, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { render,resetCompany } from "@/test/installation-company";
+import { screen } from "@testing-library/react";
+import { afterEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
+vi.mock("@/lib/instance-organization", async () => { const fixture = await import("@/test/installation-company"); return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization }; });
 
+import { fetchDocumentRegister,fetchRegisterOrganizations } from "@/lib/document-register-api";
 import { DealDocumentRegister } from "./deal-document-register";
-import { fetchDocumentRegister, fetchRegisterOrganizations } from "@/lib/document-register-api";
 
 afterEach(() => vi.unstubAllGlobals());
 const identity = { status: "confirmed", counterparty_id: 42, snapshot: { id: 42, name: "Historical client", unp: "111111111", revision: 1, is_active: true, merged_into_id: null } };
@@ -35,3 +37,5 @@ it("preserves the neutral historical consumed label", async () => {
   expect(await screen.findByText(/Исторический статус резерва: требуется сверка/)).toBeInTheDocument();
   expect(screen.queryByText(/Резерв исполнен отгрузкой/)).not.toBeInTheDocument();
 });
+
+configureBeforeEach(() => resetCompany(7));
