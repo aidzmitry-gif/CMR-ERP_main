@@ -9,6 +9,21 @@ from modules.integrations.module import IntegrationsModule
 from modules.integrations.registry import RegistryClient
 
 
+@pytest.mark.parametrize("parent_is_self", [False, True])
+def test_onec_normalized_head_accepts_empty_or_self_reference(monkeypatch, parent_is_self):
+    from modules.integrations.client import OneCClient
+
+    reference = "00000000-0000-0000-0000-000000000001"
+    empty = "00000000-0000-0000-0000-000000000000"
+    row = {"Ref_Key": reference, "Description": "Synthetic head", "НаименованиеПолное": "Synthetic legal head",
+           "ИНН": "600187521", "ОбособленноеПодразделение": False,
+           "ГоловнойКонтрагент_Key": reference if parent_is_self else empty, "КодФилиала": ""}
+    client = OneCClient("https://onec.test")
+    monkeypatch.setattr(client, "_get_all", lambda *args, **kwargs: [row])
+    assert client._fetch_counterparties_sync() == [{"name": "Synthetic head", "legal_name": "Synthetic legal head",
+                                                 "unp": "600187521", "id": reference}]
+
+
 async def test_onec_wire_branch_import_keeps_two_branches_under_one_legal_entity(api, session, monkeypatch):
     from sqlalchemy import func, select
 

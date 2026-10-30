@@ -3,7 +3,7 @@
 import { RefreshCw } from "lucide-react";
 import { Fragment, useState } from "react";
 
-import { formatSyncSummary, type SyncSummary } from "@/lib/spravochniki-import";
+import { formatSyncRefusal, formatSyncSummary, type SyncSummary } from "@/lib/spravochniki-import";
 
 // ── Demo data (static, no backend) ───────────────────────────────────────────
 
@@ -65,8 +65,8 @@ const HOW_IT_WORKS = [
   },
   {
     icon: "🔒",
-    title: "При отказе от 1С адаптер просто выключается.",
-    body: "Система-источник данных — ERP; структура и записи не меняются, перестаёт поступать только входной поток.",
+    title: "Основной учёт остаётся в 1С.",
+    body: "ERP читает подтверждённые данные через адаптер. Отключение адаптера прекращает входной поток и не переносит основной учёт в ERP.",
   },
 ];
 
@@ -94,13 +94,19 @@ export function SpravImport() {
   async function handleSync() {
     setSyncing(true);
     setSyncError(null);
+    setSyncResult(null);
     try {
       const res = await fetch("/api/integrations/1c/sync", { method: "POST" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        let refusal: unknown;
+        try { refusal = await res.json(); } catch { /* A proxy may return HTML or no body. */ }
+        setSyncError(formatSyncRefusal(res.status, refusal));
+        return;
+      }
       const data = (await res.json()) as SyncSummary;
       setSyncResult(data);
-    } catch (e) {
-      setSyncError(e instanceof Error ? e.message : "Ошибка синхронизации");
+    } catch {
+      setSyncError("Ответ синхронизации не получен. Результат не подтверждён; проверьте соединение и состояние импорта перед новым запуском.");
     } finally {
       setSyncing(false);
     }
@@ -122,9 +128,8 @@ export function SpravImport() {
 
         {/* Adapter warning banner */}
         <div className="rounded-2xl bg-amber-50 px-4 py-3 text-[12px] text-amber-800 ring-1 ring-amber-200">
-          <span className="font-semibold">↧ 1С — временный входной источник</span> через шлюз{" "}
-          <span className="font-mono">integrations</span>. Владелец и система-источник данных —{" "}
-          <span className="font-semibold">ERP</span>. Отключение 1С = выключить адаптер, без изменения структуры данных.
+          <span className="font-semibold">1С остаётся основным учётом отгрузок, оплат и себестоимости.</span>{" "}
+          ERP получает справочники через адаптер. Синхронизация справочников не подтверждает складские остатки и финансовые показатели и не переключает основной учёт.
         </div>
 
         {/* ── LIVE: Sync card ─────────────────────────────────────────────────── */}
@@ -145,7 +150,7 @@ export function SpravImport() {
           </div>
 
           {syncError && (
-            <div className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-rose-200">
+            <div role="alert" className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-rose-200">
               {syncError}
             </div>
           )}

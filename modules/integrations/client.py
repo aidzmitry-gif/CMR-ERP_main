@@ -158,7 +158,9 @@ class OneCClient:
                 parent_id = UUID(row.get("ГоловнойКонтрагент_Key"))
             except (ValueError, TypeError, AttributeError) as exc:
                 raise CounterpartyWriteError("invalid_onec_identity", "1С вернула некорректную ссылку контрагента", 502) from exc
-            if not source_id.int or (not is_branch and parent_id.int):
+            # A nonbranch may name itself as its head in the 1C source.
+            # A different parent still contradicts the explicit nonbranch flag.
+            if not source_id.int or (not is_branch and parent_id.int and parent_id != source_id):
                 raise CounterpartyWriteError("invalid_onec_classification", "1С вернула неоднозначный тип контрагента", 502)
             if is_branch:
                 if not parent_id.int or parent_id == source_id:

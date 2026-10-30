@@ -14,7 +14,7 @@ describe("formatSyncSummary", () => {
     expect(result[0]).toEqual({ label: "Контрагентов обработано", value: 218 });
     expect(result[1]).toEqual({ label: "Создано новых", value: 140 });
     expect(result[2]).toEqual({ label: "Алиасов добавлено", value: 14 });
-    expect(result[3]).toEqual({ label: "Позиций склада", value: 0 });
+    expect(result[3]).toEqual({ label: "Обновлено складских позиций", value: 0 });
   });
 
   it("handles all-zero values", () => {

@@ -57,7 +57,7 @@ describe("SpravImport — LIVE-синхронизация с 1С", () => {
     expect(screen.getByText("140")).toBeInTheDocument();
     expect(screen.getByText("42")).toBeInTheDocument();
     expect(screen.getByText("507")).toBeInTheDocument();
-    expect(screen.getByText("Позиций склада")).toBeInTheDocument();
+    expect(screen.getByText("Обновлено складских позиций")).toBeInTheDocument();
 
     // ушёл POST на правильный URL, подсказка исчезла
     expect(fetchMock).toHaveBeenCalledWith("/api/integrations/1c/sync", { method: "POST" });
@@ -87,14 +87,14 @@ describe("SpravImport — LIVE-синхронизация с 1С", () => {
     );
   });
 
-  it("HTTP-ошибка: показывает «HTTP 500», без плиток итогов", async () => {
+  it("HTTP-ошибка: показывает статус и неподтверждённый результат без старых итогов", async () => {
     stubFetch();
     fetchMock.mockResolvedValue({ ok: false, status: 500 } as unknown as Response);
     render(<SpravImport />);
 
     fireEvent.click(screen.getByRole("button", { name: "Синхронизировать" }));
 
-    expect(await screen.findByText("HTTP 500")).toBeInTheDocument();
+    expect(await screen.findByText(/HTTP 500/)).toBeInTheDocument();
     expect(screen.queryByText("Контрагентов обработано")).not.toBeInTheDocument();
     // подсказка тоже скрывается (есть ошибка)
     expect(
@@ -102,14 +102,15 @@ describe("SpravImport — LIVE-синхронизация с 1С", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("сетевой сбой: сообщение ошибки из исключения, кнопка снова активна", async () => {
+  it("сетевой сбой: безопасное сообщение без текста исключения, кнопка снова активна", async () => {
     stubFetch();
     fetchMock.mockRejectedValue(new Error("Network down"));
     render(<SpravImport />);
 
     fireEvent.click(screen.getByRole("button", { name: "Синхронизировать" }));
 
-    expect(await screen.findByText("Network down")).toBeInTheDocument();
+    expect(await screen.findByText(/Ответ синхронизации не получен/)).toBeInTheDocument();
+    expect(screen.queryByText("Network down")).not.toBeInTheDocument();
     // finally-ветка вернула кнопку в рабочее состояние
     expect(screen.getByRole("button", { name: "Синхронизировать" })).toBeEnabled();
   });
@@ -120,7 +121,7 @@ describe("SpravImport — LIVE-синхронизация с 1С", () => {
     render(<SpravImport />);
 
     fireEvent.click(screen.getByRole("button", { name: "Синхронизировать" }));
-    expect(await screen.findByText("Network down")).toBeInTheDocument();
+    expect(await screen.findByText(/Ответ синхронизации не получен/)).toBeInTheDocument();
 
     // второй прогон — успех: ошибка должна уйти (setSyncError(null) в начале handleSync)
     fetchMock.mockResolvedValueOnce(
@@ -129,7 +130,42 @@ describe("SpravImport — LIVE-синхронизация с 1С", () => {
     fireEvent.click(screen.getByRole("button", { name: "Синхронизировать" }));
 
     expect(await screen.findByText("Контрагентов обработано")).toBeInTheDocument();
-    expect(screen.queryByText("Network down")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Ответ синхронизации не получен/)).not.toBeInTheDocument();
+  });
+  it("объясняет классификацию 1С без вывода приватного текста ответа", async () => {
+    stubFetch();
+    fetchMock.mockResolvedValue({ ok: false, status: 502, json: async () => ({
+      detail: { code: "invalid_onec_classification", message: "PRIVATE_SOURCE_ID_AND_SECRET" },
+    }) } as Response);
+    render(<SpravImport />);
+    fireEvent.click(screen.getByRole("button", { name: "Синхронизировать" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/классификац.*HTTP 502/);
+    expect(screen.getByRole("alert")).not.toHaveTextContent("PRIVATE_SOURCE_ID_AND_SECRET");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("не выводит неизвестный код или приватный message из ответа", async () => {
+    stubFetch();
+    fetchMock.mockResolvedValue({ ok: false, status: 503, json: async () => ({
+      detail: { code: "__proto__", message: "PRIVATE_SOURCE_ID_AND_SECRET" },
+    }) } as Response);
+    render(<SpravImport />);
+    fireEvent.click(screen.getByRole("button", { name: "Синхронизировать" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/HTTP 503.*Причина не подтверждена/);
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/__proto__|PRIVATE_SOURCE_ID_AND_SECRET/);
+  });
+
+  it("после нового отказа не показывает старые итоги как результат попытки", async () => {
+    stubFetch();
+    fetchMock.mockResolvedValueOnce(okResponse({ counterparties: 5, new_counterparties: 2, counterparty_aliases: 1, stock: 0 }));
+    render(<SpravImport />);
+    fireEvent.click(screen.getByRole("button", { name: "Синхронизировать" }));
+    await screen.findByText("Контрагентов обработано");
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 422, json: async () => ({ detail: { code: "legal_address_required" } }) } as Response);
+    fireEvent.click(screen.getByRole("button", { name: "Синхронизировать" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/юридический адрес/);
+    expect(screen.queryByText("Контрагентов обработано")).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
