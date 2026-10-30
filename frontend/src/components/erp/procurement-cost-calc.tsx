@@ -2,6 +2,8 @@
 
 import { useState } from "react"
 
+import styles from "./procurement-cost-calc.module.css"
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 type Path = "cny" | "usd"
@@ -169,7 +171,7 @@ function RateInput({
 }) {
   return (
     <label className="block">
-      <span className="text-[11px] text-muted">
+      <span className="text-xs text-muted">
         {label}{hint && <span className="text-faint"> {hint}</span>}
       </span>
       <input
@@ -258,12 +260,12 @@ export function ProcurementCostCalc() {
   const minRentFrac = settings.minRent / 100
 
   return (
-    <div className="space-y-4">
-      <p role="note" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">При открытии показан демонстрационный расчёт с примерными курсами и ставками пошлин. Он не загружает текущие цены, курсы или ставки ТН ВЭД. Перед расчётом своего заказа проверьте цену поставщика, курсы, доставку и применимую пошлину на дату закупки. Результат не проводит документы.</p>
+    <div className={styles.workspace}>
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+      <div className={styles.header}>
         <div>
-          <h2 className="text-xl font-bold">
+          <p className={styles.eyebrow}>Закупки · планирование цены</p>
+          <h2 className={styles.title}>
             Предварительная себестоимость (Китай) → цена реализации
           </h2>
           <p className="mt-1 text-[13px] text-muted max-w-[760px]">
@@ -288,23 +290,28 @@ export function ProcurementCostCalc() {
         </div>
       </div>
 
-      {/* Info banner */}
-      <div className="rounded-2xl bg-accent-soft/50 border border-accent/20 px-4 py-3 text-[13px] text-ink space-y-1">
-        <div>
-          <b>Назначение:</b> предварительная себестоимость → <b>цена реализации</b>.
-          Согласуется с клиентом, идёт в прайс и цену продажи.
-        </div>
-        <div className="text-muted">
-          <b className="text-ink">Фактическая себестоимость</b> — из 1С (после перехода — через план счетов ERP).
-          🛡 <b className="text-ink">Буфер курса +10%</b> заложен. Рентабельность ниже минимума —{" "}
-          <b className="text-red-600 dark:text-red-400">красная подсветка</b>.
-        </div>
+      <p role="note" className={styles.demoNote}><strong>Демонстрационный расчёт.</strong> Примерные данные, курсы и пошлины; текущие значения не загружаются. Проверьте цену поставщика, валютные курсы, доставку и применимую пошлину ТН ВЭД на дату закупки. Результат не проводит документы.</p>
+
+      {/* Summary cards */}
+      <div className={styles.summary} aria-label="Итоги предварительного расчёта">
+        {[
+          { label: "Себестоимость партии", sub: "предварит. landed cost, BYN", val: f0(totalCost),   cls: "" },
+          { label: "Выручка с НДС",        sub: "сумма продажи, BYN",          val: f0(totalRev),    cls: "" },
+          { label: "Прибыль",              sub: "валовая, BYN",                val: f0(totalProfit), cls: "text-money" },
+          { label: "Рентабельность",       sub: "прибыль / выручка",           val: pct(totalMargin), cls: "" },
+        ].map(c => (
+          <div key={c.label} className={styles.summaryCard}>
+            <div className={styles.summaryLabel}>{c.label}</div>
+            <div className={`${styles.summaryValue} ${c.cls}`}>{c.val}</div>
+            <div className={styles.summaryHint}>{c.sub}</div>
+          </div>
+        ))}
       </div>
 
       {/* Settings panels */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl bg-surface p-4 shadow-card">
-          <div className="text-sm font-semibold mb-3">
+        <div className={styles.panel}>
+          <div className={styles.panelTitle}>
             Курсы валют <span className="text-faint font-normal">· задаются вручную</span>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -319,13 +326,13 @@ export function ProcurementCostCalc() {
           </p>
         </div>
 
-        <div className="rounded-2xl bg-surface p-4 shadow-card">
-          <div className="text-sm font-semibold mb-3">Ставки и коэффициенты</div>
+        <div className={styles.panel}>
+          <div className={styles.panelTitle}>Ставки и коэффициенты</div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <RateInput label="Комиссия, %"              value={settings.comm}     onChange={v => setSetting("comm", v)}     step={0.1} />
             <RateInput label="Страховка, %"             value={settings.ins}      onChange={v => setSetting("ins", v)}      step={0.01} />
             <label className="block">
-              <span className="text-[11px] text-muted">Доставка (фрахт)</span>
+              <span className="text-xs text-muted">Доставка (фрахт)</span>
               <select
                 value={settings.freight}
                 onChange={e => setSetting("freight", parseFloat(e.target.value))}
@@ -344,26 +351,24 @@ export function ProcurementCostCalc() {
         </div>
       </div>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {[
-          { label: "Себестоимость партии", sub: "предварит. landed cost, BYN", val: f0(totalCost),   cls: "" },
-          { label: "Выручка с НДС",        sub: "сумма продажи, BYN",          val: f0(totalRev),    cls: "" },
-          { label: "Прибыль",              sub: "валовая, BYN",                val: f0(totalProfit), cls: "text-money" },
-          { label: "Рентабельность",       sub: "прибыль / выручка",           val: pct(totalMargin), cls: "" },
-        ].map(c => (
-          <div key={c.label} className="rounded-2xl bg-surface p-4 shadow-card">
-            <div className="text-[11px] text-muted">{c.label}</div>
-            <div className={`mt-1 text-xl font-bold tabular-nums ${c.cls}`}>{c.val}</div>
-            <div className="text-[11px] text-faint">{c.sub}</div>
-          </div>
-        ))}
+      {/* Info banner */}
+      <div className="rounded-2xl bg-accent-soft/50 border border-accent/20 px-4 py-3 text-[13px] text-ink space-y-1">
+        <div>
+          <b>Назначение:</b> предварительная себестоимость → <b>цена реализации</b>.
+          Согласуется с клиентом, идёт в прайс и цену продажи.
+        </div>
+        <div className="text-muted">
+          <b className="text-ink">Фактическая себестоимость</b> — из 1С (после перехода — через план счетов ERP).
+          🛡 <b className="text-ink">Буфер курса +10%</b> заложен. Рентабельность ниже минимума —{" "}
+          <b className="text-red-600 dark:text-red-400">красная подсветка</b>.
+        </div>
       </div>
 
       {/* Table */}
-      <div className="rounded-2xl bg-surface shadow-card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
+      <div className={styles.tablePanel}>
+        <div className={styles.tableHeading}><h3 id="cost-lines-heading">Расчёт по позициям</h3><p id="cost-lines-hint">Выберите строку для расшифровки. Прокрутите таблицу вправо, чтобы увидеть цены и прибыль.</p></div>
+        <div className={styles.tableScroll} role="region" aria-label="Расчёт по позициям" aria-describedby="cost-lines-hint" tabIndex={0}>
+          <table className={styles.table}>
             <thead>
               <tr className="bg-sunken text-muted text-left">
                 <th className="px-3 py-2 font-semibold min-w-[200px]">Номенклатура</th>

@@ -1,0 +1,46 @@
+.workspace {
+  display: grid;
+  gap: 20px;
+  width: 100%;
+  max-width: 1600px;
+  min-width: 0;
+  margin-inline: auto;
+}
+
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.eyebrow { margin-bottom: 6px; color: rgb(var(--accent)); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.title { max-width: 850px; font-size: clamp(20px, 2vw, 26px); font-weight: 700; line-height: 1.3; letter-spacing: -.025em; }
+.demoNote { border: 1px solid rgb(217 119 6 / .35); border-radius: 14px; background: rgb(245 158 11 / .08); padding: 14px 16px; color: rgb(var(--ink)); font-size: 13px; line-height: 1.65; }
+.demoNote strong { color: rgb(var(--ink)); }
+
+.summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.summaryCard, .panel, .tablePanel { min-width: 0; border: 1px solid rgb(var(--line)); border-radius: 16px; background: rgb(var(--surface)); }
+.summaryCard { padding: 18px 20px; }
+.summaryLabel { color: rgb(var(--muted)); font-size: 12px; line-height: 1.5; }
+.summaryValue { margin-block: 6px; font-size: clamp(22px, 2vw, 28px); font-weight: 700; line-height: 1.2; letter-spacing: -.025em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.summaryHint { color: rgb(var(--muted)); font-size: 11px; line-height: 1.5; }
+.panel { padding: 20px; }
+.panelTitle { margin-bottom: 16px; font-size: 15px; font-weight: 600; }
+.workspace label > input, .workspace label > select { min-height: 40px; margin-top: 6px; }
+.workspace input:focus-visible, .workspace select:focus-visible, .workspace button:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }
+
+.tablePanel { overflow: hidden; }
+.tableHeading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px 24px; padding: 18px 20px; }
+.tableHeading h3 { font-size: 15px; font-weight: 600; }
+.tableHeading p { max-width: 620px; color: rgb(var(--muted)); font-size: 12px; line-height: 1.6; }
+.tableScroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+.tableScroll:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: -2px; }
+.table { width: 100%; min-width: 1500px; border-collapse: collapse; font-size: 13px; }
+.table th { padding-block: 14px; font-size: 12px; }
+.table td { padding-block: 10px; }
+.table td:first-child { min-width: 280px; }
+.table input, .table select { min-height: 32px; }
+.table button { min-width: 32px; min-height: 32px; }
+
+@media (max-width: 767px) {
+  .workspace { gap: 16px; }
+  .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .summaryCard, .panel { padding: 16px; }
+  .header { gap: 14px; }
+  .tableHeading { padding: 16px; }
+}

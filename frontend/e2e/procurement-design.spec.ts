@@ -51,4 +51,31 @@ test("procurement keeps navigation on the left and renders the approved board de
   await page.getByLabel("Канбан закупок", { exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("procurement-mobile-board.png"), fullPage: true });
   await testInfo.attach("procurement-mobile-board", { path: testInfo.outputPath("procurement-mobile-board.png"), contentType: "image/png" });
+
+  // Inspect the existing calculator within the same synthetic procurement workflow.
+  await page.goto("/erp/procurement/cost-calc");
+  await expect(page.getByRole("heading", { name: "Предварительная себестоимость (Китай) → цена реализации", exact: true })).toBeVisible();
+  for (const view of [
+    { name: "cost-desktop", width: 1440, height: 1000, dark: false },
+    { name: "cost-mobile", width: 390, height: 844, dark: false },
+    { name: "cost-dark", width: 1440, height: 1000, dark: true },
+  ]) {
+    await page.setViewportSize({ width: view.width, height: view.height });
+    if (view.dark) await page.getByRole("button", { name: "Включить тёмную тему", exact: true }).click();
+    await page.getByRole("heading", { name: "Предварительная себестоимость (Китай) → цена реализации", exact: true }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`${view.name}.png`), fullPage: true });
+    await testInfo.attach(view.name, { path: testInfo.outputPath(`${view.name}.png`), contentType: "image/png" });
+    if (view.width === 390) {
+      const lines = page.getByRole("region", { name: "Расчёт по позициям", exact: true });
+      await lines.scrollIntoViewIfNeeded();
+      await lines.focus();
+      await expect(lines).toBeFocused();
+      await page.keyboard.press("ArrowRight");
+      await expect.poll(() => lines.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+      await page.screenshot({ path: testInfo.outputPath("cost-mobile-table.png"), fullPage: true });
+      await testInfo.attach("cost-mobile-table", { path: testInfo.outputPath("cost-mobile-table.png"), contentType: "image/png" });
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await testInfo.attach(`${view.name}-geometry`, { body: JSON.stringify(await page.evaluate(() => ({ viewport: innerWidth, documentWidth: document.documentElement.scrollWidth, tableWidth: document.querySelector("table")?.getBoundingClientRect().width }))), contentType: "application/json" });
+  }
 });
