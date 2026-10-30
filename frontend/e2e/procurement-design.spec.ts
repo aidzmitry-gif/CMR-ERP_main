@@ -48,4 +48,7 @@ test("procurement keeps navigation on the left and renders the approved board de
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("procurement-mobile.png"), fullPage: true });
   await testInfo.attach("procurement-mobile", { path: testInfo.outputPath("procurement-mobile.png"), contentType: "image/png" });
+  await page.getByLabel("Канбан закупок", { exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("procurement-mobile-board.png"), fullPage: true });
+  await testInfo.attach("procurement-mobile-board", { path: testInfo.outputPath("procurement-mobile-board.png"), contentType: "image/png" });
 });

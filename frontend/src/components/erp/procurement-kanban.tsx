@@ -307,10 +307,11 @@ function CompanyKanban({ org }: { org: number }) {
     {notice && <p role="status" className={styles.notice}>{notice}</p>}
     <section aria-label="Показатели закупок">
       <div className={styles.sectionHeading}><h2>План — Факт</h2><span>По документам нашей организации</span></div>
-      <div className={styles.kpis}>{metrics.map(({ label, value, caption, Icon, tone }) => <div className={styles.kpi} key={label}>
+      <div className={styles.kpis} role="group" aria-label="Карточки показателей закупок" tabIndex={0}>{metrics.map(({ label, value, caption, Icon, tone }) => <div className={styles.kpi} key={label}>
         <div className={styles.kpiHeading}><span className={`${styles.kpiIcon} ${styles[tone]}`}><Icon size={18} aria-hidden /></span><h3>{label}</h3></div>
         <p className={styles.kpiValue}>{value}</p><div className={styles.kpiLine} aria-hidden /><p className={styles.kpiCaption}>{caption}</p>
       </div>)}</div>
+      <p className={styles.mobileHint}>Листайте показатели по горизонтали →</p>
     </section>
     <div className={styles.controlBar}><span className={styles.controlIcon}><CheckCheck size={19} aria-hidden /></span>
       <p><strong>Контроль закупок</strong> Поставка и приёмка подтверждаются статусом заказа и первичными документами.{ready ? ` На согласовании: ${count(["approval"])}.` : " Документы ещё не подтверждены."}</p>

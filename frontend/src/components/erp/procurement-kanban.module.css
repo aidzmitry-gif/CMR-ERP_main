@@ -15,6 +15,8 @@
 .sectionHeading h2, .boardTools > h2 { font-size:15px; font-weight:700; letter-spacing:-.015em; }
 .sectionHeading > span { font-size:12px; line-height:1.6; color:rgb(var(--muted)); }
 .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr)); gap:14px; }
+.kpis:focus-visible { outline:2px solid rgb(var(--accent)); outline-offset:4px; border-radius:16px; }
+.mobileHint { display:none; }
 .kpi { min-width:0; padding:18px; background:rgb(var(--surface)); border:1px solid rgb(var(--line)); border-radius:16px; box-shadow:0 1px 2px rgb(15 23 42 / .025),0 4px 12px rgb(15 23 42 / .025); }
 .kpiHeading { display:flex; align-items:center; gap:10px; min-height:38px; }
 .kpiHeading h3 { font-size:13px; font-weight:600; line-height:1.45; color:rgb(var(--muted)); overflow-wrap:anywhere; }
@@ -91,11 +93,16 @@
 @media (max-width:767px) {
   .workspace { padding:20px 14px; }
   .pageHeader { align-items:flex-start; gap:16px; margin-bottom:22px; }
+  .eyebrow { display:none; }
   .pageHeader h1 { font-size:23px; }
-  .pageActions { width:100%; }
-  .pageActions a { flex:1 1 auto; }
-  .kpis { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
-  .kpi { padding:14px; }
+  .pageActions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); width:100%; gap:8px; }
+  .pageActions a { min-width:0; padding:9px 10px; gap:6px; font-size:12px; }
+  .pageActions svg { flex:none; width:14px; height:14px; }
+  .kpis { display:flex; gap:10px; overflow-x:auto; padding:2px 2px 12px; scroll-snap-type:x proximity; overscroll-behavior-x:contain; scrollbar-width:thin; }
+  .kpi { flex:0 0 82%; max-width:260px; padding:14px; scroll-snap-align:start; }
+  .kpiValue { margin-top:10px; font-size:26px; }
+  .kpiLine { margin:10px 0 8px; }
+  .mobileHint { display:block; margin:6px 2px 0; font-size:11px; line-height:1.5; color:rgb(var(--muted)); }
   .controlBar { flex-wrap:wrap; padding:12px; }
   .controlBar p { flex:1; min-width:180px; }
   .controlBar > a { margin-left:44px; }
@@ -105,5 +112,4 @@
   .summaryGrid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
   .summaryGrid a { padding:0; border:0; }
 }
-@media (max-width:359px) { .kpis { grid-template-columns:1fr; } }
 @media (prefers-reduced-motion:reduce) { .card { transition:none; } }
