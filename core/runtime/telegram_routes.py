@@ -64,7 +64,7 @@ async def handle_command(core, session: AsyncSession, text: str) -> str:
     if cmd == "approvals":
         rows = (
             await session.execute(
-                select(Approval).where(Approval.status == "pending").order_by(Approval.id)
+                select(Approval).where(Approval.status == "pending", ~Approval.kind.startswith("module:")).order_by(Approval.id)
             )
         ).scalars().all()
         if not rows:
@@ -81,6 +81,8 @@ async def handle_command(core, session: AsyncSession, text: str) -> str:
             return "Согласование не найдено."
         if approval.status != "pending":
             return f"Согласование #{approval.id} уже обработано ({approval.status})."
+        if approval.kind.startswith("module:"):
+            return "Откройте согласование в соответствующем модуле ERP."
         await core.services.approvals.decide(session, approval, cmd == "approve", "Telegram")
         await session.commit()
         return f"Согласование #{approval.id}: {approval.status}."

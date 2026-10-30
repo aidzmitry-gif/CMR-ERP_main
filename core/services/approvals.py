@@ -25,6 +25,10 @@ DEFAULT_ROUTE: tuple[str, int] = ("РОП", 24)
 ESCALATION_STEP_HOURS = 24
 
 
+class ModuleApprovalRequired(ValueError):
+    """A module-owned approval needs that module's authorization and transaction."""
+
+
 def _utcnow() -> datetime:
     # наивный UTC — единообразно для SQLite и PostgreSQL
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -71,8 +75,12 @@ class ApprovalService:
         entity_ref: str,
         subject: str,
         requested_by: str = "",
+        *,
+        route_override: str | None = None,
     ) -> Approval:
         route, sla_hours = ROUTES.get(kind, DEFAULT_ROUTE)
+        if route_override is not None:
+            route = route_override
         approval = Approval(
             kind=kind,
             entity_ref=entity_ref,
@@ -97,7 +105,11 @@ class ApprovalService:
         approved: bool,
         by: str = "",
         reason: str | None = None,
+        *,
+        workflow_kind: str | None = None,
     ) -> Approval:
+        if approval.kind.startswith("module:") and workflow_kind != approval.kind:
+            raise ModuleApprovalRequired("Use the owning module's approval workflow")
         approval.status = "approved" if approved else "rejected"
         approval.decided_by = by
         approval.reason = reason

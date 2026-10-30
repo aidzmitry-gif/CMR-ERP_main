@@ -5,6 +5,7 @@ import { ChatsPanel } from "@/components/chats-panel";
 import { CurrencyProvider } from "@/components/kanban/currency-context";
 import { Sidebar } from "@/components/sidebar";
 import { Topbar } from "@/components/topbar";
+import { WorktimePresence } from "@/components/worktime-presence";
 import { fetchAccess } from "@/lib/access";
 import { backendAuthHeaders } from "@/lib/auth-headers-server";
 import { frontendAuthMode } from "@/lib/auth-mode";
@@ -74,6 +75,8 @@ export async function AppShell({
     <CurrencyProvider>
       {/* Подписка на собственные входящие звонки (SSE) + окно на любом экране оболочки. */}
       <ActiveCallProvider enabled={canSubscribeToCalls}>
+        <WorktimePresence enabled={!accessUnavailable && Boolean(currentRoles?.length)
+          && !currentRoles?.some(role => ["Гость", "onboarding", "identity_provisioner", "crm_invitation_operator"].includes(role))} />
         <div className="flex h-screen overflow-hidden max-md:[&>aside:first-child]:w-14">
           <Sidebar allowedSlugs={allowedSlugs} accessUnavailable={accessUnavailable} userName={userName} roleTitle={roleTitle} />
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden">

@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ fetchAccess: vi.fn(), currentRole: vi.fn() }));
 
+vi.mock("@/components/worktime-presence", () => ({
+  WorktimePresence: ({ enabled }: { enabled: boolean }) => <span data-testid="worktime-presence" data-enabled={String(enabled)} />,
+}));
+
 vi.mock("@/components/sidebar", () => ({
   Sidebar: ({ allowedSlugs, roleTitle, accessUnavailable }: { allowedSlugs: string[] | null; roleTitle: string; accessUnavailable?: boolean }) => (
     <div data-testid="sidebar" data-allowed={JSON.stringify(allowedSlugs)} data-role-title={roleTitle} data-access-unavailable={String(accessUnavailable)} />
@@ -70,6 +74,14 @@ afterEach(() => {
 });
 
 describe("AppShell", () => {
+  it("starts presence only after verified employee access", async () => {
+    await renderCallGate(null);
+    expect(screen.getByTestId("worktime-presence")).toHaveAttribute("data-enabled", "false");
+    await renderCallGate(accessFor(["sales"]));
+    expect(screen.getByTestId("worktime-presence")).toHaveAttribute("data-enabled", "true");
+    await renderCallGate(accessFor(["onboarding"], validMatrix({ onboarding: [] })));
+    expect(screen.getByTestId("worktime-presence")).toHaveAttribute("data-enabled", "false");
+  });
   it.each([
     ["unavailable response", null, true, [], false],
     ["unverified roles", accessFor([]), true, [], false],

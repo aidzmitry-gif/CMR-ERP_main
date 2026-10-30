@@ -34,6 +34,10 @@ OPEN_PREFIXES: tuple[str, ...] = (
 # ещё какая-то роль, presence onboarding остаётся fail-closed до явной смены
 # набора ролей при подтверждении.
 SELF_PROFILE_PATH = "/hr/me/profile"
+# Exact self-service worktime paths authorize the bound employee in the route.
+# Onboarding and technical principals are still denied by the earlier guards.
+SELF_WORKTIME_PATHS = frozenset({"/hr/me/worktime", "/hr/me/worktime/start", "/hr/me/worktime/end", "/hr/me/worktime/presence", "/hr/me/worktime/notices"})
+WORKTIME_READ_PATHS = frozenset({"/hr/worktime/board", "/hr/worktime/timesheet", "/hr/worktime/settings"})
 ONBOARDING_OPEN_PATHS: frozenset[str] = frozenset({"/health", "/system/access", SELF_PROFILE_PATH})
 
 # Технический service-account приглашений не получает общего системного доступа:
@@ -176,7 +180,11 @@ class AccessControlMiddleware(BaseHTTPMiddleware):
             return JSONResponse({"detail": "Требуется вход в ERP"}, status_code=403)
         if CRM_INVITATION_OPERATOR_ROLE in roles and path not in CRM_INVITATION_OPERATOR_PATHS:
             return JSONResponse({"detail": "Доступна только подготовка приглашений CRM"}, status_code=403)
-        if effective_user.crm_restricted and path not in {"/health", "/system/access", SELF_PROFILE_PATH}:
+        self_worktime = path in SELF_WORKTIME_PATHS or (
+            path.startswith("/hr/me/worktime/") and path.endswith("/presence")
+            and path[len("/hr/me/worktime/"):-len("/presence")].isdigit()
+        )
+        if effective_user.crm_restricted and path not in {"/health", "/system/access", SELF_PROFILE_PATH} and not self_worktime:
             crm_path = any(path == prefix or path.startswith(prefix + "/") for prefix in ("/sales", "/leads"))
             configuration_write = request.method not in {"GET", "HEAD", "OPTIONS"} and any(
                 path == prefix or path.startswith(prefix + "/") for prefix in CRM_CONFIGURATION_PREFIXES
@@ -212,6 +220,17 @@ class AccessControlMiddleware(BaseHTTPMiddleware):
         if path == SELF_PROFILE_PATH and request.method in {"GET", "PUT"}:
             # Only this route bypasses module access; its own dependency binds
             # the record to the verified identity. Other HR data stays closed.
+            return await call_next(request)
+
+        worktime_managed_write = path in {"/hr/worktime/policies", "/hr/worktime/absences"} or (
+            path.startswith("/hr/worktime/days/") and path.endswith("/decision")
+            and path[len("/hr/worktime/days/"):-len("/decision")].isdigit()
+        )
+        if (self_worktime and request.method in {"GET", "POST"}
+                or path in WORKTIME_READ_PATHS and request.method == "GET"
+                or worktime_managed_write and request.method == "POST"):
+            # These handlers check current identity, explicit manager assignment
+            # or HR/director capability. They do not open the rest of HR.
             return await call_next(request)
 
         for prefix, package in self.prefixes:
