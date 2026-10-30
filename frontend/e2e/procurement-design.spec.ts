@@ -78,4 +78,33 @@ test("procurement keeps navigation on the left and renders the approved board de
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await testInfo.attach(`${view.name}-geometry`, { body: JSON.stringify(await page.evaluate(() => ({ viewport: innerWidth, documentWidth: document.documentElement.scrollWidth, tableWidth: document.querySelector("table")?.getBoundingClientRect().width }))), contentType: "application/json" });
   }
+
+  // Exercise the sync response boundary without contacting 1C or writing ERP data.
+  let syncRequests = 0;
+  await page.route("**/api/integrations/1c/sync", async (route) => {
+    expect(route.request().method()).toBe("POST");
+    syncRequests += 1;
+    await route.fulfill({ status: syncRequests === 1 ? 422 : 200, contentType: "application/json", body: JSON.stringify(syncRequests === 1
+      ? { detail: { code: "legal_address_required", message: "PRIVATE_SOURCE_ID_AND_SECRET" } }
+      : { counterparties: 5 }) });
+  });
+  await page.goto("/erp/spravochniki/import");
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole("button", { name: "Включить светлую тему", exact: true }).click();
+  await page.getByRole("button", { name: "Синхронизировать", exact: true }).click();
+  const syncAlert = page.getByRole("alert").filter({ hasText: /юридический адрес|Результат синхронизации/ });
+  await expect(syncAlert).toContainText("Не подтверждён юридический адрес контрагента");
+  await expect(syncAlert).not.toContainText("PRIVATE_SOURCE_ID_AND_SECRET");
+  await syncAlert.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("sync-refusal-desktop.png"), fullPage: true });
+  await testInfo.attach("sync-refusal-desktop", { path: testInfo.outputPath("sync-refusal-desktop.png"), contentType: "image/png" });
+  await page.getByRole("button", { name: "Синхронизировать", exact: true }).click();
+  await expect(syncAlert).toContainText("Результат синхронизации не подтверждён");
+  await expect(page.getByText("Контрагентов обработано", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Синхронизировать", exact: true })).toBeEnabled();
+  expect(syncRequests).toBe(2);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await syncAlert.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("sync-unknown-mobile.png"), fullPage: true });
+  await testInfo.attach("sync-unknown-mobile", { path: testInfo.outputPath("sync-unknown-mobile.png"), contentType: "image/png" });
 });

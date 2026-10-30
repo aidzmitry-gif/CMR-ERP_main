@@ -12,6 +12,24 @@ export interface SyncSummaryItem {
   value: number;
 }
 
+/** A completed HTTP response does not by itself confirm the import counters. */
+export function parseSyncSummary(value: unknown): SyncSummary | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const counts = ["counterparties", "new_counterparties", "counterparty_aliases", "stock"] as const;
+  for (const key of counts) {
+    if (!Object.hasOwn(value, key)) return null;
+    const count: unknown = (value as Record<string, unknown>)[key];
+    if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) return null;
+  }
+  const summary = value as SyncSummary;
+  return {
+    counterparties: summary.counterparties,
+    new_counterparties: summary.new_counterparties,
+    counterparty_aliases: summary.counterparty_aliases,
+    stock: summary.stock,
+  };
+}
+
 /** Maps raw /integrations/1c/sync response to display-ready items. */
 export function formatSyncSummary(s: SyncSummary): SyncSummaryItem[] {
   return [

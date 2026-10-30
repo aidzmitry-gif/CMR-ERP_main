@@ -3,7 +3,7 @@
 import { RefreshCw } from "lucide-react";
 import { Fragment, useState } from "react";
 
-import { formatSyncRefusal, formatSyncSummary, type SyncSummary } from "@/lib/spravochniki-import";
+import { formatSyncRefusal, formatSyncSummary, parseSyncSummary, type SyncSummary } from "@/lib/spravochniki-import";
 
 // ── Demo data (static, no backend) ───────────────────────────────────────────
 
@@ -103,7 +103,11 @@ export function SpravImport() {
         setSyncError(formatSyncRefusal(res.status, refusal));
         return;
       }
-      const data = (await res.json()) as SyncSummary;
+      const data = parseSyncSummary(await res.json());
+      if (!data) {
+        setSyncError("Результат синхронизации не подтверждён: получен некорректный ответ. Проверьте состояние импорта перед новым запуском.");
+        return;
+      }
       setSyncResult(data);
     } catch {
       setSyncError("Ответ синхронизации не получен. Результат не подтверждён; проверьте соединение и состояние импорта перед новым запуском.");

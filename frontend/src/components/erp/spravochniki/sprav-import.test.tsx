@@ -155,6 +155,29 @@ describe("SpravImport — LIVE-синхронизация с 1С", () => {
     expect(screen.getByRole("alert")).not.toHaveTextContent(/__proto__|PRIVATE_SOURCE_ID_AND_SECRET/);
   });
 
+  it.each([
+    ["неполный объект", { counterparties: 5 }],
+    ["текст вместо числа", { counterparties: 5, new_counterparties: 2, counterparty_aliases: 1, stock: "PRIVATE_SOURCE_ID_AND_SECRET" }],
+    ["отрицательное число", { counterparties: 5, new_counterparties: -1, counterparty_aliases: 1, stock: 0 }],
+    ["дробное число", { counterparties: 5, new_counterparties: 2, counterparty_aliases: 1, stock: 0.5 }],
+    ["потеря точности", { counterparties: Number.MAX_SAFE_INTEGER + 1, new_counterparties: 2, counterparty_aliases: 1, stock: 0 }],
+    ["null", null],
+    ["массив", []],
+  ])("неподтверждённый успешный ответ: %s", async (_name, payload) => {
+    stubFetch();
+    fetchMock.mockResolvedValueOnce(okResponse({ counterparties: 5, new_counterparties: 2, counterparty_aliases: 1, stock: 0 }));
+    render(<SpravImport />);
+    fireEvent.click(screen.getByRole("button", { name: "Синхронизировать" }));
+    await screen.findByText("Контрагентов обработано");
+    fetchMock.mockResolvedValueOnce(okResponse(payload));
+    fireEvent.click(screen.getByRole("button", { name: "Синхронизировать" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Результат синхронизации не подтверждён/);
+    expect(screen.queryByText("Контрагентов обработано")).not.toBeInTheDocument();
+    expect(screen.queryByText("PRIVATE_SOURCE_ID_AND_SECRET")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Синхронизировать" })).toBeEnabled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("после нового отказа не показывает старые итоги как результат попытки", async () => {
     stubFetch();
     fetchMock.mockResolvedValueOnce(okResponse({ counterparties: 5, new_counterparties: 2, counterparty_aliases: 1, stock: 0 }));
