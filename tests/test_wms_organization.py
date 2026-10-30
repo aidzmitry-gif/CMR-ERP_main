@@ -39,7 +39,7 @@ async def test_receipt_company_flows_to_receipt_and_putaway_movements(api, sessi
     task = await session.scalar(select(Task))
     task_id = task.id
     assert task.organization_id == org
-    location = Location(warehouse="Test", code="CELL", title="Synthetic")
+    location = Location(organization_id=org, warehouse="Test", code="CELL", title="Synthetic")
     session.add(location)
     await session.commit()
     location_id = location.id
@@ -315,7 +315,7 @@ async def test_manual_movement_owner_and_list_visibility(api, session, operation
     await owned_warehouse(session, org, "Shared")
     payload = {"sku_code": "OWN-SKU", "qty": "1.25", "warehouse": "Shared"}
     if operation == "transfer":
-        location = Location(warehouse="Shared", code="DEST", title="Synthetic")
+        location = Location(organization_id=org, warehouse="Shared", code="DEST", title="Synthetic")
         session.add(location)
         await session.commit()
         payload["to_location_id"] = location.id
@@ -366,9 +366,10 @@ async def test_balance_groups_accessible_books_separately_and_excludes_unknown(a
 async def test_manual_movement_rejects_wrong_inactive_and_missing_locations(api, session, operation):
     org = await book(api)
     await owned_warehouse(session, org, "Own")
-    own = Location(warehouse="Own", code="GOOD", is_active=True)
-    other = Location(warehouse="Other", code="WRONG", is_active=True)
-    inactive = Location(warehouse="Own", code="INACTIVE", is_active=False)
+    await owned_warehouse(session, org, "Other")
+    own = Location(organization_id=org, warehouse="Own", code="GOOD", is_active=True)
+    other = Location(organization_id=org, warehouse="Other", code="WRONG", is_active=True)
+    inactive = Location(organization_id=org, warehouse="Own", code="INACTIVE", is_active=False)
     session.add_all([own, other, inactive])
     await session.commit()
     payload = {"organization_id": org, "sku_code": "A", "qty": "1.25", "warehouse": "Own"}
@@ -394,8 +395,9 @@ async def test_receipt_checks_qc_location_and_rechecks_all_before_accept(api, se
 
     org = await book(api)
     await owned_warehouse(session, org, "Own")
-    good = Location(warehouse="Own", code="GOOD", is_active=True)
-    bad = Location(warehouse="Other", code="BAD", is_active=True)
+    await owned_warehouse(session, org, "Other")
+    good = Location(organization_id=org, warehouse="Own", code="GOOD", is_active=True)
+    bad = Location(organization_id=org, warehouse="Other", code="BAD", is_active=True)
     session.add_all([good, bad])
     doc = Receipt(organization_id=org, warehouse="Own", status="pending_qc")
     session.add(doc)
@@ -431,8 +433,9 @@ async def test_receipt_checks_qc_location_and_rechecks_all_before_accept(api, se
 async def test_task_location_rechecked_before_completion_and_cancel_remains_available(api, session, kind):
     org = await book(api)
     await owned_warehouse(session, org, "Own")
-    good = Location(warehouse="Own", code="GOOD", is_active=True)
-    bad = Location(warehouse="Other", code="BAD", is_active=True)
+    await owned_warehouse(session, org, "Other")
+    good = Location(organization_id=org, warehouse="Own", code="GOOD", is_active=True)
+    bad = Location(organization_id=org, warehouse="Other", code="BAD", is_active=True)
     session.add_all([good, bad])
     await session.commit()
     payload = {"organization_id": org, "kind": kind, "sku_code": "A", "qty": "1.25", "warehouse": "Own", "from_location_id": bad.id}
