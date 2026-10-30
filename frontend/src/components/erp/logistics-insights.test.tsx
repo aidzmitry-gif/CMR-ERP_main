@@ -149,16 +149,32 @@ describe("company-owned LogisticsInsights", () => {
     await waitFor(() => expect(api.fetchCostCatalog).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(api.fetchOwnedCostReview).toHaveBeenCalledTimes(2)); await knownShown();
   });
-  it("requires a fresh selection after the authenticated principal changes", async () => {
+  it.each([["B", true], ["A", false]] as const)("revalidates the principal and qualifies response owner %s", async (responsePrincipal, accepted) => {
     render(<LogisticsInsights />);
-  await waitForCompany(); await choose(); await knownShown();
-    vi.mocked(api.fetchCostCatalog).mockResolvedValueOnce(catalog("B"));
-    await waitFor(() => expect(api.fetchCostCatalog).toHaveBeenCalledTimes(1));
+    await waitForCompany(); await choose(); await knownShown();
+    const freshCatalog = deferred<api.CostCatalog>();
+    const freshReview = deferred<api.OwnedCostReview>();
+    vi.mocked(api.fetchCostCatalog).mockReturnValueOnce(freshCatalog.promise);
+    vi.mocked(api.fetchOwnedCostReview).mockReturnValueOnce(freshReview.promise);
     fireEvent.blur(window); fireEvent.focus(window);
-    await waitFor(() => expect(screen.queryByRole("combobox", { name: /Юрлицо|Организация|Компания ячеек|Юридическое лицо/ })).not.toBeInTheDocument());
-    expect(api.fetchOwnedCostReview).toHaveBeenCalledTimes(1); noAmount();
-    await choose(); await knownShown();
+    await waitFor(() => expect(api.fetchCostCatalog).toHaveBeenCalledTimes(2));
+    expect(api.fetchOwnedCostReview).toHaveBeenCalledTimes(1);
+    noAmount();
+
+    await act(async () => freshCatalog.resolve(catalog("B")));
+    await waitFor(() => expect(api.fetchOwnedCostReview).toHaveBeenCalledTimes(2));
     expect(vi.mocked(api.fetchOwnedCostReview).mock.calls.at(-1)?.[0]).toEqual({ organization_id: 1, principal: "B" });
+    expect(screen.queryByRole("combobox", { name: /Юрлицо|Организация|Компания ячеек|Юридическое лицо/ })).not.toBeInTheDocument();
+    noAmount(); noAmount("600.00");
+
+    await act(async () => freshReview.resolve(review(1, responsePrincipal, "600.00", "300.00")));
+    if (accepted) await knownShown("600.00");
+    else {
+      expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось подтвердить владельца ответа");
+      noAmount("600.00");
+    }
+    noAmount();
+    expect(api.fetchOwnedCostReview).toHaveBeenCalledTimes(2);
   });
   it("ignores a catalog from the previous focus epoch", async () => {
     const old = deferred<api.CostCatalog>();
