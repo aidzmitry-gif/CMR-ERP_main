@@ -34,6 +34,70 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("CatalogPickerModal — selection stays open", () => {
+  it("does not start feedback after an in-flight transfer outlives the picker", async () => {
+    let finish!: (value: boolean) => void;
+    vi.mocked(api.addDealItem).mockReturnValue(new Promise<boolean>((resolve) => { finish = resolve; }));
+    const picker = render(<Harness />);
+    await screen.findByText(sku.title);
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByText(sku.title));
+      fireEvent.click(screen.getByRole("button", { name: "Добавить в подбор", exact: true }));
+      act(() => vi.advanceTimersByTime(1900));
+      fireEvent.click(screen.getAllByRole("button", { name: "Перенести в документ" })[0]);
+      expect(api.addDealItem).toHaveBeenCalledTimes(1);
+      picker.unmount();
+      await act(async () => { finish(true); });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      picker.unmount();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels feedback timers when the picker unmounts", async () => {
+    const picker = render(<Harness />);
+    await screen.findByText(sku.title);
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByText(sku.title));
+      fireEvent.click(screen.getByRole("button", { name: "Добавить в подбор", exact: true }));
+      expect(screen.getByText(`✓ Подобрано: ${sku.title}`)).toBeInTheDocument();
+      picker.unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      picker.unmount();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps newer feedback visible for its full lifetime", async () => {
+    const picker = render(<Harness />);
+    await screen.findByText(sku.title);
+    vi.useFakeTimers();
+    const add = () => {
+      const table = screen.getByRole("table", { name: "Товары по складам" });
+      fireEvent.click(within(table).getByTitle(sku.title));
+      fireEvent.click(screen.getByRole("button", { name: /Добавить в подбор|Сохранить в подборе/ }));
+    };
+    try {
+      add();
+      act(() => vi.advanceTimersByTime(1000));
+      add();
+      act(() => vi.advanceTimersByTime(900));
+      expect(screen.getByText(`✓ Подобрано: ${sku.title}`)).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(1000));
+      expect(screen.queryByText(`✓ Подобрано: ${sku.title}`)).not.toBeInTheDocument();
+      expect(api.addDealItem).not.toHaveBeenCalled();
+    } finally {
+      picker.unmount();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it("ignores the second click on the quantity backdrop without closing either dialog", async () => {
     const onClose = vi.fn();
     render(<Harness onClose={onClose} />);

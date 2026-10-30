@@ -80,6 +80,8 @@ export function CatalogPickerModal({
   const [committing, setBusy] = useState(false);
   const busy = committing || saving;
   const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<number | null>(null);
+  const toastMounted = useRef(true);
   const [kbdIndex, setKbdIndex] = useState(-1);
   const [popover, setPopover] = useState<{ sku: SkuOption; row?: PickerRow } | null>(null);
   const popoverSku = popover?.sku;
@@ -107,9 +109,23 @@ export function CatalogPickerModal({
         ? "🔒 Перенести → согласовать скидку"
         : "Перенести в документ";
 
+  useEffect(() => {
+    toastMounted.current = true;
+    return () => {
+      toastMounted.current = false;
+      if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
+      toastTimer.current = null;
+    };
+  }, []);
+
   function flash(msg: string) {
+    if (!toastMounted.current) return;
+    if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
     setToast(msg);
-    window.setTimeout(() => setToast(null), 1900);
+    toastTimer.current = window.setTimeout(() => {
+      toastTimer.current = null;
+      setToast(null);
+    }, 1900);
   }
 
   const q = query.trim().toLowerCase();
