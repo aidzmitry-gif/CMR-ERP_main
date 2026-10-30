@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, Caption } from "@/components/rop/ui";
 import { formatByn } from "@/lib/format";
 
@@ -46,34 +46,135 @@ export function DayScoreboard() {
   const [status, setStatus] = useState<Status>("loading");
   const [rows, setRows] = useState<Row[]>([]);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [writeIssue, setWriteIssue] = useState<{ message: string; unknown: boolean } | null>(null);
+  const [reviewReady, setReviewReady] = useState(false);
+  const writeLock = useRef(false);
+  const unknownWrite = useRef(false);
+  const currentPeriod = useRef("day");
+  const readVersion = useRef(0);
+  const mounted = useRef(false);
 
-  const load = useCallback(async (p: string) => {
-    setStatus("loading");
+  const load = useCallback(async (p: string): Promise<boolean> => {
+    const version = ++readVersion.current;
     try {
       const res = await fetch(`/api/sales/kpis?period=${encodeURIComponent(p)}`, { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
-      setRows((await res.json()) as Row[]);
+      const data: unknown = await res.json();
+      if (!Array.isArray(data)) throw new Error("Invalid KPI response");
+      if (!mounted.current || version !== readVersion.current || p !== currentPeriod.current) return false;
+      setRows(data as Row[]);
       setStatus("ready");
+      return true;
     } catch {
-      setStatus("error");
+      if (mounted.current && version === readVersion.current && p === currentPeriod.current) {
+        setRows([]);
+        setStatus("error");
+      }
+      return false;
     }
   }, []);
 
   useEffect(() => {
-    void load(period);
+    mounted.current = true;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void load(period);
+    });
+    return () => {
+      cancelled = true;
+      mounted.current = false;
+    };
   }, [period, load]);
 
+  function refresh(p: string) {
+    setRows([]);
+    setStatus("loading");
+    return load(p);
+  }
+
+  async function retryRead() {
+    if (!(await refresh(currentPeriod.current))) return;
+    if (unknownWrite.current) setReviewReady(true);
+    else setWriteIssue(null);
+  }
+
+  function changePeriod(p: string) {
+    if (writeLock.current || p === currentPeriod.current) return;
+    currentPeriod.current = p;
+    ++readVersion.current;
+    setReviewReady(false);
+    setRows([]);
+    setStatus("loading");
+    setPeriod(p);
+  }
+
+  function markUnknown() {
+    unknownWrite.current = true;
+    setReviewReady(false);
+    setWriteIssue({
+      unknown: true,
+      message: "Не удалось подтвердить запись активности. Она могла сохраниться. Обновите показатели и проверьте факт перед повторным добавлением.",
+    });
+  }
+
+  async function reviewUnknown() {
+    setReviewReady(false);
+    if (await refresh(currentPeriod.current)) setReviewReady(true);
+  }
+
+  function confirmReview() {
+    if (!reviewReady || !unknownWrite.current) return;
+    unknownWrite.current = false;
+    setReviewReady(false);
+    setWriteIssue(null);
+  }
+
   async function bump(key: string) {
+    if (writeLock.current || unknownWrite.current) return;
+    writeLock.current = true;
     setBusyKey(key);
+    setWriteIssue(null);
     try {
-      await fetch("/api/sales/activities", {
+      const response = await fetch("/api/sales/activities", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kpi_key: key, value: 1 }),
       });
-      await load(period);
+      if (!mounted.current) return;
+      if (!response.ok) {
+        if (response.status >= 500 || response.status === 408) {
+          markUnknown();
+        } else {
+          setWriteIssue({
+            unknown: false,
+            message: response.status === 401
+              ? "Сессия истекла. Войдите в ERP снова."
+              : response.status === 403
+                ? "Нет доступа к записи активности."
+                : "Сервер отклонил запись активности. Факт не изменён.",
+          });
+          if (response.status === 401 || response.status === 403) {
+            setRows([]);
+            setStatus("error");
+          }
+        }
+        return;
+      }
+      const result: unknown = await response.json();
+      if (!mounted.current) return;
+      if (!result || typeof result !== "object" || !("ok" in result) || result.ok !== true ||
+          !("date" in result) || typeof result.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(result.date)) {
+        markUnknown();
+        return;
+      }
+      if (!(await refresh(currentPeriod.current)) && mounted.current) {
+        setWriteIssue({ unknown: false, message: "Активность записана, но не удалось обновить показатели. Нажмите «Повторить», чтобы перечитать их." });
+      }
+    } catch {
+      if (mounted.current) markUnknown();
     } finally {
-      setBusyKey(null);
+      writeLock.current = false;
+      if (mounted.current) setBusyKey(null);
     }
   }
 
@@ -89,7 +190,8 @@ export function DayScoreboard() {
           {PERIODS.map((p) => (
             <button
               key={p.id}
-              onClick={() => setPeriod(p.id)}
+              onClick={() => changePeriod(p.id)}
+              disabled={busyKey !== null}
               className={`rounded-md px-2.5 py-1 text-xs font-semibold ${
                 period === p.id ? "bg-accent text-white" : "text-muted hover:text-ink"
               }`}
@@ -99,6 +201,28 @@ export function DayScoreboard() {
           ))}
         </div>
       </div>
+
+      {writeIssue && (
+        <div role="alert" className="space-y-2 rounded-xl border border-line p-4 text-sm text-muted">
+          <p>{writeIssue.message}</p>
+          {writeIssue.unknown && (
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => void reviewUnknown()}
+                disabled={status === "loading" || busyKey !== null}
+                className="rounded-lg border border-line px-3 py-1.5 font-semibold disabled:opacity-50"
+              >
+                Обновить показатели
+              </button>
+              {reviewReady && (
+                <button onClick={confirmReview} className="rounded-lg border border-line px-3 py-1.5 font-semibold">
+                  Факт проверен
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {status === "loading" && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -114,7 +238,7 @@ export function DayScoreboard() {
         <Card className="flex flex-wrap items-center justify-between gap-3">
           <span className="text-sm text-muted">Не удалось загрузить показатели.</span>
           <button
-            onClick={() => void load(period)}
+            onClick={() => void retryRead()}
             className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white"
           >
             Повторить
@@ -139,7 +263,7 @@ export function DayScoreboard() {
                   {r.unit !== "money" && (
                     <button
                       onClick={() => void bump(r.key)}
-                      disabled={busyKey === r.key}
+                      disabled={busyKey !== null || writeIssue?.unknown === true}
                       title="Отметить +1 факт"
                       className="shrink-0 rounded-md border border-line px-2 py-0.5 text-xs font-semibold text-muted hover:text-ink disabled:opacity-50"
                     >

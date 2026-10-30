@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DayScoreboard } from "@/components/rop/day-scoreboard";
@@ -33,7 +33,7 @@ beforeEach(() => {
   fetchMock.mockReset();
   // по умолчанию KPI отдаёт ROWS, POST активностей — ok
   fetchMock.mockImplementation((url: string) =>
-    typeof url === "string" && url.includes("/api/sales/kpis") ? okJson(ROWS) : okJson({}),
+    typeof url === "string" && url.includes("/api/sales/kpis") ? okJson(ROWS) : okJson({ ok: true, date: "2026-10-30" }),
   );
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -154,5 +154,156 @@ describe("DayScoreboard", () => {
     render(<DayScoreboard />);
     expect(screen.getAllByText("загрузка")).toHaveLength(6);
     expect(screen.queryByText("Звонки")).not.toBeInTheDocument();
+  });
+});
+
+function posts() {
+  return fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/sales/activities"));
+}
+function reads() {
+  return fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/sales/kpis"));
+}
+function activityResponse(status: number, body: unknown = { ok: true, date: "2026-10-30" }) {
+  return Promise.resolve({ ok: status >= 200 && status < 300, status, json: async () => body } as Response);
+}
+
+describe("DayScoreboard confirmed write outcome", () => {
+  it.each([401, 403])("protects rows on refused activity %i without treating it as success", async (code) => {
+    fetchMock.mockImplementation((url: string) => url.includes("/kpis") ? okJson(ROWS) : activityResponse(code));
+    render(<DayScoreboard />);
+    await screen.findByText("Звонки");
+    fireEvent.click(screen.getAllByRole("button", { name: "+1" })[0]);
+    expect(await screen.findByRole("alert")).toHaveTextContent(code === 401 ? "Сессия истекла" : "Нет доступа");
+    expect(screen.queryByText("Звонки")).not.toBeInTheDocument();
+    expect(posts()).toHaveLength(1);
+    expect(reads()).toHaveLength(1);
+  });
+
+  it("regression: server refusal leaves the fact unchanged and visible instead of silent refresh", async () => {
+    fetchMock.mockImplementation((url: string) => url.includes("/kpis") ? okJson(ROWS) : activityResponse(422));
+    render(<DayScoreboard />);
+    await screen.findByText("Звонки");
+    fireEvent.click(screen.getAllByRole("button", { name: "+1" })[0]);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Сервер отклонил запись активности");
+    expect(screen.getByText("25")).toBeInTheDocument();
+    expect(posts()).toHaveLength(1);
+    expect(reads()).toHaveLength(1);
+  });
+
+  it("regression: serialize clicks across metrics while a non-idempotent write is pending", async () => {
+    let finish!: (value: Response) => void;
+    const pending = new Promise<Response>((resolve) => { finish = resolve; });
+    fetchMock.mockImplementation((url: string) => url.includes("/kpis") ? okJson(ROWS) : pending);
+    render(<DayScoreboard />);
+    await screen.findByText("Звонки");
+    const buttons = screen.getAllByRole("button", { name: "+1" });
+    fireEvent.click(buttons[0]);
+    fireEvent.click(buttons[1]);
+    expect(posts()).toHaveLength(1);
+    expect(buttons.every((button) => button.hasAttribute("disabled"))).toBe(true);
+    await act(async () => { finish(await activityResponse(200)); });
+    await waitFor(() => expect(reads()).toHaveLength(2));
+    expect(await screen.findByText("Звонки")).toBeInTheDocument();
+  });
+
+  it("network loss blocks resending until an explicit successful read and fact review", async () => {
+    fetchMock.mockImplementation((url: string) => url.includes("/kpis") ? okJson(ROWS) : Promise.reject(new TypeError("connection lost")));
+    render(<DayScoreboard />);
+    await screen.findByText("Звонки");
+    fireEvent.click(screen.getAllByRole("button", { name: "+1" })[0]);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Она могла сохраниться");
+    expect(screen.queryByRole("button", { name: "Факт проверен" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "+1" })[1]);
+    expect(posts()).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Обновить показатели" }));
+    await screen.findByRole("button", { name: "Факт проверен" });
+    expect(screen.getAllByRole("button", { name: "+1" }).every((button) => button.hasAttribute("disabled"))).toBe(true);
+    expect(posts()).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Факт проверен" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "+1" }).every((button) => !button.hasAttribute("disabled"))).toBe(true);
+  });
+
+  it.each([408, 500, 502])("does not auto-repeat an activity with uncertain HTTP outcome %i", async (code) => {
+    fetchMock.mockImplementation((url: string) => url.includes("/kpis") ? okJson(ROWS) : activityResponse(code));
+    render(<DayScoreboard />);
+    await screen.findByText("Звонки");
+    fireEvent.click(screen.getAllByRole("button", { name: "+1" })[0]);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось подтвердить запись");
+    expect(posts()).toHaveLength(1);
+    expect(reads()).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "+1" })[1]).toBeDisabled();
+  });
+
+  it("does not accept malformed successful response as a confirmed activity", async () => {
+    fetchMock.mockImplementation((url: string) => url.includes("/kpis") ? okJson(ROWS) : activityResponse(200, {}));
+    render(<DayScoreboard />);
+    await screen.findByText("Звонки");
+    fireEvent.click(screen.getAllByRole("button", { name: "+1" })[0]);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось подтвердить запись");
+    expect(reads()).toHaveLength(1);
+  });
+
+  it("a failed verification read cannot enable acknowledgement or another activity", async () => {
+    let rejectRead = false;
+    fetchMock.mockImplementation((url: string) => url.includes("/kpis") ? (rejectRead ? failStatus(503) : okJson(ROWS)) : activityResponse(502));
+    render(<DayScoreboard />);
+    await screen.findByText("Звонки");
+    fireEvent.click(screen.getAllByRole("button", { name: "+1" })[0]);
+    await screen.findByRole("alert");
+    rejectRead = true;
+    fireEvent.click(screen.getByRole("button", { name: "Обновить показатели" }));
+    await screen.findByText("Не удалось загрузить показатели.");
+    expect(screen.queryByText("Звонки")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Факт проверен" })).not.toBeInTheDocument();
+    expect(posts()).toHaveLength(1);
+    rejectRead = false;
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    expect(await screen.findByRole("button", { name: "Факт проверен" })).toBeInTheDocument();
+    expect(posts()).toHaveLength(1);
+  });
+
+  it("successful POST plus failed GET reports recorded activity and retries reads only", async () => {
+    let readCount = 0;
+    fetchMock.mockImplementation((url: string) => url.includes("/kpis")
+      ? (++readCount === 2 ? failStatus(503) : okJson(ROWS)) : activityResponse(200));
+    render(<DayScoreboard />);
+    await screen.findByText("Звонки");
+    fireEvent.click(screen.getAllByRole("button", { name: "+1" })[0]);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Активность записана");
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    await screen.findByText("Звонки");
+    expect(posts()).toHaveLength(1);
+    expect(reads()).toHaveLength(3);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("late old-period data cannot replace a newer selected period", async () => {
+    let finishDay!: (value: Response) => void;
+    const pendingDay = new Promise<Response>((resolve) => { finishDay = resolve; });
+    fetchMock.mockImplementation((url: string) => url.includes("period=day") ? pendingDay
+      : okJson(ROWS.map((row) => ({ ...row, actual: 700 }))));
+    render(<DayScoreboard />);
+    await waitFor(() => expect(reads()).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: "Неделя" }));
+    await screen.findByText("Звонки");
+    expect(screen.getAllByText("700")).toHaveLength(2);
+    await act(async () => { finishDay(await okJson(ROWS)); });
+    await waitFor(() => expect(screen.queryByText("25")).not.toBeInTheDocument());
+    expect(screen.getAllByText("700")).toHaveLength(2);
+  });
+});
+
+
+describe("DayScoreboard unchanged period selection", () => {
+  it("clicking the active period keeps its pending read valid", async () => {
+    let finish!: (value: Response) => void;
+    fetchMock.mockImplementation(() => new Promise<Response>((resolve) => { finish = resolve; }));
+    render(<DayScoreboard />);
+    await waitFor(() => expect(reads()).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: "День" }));
+    await act(async () => { finish(await okJson(ROWS)); });
+    expect(await screen.findByText("Звонки")).toBeInTheDocument();
+    expect(reads()).toHaveLength(1);
   });
 });

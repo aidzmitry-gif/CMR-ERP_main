@@ -148,7 +148,7 @@ export function PipelineAnalytics({ initialFunnel = "new_clients" }: { initialFu
       {funnel === "all" ? (
         funnels.length === 0 ? (
           <div className="rounded-xl border border-line p-6 text-sm text-muted">
-            Воронки не настроены — аналитика пуста (honest-empty).
+            Воронки не настроены — аналитика пуста.
           </div>
         ) : (
           <div className="space-y-8">
@@ -284,7 +284,7 @@ function FunnelAnalyticsPanel({ funnel, owner }: { funnel: string; owner: string
 
       {status === "ready" && data && totalCount === 0 && (
         <div className="rounded-xl border border-line p-6 text-sm text-muted">
-          В этой воронке нет сделок — аналитика пуста (honest-empty).
+          В этой воронке нет сделок — аналитика пуста.
         </div>
       )}
 
@@ -569,7 +569,7 @@ function FunnelAnalyticsPanel({ funnel, owner }: { funnel: string; owner: string
                         </span>
                       </>
                     ) : (
-                      <span className="text-faint">истории нет — honest-empty</span>
+                      <span className="text-faint">Нет истории переходов</span>
                     )}
                   </div>
                 )}
