@@ -4,16 +4,23 @@ from uuid import uuid4
 
 from sqlalchemy import func, select, text
 
-from core.domain.models import OutboxEvent
+from core.domain.models import Counterparty, OutboxEvent
 from modules.sales.models import Deal, Message
 
 
 async def test_concurrent_history_replay_has_one_row_and_event(pg_app):
     key = uuid4().hex
-    created = await pg_app.post('/sales/deals', json={'number':key,'title':'History race','counterparty':'Synthetic'})
+    factory = pg_app._transport.app.state.core.services.db.session_factory
+    async with factory() as seed:
+        party = Counterparty(name='Synthetic', unp=str(100000000 + uuid4().int % 800000000),
+                             requisites={'address': 'Synthetic legal address'})
+        seed.add(party)
+        await seed.commit()
+        party_id = party.id
+    created = await pg_app.post('/sales/deals', json={'number':key,'title':'History race',
+        'counterparty':'Synthetic','counterparty_id':party_id})
     assert created.status_code == 201, created.text
     deal_id = created.json()['id']
-    factory = pg_app._transport.app.state.core.services.db.session_factory
     async with factory() as holder, factory() as observer:
         await holder.execute(select(Deal).where(Deal.id == deal_id).with_for_update())
         holder_pid = await holder.scalar(text('SELECT pg_backend_pid()'))

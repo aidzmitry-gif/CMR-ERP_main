@@ -28,6 +28,21 @@ function fillDeal() {
 }
 
 describe("CreateDealModal directory link", () => {
+  it("accepts a BYN amount with kopecks and submits the exact amount", async () => {
+    const onCreate = vi.fn().mockResolvedValue(true);
+    render(<CreateDealModal client={{ id: 12, name: "CRM buyer", owner_id: 34 }} stages={stages}
+      defaultStage="new" onClose={vi.fn()} onCreate={onCreate} />);
+    fillDeal();
+    const amount = screen.getByRole("spinbutton", { name: "Сумма, BYN" });
+    fireEvent.change(amount, { target: { value: "-0.01" } });
+    expect(amount).toBeInvalid();
+    fireEvent.change(amount, { target: { value: "123.45" } });
+    expect(amount).toBeValid();
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ amount: 123.45 })));
+    expect(onCreate).toHaveBeenCalledTimes(1);
+  });
+
   it("posts only the numeric MDM ID and rejects a mismatched server link", async () => {
     const { linkCrmClientToCounterparty: actual } = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
     const fetch = vi.fn()

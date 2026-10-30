@@ -21,47 +21,43 @@ from modules.accounting.production_output_transfer import (
 )
 from modules.accounting.schemas import LineInput, PostingInput
 from tests.accounting.test_finished_goods_inventory_postgres import sale_document
+from tests.accounting.test_inventory_allocation_cost_stream_postgres import (
+    accepted_production_outputs,
+)
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_production_output_transfer_postgres import (
-    SyntheticProduction,
     _seed_production_book,
     _seed_wip,
-    _upgrade_group_guard,
 )
+from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 pytestmark = pytest.mark.integration
 
 
-async def _confirm(session, org_id, policy_id, order_id, lot, quantity="1.00"):
-    class Output(SyntheticProduction):
-        async def cost_orders(self, _session, _organization_id, _order_ids):
-            return [{"order_id": order_id, "product": "Mixed pool", "quantity": quantity}]
-
-        async def output_reconciliation(self, _session, _organization_id, _order_id, _warehouse):
-            return {"planned_quantity": quantity, "confirmed_quantity": quantity, "accepted_quantity": quantity,
-                    "rejected_quantity": "0.00", "pending_quantity": "0.00", "sku_code": "SYN-WIDGET",
-                    "unit": "шт", "lot": lot, "documents": [{"document_id": order_id + 100, "operation_date": "2026-10-10"}]}
-
-    production = Output()
+async def _confirm(session, org_id, policy_id, order_id, lot, quantity="1.00", *, sources):
+    production, warehouse, documents, _ = sources
+    physical = await production.output_reconciliation(session, org_id, order_id, warehouse)
+    assert physical["lot"] == lot and Decimal(physical["accepted_quantity"]) == Decimal(quantity)
     command = ProductionOutputTransferConfirmInput.model_validate({
         "policy_id": policy_id, "order_id": order_id, "analytical_order": f"ORDER-{order_id}",
         "department": "SHOP", "warehouse": "Main", "posting_date": "2026-10-31",
-        "output_document_ids": [order_id + 100], "basis_digest": "0" * 64, "digest": "0" * 64,
+        "output_document_ids": [documents[order_id]], "basis_digest": "0" * 64, "digest": "0" * 64,
     })
-    preview = await prepare_output_transfer(session, org_id, "2026-10", command, production, object())
+    preview = await prepare_output_transfer(session, org_id, "2026-10", command, production, warehouse)
     command = command.model_copy(update={"basis_digest": preview["basis_digest"], "digest": preview["digest"]})
     return await confirm_output_transfer(session, org_id, "2026-10", command, "tester",
-                                         production=production, warehouse_gateway=object())
+                                         production=production, warehouse_gateway=warehouse)
 
 
 @pytest.mark.parametrize("selected_lot", ["", "LOT-A"])
-async def test_weighted_average_mixed_lot_output_revision_preserves_pool_contribution(pg_factory, pg_book, selected_lot):
+async def test_weighted_average_mixed_lot_output_revision_preserves_pool_contribution(pg_factory, pg_book, selected_lot, issuance_pg):
     """A 50/B 100 pool sale at 75; A late +20 adds 10 expense and 10 to B."""
     policy_id = await _seed_production_book(pg_factory, pg_book, "weighted_average")
     await _seed_wip(pg_factory, pg_book, policy_id, [("SHOP", "ORDER-42", "50.00")])
+    physical = await accepted_production_outputs(issuance_pg[0], pg_factory, pg_book, same_lot=False,
+        order_ids=(42, 43), lot_by_order={42: "LOT-A", 43: "LOT-B"}, quantity_by_order={42: "1.00", 43: "1.00"})
     async with pg_factory() as session:
-        await _upgrade_group_guard(session)
-        first = await _confirm(session, pg_book[0], policy_id, 42, "LOT-A")
+        first = await _confirm(session, pg_book[0], policy_id, 42, "LOT-A", sources=physical)
         await service.post(session, pg_book[0], PostingInput(
             source="production:wip:43", source_version=1, operation="manual", document_date="2026-10-10",
             operation_date="2026-10-10", posting_date="2026-10-10", policy_id=policy_id,
@@ -69,7 +65,7 @@ async def test_weighted_average_mixed_lot_output_revision_preserves_pool_contrib
                 LineInput(account="20", side="debit", amount="100", dimensions={"department": "SHOP", "order": "ORDER-43"}),
                 LineInput(account="60", side="credit", amount="100"),
             ]), "tester")
-        await _confirm(session, pg_book[0], policy_id, 43, "LOT-B")
+        await _confirm(session, pg_book[0], policy_id, 43, "LOT-B", sources=physical)
         sale = sales.SaleDocument.model_validate({**sale_document(policy_id).model_dump(mode="json"), "lot": selected_lot})
         prepared = await sales.prepare(session, pg_book[0], sale)
         assert prepared["cost"]["issue_cost_byn"] == "75.00"
@@ -134,19 +130,21 @@ async def test_weighted_average_mixed_lot_output_revision_preserves_pool_contrib
 
 
 @pytest.mark.parametrize("negative, future_cost", [(False,"190.00"),(True,"176.66")])
-async def test_weighted_average_late_a_uses_largest_remainder_across_two_sales_and_c(pg_factory, pg_book, negative, future_cost):
+async def test_weighted_average_late_a_uses_largest_remainder_across_two_sales_and_c(pg_factory, pg_book, negative, future_cost, issuance_pg):
     """A late +20 must allocate 10.00/3.33/6.67, not independently rounded source totals."""
     policy_id = await _seed_production_book(pg_factory, pg_book, "weighted_average")
     await _seed_wip(pg_factory, pg_book, policy_id, [("SHOP", "ORDER-42", "50.00")])
+    physical = await accepted_production_outputs(issuance_pg[0], pg_factory, pg_book, same_lot=False,
+        order_ids=(42, 43, 44), lot_by_order={42: "LOT-A", 43: "LOT-B", 44: "LOT-C"},
+        quantity_by_order={42: "1.00", 43: "1.00", 44: "2.00"})
     async with pg_factory() as session:
-        await _upgrade_group_guard(session)
-        a = await _confirm(session, pg_book[0], policy_id, 42, "LOT-A")
+        a = await _confirm(session, pg_book[0], policy_id, 42, "LOT-A", sources=physical)
         await service.post(session, pg_book[0], PostingInput(source="production:wip:43", source_version=1,
             operation="manual", document_date="2026-10-10", operation_date="2026-10-10", posting_date="2026-10-10",
             policy_id=policy_id, rule_version="synthetic", explanation="B cost", lines=[
                 LineInput(account="20", side="debit", amount="100", dimensions={"department":"SHOP","order":"ORDER-43"}),
                 LineInput(account="60", side="credit", amount="100")]), "tester")
-        await _confirm(session, pg_book[0], policy_id, 43, "LOT-B")
+        await _confirm(session, pg_book[0], policy_id, 43, "LOT-B", sources=physical)
         sale_a = sales.SaleDocument.model_validate({**sale_document(policy_id).model_dump(mode="json"), "lot":""})
         p1 = await sales.prepare(session, pg_book[0], sale_a)
         assert p1["cost"]["issue_cost_byn"] == "75.00"
@@ -156,7 +154,7 @@ async def test_weighted_average_late_a_uses_largest_remainder_across_two_sales_a
             policy_id=policy_id, rule_version="synthetic", explanation="C cost", lines=[
                 LineInput(account="20", side="debit", amount="200", dimensions={"department":"SHOP","order":"ORDER-44"}),
                 LineInput(account="60", side="credit", amount="200")]), "tester")
-        await _confirm(session, pg_book[0], policy_id, 44, "LOT-C", "2.00")
+        await _confirm(session, pg_book[0], policy_id, 44, "LOT-C", "2.00", sources=physical)
         sale_b = sales.SaleDocument.model_validate({**sale_document(policy_id).model_dump(mode="json"), "source":"sale:fg:b",
             "lot":"", "buyer_dimensions":{**sale_document(policy_id).buyer_dimensions,"settlement_document":"sale:fg:b"}})
         p2 = await sales.prepare(session, pg_book[0], sale_b)

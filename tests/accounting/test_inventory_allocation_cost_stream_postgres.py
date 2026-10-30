@@ -51,7 +51,8 @@ class TwoOutputs(SyntheticProduction):
                 "documents": [{"document_id": order_id + 59, "operation_date": "2026-10-10"}]}
 
 
-async def accepted_production_outputs(api, factory, book, *, same_lot, order_ids=(42, 43), lot_by_order=None):
+async def accepted_production_outputs(api, factory, book, *, same_lot, order_ids=(42, 43), lot_by_order=None,
+                                      sku_by_order=None, quantity_by_order=None):
     """Create the physical documents and WMS facts required by a current transfer."""
     from sqlalchemy import select
 
@@ -74,6 +75,8 @@ async def accepted_production_outputs(api, factory, book, *, same_lot, order_ids
     documents = {}
     assert order_ids and len(order_ids) == len(set(order_ids))
     assert lot_by_order is None or set(lot_by_order) <= set(order_ids)
+    assert sku_by_order is None or set(sku_by_order) <= set(order_ids)
+    assert quantity_by_order is None or set(quantity_by_order) <= set(order_ids)
     async with factory() as session:
         # pg_book copies explicit directory IDs from SQLite into this isolated DB.
         await session.execute(text(
@@ -82,17 +85,22 @@ async def accepted_production_outputs(api, factory, book, *, same_lot, order_ids
         ))
         location = Location(warehouse="Main", code="SYN-OUTPUT")
         sku = Sku(code="SYN-WIDGET", title="Synthetic widget", unit="шт", is_active=True)
+        other_skus = [Sku(code=code, title="Synthetic other widget", unit="шт", is_active=True)
+                      for code in sorted(set((sku_by_order or {}).values()) - {sku.code})]
         directory = WarehouseDirectory(organization_id=book[0], name="Main", title="Main warehouse",
                                        wms_enabled=True, created_by="tester")
-        session.add_all([location, sku, directory])
+        session.add_all([location, sku, directory, *other_skus])
         await session.flush()
         identities = {
             "warehouse_identity": {"id": directory.id, "name": directory.name, "title": directory.title},
             "sku_identity": {"id": sku.id, "code": sku.code, "title": sku.title, "unit": sku.unit},
         }
         for order_id in order_ids:
+            quantity = (quantity_by_order or {}).get(order_id, "2.00")
+            planned_quantity = int(Decimal(quantity))
+            assert Decimal(quantity) == planned_quantity
             order = ProductionOrder(id=order_id, number=f"SYN-OUTPUT-{order_id}",
-                                    product="Synthetic widget", qty=2)
+                                    product="Synthetic widget", qty=planned_quantity)
             session.add(order)
             await session.flush()
             digest = order_snapshot(order)[1]
@@ -100,7 +108,8 @@ async def accepted_production_outputs(api, factory, book, *, same_lot, order_ids
                 order_id=order_id, expected_digest=digest, evidence="Synthetic reviewed output owner"))
             document = await prepare_output(session, gateway, book[0], user, OutputCommand(
                 request_id=uuid4(), order_id=order_id, expected_order_digest=digest,
-                operation_date="2026-10-10", sku_code="SYN-WIDGET", quantity="2.00", warehouse="Main",
+                operation_date="2026-10-10", sku_code=(sku_by_order or {}).get(order_id, "SYN-WIDGET"),
+                quantity=quantity, warehouse="Main",
                 location_id=location.id, lot=(lot_by_order or {}).get(order_id, "SHARED" if same_lot else f"LOT-{order_id}"),
                 evidence="Synthetic reviewed physical output"), warehouse_gateway=warehouse)
             await confirm_output(session, gateway, book[0], user, document.id, document.digest,
@@ -110,16 +119,16 @@ async def accepted_production_outputs(api, factory, book, *, same_lot, order_ids
     assert await core.event_bus.relay_pending(
         factory, core.services, event_types=("production.output.confirmed",)) == len(order_ids)
     async with factory() as session:
-        arrivals = (await session.execute(select(Receipt.id, ReceiptLine.id).join(
+        arrivals = (await session.execute(select(Receipt.id, ReceiptLine.id, ReceiptLine.expected_qty).join(
             ReceiptLine, ReceiptLine.receipt_id == Receipt.id).where(
                 Receipt.organization_id == book[0], Receipt.warehouse == "Main"))).all()
         assert len(arrivals) == len(order_ids)
-    for receipt_id, line_id in arrivals:
+    for receipt_id, line_id, quantity in arrivals:
         path = f"/wms/receipts/{receipt_id}"
         detail = await api.get(path)
         assert detail.status_code == 200, detail.text
         qc = await api.post(path + "/qc", json={"expected_revision": detail.json()["qc_revision"],
-            "decisions": [{"line_id": line_id, "accepted_qty": "2.00", "rejected_qty": "0.00",
+            "decisions": [{"line_id": line_id, "accepted_qty": str(quantity), "rejected_qty": "0.00",
                            "reject_reason": "Synthetic complete acceptance"}]})
         assert qc.status_code == 200, qc.text
         accepted = await api.post(path + "/accept")
@@ -250,70 +259,70 @@ async def test_mixed_production_late_cost_confirm_replay_and_historical_cutoff(p
                 await run_migration(session, "0145_inventory_allocation_cost_stream.py", "downgrade")
 
 
-@pytest.mark.parametrize("accounting_pg_revision", ["0139"], indirect=True)
+@pytest.mark.parametrize("accounting_pg_revision", ["0144"], indirect=True)
 async def test_0145_empty_roundtrip_retains_legacy_evidence_definitions(pg_factory):
+    from tests.accounting.historical_zero_sale import transition
+
+    query = text("SELECT pg_get_functiondef('accounting.output_cost_revision_evidence(integer,integer,date,integer,integer)'::regprocedure)")
     async with pg_factory() as session:
-        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
-                         "0142_zero_value_command_dates.py", "0143_zero_value_sales.py",
-                         "0144_inventory_explicit_allocation_guards.py"):
-            await run_migration(session, revision, "upgrade")
-        query = text("SELECT pg_get_functiondef('accounting.output_cost_revision_evidence(integer,integer,date,integer,integer)'::regprocedure)")
         before = await session.scalar(query)
-        await run_migration(session, "0145_inventory_allocation_cost_stream.py", "upgrade")
-        await run_migration(session, "0145_inventory_allocation_cost_stream.py", "downgrade")
+    await transition(pg_factory, "0145")
+    await transition(pg_factory, "0144", action="downgrade")
+    async with pg_factory() as session:
         assert await session.scalar(query) == before
         assert await session.scalar(text("SELECT to_regprocedure('accounting.inventory_allocation_cost_stream(integer,text,text,text,date,integer)')")) is None
-        await run_migration(session, "0145_inventory_allocation_cost_stream.py", "upgrade")
-        await session.commit()
+    await transition(pg_factory, "0145")
 
 
+async def _assert_legacy_revision_evidence(session):
+    # Recompute every historical cutoff, including entryless revision tokens.
+    # Stored bytes are separately checked after each original commit by replay.
+    verified = (await session.scalars(text("""
+        SELECT accounting.output_cost_revision_evidence(
+            organization_id, original_entry_id, (command->>'posting_date')::date,
+            entry_id, registration_token) = preview::jsonb->'ledger_evidence'
+        FROM accounting.production_output_cost_revision ORDER BY sequence
+    """))).all()
+    assert verified and all(value is True for value in verified)
+
+
+@pytest.mark.parametrize("accounting_pg_revision", ["0145"], indirect=True)
 @pytest.mark.parametrize("method", ["specific", "weighted_average"])
-async def test_0145_preserves_legacy_monetary_sale_and_correction_history(pg_factory, pg_book, method):
-    from tests.accounting.test_finished_goods_inventory_postgres import (
-        test_output_cost_preview_authenticates_late_wip_and_sale_destinations as legacy_scenario,
-    )
+async def test_0145_preserves_legacy_monetary_sale_and_correction_history(pg_factory, method):
+    from tests.accounting.historical_zero_sale import historical_session, replay
 
-    async with pg_factory() as session:
-        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
-                         "0142_zero_value_command_dates.py", "0143_zero_value_sales.py",
-                         "0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py"):
-            await run_migration(session, revision, "upgrade")
-        await session.commit()
-    await legacy_scenario(pg_factory, pg_book, method)
+    await replay(pg_factory, f"monetary_{method}.json", fixture_folder="inventory_stream_history")
+    async with historical_session(pg_factory) as session:
+        await _assert_legacy_revision_evidence(session)
+        sales_history = (await session.scalars(text(
+            "SELECT cost FROM accounting.inventory_sale_receipt ORDER BY entry_id"))).all()
+        assert [row["method"] for row in sales_history] == [method, method]
+        assert [row["issue_cost_byn"] for row in sales_history] == ["50.00", "60.00"]
+        revisions = (await session.execute(text(
+            "SELECT sequence,entry_id,posting FROM accounting.production_output_cost_revision ORDER BY sequence"))).all()
+        assert [row.sequence for row in revisions] == [1, 2, 3]
+        assert revisions[1].entry_id is None and revisions[1].posting is None
+        assert {(line["account"], line["side"], line["amount"]) for line in revisions[0].posting["lines"]} == {
+            ("20", "credit", "20.00"), ("43", "debit", "10.00"), ("90.4", "debit", "10.00")}
+        assert {(line["account"], line["side"], line["amount"]) for line in revisions[2].posting["lines"]} == {
+            ("20", "credit", "20.00"), ("90.4", "debit", "20.00")}
 
 
-async def test_0145_keeps_existing_zero_issue_late_cost(pg_factory, pg_book):
-    from modules.accounting.zero_value_disposals import (
-        preview_standalone_zero_value_issue_basis,
-        register_standalone_zero_value_issue,
-    )
-    from tests.accounting.test_zero_value_disposals_postgres import command, zeroed_output
+@pytest.mark.parametrize("accounting_pg_revision", ["0143"], indirect=True)
+async def test_0145_keeps_existing_zero_issue_late_cost(pg_factory):
+    from tests.accounting.historical_zero_sale import historical_session, replay
 
-    async with pg_factory() as session:
-        for revision in ("0140_zero_value_disposals.py", "0141_zero_value_output_cost.py",
-                         "0142_zero_value_command_dates.py", "0143_zero_value_sales.py"):
-            await run_migration(session, revision, "upgrade")
-        await session.commit()
-    policy_id, output_id, line_id = await zeroed_output(pg_factory, pg_book)
-    async with pg_factory() as session:
-        draft = command(policy_id, output_id, line_id, destination_account="90.4", destination_dimensions={})
-        basis = await preview_standalone_zero_value_issue_basis(session, pg_book[0], draft)
-        await register_standalone_zero_value_issue(session, pg_book[0], "tester", draft.model_copy(update={"basis_digest": basis}))
-        for revision in ("0144_inventory_explicit_allocation_guards.py", "0145_inventory_allocation_cost_stream.py"):
-            await run_migration(session, revision, "upgrade")
-        await service.post(session, pg_book[0], PostingInput(source="legacy-zero-late-wip", source_version=1, operation="manual",
-            document_date="2026-10-31", operation_date="2026-10-31", posting_date="2026-10-31", policy_id=policy_id,
-            rule_version="synthetic", explanation="Legacy zero issue late cost", lines=[
-                LineInput(account="20", side="debit", amount="100", dimensions={"department": "SHOP", "order": "ORDER-42"}),
-                LineInput(account="60", side="credit", amount="100")]), "tester")
-        request = ProductionOutputCostPreviewInput(original_entry_id=output_id, posting_date="2026-10-31",
-                                                  request_evidence="Legacy zero receipt survives 0145")
-        preview = await preview_output_cost_correction(session, pg_book[0], "2026-10", request)
-        assert preview["trace"]["disposals"][0]["kind"] == "zero"
-        assert sorted(row["amount_byn"] for row in preview["destinations"]) == ["25.00", "75.00"]
-        await confirm_output_cost_correction(session, pg_book[0], "2026-10",
-            ProductionOutputCostConfirmInput(**request.model_dump(), request_key=uuid4(), basis_digest=preview["basis_digest"]), "tester")
-        await session.commit()
+    await replay(pg_factory, "zero_issue_0143_to_0145.json", fixture_folder="inventory_stream_history")
+    async with historical_session(pg_factory) as session:
+        await _assert_legacy_revision_evidence(session)
+        revision = (await session.execute(text(
+            "SELECT preview,posting FROM accounting.production_output_cost_revision ORDER BY sequence DESC LIMIT 1"))).one()
+        allocation = revision.preview["ledger_evidence"]["allocation"]
+        zero = [row for row in allocation if row["key"].startswith("zero:")]
+        assert len(zero) == 1 and Decimal(str(zero[0]["quantity"])) == Decimal("0.5")
+        assert sorted(Decimal(str(row["delta"])) for row in allocation) == [Decimal("25.00"), Decimal("75.00")]
+        assert {(line["account"], line["side"], line["amount"]) for line in revision.posting["lines"]} == {
+            ("20", "credit", "100.00"), ("43", "debit", "75.00"), ("90.4", "debit", "25.00")}
 
 
 async def test_pool_stream_preserves_real_production_output(pg_factory, pg_book, issuance_pg):

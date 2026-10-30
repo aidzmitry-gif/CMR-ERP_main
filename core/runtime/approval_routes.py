@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.domain.models import Approval
 from core.runtime.core import Core
 from core.runtime.deps import get_core, get_session
-from core.services.approvals import ApprovalDecision, ApprovalOut
+from core.services.approvals import ApprovalDecision, ApprovalOut, ModuleApprovalRequired
 from core.services.auth import require_permission
 
 router = APIRouter(tags=["approvals"])
@@ -22,7 +22,7 @@ async def list_approvals(
     _: object = Depends(require_permission("sales.deal.approve")),
 ):
     """Список согласований (фильтры: статус и/или сущность, например ``deal:7``)."""
-    query = select(Approval).order_by(Approval.id.desc())
+    query = select(Approval).where(~Approval.kind.startswith("module:")).order_by(Approval.id.desc())
     if status:
         query = query.where(Approval.status == status)
     if entity_ref:
@@ -42,7 +42,10 @@ async def _decide(
         raise HTTPException(status_code=404, detail="Согласование не найдено")
     if approval.status != "pending":
         raise HTTPException(status_code=409, detail="Согласование уже обработано")
-    await core.services.approvals.decide(session, approval, approved, payload.by, payload.reason)
+    try:
+        await core.services.approvals.decide(session, approval, approved, payload.by, payload.reason)
+    except ModuleApprovalRequired as exc:
+        raise HTTPException(409, "Откройте согласование в соответствующем модуле") from exc
     await session.commit()
     return approval
 

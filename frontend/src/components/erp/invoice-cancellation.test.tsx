@@ -45,3 +45,44 @@ it("cancel rejected after fresh preflight allows explicit review restart without
   expect(api.readJournal(scope).pending).toEqual(next);
   expect(next.body.request_key).not.toBe(rejectedAttempt.body.request_key);
 });
+
+async function confirmCancellation(){
+ await screen.findByText("Подтвердить аннулирование");
+ fireEvent.change(screen.getByLabelText("Причина аннулирования"),{target:{value:"Synthetic cancellation"}});
+ fireEvent.click(screen.getByLabelText("Подтверждаю, что счёт больше не будет действителен"));
+ fireEvent.click(screen.getByRole("button",{name:"Аннулировать счёт"}));
+}
+it("explains and confirms that an unreserved invoice never released stock",async()=>{
+ savedReview();const b=basis();b.preview.sections.wms_pick.facts.remaining={reservation_absent:true};
+ vi.mocked(api.fetchBasis).mockResolvedValue(b);
+ vi.mocked(api.sendAttempt).mockResolvedValue({...receipt,stock_outcome:"no_stock_release",release_id:null,reserve_status:"unreserved"});
+ const done=vi.fn();render(<InvoiceCancellation scope={scope} onCancelled={done}/>);
+ await screen.findByText(/Резерв отсутствовал; складские остатки не изменятся/);
+ await confirmCancellation();
+ expect(await screen.findByText("Счёт аннулирован. Резерв отсутствовал.")).toBeInTheDocument();
+ expect(screen.queryByText("Счёт аннулирован. Резерв снят.")).not.toBeInTheDocument();
+ expect(done).toHaveBeenCalledOnce();expect(api.readJournal(scope).pending).toBeNull();
+});
+it("recovers an unknown no-stock response using the original cancellation command",async()=>{
+ savedReview();vi.mocked(api.sendAttempt).mockRejectedValueOnce(new api.CancellationError("Результат неизвестен."))
+  .mockResolvedValueOnce({...receipt,stock_outcome:"no_stock_release",release_id:null,reserve_status:"unreserved"});
+ render(<InvoiceCancellation scope={scope} onCancelled={()=>{}}/>);await confirmCancellation();
+ await screen.findByText("Результат неизвестен.");const pending=api.readJournal(scope).pending!;
+ fireEvent.click(screen.getByRole("button",{name:"Повторить сохранённый запрос"}));
+ await screen.findByText("Счёт аннулирован. Резерв отсутствовал.");
+ expect(api.sendAttempt).toHaveBeenNthCalledWith(1,pending);expect(api.sendAttempt).toHaveBeenNthCalledWith(2,pending);
+});
+it("does not clear a corrupt no-stock result or offer a new cancellation key",async()=>{
+ savedReview();vi.mocked(api.sendAttempt).mockRejectedValue(new api.CancellationError("Повреждённое подтверждение. Результат неизвестен."));
+ const done=vi.fn();render(<InvoiceCancellation scope={scope} onCancelled={done}/>);await confirmCancellation();
+ await screen.findByText("Повреждённое подтверждение. Результат неизвестен.");
+ expect(api.readJournal(scope).pending?.phase).toBe("cancel");expect(done).not.toHaveBeenCalled();
+ expect(screen.queryByRole("button",{name:"Начать новую сверку"})).not.toBeInTheDocument();
+ expect(screen.queryByRole("button",{name:"Аннулировать счёт"})).not.toBeInTheDocument();
+});
+it("retains the stock-release confirmation without a no-stock label",async()=>{
+ savedReview();vi.mocked(api.sendAttempt).mockResolvedValue(receipt);
+ render(<InvoiceCancellation scope={scope} onCancelled={()=>{}}/>);await confirmCancellation();
+ expect(await screen.findByText("Счёт аннулирован. Резерв снят.")).toBeInTheDocument();
+ expect(screen.queryByText("Счёт аннулирован. Резерв отсутствовал.")).not.toBeInTheDocument();
+});

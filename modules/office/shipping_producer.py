@@ -68,6 +68,14 @@ class AssignmentInput(StrictShippingModel):
     evidence: str = Field(min_length=1, max_length=1000)
 
 
+def office_row_snapshot(doc):
+    snapshot = snapshot_row(doc)
+    # Legacy frozen source states predate author scope; NULL adds no new fact.
+    if snapshot.get("draft_owner_subject") is None:
+        snapshot.pop("draft_owner_subject", None)
+    return snapshot
+
+
 def conflict(message):
     raise HTTPException(409, message)
 
@@ -144,7 +152,7 @@ class OfficeShippingProducer:
                     "payload_sha256": hashed, "payload": model.model_dump()},
                 "association": {"record_id": association.id, "revision": "1", "row_sha256": snapshot_hash(snapshot_row(association))},
                 "execution_id": verified["execution_id"], "intent_digest": verified["intent_digest"],
-                "source_state_sha256": snapshot_hash({"document": snapshot_row(doc),
+                "source_state_sha256": snapshot_hash({"document": office_row_snapshot(doc),
                     "historical_assignment": snapshot_row(historical), "current_assignment": snapshot_row(latest)}),
                 "fulfillment_allowed": verified["fulfillment_allowed"]})
         return producer_sources_snapshot(exact, sources)

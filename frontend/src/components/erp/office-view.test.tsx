@@ -32,6 +32,18 @@ function deliveryWrapper() {
 }
 
 describe("OfficeView", () => {
+  it("открывает назначение проверяющего только после выбора вкладки", async () => {
+    const fetcher = vi.fn(async (url: string) => url === "/api/office/review-queue"
+      ? { ok: true, status: 200, json: async () => ({ documents: [], reviewers: [] }) }
+      : { ok: false, status: 404, json: async () => [] });
+    vi.stubGlobal("fetch", fetcher);
+    render(<OfficeView board={board} initialDeliveries={[]} />);
+    expect(fetcher.mock.calls.some(([url]) => url === "/api/office/review-queue")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Проверяющие" }));
+    expect(await screen.findByText("Нет черновиков для назначения.")).toBeInTheDocument();
+    expect(boardWrapper().className).toContain("hidden");
+  });
+
   it("рендерит обе вкладки, по умолчанию активна «Документы» и показывает доску", () => {
     render(<OfficeView board={board} initialDeliveries={[heavy, light]} />);
 

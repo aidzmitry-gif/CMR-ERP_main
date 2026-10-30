@@ -174,8 +174,8 @@ export function WmsMovements({
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const locsForWh = useMemo(
-    () => locations.filter((l) => l.is_active && (!f.warehouse || l.warehouse === f.warehouse)),
-    [locations, f.warehouse],
+    () => locations.filter((l) => l.is_active && l.organization_id === Number(organizationId) && !!f.warehouse && l.warehouse === f.warehouse),
+    [locations, f.warehouse, organizationId],
   );
 
   async function refresh() {

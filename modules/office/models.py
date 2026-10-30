@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Integer, Numeric, String, func
+from sqlalchemy import DateTime, Integer, Numeric, String, event, func, inspect
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.db.base import Base
@@ -30,6 +30,8 @@ class OfficeDoc(Base):
     docs_status: Mapped[str] = mapped_column(String(64), default="", server_default="")  # статус документов
     priority: Mapped[str] = mapped_column(String(32), default="Средний", server_default="Средний")
     owner: Mapped[str] = mapped_column(String(128), default="", server_default="")
+    # Verified creator identity, distinct from the editable display-only owner.
+    draft_owner_subject: Mapped[str | None] = mapped_column(String(200), nullable=True)
     stage: Mapped[str] = mapped_column(String(32), default="ready", server_default="ready")
     next_step: Mapped[str] = mapped_column(String(255), default="", server_default="")
     op_date: Mapped[str | None] = mapped_column(String(32))
@@ -49,6 +51,12 @@ class OfficeDoc(Base):
     overdue_days: Mapped[int] = mapped_column(Integer, default=0, server_default="0")          # дни просрочки оплаты
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+@event.listens_for(OfficeDoc, "before_update")
+def preserve_draft_owner(_mapper, _connection, target):
+    if inspect(target).attrs.draft_owner_subject.history.has_changes():
+        raise ValueError("Office draft owner is immutable")
 
 
 class LegalContract(Base):

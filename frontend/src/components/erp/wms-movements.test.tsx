@@ -46,9 +46,9 @@ const inRow = mv({ id: 1, sku_code: "6СТ-190", kind: "in", qty: 5, reason: "re
 const outRow = mv({ id: 2, sku_code: "6СТ-100", kind: "out", qty: 12, reason: "shipment", doc_ref: "" });
 
 const locations: WmsLocation[] = [
-  { id: 10, warehouse: "Главный", zone: "A", code: "01", title: "", is_active: true },
-  { id: 11, warehouse: "Главный", zone: "B", code: "99", title: "", is_active: false },
-  { id: 12, warehouse: "Второй", zone: "C", code: "07", title: "", is_active: true },
+  { id: 10, organization_id: 7, warehouse: "Главный", zone: "A", code: "01", title: "", is_active: true },
+  { id: 11, organization_id: 7, warehouse: "Главный", zone: "B", code: "99", title: "", is_active: false },
+  { id: 12, organization_id: 7, warehouse: "Второй", zone: "C", code: "07", title: "", is_active: true },
 ];
 
 const asMock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
@@ -62,6 +62,18 @@ beforeEach(() => {
 });
 
 describe("WmsMovements", () => {
+  it("offers only active cells in the explicitly selected company and exact warehouse", () => {
+    render(<WmsMovements organizations={[{ id: 7, name: "Учебная А" }, { id: 8, name: "Учебная Б" }]} initial={[]} locations={[...locations, { ...locations[0], id: 99, organization_id: 8, code: "FOREIGN" }]} />);
+    expect(screen.queryByRole("option", { name: /A · 01/ })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Юрлицо операции"), { target: { value: "7" } });
+    expect(screen.getByRole("option", { name: /A · 01/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /FOREIGN/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /B · 99/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /C · 07/ })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "" } });
+    expect(screen.queryByRole("option", { name: /A · 01/ })).not.toBeInTheDocument();
+  });
+
   it("направляет накладную поставщика в закупки и не даёт вручную создать приёмку", () => {
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={[]} />);
     expect(screen.getByRole("link", { name: /Накладные на поступление/ })).toHaveAttribute("href", "/erp/procurement/receipts");
@@ -166,6 +178,7 @@ describe("WmsMovements", () => {
 
   it("селект ячейки показывает только активные ячейки текущего склада", () => {
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={locations} />);
+    fireEvent.change(screen.getByLabelText("Юрлицо операции"), { target: { value: "7" } });
     // склад по умолчанию «Главный»: активная A·01 есть, неактивная B·99 и чужой склад C·07 — нет
     expect(screen.getByRole("option", { name: "A · 01" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "B · 99" })).not.toBeInTheDocument();
@@ -253,6 +266,8 @@ describe("WmsMovements", () => {
     fireEvent.change(screen.getByPlaceholderText("Код SKU*"), { target: { value: "6СТ-190" } });
     fireEvent.change(screen.getByPlaceholderText("Кол-во*"), { target: { value: "2" } });
 
+    fireEvent.change(screen.getByLabelText("Юрлицо операции"), { target: { value: "7" } });
+
     // селекты «Из ячейки» / «В ячейку» — оба содержат активную A·01 (id 10)
     const selects = screen.getAllByRole("combobox") as HTMLSelectElement[];
     const fromSel = selects.find((s) => s.textContent?.includes("Из ячейки")) as HTMLSelectElement;
@@ -260,7 +275,6 @@ describe("WmsMovements", () => {
     fireEvent.change(fromSel, { target: { value: "10" } });
     fireEvent.change(toSel, { target: { value: "10" } });
 
-    fireEvent.change(screen.getByLabelText("Юрлицо операции"), { target: { value: "7" } });
     fireEvent.click(screen.getByRole("button", { name: "Записать" }));
 
     await waitFor(() =>

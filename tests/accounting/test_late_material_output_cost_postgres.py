@@ -15,6 +15,7 @@ from modules.accounting.late_cost_receipts import (
 from modules.accounting.service import AccountingError
 from tests.accounting.test_late_cost_conversion import _data, _history, _policy
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
+from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 
 def prepared():
@@ -86,12 +87,56 @@ def test_pool_command_is_versioned_and_preserves_signed_output_amounts():
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("accounting_pg_revision", ["0150"], indirect=True)
+async def test_0151_and_0152_registered_empty_roundtrip(pg_factory):
+    import asyncio
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from sqlalchemy import text
+
+    async with pg_factory() as session:
+        target = session.bind.url.render_as_string(hide_password=False)
+        assert await session.scalar(text("SELECT version_num FROM alembic_version")) == "0150"
+        assert await session.scalar(text("SELECT to_regclass('accounting.late_material_package')")) is None
+
+    async def migrate(action, revision):
+        result = await asyncio.to_thread(
+            subprocess.run, [sys.executable, "-m", "alembic", action, revision],
+            env={**os.environ, "AIOS_DATABASE_URL": target, "AIOS_ENVIRONMENT": "dev"},
+            cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, result.stderr[-3000:]
+        async with pg_factory() as session:
+            assert await session.scalar(text("SELECT version_num FROM alembic_version")) == revision
+
+    signed = text("SELECT to_regprocedure('accounting.preview_output_cost_with_signed_wip(integer,integer,date,integer,jsonb,integer)')")
+    await migrate("upgrade", "0152")
+    async with pg_factory() as session:
+        assert await session.scalar(signed) is not None
+    # Follow the registered dependency order:0152 down,then0151 down.
+    await migrate("downgrade", "0150")
+    async with pg_factory() as session:
+        assert await session.scalar(text("SELECT to_regclass('accounting.late_material_package')")) is None
+        assert await session.scalar(signed) is None
+    await migrate("upgrade", "0152")
+    await migrate("downgrade", "0151")
+    async with pg_factory() as session:
+        assert await session.scalar(text("SELECT to_regclass('accounting.late_material_package')")) is not None
+        assert await session.scalar(signed) is None
+    await migrate("upgrade", "0152")
+    async with pg_factory() as session:
+        assert await session.scalar(signed) is not None
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize("dispose_half", [False, True])
 @pytest.mark.parametrize("delta_amount", ["2.00", "-2.00"])
-async def test_prospective_wip_matrix_matches_real_ledger_without_preview_writes(pg_factory, pg_book, dispose_half, delta_amount):
+async def test_prospective_wip_matrix_matches_real_ledger_without_preview_writes(pg_factory, pg_book, dispose_half, delta_amount, issuance_pg):
     import json
     from decimal import Decimal
-    from pathlib import Path
 
     from sqlalchemy import text
 
@@ -102,31 +147,26 @@ async def test_prospective_wip_matrix_matches_real_ledger_without_preview_writes
         prepare_output_transfer,
     )
     from modules.accounting.schemas import LineInput, PostingInput
+    from tests.accounting.test_inventory_allocation_cost_stream_postgres import (
+        accepted_production_outputs,
+    )
     from tests.accounting.test_production_output_transfer_postgres import (
-        SyntheticProduction,
         _seed_production_book,
         _seed_wip,
         transfer_input,
     )
-    from tests.accounting.test_zero_value_output_cost_postgres import run_migration
 
     policy_id = await _seed_production_book(pg_factory, pg_book)
     await _seed_wip(pg_factory, pg_book, policy_id, [("SHOP", "ORDER-42", "12.50")])
+    production, warehouse, documents, identities = await accepted_production_outputs(
+        issuance_pg[0], pg_factory, pg_book, same_lot=False, order_ids=(42,), lot_by_order={42: "LOT-1"})
     async with pg_factory() as session:
-        for path in sorted(Path("migrations/versions").glob("*.py")):
-            if "0140" <= path.name[:4] <= "0152":
-                await run_migration(session, path.name, "upgrade")
-        await run_migration(session, "0151_late_material_output_cost.py", "downgrade")
-        assert await session.scalar(text("SELECT to_regclass('accounting.late_material_package')")) is None
-        await run_migration(session, "0151_late_material_output_cost.py", "upgrade")
-        await run_migration(session, "0152_signed_prospective_wip.py", "downgrade")
-        await run_migration(session, "0152_signed_prospective_wip.py", "upgrade")
-        data = transfer_input(policy_id)
-        preview = await prepare_output_transfer(session, pg_book[0], "2026-10", data, SyntheticProduction(), object())
+        data = transfer_input(policy_id).model_copy(update={"output_document_ids": [documents[42]]})
+        preview = await prepare_output_transfer(session, pg_book[0], "2026-10", data, production, warehouse)
         row = await confirm_output_transfer(session, pg_book[0], "2026-10",
             ProductionOutputTransferConfirmInput.model_validate({**data.model_dump(mode="json"),
                 "basis_digest": preview["basis_digest"], "digest": preview["digest"]}), "tester",
-            production=SyntheticProduction(), warehouse_gateway=object())
+            production=production, warehouse_gateway=warehouse)
         await session.commit()
         if dispose_half:
             from modules.accounting.inventory_issues import confirm, prepare
@@ -135,7 +175,8 @@ async def test_prospective_wip_matrix_matches_real_ledger_without_preview_writes
             issue = InventoryIssueDocument(source="prospective-half-disposal", source_version=1,
                 document_date="2026-10-31", operation_date="2026-10-31", posting_date="2026-10-31",
                 policy_id=policy_id, account="43", warehouse="Main", sku="SYN-WIDGET", lot="LOT-1",
-                quantity="1", expense_account="90.4", expense_dimensions={}, explanation="Synthetic half disposal")
+                quantity="1", expense_account="90.4", expense_dimensions={}, explanation="Synthetic half disposal",
+                **identities)
             cost, posting = await prepare(session, pg_book[0], issue)
             await confirm(session, pg_book[0], issue, cost["basis_digest"], service.digest(posting), "tester")
             await session.commit()

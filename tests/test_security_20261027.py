@@ -147,7 +147,11 @@ async def test_training_owner_can_author_course(api, role):
 
 
 @pytest.mark.parametrize("role", ["finance", "assistant"])
-async def test_office_roles_keep_document_workflow(api, role):
+async def test_office_roles_keep_document_workflow(api, session, role):
+    username = f"synthetic-office-{role}"
+    session.add(User(username=username, full_name="Synthetic Office worker", role=role, status="active"))
+    await session.commit()
+    api.headers["X-User"] = username
     result = await api.post(
         "/office/docs", json={"title": "QA document"}, headers={"X-User-Roles": role}
     )

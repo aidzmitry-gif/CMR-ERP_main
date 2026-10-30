@@ -301,6 +301,9 @@ async def test_mapped_1c_document_uses_existing_postgres_receipt_preview(
     created = await api.post(receipt_root, json={"key": draft["key"], "document": draft["document"]})
     assert created.status_code == 201, created.text
     receipt_id = created.json()["id"]
+    rejected = await api.post(f"{receipt_root}/{receipt_id}/preview", json={**options, "expected_version": 1})
+    assert rejected.status_code == 422 and "Posting cannot precede" in rejected.text
+    options = {**options, "posting_date": max(draft["document"]["document_date"], draft["document"]["operation_date"])}
     preview = await api.post(
         f"{receipt_root}/{receipt_id}/preview",
         json={**options, "expected_version": 1},

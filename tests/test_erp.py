@@ -3,6 +3,10 @@
 
 import pytest_asyncio
 
+from modules.office.shipping_associations import (  # noqa: F401
+    OfficeInvoiceAssociation,
+    ShippingReviewAssignment,
+)
 from tests.reservation_source import event_context, invoice
 from tests.test_logistics_invoice_binding import exact as logistics_invoice  # noqa: F401
 
@@ -34,32 +38,65 @@ async def erp_organization(api):
     return response.json()["id"]
 
 
-async def test_procurement(api, erp_organization):
-    r = await api.post(
-        "/procurement/requests", json={"supplier": "ООО Поставщик", "item": "Болты", "qty": 100}
-    )
-    assert r.status_code == 201
-    assert r.json()["stage"] == "need"
-    assert r.json()["number"].startswith("ЗАК-")
-    items = (await api.get("/procurement/requests")).json()
-    assert any(i["item"] == "Болты" for i in items)
-    # доска воронки: стадии по порядку, заявка в первой колонке
-    board = (await api.get("/procurement/board")).json()
+async def test_procurement(api, session, erp_organization):
+    from datetime import date
+    from uuid import uuid4
+
+    from core.runtime.funnel import build_board
+    from modules.procurement import routes
+    from modules.procurement.models import PurchaseRequest
+    from modules.procurement.ownership import PurchaseOwnership
+    from modules.procurement.stages import STAGES
+
+    path = f"/procurement/organizations/{erp_organization}/requests"
+    headers = {"X-Expected-Principal": "erp-test-owner"}
+    command = {"request_key": str(uuid4()),
+               "document": {"supplier": "ООО Поставщик", "item": "Болты", "qty": 100, "amount": "0.00"},
+               "ownership_evidence": "Synthetic ERP request belongs to this test company"}
+    created = await api.post(path, json=command, headers=headers)
+    assert created.status_code == 201, created.text
+    receipt = created.json()
+    assert receipt["stage"] == "need"
+    assert receipt["number"].startswith(f"ЗАК-{date.today().year}-")
+    owner = await session.get(PurchaseOwnership, receipt["ownership_id"])
+    assert (owner.organization_id, owner.kind, owner.source_id) == (erp_organization, "request", receipt["request_id"])
+
+    listing_path = f"/procurement/organizations/{erp_organization}/owned-sources?kind=request"
+    listing = await api.get(listing_path)
+    assert listing.status_code == 200, listing.text
+    items = listing.json()["items"]
+    item = next(i for i in items if i["id"] == receipt["request_id"])
+    assert item["item"] == "Болты" and item["quantity"] == "100" and item["stage"] == "need"
+    # Common reads stay retired; a company-scoped success must not reopen them.
+    assert (await api.get("/procurement/requests")).status_code == 410
+    assert (await api.get("/procurement/board")).status_code == 410
+    # Retain the existing card/stage projection assertions using the owned row.
+    row = await session.get(PurchaseRequest, receipt["request_id"])
+    board = build_board(STAGES, [row], routes._to_card).model_dump()
     assert [s["id"] for s in board["stages"]][0] == "need"
     assert sum(s["count"] for s in board["stages"]) >= 1
-    # балл поставщика на карточке — реальный (по supplier_id); без привязки поставщика — пусто
-    ownership = await api.post(
-        f"/procurement/organizations/{erp_organization}/purchase-ownership",
-        json={"kind": "request", "source_id": r.json()["id"],
-              "evidence": "Synthetic ERP request belongs to this test company"},
-    )
-    assert ownership.status_code == 201, ownership.text
-    moved = await api.patch(f"/procurement/requests/{r.json()['id']}", json={"stage": "nego"})
-    assert moved.status_code == 200, moved.text
-    assert moved.json()["stage"] == "nego"
-    board2 = (await api.get("/procurement/board")).json()
+
+    stage_path = path + f'/{receipt["request_id"]}/stage'
+    assert (await api.patch(stage_path, json={"expected_stage": "need", "stage": "nego"}, headers=headers)).status_code == 409
+    for expected, target in (("need", "sourcing"), ("sourcing", "nego")):
+        moved = await api.patch(stage_path, json={"expected_stage": expected, "stage": target}, headers=headers)
+        assert moved.status_code == 200, moved.text
+        assert moved.json()["stage"] == target
+    row = await session.get(PurchaseRequest, receipt["request_id"], populate_existing=True)
+    board2 = build_board(STAGES, [row], routes._to_card).model_dump()
     nego = next(s for s in board2["stages"] if s["id"] == "nego")
-    assert nego["cards"][0]["score"] == ""  # supplier_id не задан → балла нет (не заглушка «8.7»)
+    assert nego["count"] == 1 and nego["cards"][0]["id"] == receipt["request_id"]
+    assert nego["cards"][0]["score"] == ""  # no supplier_id means no invented supplier score
+    current = await api.get(listing_path)
+    assert current.status_code == 200, current.text
+    assert next(i for i in current.json()["items"] if i["id"] == receipt["request_id"])["stage"] == "nego"
+    replay = await api.post(path, json=command, headers=headers)
+    assert replay.status_code == 201 and replay.json() == receipt
+    other = await api.post("/accounting/organizations", json={"name": "Other synthetic ERP company", "unp": "999999993"})
+    assert other.status_code == 201, other.text
+    other_listing = await api.get(f'/procurement/organizations/{other.json()["id"]}/owned-sources?kind=request')
+    assert other_listing.status_code == 200, other_listing.text
+    assert all(i["id"] != receipt["request_id"] for i in other_listing.json()["items"])
 
 
 async def test_production(api):
@@ -71,27 +108,62 @@ async def test_production(api):
     assert [s["id"] for s in board["stages"]][0] == "queue"
 
 
-async def test_wms(api, erp_organization):
-    r = await api.post("/wms/movements", json={"organization_id": erp_organization, "sku_code": "AKB-60", "kind": "in", "qty": 50})
-    assert r.status_code == 201
-    movements = (await api.get("/wms/movements")).json()
+async def test_wms(api, session, erp_organization):
+    from decimal import Decimal
+
+    from sqlalchemy import func, select
+
+    from core.domain.models import User
+    from modules.wms.models import WarehouseOp
+
+    # Explicit company/warehouse opening movement, not a supplier primary receipt.
+    r = await api.post("/wms/movements", json={"organization_id": erp_organization, "warehouse": "Минск",
+                        "sku_code": "AKB-60", "kind": "in", "qty": 50, "reason": "opening"})
+    assert r.status_code == 201, r.text
+    assert (r.json()["organization_id"], r.json()["warehouse"], r.json()["qty"]) == (erp_organization, "Минск", 50.0)
+    movements = (await api.get(f"/wms/movements?organization_id={erp_organization}&warehouse=Минск")).json()
     assert movements[0]["sku_code"] == "AKB-60" and movements[0]["kind"] == "in"
-    # воронка складских операций
+    # The retired unscoped writer cannot create a pretend warehouse operation.
+    assert await session.scalar(select(func.count()).select_from(WarehouseOp)) == 0
     op = await api.post("/wms/ops", json={"counterparty": "ООО Поставка", "title": "Металл", "items_count": 12, "amount": 500000})
-    assert op.status_code == 201 and op.json()["stage"] == "inbound"
-    moved = await api.patch(f"/wms/ops/{op.json()['id']}", json={"stage": "receiving"})
-    assert moved.json()["stage"] == "receiving"
-    assert len((await api.get("/wms/ops")).json()) >= 1
-    assert (await api.patch("/wms/ops/999999", json={"stage": "qc"})).status_code == 404
+    assert op.status_code == 409, op.text
+    assert await session.scalar(select(func.count()).select_from(WarehouseOp)) == 0
+    # Historical read compatibility has explicit legacy fixtures. Actual QC,
+    # acceptance and putaway/pick remain covered by unchanged test_wms_tasks.
+    waiting = WarehouseOp(number="ОП-LEGACY-1", counterparty="ООО Поставка", title="Металл",
+                          items_count=12, amount=Decimal("500000.00"), stage="inbound")
+    receiving = WarehouseOp(number="ОП-LEGACY-2", counterparty="ООО Поставка", title="Металл",
+                            items_count=12, amount=Decimal("500000.00"), stage="receiving")
+    session.add_all([waiting, receiving])
+    await session.commit()
+    moved = await api.patch(f"/wms/ops/{waiting.id}", json={"stage": "receiving"})
+    assert moved.status_code == 409, moved.text
+    assert (await api.patch("/wms/ops/999999", json={"stage": "qc"})).status_code == 409
+    await session.refresh(waiting)
+    await session.refresh(receiving)
+    assert waiting.stage == "inbound" and receiving.stage == "receiving"
+    assert waiting.items_count == receiving.items_count == 12
+    assert waiting.amount == receiving.amount == Decimal("500000.00")
+    assert await session.scalar(select(func.count()).select_from(WarehouseOp)) == 2
+    historical = (await api.get("/wms/ops")).json()
+    assert len(historical) >= 1
+    assert {row["id"] for row in historical} == {waiting.id, receiving.id}
     board = (await api.get("/wms/board")).json()
     assert [s["id"] for s in board["stages"]][0] == "inbound"
-    # на приёмке карточка получает soft-панель пересчёта и кнопку-действие
+    inbound = next(s for s in board["stages"] if s["id"] == "inbound")
+    assert inbound["count"] == 1 and inbound["cards"][0]["id"] == waiting.id
+    # Retain historical receiving-card details/action without claiming real QC.
     recv = next(s for s in board["stages"] if s["id"] == "receiving")
+    assert recv["count"] == 1 and recv["cards"][0]["id"] == receiving.id
     assert recv["cards"][0]["details"] and recv["cards"][0]["action"] == "Завершить приёмку"
     # RBAC воронки операций: чтение — wms.read (логистика ок), запись — wms.count (логистика 403)
-    assert (await api.get("/wms/ops", headers={"X-User-Roles": "logistics"})).status_code == 200
+    session.add(User(username="erp-history-logistician", full_name="Synthetic history reader", role="logistics", status="active"))
+    await session.commit()
+    logistics_headers = {"X-User": "erp-history-logistician", "X-User-Roles": "logistics"}
+    assert (await api.get("/wms/ops", headers=logistics_headers)).status_code == 200
     assert (await api.post("/wms/ops", json={"title": "x"},
-                           headers={"X-User-Roles": "logistics"})).status_code == 403
+                           headers=logistics_headers)).status_code == 403
+    assert await session.scalar(select(func.count()).select_from(WarehouseOp)) == 2
 
 
 async def test_wms_stock_mirror(api, session):
@@ -164,10 +236,26 @@ async def test_wms_inventory(api, session, erp_organization):
     assert reedit.status_code == 409
 
     # RBAC: пересчёт (wms.count) только у склада; логистика (только wms.read) — 403
+    from core.domain.models import User
+
+    session.add_all([
+        User(username="erp-test-counter", full_name="Synthetic warehouse counter", role="warehouse", status="active"),
+        User(username="erp-test-logistician", full_name="Synthetic inventory reader", role="logistics", status="active"),
+    ])
+    await session.commit()
+    warehouse_headers = {"X-User": "erp-test-counter", "X-User-Roles": "warehouse"}
+    logistics_headers = {"X-User": "erp-test-logistician", "X-User-Roles": "logistics"}
+    # A module role alone does not authorize this company's journal.
+    assert (await api.post("/wms/inventory", json=payload, headers=warehouse_headers)).status_code == 403
+    for subject in ("erp-test-counter", "erp-test-logistician"):
+        grant = await api.put(f"/accounting/organizations/{erp_organization}/members",
+                              json={"subject": subject, "role": "reader"})
+        assert grant.status_code == 200, grant.text
+    warehouse_count = await api.post("/wms/inventory", json=payload,
+                                     headers=warehouse_headers)
+    assert warehouse_count.status_code == 201, warehouse_count.text
     assert (await api.post("/wms/inventory", json=payload,
-                           headers={"X-User-Roles": "warehouse"})).status_code == 201
-    assert (await api.post("/wms/inventory", json=payload,
-                           headers={"X-User-Roles": "logistics"})).status_code == 403
+                           headers=logistics_headers)).status_code == 403
 
 
 async def test_wms_operational(api, session, erp_organization):
@@ -390,6 +478,11 @@ async def test_wms_outbound(api, session, erp_organization):
     """Резерв из sales создаёт pick-задачи; упаковка (/pack) нейтральна для остатка."""
 
     from modules.wms.events import on_stock_reserved
+    from modules.wms.models import WarehouseDirectory
+
+    session.add(WarehouseDirectory(organization_id=erp_organization, name="Минск",
+        title="Synthetic outbound warehouse", wms_enabled=True, created_by="erp-test-owner"))
+    await session.commit()
 
     await invoice(session, 5, [{"sku_code": "ROLL-3", "qty": "10"}], erp_organization)
     await on_stock_reserved(
@@ -744,7 +837,12 @@ async def test_hr(api):
     assert [s["id"] for s in board["stages"]] == ["new", "invite", "tech", "offer", "hired"]
 
 
-async def test_office(api):
+async def test_office(api, session):
+    from core.domain.models import User
+
+    session.add(User(username="office-erp-test", full_name="Synthetic director", role="director", status="active"))
+    await session.commit()
+    api.headers["X-User"] = "office-erp-test"
     r = await api.post("/office/docs", json={"company": "ООО Альфа", "title": "Поставка", "amount": 850000})
     assert r.status_code == 201 and r.json()["stage"] == "ready"
     assert len((await api.get("/office/docs")).json()) >= 1
@@ -752,7 +850,7 @@ async def test_office(api):
     assert moved.json()["stage"] == "paid"
     assert (await api.patch("/office/docs/999999", json={"stage": "paid"})).status_code == 404
     board = (await api.get("/office/board")).json()
-    assert [s["id"] for s in board["stages"]][0] == "ready"
+    assert [s["id"] for s in board["stages"]][:2] == ["draft", "ready"]
     assert sum(s["count"] for s in board["stages"]) >= 1
 
 

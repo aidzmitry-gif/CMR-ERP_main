@@ -694,7 +694,7 @@ async def test_decide_document_rbac_enforced(session, api, _sales_contract_denia
     assert denied.status_code == 403
 
 
-async def test_order_reserves_stock(session, api):
+async def test_order_reserves_stock(session, api, _sales_db_parties):
     from sqlalchemy import select
 
     from core.domain.models import OutboxEvent, Sku

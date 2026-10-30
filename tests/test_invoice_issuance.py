@@ -128,14 +128,14 @@ async def create(api, ids, cmd):
     return await api.post(f"/sales/deals/{ids['deal']}/documents", json={"kind": "invoice", **cmd})
 
 
-async def erp_money_flow(api, session, reserve_mode="stock"):
+async def erp_money_flow(api, session, reserve_mode="stock", *, wms_enabled=False):
     """Actual issued invoice, posted bank entries and accountant allocations."""
     from datetime import date
 
     from modules.accounting.models import Account, Policy
     from tests.accounting.test_invoice_settlements import bank
 
-    ids, base = await seed(api, session)
+    ids, base = await seed(api, session, wms_enabled=wms_enabled)
     if reserve_mode == "stock":
         cmd, _ = await command(api, ids, base)
     else:

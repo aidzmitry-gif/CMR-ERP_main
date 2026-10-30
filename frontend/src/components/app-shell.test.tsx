@@ -4,9 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ fetchAccess: vi.fn(), currentRole: vi.fn() }));
 
+vi.mock("@/components/worktime-presence", () => ({
+  WorktimePresence: ({ enabled }: { enabled: boolean }) => <span data-testid="worktime-presence" data-enabled={String(enabled)} />,
+}));
+
 vi.mock("@/components/sidebar", () => ({
-  Sidebar: ({ allowedSlugs, roleTitle }: { allowedSlugs: string[] | null; roleTitle: string }) => (
-    <div data-testid="sidebar" data-allowed={JSON.stringify(allowedSlugs)} data-role-title={roleTitle} />
+  Sidebar: ({ allowedSlugs, roleTitle, accessUnavailable }: { allowedSlugs: string[] | null; roleTitle: string; accessUnavailable?: boolean }) => (
+    <div data-testid="sidebar" data-allowed={JSON.stringify(allowedSlugs)} data-role-title={roleTitle} data-access-unavailable={String(accessUnavailable)} />
   ),
 }));
 vi.mock("@/components/topbar", () => ({
@@ -70,6 +74,27 @@ afterEach(() => {
 });
 
 describe("AppShell", () => {
+  it("starts presence only after verified employee access", async () => {
+    await renderCallGate(null);
+    expect(screen.getByTestId("worktime-presence")).toHaveAttribute("data-enabled", "false");
+    await renderCallGate(accessFor(["sales"]));
+    expect(screen.getByTestId("worktime-presence")).toHaveAttribute("data-enabled", "true");
+    await renderCallGate(accessFor(["onboarding"], validMatrix({ onboarding: [] })));
+    expect(screen.getByTestId("worktime-presence")).toHaveAttribute("data-enabled", "false");
+  });
+  it.each([
+    ["unavailable response", null, true, [], false],
+    ["unverified roles", accessFor([]), true, [], false],
+    ["malformed role matrix", accessFor(["sales"], validMatrix({ sales: ["crm", 3] })), true, [], false],
+    ["verified empty modules", accessFor(["sales"], validMatrix({ sales: [] })), false, [], false],
+    ["verified CRM modules", accessFor(["sales"]), false, ["crm"], true],
+  ])("distinguishes navigation state: %s", async (_name, access, unavailable, allowed, callsEnabled) => {
+    const gate = await renderCallGate(access);
+    expect(screen.getByTestId("sidebar")).toHaveAttribute("data-access-unavailable", String(unavailable));
+    expect(screen.getByTestId("sidebar")).toHaveAttribute("data-allowed", JSON.stringify(allowed));
+    expect(gate).toHaveAttribute("data-enabled", String(callsEnabled));
+  });
+
   it("рендерит сайдбар, топбар с крошками и контент (вошедший пользователь)", async () => {
     // AppShell — async server component: вызываем как функцию и рендерим результат
     const ui = await AppShell({ crumbs: ["CRM", "Лиды"], children: <div>содержимое страницы</div> });

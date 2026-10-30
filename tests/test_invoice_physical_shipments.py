@@ -677,7 +677,7 @@ async def test_actual_event_and_api_receipt_after_unknown_response(api, session,
     assert await counts(session) == [1, 1, 3, 2]
 
 
-async def test_confirmed_inventory_records_shortage_preserves_reserve_and_blocks_fulfillment(api, session):
+async def test_confirmed_inventory_shortage_allows_available_part_and_protects_other_reserves(api, session):
     org, facts = await prepared(api, session)
     created = await api.post("/wms/inventory", json={"organization_id": org, "warehouse": "W",
         "expected_source": "wms_physical", "source_evidence": "Synthetic complete journal", "journal_complete": True})
@@ -697,10 +697,47 @@ async def test_confirmed_inventory_records_shortage_preserves_reserve_and_blocks
     assert available["rows"] == [{"sku_code": "A", "warehouse": "W", "physical": "4.00",
                                   "prohibit_negative_stock": True, "reserved": "5.00", "free": "-1.00"}]
     body = await request(api, org, facts)
-    denied = await api.post(endpoint(org), json=body)
-    assert denied.status_code == 409 and "physical_reserves_exceed_stock" in denied.text
+    partial = await api.post(endpoint(org), json=body)
+    assert partial.status_code == 201, partial.text
+    after_partial = await counts(session)
+    assert after_partial == [1, 1, 3, 3]
+    repeated_partial = await api.post(endpoint(org), json=body)
+    assert repeated_partial.status_code == 201, repeated_partial.text
+    assert repeated_partial.json() == partial.json()
+    assert await counts(session) == after_partial
+    available = await invoice_availability(session, org, ["A"])
+    assert available["rows"][0]["physical"] == "3.00"
+    assert available["rows"][0]["reserved"] == "4.00"
+    other_source = "synthetic-other-reserve"
+    session.add(ReservationVersion(organization_id=org, source=other_source, version=1,
+        sku_code="A", warehouse="W", qty=Decimal("1"),
+        evidence="Synthetic prior reservation of another document", actor="allocator"))
+    await session.commit()
+    before_denied = await counts(session)
+    excess = await request(api, org, facts, [{"line_no": 2, "warehouse": "W", "qty": "3.00"}])
+    denied = await api.post(endpoint(org), json=excess)
+    assert denied.status_code == 409, denied.text
+    assert denied.json()["detail"]["code"] == "stock_shortage"
+    assert denied.json()["detail"]["reason"] == "reserved_by_other_documents"
+    assert denied.json()["detail"]["available"] == "2.00"
     await session.rollback()
-    assert await counts(session) == [0, 0, 2, 2]
+    assert await counts(session) == before_denied
+    allowed = await request(api, org, facts, [{"line_no": 2, "warehouse": "W", "qty": "2.00"}])
+    shipped = await api.post(endpoint(org), json=allowed)
+    assert shipped.status_code == 201, shipped.text
+    assert await counts(session) == [2, 2, 5, 4]
+    available = await invoice_availability(session, org, ["A"])
+    assert available["rows"][0]["physical"] == "1.00"
+    assert available["rows"][0]["reserved"] == "3.00"
+    assert await session.scalar(select(ReservationVersion.qty).where(ReservationVersion.source == other_source)) == Decimal("1")
+    blocked = await request(api, org, facts, [{"line_no": 1, "warehouse": "W", "qty": "1.00"}])
+    protected = await api.post(endpoint(org), json=blocked)
+    assert protected.status_code == 409, protected.text
+    assert protected.json()["detail"]["reason"] == "reserved_by_other_documents"
+    assert protected.json()["detail"]["available"] == "0.00"
+    await session.rollback()
+    assert await counts(session) == [2, 2, 5, 4]
+
 
 
 @pytest.mark.parametrize("change", ["confirmation", "stale", "access", "uncounted"])

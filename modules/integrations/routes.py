@@ -274,6 +274,7 @@ async def enqueue_out(
 
 @router.get("/1c/stock", response_model=list[StockOut])
 async def stock(
+    core: Core = Depends(get_core),
     session: AsyncSession = Depends(get_session),
     _: object = Depends(require_permission("sales.deal.read")),
 ):
@@ -283,6 +284,11 @@ async def stock(
     что у карточки SKU (core system_routes). Префикс ``/integrations`` не покрыт middleware
     (пакет без UI-слага), поэтому защита — пообъектно на роуте, иначе аноним читает себес/цены.
     """
+    if getattr(core.services.onec, "stock_source_available", False) is not True:
+        raise HTTPException(status_code=503, detail={
+            "code": "onec_stock_source_unavailable",
+            "message": "Нет подтверждённого источника складских остатков 1С",
+        })
     return (await session.execute(select(StockItem).order_by(StockItem.sku_code))).scalars().all()
 
 

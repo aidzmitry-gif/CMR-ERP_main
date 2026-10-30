@@ -8,9 +8,9 @@ from typing import Any, Protocol
 class WmsReservationGateway(Protocol):
     async def production_receipt_status(self, session, organization_id: int, event_id: int, source: dict) -> dict: ...
 
-    async def receiving_places(self, session, query: str) -> list[dict]: ...
+    async def receiving_places(self, session, organization_id: int, query: str) -> list[dict]: ...
 
-    async def receiving_place(self, session, warehouse: str, location_id: int) -> dict: ...
+    async def receiving_place(self, session, organization_id: int, warehouse: str, location_id: int) -> dict: ...
 
     async def receipt_reconciliation(self, session: Any, organization_id: int, source: dict) -> dict:
         """Read explicit primary bindings and QC quantities for an authorized, locked book."""
@@ -113,7 +113,7 @@ class VerifiedNoShipment:
     document_id: int
     document_version: int
     content_sha256: str
-    reservation_digest: str
+    reservation_digest: str | None
     review_id: str
     review_digest: str
     reviewed_by: str

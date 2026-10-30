@@ -9,9 +9,10 @@ from tests.accounting.test_postgres import pg_factory  # noqa: F401
 async def test_late_cost_receipt_guards_are_installed_and_reject_unbound_history(pg_factory):
     async with pg_factory() as session:
         names = set((await session.scalars(text("SELECT tgname FROM pg_trigger WHERE tgrelid='accounting.late_cost_receipt'::regclass AND NOT tgisinternal"))).all())
-        assert names == {"immutable_late_cost_receipt", "guard_late_cost_receipt", "complete_late_cost_receipt"}
+        assert names == {"immutable_late_cost_receipt", "guard_late_cost_receipt",
+                         "complete_late_cost_receipt", "complete_material_receipt"}
     for statement in ["UPDATE accounting.late_cost_receipt SET actor='other'",
-                      "DELETE FROM accounting.late_cost_receipt", "TRUNCATE accounting.late_cost_receipt"]:
+                      "DELETE FROM accounting.late_cost_receipt", "TRUNCATE accounting.late_cost_receipt CASCADE"]:
         async with pg_factory() as session:
             with pytest.raises(DBAPIError, match="immutable"):
                 await session.execute(text(statement))

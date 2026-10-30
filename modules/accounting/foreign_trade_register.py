@@ -231,7 +231,7 @@ async def confirm_register(session, org_id: int, data: ForeignTradeRegisterConfi
     ))
     if existing_request is not None:
         if (existing_request.digest != data.digest or existing_request.entry_id != data.entry_id
-                or existing_request.line_id != data.line_id):
+                or existing_request.line_id != data.line_id or existing_request.command != data.model_dump(mode="json")):
             raise service.AccountingError("Trade register request key was reused with different content")
         return existing_request
     existing_line = await session.scalar(select(ForeignTradeRegisterEntry).where(
@@ -240,7 +240,7 @@ async def confirm_register(session, org_id: int, data: ForeignTradeRegisterConfi
         ForeignTradeRegisterEntry.line_id == data.line_id,
     ))
     if existing_line is not None:
-        if existing_line.digest != data.digest:
+        if existing_line.digest != data.digest or existing_line.command != data.model_dump(mode="json"):
             raise service.AccountingError("The source trade line is already registered with different content")
         return existing_line
     prepared = await prepare_register(session, org_id, data)

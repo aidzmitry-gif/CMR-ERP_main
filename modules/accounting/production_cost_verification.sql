@@ -4,7 +4,7 @@ CREATE OR REPLACE FUNCTION accounting.verify_production_cost_review(
   reviewed jsonb, review_command jsonb, excluded_entries integer[], allow_empty boolean DEFAULT false
 ) RETURNS jsonb
 LANGUAGE plpgsql AS $$
-DECLARE p accounting.policy%ROWTYPE; settings jsonb; classes jsonb; bindings jsonb; saved jsonb;
+DECLARE p accounting.policy%ROWTYPE; settings jsonb; saved_settings jsonb; classes jsonb; bindings jsonb; saved jsonb;
   actual_sources jsonb; actual_ids jsonb; classified_ids jsonb; expected_matrix jsonb;
   expected_balances jsonb; saved_balances jsonb; expected_allocations jsonb; saved_allocations jsonb;
   first_day date; last_day date; item jsonb; saved_order jsonb; order_row production.production_order%ROWTYPE;
@@ -14,19 +14,26 @@ BEGIN
   last_day := (first_day + interval '1 month - 1 day')::date;
   SELECT * INTO p FROM accounting.policy WHERE organization_id=book AND effective_from<=last_day
     ORDER BY effective_from DESC LIMIT 1;
-  -- The API validates/stores a typed policy, while the optional finished-goods
-  -- field may be omitted from older JSON rows. Rebuild the canonical shape
-  -- used by the Python source snapshot before comparing it with the review.
+  -- Rebuild the complete typed policy shape, including optional account roles.
+  -- Only legacy omission of a genuinely absent material role is compatible;
+  -- saved JSON and its digests remain immutable.
   settings := jsonb_build_object(
     'overhead_accounts', p.production_costing::jsonb->'overhead_accounts',
     'wip_account', p.production_costing::jsonb->>'wip_account',
     'finished_goods_account', p.production_costing::jsonb->>'finished_goods_account',
+    'material_inventory_account', p.production_costing::jsonb->>'material_inventory_account',
     'pool_dimensions', p.production_costing::jsonb->'pool_dimensions',
     'order_dimension', p.production_costing::jsonb->>'order_dimension',
     'rounding', p.production_costing::jsonb->>'rounding',
     'reference', p.production_costing::jsonb->>'reference'
   );
   saved := reviewed->'snapshot'->'source'->'snapshot';
+  saved_settings := saved->'settings';
+  IF jsonb_typeof(saved_settings) = 'object'
+    AND NOT (saved_settings ? 'material_inventory_account')
+    AND p.production_costing::jsonb->>'material_inventory_account' IS NULL THEN
+    saved_settings := saved_settings || jsonb_build_object('material_inventory_account', NULL);
+  END IF;
   classes := review_command->'classifications';
   bindings := review_command->'orders';
   IF p.id IS DISTINCT FROM review_policy OR p.effective_from>first_day OR settings IS NULL
@@ -36,7 +43,7 @@ BEGIN
     OR settings->>'rounding' IS DISTINCT FROM 'largest_remainder_cent'
     OR settings->>'order_dimension' IS DISTINCT FROM 'order'
     OR settings->'pool_dimensions' NOT IN ('[]'::jsonb,'["department"]'::jsonb)
-    OR saved->'settings' IS DISTINCT FROM settings
+    OR saved_settings IS DISTINCT FROM settings
     OR saved->>'organization_id' IS DISTINCT FROM book::text
     OR saved->>'month' IS DISTINCT FROM review_month OR saved->>'policy_id' IS DISTINCT FROM p.id::text
     OR reviewed->'snapshot'->>'organization_id' IS DISTINCT FROM book::text

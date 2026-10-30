@@ -6,7 +6,7 @@ from tests.test_invoice_late_reservation import late_reservation_flow
 async def test_pg_later_reservation(issuance_pg):  # noqa: F811
     api, factory = issuance_pg
     async with factory() as session:
-        ids, doc_id, digest = await late_reservation_flow(api, session, concurrent=True)
+        ids, doc_id, digest = await late_reservation_flow(api, session, concurrent=True, wms_enabled=True)
     from sqlalchemy import func, select
 
     from core.services.eventbus import OutboxEventBus

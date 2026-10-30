@@ -53,6 +53,7 @@ export interface LossReason {
 export interface Stage {
   id: string;
   title: string;
+  description?: string;
   color: string;
   count: number;
   sum: number;

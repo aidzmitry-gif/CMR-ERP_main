@@ -40,6 +40,20 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("DealStageEditor", () => {
+  it("сохраняет и очищает многострочное описание стадии", async () => {
+    (api.updateStage as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    mockLoad([stage({ description: "Прежний текст" })]);
+    render(<DealStageEditor />);
+    const description = await screen.findByRole("textbox", { name: "Описание стадии «Успех»" });
+    fireEvent.change(description, { target: { value: "Инструкция\nВторая строка" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(api.updateStage).toHaveBeenCalledWith("won", expect.objectContaining({ description: "Инструкция\nВторая строка" })));
+    const reloaded = await screen.findByRole("textbox", { name: "Описание стадии «Успех»" });
+    fireEvent.change(reloaded, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(api.updateStage).toHaveBeenLastCalledWith("won", expect.objectContaining({ description: "" })));
+  });
+
   it("показывает индикатор загрузки до первого ответа, затем убирает его", async () => {
     // fetch, который никогда не резолвится → состояние остаётся loading
     vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));

@@ -16,6 +16,7 @@ type RequestRow = {
   planned_amount: string;
   due_date: string | null;
   stage: string;
+  origin?: string;
 };
 type OrderRow = {
   id: number;
@@ -44,6 +45,7 @@ type Card = {
   href: string;
   action?: { requestId: number; stage: "need" | "sourcing" | "nego" | "analysis" };
   note?: string;
+  origin?: string;
 };
 
 const prefix = (org: number) => `/api/procurement/organizations/${org}`;
@@ -124,6 +126,7 @@ function cardsFor(org: number, requests: RequestRow[], orders: OrderRow[], chain
       meta: `${request.supplier || "Поставщик не указан"} · ${request.quantity} шт. · ${request.planned_amount}`,
       href: stage === "approval" ? `/erp/procurement/orders?org=${org}&request=${request.id}` : `/erp/procurement/planning?org=${org}`,
       action,
+      origin: request.origin,
       note: request.due_date ? `Плановая дата: ${request.due_date}` : undefined,
     });
   }
@@ -276,7 +279,7 @@ function CompanyKanban({ org }: { org: number }) {
     <div className="flex flex-wrap gap-3"><Button disabled={busy || !identity} variant="secondary" onClick={() => run(refresh)}>Обновить канбан</Button><Link className="self-center text-accent underline" href={`/erp/procurement/planning?org=${org}`}>Открыть план закупок</Link><Link className="self-center text-accent underline" href={`/erp/procurement/receipts?org=${org}`}>Открыть накладные на поступление</Link></div>
     <div className="grid auto-cols-[minmax(252px,1fr)] grid-flow-col gap-3 overflow-x-auto pb-3" aria-label="Канбан закупок">
       {(Object.keys(stageTitles) as StageId[]).map(stage => <section key={stage} aria-label={`Колонка ${stageTitles[stage]}`} className="min-h-[250px] space-y-3 rounded-xl border border-line bg-sunken/40 p-3"><header className="flex items-center justify-between gap-2"><h2 className="font-semibold">{stageTitles[stage]}</h2><span className="rounded-full bg-surface px-2 py-0.5 text-xs text-muted">{cards.filter(card => card.stage === stage).length}</span></header>
-        {cards.filter(card => card.stage === stage).map(card => <article key={card.id} className="space-y-2 rounded-lg border border-line bg-surface p-3 shadow-sm"><Link className="block font-medium text-accent underline" href={card.href}>{card.title}</Link><p className="text-sm">{card.subtitle}</p><p className="text-xs text-muted">{card.meta}</p>{card.note && <p className="text-xs text-muted">{card.note}</p>}{card.action && <Button size="sm" disabled={busy || !identity?.can_manage} onClick={() => advance(card.action!)}>Далее: {stageTitles[nextRequestStage[card.action.stage]]}</Button>}</article>)}
+        {cards.filter(card => card.stage === stage).map(card => <article key={card.id} className="space-y-2 rounded-lg border border-line bg-surface p-3 shadow-sm"><Link className="block font-medium text-accent underline" href={card.href}>{card.title}</Link><p className="text-sm">{card.subtitle}</p>{card.origin === "deficit" && <p className="inline-block rounded bg-accent/10 px-2 py-1 text-xs">Авто: дефицит склада</p>}<p className="text-xs text-muted">{card.meta}</p>{card.note && <p className="text-xs text-muted">{card.note}</p>}{card.action && <Button size="sm" disabled={busy || !identity?.can_manage} onClick={() => advance(card.action!)}>Далее: {stageTitles[nextRequestStage[card.action.stage]]}</Button>}</article>)}
         {!cards.some(card => card.stage === stage) && <p className="text-sm text-muted">Нет документов на этом этапе.</p>}
       </section>)}
     </div>

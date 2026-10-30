@@ -1,12 +1,13 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Мокаем ТОЛЬКО сетевой fetchLocations; чистые хелперы (locationLabel) оставляем настоящими.
+// Мокаем ТОЛЬКО сетевой fetchLocation; чистые хелперы (locationLabel) оставляем настоящими.
 vi.mock("@/lib/wms-ops", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/wms-ops")>();
   return {
     ...actual,
-    fetchLocations: vi.fn().mockResolvedValue([]),
+    fetchLocation: vi.fn(),
+    fetchLocationOrganizations: vi.fn(),
   };
 });
 
@@ -17,18 +18,19 @@ import type { WmsLocation } from "@/lib/wms-ops";
 const asMock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
 const locations: WmsLocation[] = [
-  { id: 10, warehouse: "Главный", zone: "A", code: "A-01", title: "Верхняя полка", is_active: true },
-  { id: 11, warehouse: "Второй", zone: "", code: "ЯЧ-99", title: "", is_active: true },
+  { id: 10, organization_id: 7, warehouse: "Главный", zone: "A", code: "A-01", title: "Верхняя полка", is_active: true },
+  { id: 11, organization_id: 7, warehouse: "Второй", zone: "", code: "ЯЧ-99", title: "", is_active: true },
 ];
 
 beforeEach(() => {
   vi.clearAllMocks();
-  asMock(wms.fetchLocations).mockResolvedValue(locations);
+  asMock(wms.fetchLocation).mockImplementation(async (id: number) => locations.find((row) => row.id === id) ?? null);
+  asMock(wms.fetchLocationOrganizations).mockResolvedValue([{ id: 7, name: "Учебная компания" }]);
 });
 
 describe("WmsLocationLabel", () => {
-  it("показывает индикатор загрузки до ответа fetchLocations", () => {
-    asMock(wms.fetchLocations).mockReturnValue(new Promise(() => {}));
+  it("показывает индикатор загрузки до ответа fetchLocation", () => {
+    asMock(wms.fetchLocation).mockReturnValue(new Promise(() => {}));
     render(<WmsLocationLabel id={10} />);
     expect(screen.getByText("Загрузка…")).toBeInTheDocument();
   });
@@ -46,6 +48,7 @@ describe("WmsLocationLabel", () => {
     expect(screen.getByRole("img", { name: "Штрихкод A-01" })).toBeInTheDocument();
     expect(screen.getByText("A-01")).toBeInTheDocument();
     expect(screen.getByText("Верхняя полка")).toBeInTheDocument();
+    expect(screen.getByText("Учебная компания")).toBeInTheDocument();
   });
 
   it("не рендерит title, если он пустой", async () => {
@@ -74,7 +77,42 @@ describe("WmsLocationLabel", () => {
     const { rerender } = render(<WmsLocationLabel id={10} />);
     await waitFor(() => expect(screen.getByText("Главный")).toBeInTheDocument());
     rerender(<WmsLocationLabel id={11} />);
+    expect(screen.queryByText("Главный")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Печать" })).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Второй")).toBeInTheDocument());
-    expect(wms.fetchLocations).toHaveBeenCalledTimes(2);
+    expect(wms.fetchLocation).toHaveBeenCalledTimes(2);
+  });
+});
+
+
+describe("label access and stale responses", () => {
+  it("does not turn access failure into missing or expose a print action", async () => {
+    asMock(wms.fetchLocation).mockRejectedValue(new wms.LocationRequestError("Нет доступа", 403));
+    render(<WmsLocationLabel id={10} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Нет доступа");
+    expect(screen.queryByText("Ячейка не найдена")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Печать" })).not.toBeInTheDocument();
+  });
+  it("hides the label when its company cannot be confirmed", async () => {
+    asMock(wms.fetchLocationOrganizations).mockResolvedValue([{ id: 8, name: "Другая компания" }]);
+    render(<WmsLocationLabel id={10} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось подтвердить доступ");
+    expect(screen.queryByText("A · A-01")).not.toBeInTheDocument();
+  });
+  it("removes the previous label immediately and ignores its late response after id changes", async () => {
+    let finish!: (value: WmsLocation) => void;
+    asMock(wms.fetchLocation).mockImplementation((id: number) => id === 10 ? new Promise<WmsLocation>((resolve) => { finish = resolve; }) : Promise.resolve(locations[1]));
+    const { rerender } = render(<WmsLocationLabel id={10} />);
+    rerender(<WmsLocationLabel id={11} />);
+    await screen.findByText("Второй");
+    finish(locations[0]);
+    await waitFor(() => expect(screen.queryByText("Главный")).not.toBeInTheDocument());
+  });
+  it("retry loads again after a network error without creating any location", async () => {
+    asMock(wms.fetchLocation).mockRejectedValueOnce(new Error("Нет связи"));
+    render(<WmsLocationLabel id={10} />);
+    (await screen.findByRole("button", { name: "Повторить загрузку" })).click();
+    await screen.findByText("Главный");
+    expect(wms.fetchLocation).toHaveBeenCalledTimes(2);
   });
 });

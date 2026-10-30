@@ -50,6 +50,41 @@ vi.mock("next/navigation", () => ({
 import { Sidebar } from "@/components/sidebar";
 
 describe("Sidebar", () => {
+  it("shows unavailable access without exposing fallback module links", async () => {
+    render(<Sidebar accessUnavailable allowedSlugs={["home", "crm"]} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить разделы");
+    expect(screen.queryByText("Главная")).toBeNull();
+    expect(screen.queryByText("CRM")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Сделки", exact: true })).toBeNull();
+  });
+
+  it("distinguishes verified empty access from a loading failure", async () => {
+    render(<Sidebar allowedSlugs={[]} />);
+    expect(await screen.findByRole("status")).toHaveTextContent("Нет доступных разделов");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Повторить загрузку разделов" })).toBeNull();
+  });
+
+  it("offers one safe read retry in a collapsed sidebar", async () => {
+    localStorage.setItem("aios-sidebar-collapsed", "1");
+    render(<Sidebar accessUnavailable allowedSlugs={[]} />);
+    const retry = await screen.findByRole("button", { name: "Повторить загрузку разделов" });
+    fireEvent.click(retry);
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(localStorage.getItem("aios-sidebar-collapsed")).toBe("1");
+    expect(screen.queryByRole("link", { name: "Сделки", exact: true })).toBeNull();
+  });
+
+  it("restores only authorized navigation after access recovers", async () => {
+    const { rerender } = render(<Sidebar accessUnavailable allowedSlugs={[]} />);
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    rerender(<Sidebar accessUnavailable={false} allowedSlugs={["crm"]} />);
+    expect(await screen.findByRole("link", { name: "Сделки", exact: true })).toHaveAttribute("href", "/crm/deals");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText("Закупки")).toBeNull();
+  });
+
   it.each([["/crm/clients", "Клиенты"], ["/crm/contacts", "Контакты"]])(
     "раскрывает CRM и подключает навигацию на %s", async (path, label) => {
       mockUsePathname.mockReturnValue(path);

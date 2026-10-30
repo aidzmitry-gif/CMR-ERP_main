@@ -118,12 +118,13 @@ async def test_cross_module_api(api, session):
     assert result.json()["amount_byn"] == "312.34"
 
 
-async def test_bank_preserves_original_and_allocates_byn(session):
-    from modules.finance.bank_ingest import sync_incoming
+async def test_bank_preserves_original_and_holds_byn_candidate_for_owned_review(session):
+    from modules.finance.bank_ingest import LEGACY_BANK_REVIEW_REQUIRED, sync_incoming
     from modules.finance.models import BankTransaction, PaymentAllocation
 
     await seed(session)
-    session.add(Payment(ref="INV-77", amount=Decimal("312.34"), status="pending", kind="receivable"))
+    payment = Payment(ref="INV-77", amount=Decimal("312.34"), status="pending", kind="receivable")
+    session.add(payment)
     await session.commit()
 
     class Bank:
@@ -133,10 +134,19 @@ async def test_bank_preserves_original_and_allocates_byn(session):
 
     result = await sync_incoming(session, Bank(), OutboxEventBus())
     await session.commit()
-    assert result["matched"] == 1
-    assert (await session.execute(select(PaymentAllocation))).scalar_one().amount == Decimal("312.34")
+    assert result["matched"] == 0 and result["unmatched"] == 1
+    assert not (await session.execute(select(PaymentAllocation))).scalars().all()
     tx = (await session.execute(select(BankTransaction))).scalar_one()
     assert tx.amount == 100 and tx.currency == "USD"
+    assert tx.occurred_on == DAY and tx.match_status == "unmatched"
+    assert tx.note == LEGACY_BANK_REVIEW_REQUIRED
+    applied = (await session.execute(select(AuditLog).where(
+        AuditLog.action == "finance.fx.applied", AuditLog.entity_ref == "bank:fx-77",
+    ))).scalar_one()
+    assert Decimal(applied.detail["amount_original"]) == Decimal("100")
+    assert Decimal(applied.detail["amount_byn"]) == Decimal("312.34")
+    assert payment.status == "pending"
+    assert not (await session.execute(select(OutboxEvent))).scalars().all()
     assert (await sync_incoming(session, Bank(), OutboxEventBus()))["new"] == 0
 
 

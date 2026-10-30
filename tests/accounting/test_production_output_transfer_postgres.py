@@ -31,6 +31,7 @@ from modules.accounting.production_output_transfer import (
 )
 from modules.accounting.schemas import LineInput, PostingInput
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
+from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 pytestmark = pytest.mark.integration
 
@@ -143,18 +144,24 @@ async def _seed_wip(factory, pg_book, policy_id, groups=None):
         return entry.id
 
 
-async def test_reviewed_output_transfer_is_atomic_replayable_and_immutable(pg_factory, pg_book):
+async def test_reviewed_output_transfer_is_atomic_replayable_and_immutable(pg_factory, pg_book, issuance_pg):
     policy_id = await _seed_production_book(pg_factory, pg_book)
     wip_entry_id = await _seed_wip(pg_factory, pg_book, policy_id, [
         ("SHOP-A", "ORDER-42", "70.00"), ("SHOP-B", "ORDER-42", "30.00"),
         ("SHOP-A", "OTHER", "50.00"),
     ])
-    production = SyntheticProduction()
-    command = transfer_input(policy_id)
+    from tests.accounting.test_inventory_allocation_cost_stream_postgres import (
+        accepted_production_outputs,
+    )
+
+    production, warehouse, documents, _ = await accepted_production_outputs(
+        issuance_pg[0], pg_factory, pg_book, same_lot=False,
+        order_ids=(42,), lot_by_order={42: "LOT-1"})
+    command = transfer_input(policy_id).model_copy(update={"output_document_ids": [documents[42]]})
 
     async with pg_factory() as session:
         preview = await prepare_output_transfer(
-            session, pg_book[0], "2026-10", command, production, object()
+            session, pg_book[0], "2026-10", command, production, warehouse
         )
         assert preview["status"] == "ready_for_transfer_review"
         assert preview["candidate_transfer_byn"] == "100.00"
@@ -164,14 +171,13 @@ async def test_reviewed_output_transfer_is_atomic_replayable_and_immutable(pg_fa
             "basis_digest": preview["basis_digest"],
             "digest": preview["digest"],
         })
-        await _upgrade_group_guard(session)
         await session.commit()
 
     async def confirm_once():
         async with pg_factory() as session:
             entry = await confirm_output_transfer(
                 session, pg_book[0], "2026-10", confirmed, "tester",
-                production=production, warehouse_gateway=object(),
+                production=production, warehouse_gateway=warehouse,
             )
             await session.commit()
             return entry.id
@@ -285,21 +291,26 @@ async def test_reviewed_output_transfer_is_atomic_replayable_and_immutable(pg_fa
         await session.rollback()
 
 
-async def test_output_transfer_basis_becomes_stale_only_when_its_later_source_enters_closing_month(pg_factory, pg_book):
+async def test_output_transfer_basis_becomes_stale_only_when_its_later_source_enters_closing_month(pg_factory, pg_book, issuance_pg):
     policy_id = await _seed_production_book(pg_factory, pg_book)
     await _seed_wip(pg_factory, pg_book, policy_id)
-    production = SyntheticProduction()
-    command = transfer_input(policy_id)
+    from tests.accounting.test_inventory_allocation_cost_stream_postgres import (
+        accepted_production_outputs,
+    )
+
+    production, warehouse, documents, _ = await accepted_production_outputs(
+        issuance_pg[0], pg_factory, pg_book, same_lot=False,
+        order_ids=(42,), lot_by_order={42: "LOT-1"})
+    command = transfer_input(policy_id).model_copy(update={"output_document_ids": [documents[42]]})
     async with pg_factory() as session:
-        preview = await prepare_output_transfer(session, pg_book[0], "2026-10", command, production, object())
+        preview = await prepare_output_transfer(session, pg_book[0], "2026-10", command, production, warehouse)
         confirmed = ProductionOutputTransferConfirmInput.model_validate({
             **command.model_dump(mode="json"), "basis_digest": preview["basis_digest"], "digest": preview["digest"],
         })
-        await _upgrade_group_guard(session)
         await session.commit()
     async with pg_factory() as session:
         entry = await confirm_output_transfer(session, pg_book[0], "2026-10", confirmed, "tester",
-                                              production=production, warehouse_gateway=object())
+                                              production=production, warehouse_gateway=warehouse)
         await session.commit()
         receipt = await session.get(ProductionOutputTransferReceipt, entry.id)
         assert await output_transfer_source_state(session, receipt, "2026-10") == "unchanged"

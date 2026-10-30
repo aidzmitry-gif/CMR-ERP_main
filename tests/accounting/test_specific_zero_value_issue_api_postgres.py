@@ -29,8 +29,8 @@ from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa
 pytestmark = pytest.mark.integration
 
 @pytest.mark.parametrize("concurrent", [False, True])
-async def test_http_specific_zero_issue_preview_confirm_retry_and_remaining(pg_factory, pg_book, concurrent):
-    policy_id, output_id, _ = await zeroed_output(pg_factory, pg_book)
+async def test_http_specific_zero_issue_preview_confirm_retry_and_remaining(pg_factory, pg_book, concurrent, issuance_pg):
+    policy_id, output_id, _ = await zeroed_output(pg_factory, pg_book, api=issuance_pg[0])
     identities = await inventory_identities(pg_factory, pg_book)
     app = FastAPI()
     app.include_router(routes.router, prefix="/accounting")

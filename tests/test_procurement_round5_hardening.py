@@ -4,8 +4,8 @@
 (удали гард — тест упадёт), а не тавтология. Фоновый relay в тестах не крутится — гоняем
 ``relay_once`` вручную на той же in-memory сессии.
 
-Кейсы: (1) MRP-lite дедуп wms.stock.low между проходами relay; (2) обратный waterfall при
-недостижимом сроке (срок−буфер < сегодня) — риск + валидные (прошлые) даты, без падения и None;
+Кейсы: (1) MRP-lite дедуп wms.stock.low между проходами relay; (2) обзор связанного клиентского
+срока и явное сохранение плана: срок−буфер < сегодня — риск + валидные прошлые даты без None;
 (3) факт приёмки не перетирается более поздней оценкой в фасаде себестоимости; (4) reference→landed
 идемпотентен между батчами (одна строка, стабильное значение); (5) повторный resolve претензии не
 шлёт второе событие (finance не задваивает).
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -21,13 +22,23 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 import core.services.sku_master as sku_master_mod
-from core.domain.models import OutboxEvent, Sku
+from core.domain.models import Sku
 from core.runtime.app import create_app
 from core.runtime.deps import get_session
 from core.services.eventbus import EventContext
 from modules.procurement.models import LandedCost, PurchaseRequest
+from tests import test_procurement_ship_deadline as deadline_contract
+from tests.test_procurement_claims_ext import (
+    _claim_events,
+    _context,
+    _create,
+    _resolution,
+    _resolve,
+)
+from tests.test_procurement_landed_cost import _scoped_landed_next_order, _scoped_landed_order
 
 pytestmark = pytest.mark.asyncio
+owned_deadline_order = deadline_contract.owned_deadline_order
 
 
 @pytest_asyncio.fixture
@@ -48,6 +59,14 @@ async def app2(session):
 
 async def _relay(core, session):
     await core.event_bus.relay_once(session, EventContext(session, core.services))
+
+
+async def _status(client, order_id, status):
+    org = client.headers["X-Expected-Organization"]
+    return await client.post(f"/procurement/organizations/{org}/orders/{order_id}/edit-commands", json={
+        "version": 1, "request_key": str(uuid4()), "order_id": order_id,
+        "action": "status", "payload": {"status": status},
+    })
 
 
 def _patch_duty(monkeypatch, pct):
@@ -83,50 +102,63 @@ async def test_stock_low_dedup_across_relay_cycles(app2, session):
 # ───────────────────────── 2. Обратный waterfall: недостижимый срок ─────────────────────────
 
 
-async def test_plan_unreachable_deadline_risk_no_invalid_dates(app2, session):
+async def test_plan_unreachable_deadline_risk_no_invalid_dates(api, session, owned_deadline_order, monkeypatch):
     """Срок клиента − буфер < сегодня (физически не успеть) → at_risk, валидные (прошлые) даты,
     без падения и без None/отрицательных дат."""
-    client, core = app2
-    o = (await client.post(
-        "/procurement/orders",
-        json={"supplier": "S", "lines": [{"sku_code": "A", "qty": 5, "goods_value_byn": 500}]},
-    )).json()
-    today = datetime.now(timezone.utc).date()
+    from modules.procurement import customer_deadlines
+    from modules.procurement.models import PurchaseOrder
+    from modules.sales.models import Deal
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 10, 29, tzinfo=tz)
+
+    monkeypatch.setattr(customer_deadlines, "datetime", Clock)
+    context = owned_deadline_order
+    today = Clock.now(timezone.utc).date()
     soon = (today + timedelta(days=1)).isoformat()  # срок завтра → срок−буфер(3) = позавчера
-    core.event_bus.emit(session, "sales.deal.ship_deadline.set", {
-        "deal_id": 1, "number": "СД-1", "counterparty": "К", "ship_deadline": soon,
-        "items": [{"sku_code": "A", "qty": 5}],
-    })
-    await _relay(core, session)
-    r = await client.post(f"/procurement/orders/{o['id']}/plan",
-                          json={"transport_method_code": "truck"})  # target авто = срок−буфер
-    assert r.status_code == 200, r.text
-    plan = r.json()
-    assert plan["at_risk"] is True
-    assert plan["required_arrival"] < today.isoformat()  # крайний приход уже в прошлом
+    deal = await session.get(Deal, context["deal"])
+    deal.ship_deadline = soon
+    await session.commit()
+    reviewed = await deadline_contract._owned_review(api, context)
+    target = reviewed["earliest_required_arrival"]
+    assert target == (today - timedelta(days=2)).isoformat()
+    order = await session.get(PurchaseOrder, context["order"], populate_existing=True)
+    assert order.target_arrival_date is None  # чтение не сохраняет предложенную дату
+    await deadline_contract._owned_plan(api, context, target=target, method="truck")
+    response = await api.get(f"{context['prefix']}/orders/{context['order']}/plan")
+    assert response.status_code == 200, response.text
+    plan = response.json()
+    assert plan["organization_id"] == context["org"] and plan["order_id"] == context["order"]
+    assert plan["target_arrival_date"] == target
     dates = [m["planned_date"] for m in plan["milestones"]]
-    assert all(d is not None for d in dates)  # ни одной None/пропущенной даты
+    assert dates and all(d is not None for d in dates)  # ни одной None/пропущенной даты
     assert dates == sorted(dates)  # монотонный обратный waterfall (по возрастанию)
+    assert dates[-1] == target
     assert plan["start_date"] is not None and plan["start_date"] < dates[0]  # старт раньше первого этапа
+    risk = await deadline_contract._owned_review(api, context)
+    assert risk["at_risk"] is True and risk["risk_details"]["schedule_start_in_past"] is True
+    assert risk["risk_details"]["required_by"] == soon and risk["earliest_required_arrival"] < today.isoformat()
+    assert risk["risk_details"]["slack_days"] == 0  # риск старта, а не выдуманное опоздание
+    await deadline_contract._no_physical_writes(session)
 
 
 # ───────────────────────── 3. estimated не перетирает actual ─────────────────────────
 
 
-async def test_actual_receipt_not_overwritten_by_later_estimate(app2, session, monkeypatch):
+async def test_actual_receipt_not_overwritten_by_later_estimate(api, session, monkeypatch):
     """Факт приёмки (actual) важнее более ПОЗДНЕЙ плановой оценки в фасаде: оценка по второму
     (открытому) заказу не «откатывает» себестоимость к плановой."""
-    client, core = app2
+    client, core = api, api._transport.app.state.core
     session.add(Sku(code="A", title="A"))
     await session.commit()
     # заказ 1 — принят → actual (goods 1000 / qty 10, фрахт 0 → 100, без пошлины: Горизонт 2)
-    o1 = (await client.post("/procurement/orders",
-          json={"supplier": "S", "lines": [{"sku_code": "A", "qty": 10, "goods_value_byn": 1000}]})).json()
-    assert (await client.patch(f"/procurement/orders/{o1['id']}", json={"status": "received"})).status_code == 200
+    o1 = await _scoped_landed_order(client, session, lines=[{"sku_code": "A", "qty": 10, "goods_value_byn": 1000}])
+    assert (await _status(client, o1["id"], "received")).status_code == 200
     # заказ 2 — открыт (в пути) → база для плановой оценки
-    o2 = (await client.post("/procurement/orders",
-          json={"supplier": "S", "lines": [{"sku_code": "A", "qty": 10, "goods_value_byn": 1000}]})).json()
-    assert (await client.patch(f"/procurement/orders/{o2['id']}", json={"status": "ordered"})).status_code == 200
+    o2 = await _scoped_landed_next_order(client, session, lines=[{"sku_code": "A", "qty": 10, "goods_value_byn": 1000}])
+    assert (await _status(client, o2["id"], "ordered")).status_code == 200
     _patch_duty(monkeypatch, 10.0)  # оценка с пошлиной = 110 > факт 100
     core.event_bus.emit(session, "reference.sku.changed",
                         {"ref_key": "core.skus", "entity_ref": "sku:A"})
@@ -142,13 +174,12 @@ async def test_actual_receipt_not_overwritten_by_later_estimate(app2, session, m
 # ───────────────────────── 4. reference→landed идемпотентен между батчами ─────────────────────────
 
 
-async def test_reference_recompute_idempotent_across_batches(app2, session, monkeypatch):
+async def test_reference_recompute_idempotent_across_batches(api, session, monkeypatch):
     """Повторный одиночный `reference.sku.changed` в новом проходе relay → та же одна строка
     estimated, стабильное значение (upsert по purchase_order_id IS NULL, не плодим дубль)."""
-    client, core = app2
-    o = (await client.post("/procurement/orders",
-         json={"supplier": "S", "lines": [{"sku_code": "A", "qty": 10, "goods_value_byn": 1000}]})).json()
-    assert (await client.patch(f"/procurement/orders/{o['id']}", json={"status": "ordered"})).status_code == 200
+    client, core = api, api._transport.app.state.core
+    o = await _scoped_landed_order(client, session, lines=[{"sku_code": "A", "qty": 10, "goods_value_byn": 1000}])
+    assert (await _status(client, o["id"], "ordered")).status_code == 200
     calls = _patch_duty(monkeypatch, 10.0)
     for _ in range(3):  # три отдельных прохода relay (отдельные батчи)
         core.event_bus.emit(session, "reference.sku.changed",
@@ -165,16 +196,14 @@ async def test_reference_recompute_idempotent_across_batches(app2, session, monk
 # ───────────────────────── 5. claim.resolved — повтор без дубль-эффекта ─────────────────────────
 
 
-async def test_claim_reresolve_emits_event_once(app2, session):
-    """Повторный resolve уже закрытой претензии НЕ шлёт второе `procurement.claim.resolved`
-    (иначе finance задвоит сумму). Гард `was_closed` — закрепляем."""
-    client, core = app2
-    claim = (await client.post("/procurement/claims",
-             json={"supplier": "S", "item": "Брак", "claim_type": "брак", "amount_byn": 500})).json()
-    body = {"status": "resolved", "resolution": "компенсация"}
-    assert (await client.patch(f"/procurement/claims/{claim['id']}", json=body)).status_code == 200
-    assert (await client.patch(f"/procurement/claims/{claim['id']}", json=body)).status_code == 200  # повтор
-    events = (await session.execute(
-        select(OutboxEvent).where(OutboxEvent.event_type == "procurement.claim.resolved")
-    )).scalars().all()
+async def test_claim_reresolve_emits_event_once(api, session):
+    """Exact resolution replay emits one scoped fact, never an automatic payment."""
+    org, supplier = await _context(api, session)
+    response = await _create(api, org, supplier, item="Брак", amount_byn=500)
+    assert response.status_code == 201, response.text
+    claim = response.json()["claim"]
+    body = _resolution(resolution="компенсация")
+    assert (await _resolve(api, org, claim["id"], body)).status_code == 200
+    assert (await _resolve(api, org, claim["id"], body)).status_code == 200
+    events = await _claim_events(session)
     assert len(events) == 1  # эмит ровно раз, несмотря на два resolve

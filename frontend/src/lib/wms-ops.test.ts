@@ -7,6 +7,10 @@ import {
   fetchBalances,
   fetchBalancesServer,
   fetchLocations,
+  fetchLocation,
+  fetchLocationOrganizations,
+  fetchLocationWarehouses,
+  LocationRequestError,
   fetchLocationsServer,
   fetchMovements,
   fetchMovementsServer,
@@ -21,7 +25,7 @@ import {
 afterEach(() => vi.restoreAllMocks());
 
 function stubFetch(data: unknown, ok = true) {
-  const fn = vi.fn().mockResolvedValue({ ok, json: async () => data });
+  const fn = vi.fn().mockResolvedValue({ ok, status: ok ? 200 : 503, json: async () => data });
   vi.stubGlobal("fetch", fn);
   return fn;
 }
@@ -48,6 +52,7 @@ const movement: StockMovement = {
 
 const location: WmsLocation = {
   id: 3,
+  organization_id: 7,
   warehouse: "Минск",
   zone: "A",
   code: "A-01",
@@ -176,14 +181,14 @@ describe("SSR fetch*Server", () => {
     expect(res).toEqual([location]);
   });
 
-  it("fetchLocationsServer: ok:false → пустой массив", async () => {
+  it("fetchLocationsServer: HTTP failure rejects", async () => {
     stubFetch(null, false);
-    expect(await fetchLocationsServer()).toEqual([]);
+    await expect(fetchLocationsServer()).rejects.toThrow();
   });
 
-  it("fetchLocationsServer: сеть упала → пустой массив", async () => {
+  it("fetchLocationsServer: network failure rejects", async () => {
     stubFetchThrow();
-    expect(await fetchLocationsServer()).toEqual([]);
+    await expect(fetchLocationsServer()).rejects.toThrow();
   });
 });
 
@@ -230,19 +235,19 @@ describe("клиентские fetch* через /api", () => {
     expect(res).toEqual([location]);
   });
 
-  it("fetchLocations: ok:false → пустой массив", async () => {
+  it("fetchLocations: HTTP failure rejects", async () => {
     stubFetch(null, false);
-    expect(await fetchLocations()).toEqual([]);
+    await expect(fetchLocations()).rejects.toThrow();
   });
 
-  it("fetchLocations: сеть упала → пустой массив", async () => {
+  it("fetchLocations: network failure rejects", async () => {
     stubFetchThrow();
-    expect(await fetchLocations()).toEqual([]);
+    await expect(fetchLocations()).rejects.toThrow();
   });
 });
 
 describe("операции записи (POST /api/wms/*)", () => {
-  const input = { sku_code: "AKB-60", qty: 5, warehouse: "Минск", location_id: 3, batch_ref: "B-1", note: "прим" };
+  const input = { organization_id: 7, sku_code: "AKB-60", qty: 5, warehouse: "Минск", location_id: 3, batch_ref: "B-1", note: "прим" };
 
   it("shipment: правильный путь /api/wms/shipment", async () => {
     const fn = stubFetch({});
@@ -264,6 +269,7 @@ describe("операции записи (POST /api/wms/*)", () => {
 
   it("transfer: путь /api/wms/transfer, тело с from/to", async () => {
     const transferInput = {
+      organization_id: 7,
       sku_code: "AKB-60",
       qty: 2,
       warehouse: "Минск",
@@ -283,19 +289,74 @@ describe("операции записи (POST /api/wms/*)", () => {
   });
 
   it("createLocation: путь /api/wms/locations, тело", async () => {
-    const locInput = { warehouse: "Минск", zone: "A", code: "A-02", title: "Стеллаж A-02" };
-    const fn = stubFetch({});
+    const locInput = { organization_id: 7, warehouse: "Минск", zone: "A", code: "A-02", title: "Стеллаж A-02" };
+    const fn = stubFetch({ ...location, ...locInput });
     const result = await createLocation(locInput);
     expect(fn).toHaveBeenCalledWith("/api/wms/locations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(locInput),
     });
-    expect(result).toBe(true);
+    expect(result).toEqual({ ...location, ...locInput });
   });
 
-  it("createLocation: сеть упала → false", async () => {
+  it("createLocation: network failure has unknown result", async () => {
     stubFetchThrow();
-    expect(await createLocation({ warehouse: "Минск", code: "A-03" })).toBe(false);
+    await expect(createLocation({ organization_id: 7, warehouse: "Минск", code: "A-03" })).rejects.toMatchObject({ resultUnknown: true });
+  });
+});
+
+
+describe("owned locations", () => {
+  it("sends an explicit company filter and refuses foreign response rows", async () => {
+    const fn = stubFetch([location]);
+    expect(await fetchLocations(7)).toEqual([location]);
+    expect(fn).toHaveBeenCalledWith("/api/wms/locations?organization_id=7", { cache: "no-store" });
+    stubFetch([{ ...location, organization_id: 8 }]);
+    await expect(fetchLocations(7)).rejects.toThrow();
+  });
+  it("single location GET uses its id and only 404 means missing", async () => {
+    const fn = stubFetch(location);
+    expect(await fetchLocation(3)).toEqual(location);
+    expect(fn).toHaveBeenCalledWith("/api/wms/locations/3", { cache: "no-store" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404 }));
+    expect(await fetchLocation(3)).toBeNull();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 403 }));
+    await expect(fetchLocation(3)).rejects.toMatchObject({ status: 403 });
+  });
+  it("rejects malformed ownership and mismatched label identity", async () => {
+    stubFetch([{ ...location, organization_id: null }]);
+    await expect(fetchLocations()).rejects.toThrow();
+    stubFetch({ ...location, id: 4 });
+    await expect(fetchLocation(3)).rejects.toThrow();
+  });
+  it("uses trusted server identity for company names and validates names", async () => {
+    const headers = { Authorization: "Bearer synthetic-test-only" };
+    const fn = stubFetch([{ id: 7, name: "Учебная компания" }]);
+    expect(await fetchLocationOrganizations(headers)).toEqual([{ id: 7, name: "Учебная компания" }]);
+    expect(fn).toHaveBeenCalledWith("http://127.0.0.1:8000/wms/receipt-organizations", { cache: "no-store", headers });
+    stubFetch([{ id: 7, name: null }]);
+    await expect(fetchLocationOrganizations()).rejects.toThrow();
+  });
+  it("searches registered warehouses and rejects a foreign catalogue", async () => {
+    const data = { organization_id: 7, items: [{ organization_id: 7, name: "Главный" }], truncated: true };
+    const fn = stubFetch(data);
+    expect(await fetchLocationWarehouses(7, "  Главный  ")).toEqual({ items: data.items, truncated: true });
+    expect(fn).toHaveBeenCalledWith(`/api/wms/organizations/7/warehouse-options?q=${encodeURIComponent("Главный")}`, { cache: "no-store" });
+    stubFetch({ ...data, organization_id: 8 });
+    await expect(fetchLocationWarehouses(7)).rejects.toThrow();
+  });
+  it("refuses a successful write response from another company without false success", async () => {
+    stubFetch({ ...location, organization_id: 8 });
+    await expect(createLocation({ organization_id: 7, warehouse: "Минск", code: "A-01" })).rejects.toMatchObject({ resultUnknown: true });
+  });
+  it("does not send absent company or warehouse and preserves known rejection status", async () => {
+    const fn = stubFetch(location);
+    await expect(createLocation({ organization_id: 0, warehouse: "Минск", code: "A" })).rejects.toThrow();
+    await expect(createLocation({ organization_id: 7, warehouse: "", code: "A" })).rejects.toThrow();
+    expect(fn).not.toHaveBeenCalled();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 422 }));
+    await expect(createLocation({ organization_id: 7, warehouse: "Минск", code: "A" })).rejects.toEqual(expect.objectContaining({ status: 422, resultUnknown: false }));
+    expect(new LocationRequestError("x").resultUnknown).toBe(false);
   });
 });

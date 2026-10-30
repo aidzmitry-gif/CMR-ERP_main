@@ -17,7 +17,9 @@ class SalesSourceGateway(Protocol):
         Caller authorizes the actor and holds the discovered organization lock
         before invoking this internal facade; caller owns commit/rollback.
         `historical_claim` permits attribution of terminal history only, never
-        new fulfillment. Neither result grants user access or proves stock.
+        new fulfillment. `cancellation` additionally permits a verified ERP
+        on-order original without a reservation; it never grants fulfillment.
+        Neither result grants user access or proves stock.
         """
         ...
 

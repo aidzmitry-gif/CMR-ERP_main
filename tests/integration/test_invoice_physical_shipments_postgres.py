@@ -165,8 +165,34 @@ async def test_pg_close_and_no_shipment_preview_share_org_lock(physical_pg):
         with pytest.raises(HTTPException, match="physical_act_excludes"):
             await release_preview(session, org, current)
         await session.rollback()
-        await session.execute(text("UPDATE accounting.period SET closed=true WHERE organization_id=:org"), {"org": org})
+    # A physical act is an unposted primary source until its accounting receipt
+    # exists. Close through the public route after posting that exact act.
+    from modules.accounting import shipment_commands, shipment_preview
+    from modules.accounting.service import CLOSE_STEPS
+    from tests.accounting.test_shipment_receipt_postgres import prepare_accounting
+
+    act = (await api.post(endpoint(org), json=body)).json()
+    _, _, _, posting = await prepare_accounting(
+        physical_pg, normative_verified=True, act=act,
+    )
+    async with factory() as session:
+        plan = await shipment_preview.prepare(session, org, act, posting)
+        await shipment_commands.confirm(session, org, act, posting, plan["basis_digest"], "allocator")
         await session.commit()
+
+    periods = await api.get(f"/accounting/organizations/{org}/periods")
+    assert periods.status_code == 200, periods.text
+    assert periods.json(), "The physical shipment must create its accounting period"
+    for period in sorted(periods.json(), key=lambda row: row["month"]):
+        closed = await api.post(
+            f"/accounting/organizations/{org}/periods/{period['month']}/close",
+            json={"expected_generation": period["generation"],
+                  "evidence": {step: "Synthetic reviewed close after physical shipment"
+                               for step in CLOSE_STEPS}},
+        )
+        assert closed.status_code == 200, closed.text
+        assert closed.json()["closed"] is True
+        assert closed.json()["closed_generation"] == period["generation"]
     assert (await api.post(endpoint(org), json=body)).status_code == 201
     next_body = await request(api, org, facts)
     assert (await api.post(endpoint(org), json=next_body)).status_code == 409

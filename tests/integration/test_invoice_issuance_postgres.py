@@ -100,6 +100,14 @@ async def test_pg_erp_invoice_bank_receipt_refund_and_reconciliation(issuance_pg
         await erp_money_flow(client, session)
 
 
+async def test_pg_invoice_logo_freezes_with_verified_receipt(issuance_pg):
+    from tests.test_sales_contract import _logo_original_flow
+
+    client, factory = issuance_pg
+    async with factory() as session:
+        await _logo_original_flow(client, session)
+
+
 async def test_pg_stored_reservation_rejects_nan_at_database_boundary(issuance_pg):
     from decimal import Decimal
 

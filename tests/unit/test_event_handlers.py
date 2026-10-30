@@ -45,7 +45,8 @@ async def test_cross_module_handlers_missing_context_contract():
             await handler({"items": [{"sku_code": "X", "qty": 1}]}, None)
     with pytest.raises(ValueError, match="EventContext is required"):
         await on_goods_received({"item": "Болт", "qty": 5}, None)
-    await logistics_on_doc({"kind": "order", "deal_id": 1}, None)
+    with pytest.raises(ValueError, match="Logistics order intake requires event context"):
+        await logistics_on_doc({"kind": "order", "deal_id": 1}, None)
     await finance_on_doc({"kind": "invoice", "number": "СЧ-1"}, None)
 
 

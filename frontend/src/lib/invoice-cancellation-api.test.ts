@@ -21,3 +21,34 @@ it("requires explicit money/coverage/invalidation and current records",()=>{cons
 it("accepts matching current money record even when another current record appears first",()=>{const b=basis();b.money.records.unshift({...b.money.records[0],id:5});expect(currentReview(b,review)).toBe(true);});
 it("detects corrupt storage and does not fabricate a pending request",()=>{sessionStorage.setItem(journalKey(s),'{"schema":1}');expect(()=>readJournal(s)).toThrow();});
 it("hashes full preview including new eligibility fields and rejects tampering",async()=>{const b=basis();for(const item of Object.values(b.preview.sections))item.sha256=await digest(item.facts);const body={...b.preview};delete (body as Partial<typeof body>).basis_digest;b.preview.basis_digest=await digest(body);const doc={id:11,deal_id:3,organization_id:7,kind:"invoice",number:"I",version:2,status:"posted",amount:"1.00",currency:"BYN",payment_terms:null,delivery_terms:null,draft_edit_token:null,created_at:null,issued_at:null,valid_until:null,reserve_status:"reserved",onec_ref:null,original_state:"issued",content_sha256:h,replacement_reason:null,supersedes_id:null,superseded_by_id:null,original_available:true,preview_available:false};const f=vi.fn().mockImplementation((url:string)=>Promise.resolve(ok(url.endsWith("cancellation/preview")?b.preview:url.endsWith("money-reconciliation")?b.money:doc)));vi.stubGlobal("fetch",f);expect((await fetchBasis(s)).preview.basis_digest).toBe(b.preview.basis_digest);b.preview.eligibility_issues=[{scope:"accounting_issue",code:"blocked",message:"blocked",detail:"new"}];await expect(fetchBasis(s)).rejects.toThrow();});
+
+it("accepts an exact tagged no-stock cancellation without a warehouse release",async()=>{
+ const a=makeCancel();persist(a);
+ const r={...await reply(a),stock_outcome:"no_stock_release",release_id:null,reserve_status:"unreserved"};
+ vi.stubGlobal("fetch",vi.fn().mockResolvedValue(ok(r)));
+ const got=await sendAttempt(a);expect(got).toEqual(r);expect(settle(a,got)).toBe(true);
+ expect(readJournal(s).pending).toBeNull();
+});
+it.each(["null_without_tag","release_with_no_stock_tag","stock_without_release","stock_unreserved_mismatch","no_stock_released_mismatch","corrupt_digest_or_identity"])("rejects %s and preserves the exact pending command",async kind=>{
+ const a=makeCancel();persist(a);const saved=sessionStorage.getItem(journalKey(s));
+ const r:Record<string,unknown>={...await reply(a)};
+ if(kind==="null_without_tag"||kind==="stock_without_release")r.release_id=null;
+ if(kind==="stock_without_release")r.stock_outcome="released";
+ if(kind==="release_with_no_stock_tag")r.stock_outcome="no_stock_release";
+ if(kind==="stock_unreserved_mismatch")r.reserve_status="unreserved";
+ if(kind==="no_stock_released_mismatch"){r.release_id=null;r.stock_outcome="no_stock_release";}
+ if(kind==="corrupt_digest_or_identity"){r.release_id=null;r.stock_outcome="no_stock_release";r.reserve_status="unreserved";r.digest="broken";}
+ vi.stubGlobal("fetch",vi.fn().mockResolvedValue(ok(r)));
+ await expect(sendAttempt(a)).rejects.toThrow(/Результат неизвестен/);
+ expect(sessionStorage.getItem(journalKey(s))).toBe(saved);
+});
+it("keeps an unknown stock outcome pending and repeats identical request bytes",async()=>{
+ const a=makeCancel();persist(a);const saved=sessionStorage.getItem(journalKey(s));
+ const r={...await reply(a),stock_outcome:"future_outcome"};
+ const f=vi.fn().mockResolvedValue(ok(r));vi.stubGlobal("fetch",f);
+ await expect(sendAttempt(a)).rejects.toThrow();
+ const pending=readJournal(s).pending!;await expect(sendAttempt(pending)).rejects.toThrow();
+ expect(f.mock.calls[0][1].body).toBe(f.mock.calls[1][1].body);
+ expect(f.mock.calls[0][1].body).toBe(canonical(a.body));
+ expect(sessionStorage.getItem(journalKey(s))).toBe(saved);
+});

@@ -279,6 +279,8 @@ async def test_pg_receipt_correction_migration_empty_roundtrip(pg_factory):
 
 
 async def test_finance_reads_posted_primary_without_procurement_access(issuance_pg, pg_book):
+    from core.domain.models import User
+
     api, factory = issuance_pg
     api.headers["X-User"] = "tester"
     async with factory() as session:
@@ -288,6 +290,15 @@ async def test_finance_reads_posted_primary_without_procurement_access(issuance_
     receipt_id = int(path.rsplit("/", 1)[1])
     preview = await api.post(path + "/preview", json=options)
     assert preview.status_code == 200, preview.text
+    async with factory() as session:
+        # pg_book imports explicit grant IDs; advance this private DB's sequence.
+        await session.execute(text("SELECT setval(pg_get_serial_sequence('accounting.access_grant', 'id'), (SELECT max(id) FROM accounting.access_grant))"))
+        session.add_all([
+            User(username="receipt-financier", full_name="Synthetic receipt financier", role="finance", status="active"),
+            AccessGrant(organization_id=pg_book[0], subject="receipt-financier", role="chief"),
+        ])
+        await session.commit()
+    api.headers["X-User"] = "receipt-financier"
     api.headers["X-User-Roles"] = "finance"
     preview_url = f"/accounting/organizations/{pg_book[0]}/receipts/{receipt_id}/preview"
     prepared = await api.post(preview_url, json=options)
@@ -333,8 +344,11 @@ async def test_finance_reads_posted_primary_without_procurement_access(issuance_
     closed = await api.post(close_url, json=closing)
     assert closed.status_code == 200, closed.text
     # A new primary cannot enter an already closed month; historical source stays readable.
+    api.headers["X-User"] = "tester"
     api.headers["X-User-Roles"] = "director"
-    late = await api.post(path.rsplit("/", 1)[0], json={"key": "late-closed-month", "document": document()})
+    late_document = document()
+    late_document["items"][0]["unit"] = "кг"
+    late = await api.post(path.rsplit("/", 1)[0], json={"key": "late-closed-month", "document": late_document})
     assert late.status_code in {409, 422}, late.text
     assert "closed" in late.text.lower()
 
@@ -347,6 +361,7 @@ async def test_finance_reads_posted_primary_without_procurement_access(issuance_
         revision = await session.scalar(select(ReceiptRevision).where(ReceiptRevision.receipt_id == receipt_id))
         expected_document = revision.document
 
+    api.headers["X-User"] = "receipt-financier"
     api.headers["X-User-Roles"] = "finance"
     assert (await api.get(path.rsplit("/", 1)[0])).status_code == 403
     response = await api.get(source_url)

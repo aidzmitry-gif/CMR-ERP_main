@@ -7,7 +7,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select, update
 
-from core.domain.models import AuditLog, OutboxEvent
+from core.domain.models import AuditLog, OutboxEvent, User
 from core.runtime.app import create_app
 from core.services.eventbus import OutboxEventBus
 from modules.accounting.models import AccessGrant, Organization
@@ -86,6 +86,7 @@ async def test_legacy_and_foreign_reads(api, session, exact):
     rows = (await api.get("/logistics/shipments")).json()
     assert len(rows) == 1 and rows[0]["id"] == sid
     other = {"X-User": "foreign", "X-User-Roles": "logistics"}
+    session.add(User(username="foreign", full_name="Synthetic foreign logistician", role="logistics", status="active"))
     session.add(AccessGrant(organization_id=2, subject="foreign", role="reader"))
     await session.commit()
     assert (await api.get("/logistics/shipments", headers=other)).json() == []
@@ -221,9 +222,10 @@ async def test_unscoped_audit_get_post_seed_neither_leak_nor_write(api, session,
     secret = FreightAuditLog(shipment_code="FOREIGN-SHIP", carrier_code="dpd", invoice_amount=900,
                             expected_amount=100, variance=800, reason="foreign commercial detail", status="open")
     session.add(secret)
+    session.add(User(username="registered-auditor", full_name="Synthetic auditor", role=role, status="active"))
     await session.commit()
     before = {col.name: getattr(secret, col.name) for col in FreightAuditLog.__table__.columns}
-    headers = {"X-User-Roles": role}
+    headers = {"X-User": "registered-auditor", "X-User-Roles": role}
     responses = [
         await api.get("/logistics/costs/audit?period=2026-09", headers=headers),
         await api.post("/logistics/costs/audit", headers=headers, json={"shipment_code": "FOREIGN-SHIP",

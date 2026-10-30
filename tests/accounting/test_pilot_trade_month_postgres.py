@@ -4,12 +4,12 @@ from datetime import date
 
 from sqlalchemy import text
 
-from core.domain.models import User
+from core.domain.models import Counterparty, Sku, User
 from modules.accounting.models import Account
+from modules.wms.models import WarehouseDirectory
 from tests.accounting.test_bank_documents import document as bank_document
 from tests.accounting.test_postgres import pg_book, pg_factory  # noqa: F401
 from tests.accounting.test_procurement_receipt_drafts import source_options
-from tests.accounting.test_zero_value_output_cost_postgres import run_migration
 from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 
@@ -26,13 +26,26 @@ async def test_purchase_sale_settlements_and_reports_use_one_ledger(issuance_pg,
                 valid_from=date(2026, 1, 1), required_dimensions=[], currency_tracking=False,
                 quantity_tracking=False, cash=False, normative_ref="Synthetic only"))
         await session.commit()
-        # Sales replay requires the zero-value disposal receipt schema from 0140.
-        await run_migration(session, "0140_zero_value_disposals.py", "upgrade")
+        # pg_factory installs the registered current schema, including0140.
+        await session.execute(text("SELECT setval(pg_get_serial_sequence('counterparty', 'id'), (SELECT max(id) FROM counterparty))"))
+        buyer = Counterparty(name="buyer", unp="190000002")
+        session.add(buyer)
+        await session.flush()
+        buyer_identity = {"counterparty_id": str(buyer.id), "counterparty": buyer.legal_name or buyer.name,
+                          "counterparty_unp": buyer.unp or "", "counterparty_revision": str(buyer.revision)}
+        warehouse = await session.get(WarehouseDirectory, 1)
+        sku = await session.get(Sku, 1)
+        inventory_identity = {
+            "warehouse_identity": {"id": warehouse.id, "name": warehouse.name, "title": warehouse.title},
+            "sku_identity": {"id": sku.id, "code": sku.code, "title": sku.title, "unit": sku.unit},
+        }
         await session.commit()
     api.headers["X-User-Roles"] = "finance"
     receipt_id = path.rsplit("/", 1)[1]
     preview = await api.post(root + f"/receipts/{receipt_id}/preview", json=options)
     assert preview.status_code == 200, preview.text
+    supplier_dimensions = next(line["dimensions"] for line in preview.json()["lines"]
+                               if line["account"] == "60" and line["side"] == "credit")
     posted = await api.post(root + f"/receipts/{receipt_id}/confirm", json={**options, "digest": preview.json()["digest"]})
     assert posted.status_code == 201, posted.text
 
@@ -50,7 +63,8 @@ async def test_purchase_sale_settlements_and_reports_use_one_ledger(issuance_pg,
         "operation_date": "2026-09-04", "expense_account": "90.4", "explanation": "Synthetic trade month sale",
         "net_amount": "100.00", "vat_rate": "20", "vat_basis": "Synthetic explicit basis",
         "buyer_account": "62", "revenue_account": "90.1", "vat_revenue_account": "90.2",
-        "vat_payable_account": "68.2", "buyer_dimensions": {"counterparty": "buyer", "contract": "B1", "settlement_document": "synthetic-sale-month"}}
+        "vat_payable_account": "68.2", "buyer_dimensions": {**buyer_identity, "contract": "B1", "settlement_document": "synthetic-sale-month"},
+        **inventory_identity}
     preview = await api.post(root + "/sales/posting-preview", json=sale)
     assert preview.status_code == 200, preview.text
     command = {**sale, "basis_digest": preview.json()["cost"]["basis_digest"], "digest": preview.json()["digest"]}
@@ -60,7 +74,7 @@ async def test_purchase_sale_settlements_and_reports_use_one_ledger(issuance_pg,
     assert before_cash["pnl"] == {"income": "100.00", "expenses": "50.00", "profit": "50.00"}
     for direction, amount, account, source, dimensions in [
         ("receipt", "120.00", "62", "customer-bank", sale["buyer_dimensions"]),
-        ("payment", "100.01", "60", "supplier-bank", {"counterparty": "supplier1", "contract": "contract1", "settlement_document": "INV1"}),
+        ("payment", "100.01", "60", "supplier-bank", supplier_dimensions),
     ]:
         bank = bank_document(direction=direction, source=source, statement_reference=source,
             policy_id=pg_book[1], posting_date="2026-09-05", operation_date="2026-09-05",

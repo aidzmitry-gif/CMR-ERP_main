@@ -1,4 +1,4 @@
-"""Actual row-lock contention in disposable metadata on the dedicated G02 database."""
+"""Real stock contention: dedicated G02 service checks and current migrated ERP issue."""
 import asyncio
 import os
 from decimal import Decimal
@@ -7,7 +7,6 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from fastapi import Request
-from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -15,12 +14,13 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 
 from core.db.base import Base
 from core.domain.models import OutboxEvent, Sku
-from core.runtime.app import create_app
 from core.runtime.deps import get_session
 from modules.integrations.models import StockItem
 from modules.integrations.stock import StockService
-from modules.sales.models import Deal, DealDocument, DealItem, PriceQuote
+from modules.sales.models import Deal, DealDocument, DealItem
+from tests.accounting.test_postgres import pg_factory  # noqa: F401
 from tests.integration.joint_postgres import is_joint_test_url
+from tests.integration.test_invoice_issuance_postgres import issuance_pg  # noqa: F401
 
 
 @pytest_asyncio.fixture
@@ -113,120 +113,146 @@ async def test_stock_waiter_refreshes_stale_balance(stock_factory, first_operati
             await asyncio.gather(task, return_exceptions=True)
 
 
-async def test_replacement_and_new_invoice_lock_old_and_new_stock_before_release(
-    stock_factory, monkeypatch,
+@pytest.mark.parametrize("wms_enabled", [False, True])
+async def test_cancelled_replacement_and_new_invoice_serialize_stock_reservations(
+    issuance_pg, monkeypatch, wms_enabled,  # noqa: F811 -- imported pytest fixture
 ):
-    """HIGH -> LOW replacement must not deadlock a concurrent LOW+HIGH invoice."""
-    engine = stock_factory.kw["bind"]
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    app = create_app()
-    app.state.core.services.db.engine = engine
-    app.state.core.services.db.session_factory = stock_factory
+    """A reconciled HIGH cancellation precedes concurrent LOW / LOW+HIGH issues."""
+    from modules.sales.accounting_ownership import DealOwnership
+    from modules.sales.client_document_register import DealClientBinding, preview_snapshot
+    from modules.sales.invoice_cancellation import InvoiceCancellationReceipt
+    from modules.sales.invoice_issuance import verified_receipt
+    from modules.wms.invoice_reservations import InvoiceReservationRelease
+    from modules.wms.models import ReservationVersion, StockMovement, WarehouseDirectory
+    from tests.integration.test_document_original_postgres import _cancel_for_replacement
+    from tests.test_invoice_issuance import command, create, seed
+
+    api, factory = issuance_pg
+    app = api._transport.app
+    assert not getattr(app.state.core.services.onec, "outbound_document_source_available", False)
+    async with factory() as session:
+        low = Sku(code="LOW", title="Replacement goods", unit="шт")
+        session.add(low)
+        await session.commit()
+        low_id = low.id
+        ids, base = await seed(api, session, suffix="-HIGH", wms_enabled=wms_enabled)
+        competitor = Deal(number="COMPETE", title="LOW + HIGH", counterparty="Exact buyer-HIGH")
+        session.add(competitor)
+        await session.flush()
+        session.add(DealOwnership(deal_id=competitor.id, organization_id=ids["org"],
+            snapshot={}, evidence="Synthetic competing invoice ownership", actor="issuer"))
+        session.add(DealClientBinding(deal_id=competitor.id, organization_id=ids["org"],
+            counterparty_id=ids["buyer"], snapshot=await preview_snapshot(
+                session, ids["org"], competitor, ids["buyer"]),
+            evidence="Synthetic competing invoice buyer", actor="issuer"))
+        items = [DealItem(deal_id=competitor.id, sku_id=sku, qty=2) for sku in (low_id, ids["sku"])]
+        session.add_all(items)
+        session.add(StockMovement(organization_id=ids["org"], sku_code="LOW", warehouse="W",
+            kind="in", qty=10, reason="receipt"))
+        await session.commit()
+        other_ids = {**ids, "deal": competitor.id}
+        other_base = {**base, "pricing": [{"item_id": item.id, "unit_price_net": "100.00",
+                                          "vat_rate": "20.00"} for item in items]}
+
+    initial, _ = await command(api, ids, base)
+    issued = await create(api, ids, initial)
+    assert issued.status_code == 201, issued.text
+    invoice = issued.json()["document"]
+    old_id = invoice["id"]
+    old_original = (await api.get(f"/sales/documents/{old_id}/render")).content
+    await _cancel_for_replacement(api, ids, invoice)
+    async with factory() as session:
+        assert await session.scalar(select(InvoiceCancellationReceipt.document_id)) == old_id
+        assert await session.scalar(select(InvoiceReservationRelease.document_id)) == old_id
+    revision = await api.post(f"/sales/documents/{old_id}/revision", json={
+        "reason": "Use LOW instead of HIGH", "request_key": "current-stock-replacement",
+    })
+    assert revision.status_code == 201, revision.text
+    replacement_id = revision.json()["id"]
+    async with factory() as session:
+        item = await session.get(DealItem, ids["item"])
+        item.sku_id, item.qty = low_id, Decimal("3")
+        await session.commit()
+    revised, _ = await command(api, ids, base, doc_id=replacement_id, key="issue-replacement")
+    other, _ = await command(api, other_ids, other_base, key="issue-competitor")
+
     backend_pids = {}
-    request_started = asyncio.Event()
-    watch_path = None
+    request_started, reserved, proceed = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    replacement_path = f"/sales/documents/{replacement_id}/issue"
+    watch_path = f"/sales/deals/{other_ids['deal']}/documents"
+    original_dependency = app.dependency_overrides[get_session]
 
     async def own_session(request: Request):
-        async with stock_factory() as session:
+        async with factory() as session:
             backend_pids[request.url.path] = await session.scalar(text("SELECT pg_backend_pid()"))
             if request.url.path == watch_path:
                 request_started.set()
             yield session
 
-    app.dependency_overrides[get_session] = own_session
-    async with stock_factory() as setup:
-        low, high = [Sku(code=code, title=code, unit="шт") for code in ("LOW", "HIGH")]
-        old_deal = Deal(number="REPLACE", title="Replacement", counterparty="Buyer")
-        other_deal = Deal(number="COMPETE", title="New invoice", counterparty="Buyer")
-        setup.add_all([low, high, old_deal, other_deal])
-        await setup.flush()
-        # Stock IDs define lock order independently of SKU spelling.
-        setup.add(StockItem(sku_code="LOW", qty_available=10, qty_reserved=0))
-        await setup.flush()
-        setup.add(StockItem(sku_code="HIGH", qty_available=10, qty_reserved=0))
-        old_item = DealItem(deal_id=old_deal.id, sku_id=high.id, qty=2, unit_price=100)
-        setup.add_all([
-            old_item,
-            DealItem(deal_id=other_deal.id, sku_id=low.id, qty=2, unit_price=100),
-            DealItem(deal_id=other_deal.id, sku_id=high.id, qty=2, unit_price=100),
-            PriceQuote(sku_code="LOW", counterparty="Buyer", price=100),
-            PriceQuote(sku_code="HIGH", counterparty="Buyer", price=100),
-        ])
-        await setup.commit()
-        old_deal_id, other_deal_id, item_id, low_id = (
-            old_deal.id, other_deal.id, old_item.id, low.id,
-        )
+    gateway = app.state.core.services.wms_reservations
+    original_reserve = gateway.reserve_invoice
+
+    async def pause_after_reserve(session, organization_id, source, request, actor):
+        result = await original_reserve(session, organization_id, source, request, actor)
+        if source["document_id"] == replacement_id:
+            await session.flush()
+            reserved.set()
+            await asyncio.wait_for(proceed.wait(), 15)
+        return result
 
     tasks = []
-    continue_replacement = asyncio.Event()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
-                           headers={"X-User-Roles": "director"}) as api:
-        issued = await api.post(f"/sales/deals/{old_deal_id}/documents", json={"kind": "invoice"})
-        assert issued.status_code == 201, issued.text
-        old_id = issued.json()["id"]
-        revision = await api.post(f"/sales/documents/{old_id}/revision", json={
-            "reason": "Use LOW instead of HIGH", "request_key": "g02-lock-union",
-        })
-        assert revision.status_code == 201, revision.text
-        replacement_id = revision.json()["id"]
-        async with stock_factory() as edit:
-            item = await edit.get(DealItem, item_id)
-            item.sku_id, item.qty = low_id, Decimal("3")
-            old_original = (await edit.get(DealDocument, old_id)).original_html
-            await edit.commit()
+    app.dependency_overrides[get_session] = own_session
+    monkeypatch.setattr(gateway, "reserve_invoice", pause_after_reserve)
+    try:
+        replacement = asyncio.create_task(api.post(replacement_path, json=revised))
+        tasks.append(replacement)
+        await asyncio.wait_for(reserved.wait(), 15)
+        competing = asyncio.create_task(api.post(watch_path, json={"kind": "invoice", **other}))
+        tasks.append(competing)
+        await asyncio.wait_for(request_started.wait(), 15)
+        await _assert_blocked(factory, backend_pids[replacement_path], backend_pids[watch_path], competing)
+        assert not competing.done()
+        proceed.set()
+        responses = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), 20)
+        outcomes = [getattr(getattr(result, "orig", None), "sqlstate", None)
+                    if isinstance(result, Exception) else result.status_code for result in responses]
+        assert outcomes == [200, 201], responses
+        other_id = responses[1].json()["document"]["id"]
+    finally:
+        proceed.set()
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        app.dependency_overrides[get_session] = original_dependency
 
-        released_old = asyncio.Event()
-        stock = app.state.core.services.stock
-        original_release = stock.release
-
-        async def pause_after_release(session, items):
-            result = await original_release(session, items)
-            await session.flush()
-            released_old.set()
-            await asyncio.wait_for(continue_replacement.wait(), 10)
-            return result
-
-        monkeypatch.setattr(stock, "release", pause_after_release)
-        replacement_path = f"/sales/documents/{replacement_id}/issue"
-        watch_path = f"/sales/deals/{other_deal_id}/documents"
-        try:
-            replacement = asyncio.create_task(api.post(replacement_path))
-            tasks.append(replacement)
-            await asyncio.wait_for(released_old.wait(), 10)
-            competing = asyncio.create_task(api.post(watch_path, json={"kind": "invoice"}))
-            tasks.append(competing)
-            await asyncio.wait_for(request_started.wait(), 10)
-            await _assert_blocked(stock_factory, backend_pids[replacement_path],
-                                  backend_pids[watch_path], competing)
-            continue_replacement.set()
-            responses = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), 10)
-            outcomes = [getattr(getattr(result, "orig", None), "sqlstate", None)
-                        if isinstance(result, Exception) else result.status_code for result in responses]
-            assert outcomes == [200, 201], responses
-            other_id = responses[1].json()["id"]
-        finally:
-            continue_replacement.set()
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-
-    async with stock_factory() as check:
-        rows = (await check.scalars(select(StockItem).order_by(StockItem.id))).all()
-        assert [(row.sku_code, row.qty_reserved) for row in rows] == [
-            ("LOW", Decimal("5")), ("HIGH", Decimal("2")),
-        ]
+    async with factory() as check:
+        latest = {}
+        for row in await check.scalars(select(ReservationVersion).where(
+            ReservationVersion.organization_id == ids["org"]).order_by(ReservationVersion.id)):
+            latest[row.source] = row
+        totals = {code: sum(row.qty for row in latest.values() if row.sku_code == code)
+                  for code in ("LOW", ids["code"])}
+        assert totals == {"LOW": Decimal("5"), ids["code"]: Decimal("2")}
+        assert all(row.qty >= 0 and row.qty <= 10 for row in latest.values())
+        movements = list(await check.scalars(select(StockMovement).where(
+            StockMovement.organization_id == ids["org"])))
+        assert len(movements) == 2 and all(row.kind == "in" and row.qty == 10 for row in movements)
         old = await check.get(DealDocument, old_id)
-        assert old.original_html == old_original and old.reserve_status == "released"
+        assert old.original_html.encode() == old_original and old.reserve_status == "released"
+        assert old.status == "cancelled" and old.content_sha256 == invoice["content_sha256"]
         assert old.superseded_by_id == replacement_id
         for doc_id in (replacement_id, other_id):
             doc = await check.get(DealDocument, doc_id)
-            assert doc.status == "posted" and doc.reserve_status == "reserved"
-        posted = (await check.scalars(select(OutboxEvent).where(
-            OutboxEvent.event_type == "sales.document.posted",
-        ))).all()
-        assert len(posted) == 3
+            assert doc.status == "issued" and doc.reserve_status == "reserved"
+            assert await verified_receipt(check, doc, ids["org"]) is not None
+        issued_events = list(await check.scalars(select(OutboxEvent).where(
+            OutboxEvent.event_type == "sales.invoice.issued")))
+        assert len(issued_events) == 3
+        warehouse = await check.scalar(select(WarehouseDirectory).where(
+            WarehouseDirectory.organization_id == ids["org"], WarehouseDirectory.name == "W"))
+        assert warehouse.wms_enabled is wms_enabled and warehouse.prohibit_negative_stock is True
+    assert (await api.get(f"/sales/documents/{old_id}/render")).content == old_original
 
 
 async def test_release_waits_for_reserve_without_losing_new_quantity(stock_factory):

@@ -2,16 +2,13 @@
 from __future__ import annotations
 
 import asyncio
-import runpy
 from datetime import date
 from uuid import uuid4
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import DBAPIError
 
-from core.db.base import Base
 from modules.accounting import bank_import, closing_controls, service
 from modules.accounting.models import Account, BankAccountMapping, BankImportReceipt, SourceBinding
 from modules.finance.models import BankAccount, BankTransaction, Payment, PaymentAllocation
@@ -21,32 +18,11 @@ pytestmark = pytest.mark.integration
 
 
 
-@pytest_asyncio.fixture(autouse=True)
-async def bank_period_sql_guards(pg_factory):  # noqa: F811
-    from pathlib import Path
-
-    from alembic.migration import MigrationContext
-    from alembic.operations import Operations
-
-    async with pg_factory() as session:
-        connection = await session.connection()
-        migration = runpy.run_path("migrations/versions/0137_bank_account_mapping.py")
-
-        def upgrade(conn):
-            with Operations.context(MigrationContext.configure(conn)):
-                migration["upgrade"]()
-
-        await connection.run_sync(upgrade)
-        sql = Path("modules/accounting/bank_period_guards.sql").read_text(encoding="utf-8")
-        await connection.run_sync(lambda conn: Operations(MigrationContext.configure(conn)).execute(sql))
-        await session.commit()
-
-async def _install_finance_source_tables(session):
-    """The frozen accounting proposal deliberately does not own finance.*."""
-    await session.execute(text("CREATE SCHEMA IF NOT EXISTS finance"))
-    connection = await session.connection()
-    tables = [BankAccount.__table__, Payment.__table__, PaymentAllocation.__table__, BankTransaction.__table__]
-    await connection.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tables, checkfirst=True))
+async def _require_finance_source_tables(session):
+    """The registered head must supply finance tables and their real guards."""
+    for model in (BankAccount, Payment, PaymentAllocation, BankTransaction):
+        name = model.__table__.fullname
+        assert await session.scalar(text("SELECT to_regclass(:name)"), {"name": name}) == name
 
 
 def command(source_id: int, source_digest: str, policy_id: int) -> bank_import.BankImportInput:
@@ -62,11 +38,12 @@ def command(source_id: int, source_digest: str, policy_id: int) -> bank_import.B
 
 async def test_imported_bank_source_is_mapped_atomic_and_immutable(pg_factory, pg_book):  # noqa: F811
     async with pg_factory() as session:
-        await _install_finance_source_tables(session)
+        await _require_finance_source_tables(session)
         source = BankTransaction(
             ext_id="PG-BANK-IMPORT-1", occurred_on=date(2026, 9, 3), amount="120.00", currency="BYN",
             payer_unp="191234567", payer_name="PG Buyer", purpose="Advance", account_code="main",
-            source_provider="synthetic-bank",
+            source_provider="synthetic-bank", source_external_id="PG-BANK-IMPORT-1",
+            source_kind="api", source_reference="Synthetic PostgreSQL bank statement",
         )
         session.add(source)
         await session.flush()
@@ -117,9 +94,19 @@ async def test_imported_bank_source_is_mapped_atomic_and_immutable(pg_factory, p
     assert results[0] == results[1] and results[0] is not None
 
     async with pg_factory() as session:
-        await session.execute(update(BankTransaction).where(BankTransaction.id == source.id).values(match_status="matched"))
+        # Full statement rows cannot enter the legacy incoming-payment matcher.
+        with pytest.raises(DBAPIError, match="bank_statement_provenance"):
+            await session.execute(update(BankTransaction).where(BankTransaction.id == source.id).values(match_status="matched"))
+        await session.rollback()
+    async with pg_factory() as session:
+        await session.execute(update(BankTransaction).where(BankTransaction.id == source.id).values(
+            note="Synthetic review completed without changing the financial source",
+        ))
         await session.commit()
     async with pg_factory() as session:
+        reviewed = await session.get(BankTransaction, source.id)
+        assert reviewed.note == "Synthetic review completed without changing the financial source"
+        assert reviewed.match_status == "unmatched"
         replay = await bank_import.confirm(session, pg_book[0], confirmed, "tester")
         await session.commit()
         assert replay.entry_id == results[0]

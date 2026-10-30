@@ -115,7 +115,7 @@ def test_lead_priority_boundaries(score, expected):
 async def test_onec_client_mock():
     from modules.integrations.client import OneCClient, OutboundDocumentUnavailable
 
-    c = OneCClient()
+    c = OneCClient(allow_demo=True)
     assert c.outbound_document_source_available is False
     assert c.outbound_document_source_reason
     with pytest.raises(OutboundDocumentUnavailable):

@@ -96,6 +96,28 @@ function VisibilityChart({ points }: { points: { date: string; visibility: numbe
 
 
 
+const TASK_TYPES: Record<string, string> = {
+  on_page: "Оптимизация страниц",
+  tech: "Техническое SEO",
+  content: "Контент",
+};
+
+const TASK_PRIORITIES: Record<string, string> = {
+  critical: "Критический",
+  high: "Высокий",
+  medium: "Средний",
+  low: "Низкий",
+};
+
+const TASK_STATUSES: Record<string, string> = {
+  new: "Новая",
+  in_progress: "В работе",
+};
+
+function taskLabel(value: string, labels: Record<string, string>): string {
+  return Object.prototype.hasOwnProperty.call(labels, value) ? labels[value] : value || "—";
+}
+
 function PriorityBadge({ priority }: { priority: string }) {
 
   const tone =
@@ -110,7 +132,7 @@ function PriorityBadge({ priority }: { priority: string }) {
 
         : "bg-sunken text-muted";
 
-  return <span className={clsx("rounded-full px-2 py-0.5 text-xs font-medium", tone)}>{priority}</span>;
+  return <span className={clsx("rounded-full px-2 py-0.5 text-xs font-medium", tone)}>{taskLabel(priority, TASK_PRIORITIES)}</span>;
 
 }
 
@@ -500,7 +522,7 @@ export function MarketingSeoProjectView({ projectId }: { projectId: string }) {
 
               {quickWins.length === 0 ? (
 
-                <p className="mt-3 text-sm text-muted">Нет quick wins в последнем снимке.</p>
+                <p className="mt-3 text-sm text-muted">В последнем снимке нет быстрых побед.</p>
 
               ) : (
 
@@ -620,7 +642,7 @@ export function MarketingSeoProjectView({ projectId }: { projectId: string }) {
 
                     </td>
 
-                    <td className="px-4 py-3 text-muted">{task.type || "—"}</td>
+                    <td className="px-4 py-3 text-muted">{taskLabel(task.type, TASK_TYPES)}</td>
 
                     <td className="px-4 py-3">
 
@@ -628,7 +650,7 @@ export function MarketingSeoProjectView({ projectId }: { projectId: string }) {
 
                     </td>
 
-                    <td className="px-4 py-3 text-muted">{task.status}</td>
+                    <td className="px-4 py-3 text-muted">{taskLabel(task.status, TASK_STATUSES)}</td>
 
                   </tr>
 

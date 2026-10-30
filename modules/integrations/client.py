@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import date
+from math import isfinite
 from uuid import UUID
 
 import httpx
@@ -49,10 +50,13 @@ class OneCClient:
         base_url: str = "",
         username: str = "",
         password: str = "",
+        *,
+        allow_demo: bool = False,
     ) -> None:
         self.base_url = (base_url or "").rstrip("/")
         self.username = username or ""
         self.password = password or ""
+        self.allow_demo = allow_demo
         # Basic-auth уходит открытым текстом по http:// (base64 тривиально снимается). Предупреждаем
         # ровно когда 1С сконфигурирована небезопасно; https не принуждаем — внутренняя файловая ИБ
         # 1С обычно без TLS, форс сломал бы боевой конфиг. Канал держать в доверенной сети/VPN.
@@ -64,6 +68,15 @@ class OneCClient:
 
     def _live(self) -> bool:
         return bool(self.base_url)
+
+    @property
+    def stock_source_available(self) -> bool:
+        """Live stock registers have no verified mapping; demo is explicit only."""
+        return not self._live() and self.allow_demo
+
+    @property
+    def stock_source_reason(self) -> str:
+        return "Для складских остатков 1С не настроен проверенный read-only OData-адаптер"
 
     @property
     def financial_source_available(self) -> bool:
@@ -161,7 +174,8 @@ class OneCClient:
 
         Опубликованный OData ``ka_copy`` (2026-07): есть ``Catalog_Номенклатура``,
         ``InformationRegister_ЦеныНоменклатуры``; остатки/себес-регистры — НЕ опубликованы.
-        qty_* = 0 (честно), cost = None, price — последняя ненулевая Цена из RecordSet.
+        Склад и qty_* неизвестны (None), cost = None. Цена — только при наличии
+        положительной конечной цены в RecordSet; отсутствие цены не означает ноль.
         """
         skus = self._get_all(
             "Catalog_Номенклатура",
@@ -177,11 +191,11 @@ class OneCClient:
             by_ref[ref] = {
                 "sku_code": code,
                 "title": (row.get("Description") or code)[:255],
-                "warehouse": "Главный",
-                "qty_available": 0,
-                "qty_reserved": 0,
-                "qty_forecast": 0,
-                "price": 0.0,
+                "warehouse": None,
+                "qty_available": None,
+                "qty_reserved": None,
+                "qty_forecast": None,
+                "price": None,
                 "cost": None,
             }
 
@@ -208,7 +222,7 @@ class OneCClient:
                     price = float(line.get("Цена") or 0)
                 except (TypeError, ValueError):
                     continue
-                if not ref or price <= 0:
+                if not ref or not isfinite(price) or price <= 0:
                     continue
                 latest[ref] = price  # последняя страница ≈ актуальные; достаточно для sync
 
@@ -220,7 +234,7 @@ class OneCClient:
 
     async def fetch_counterparties(self) -> list[dict]:
         if not self._live():
-            return list(_MOCK_COUNTERPARTIES)
+            return [dict(row) for row in _MOCK_COUNTERPARTIES] if self.allow_demo else []
         try:
             return await asyncio.to_thread(self._fetch_counterparties_sync)
         except CounterpartyWriteError:
@@ -231,7 +245,7 @@ class OneCClient:
 
     async def fetch_stock(self) -> list[dict]:
         if not self._live():
-            return list(_MOCK_STOCK)
+            return [dict(row) for row in _MOCK_STOCK] if self.allow_demo else []
         try:
             return await asyncio.to_thread(self._fetch_stock_sync)
         except Exception as exc:  # noqa: BLE001

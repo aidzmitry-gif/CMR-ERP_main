@@ -23,6 +23,45 @@ async def test_unmapped_onec_is_not_presented_as_a_payment_reconciliation_source
     assert "проверенный" in res["source_reason"]
 
 
+async def test_reconcile_respects_unavailable_and_verified_empty_sources(session):
+    from modules.finance.reconcile import reconcile_with_onec
+
+    class Unavailable:
+        financial_source_available = False
+        financial_source_reason = "Synthetic source is unavailable"
+        calls = 0
+
+        async def fetch_payments(self):
+            self.calls += 1
+            raise AssertionError("An unavailable source must not be queried")
+
+    class Available:
+        financial_source_available = True
+
+        async def fetch_payments(self):
+            return []
+
+    unavailable_gateway = Unavailable()
+    unavailable = await reconcile_with_onec(session, unavailable_gateway)
+    assert unavailable_gateway.calls == 0
+    assert unavailable["source_available"] is False
+    assert unavailable["source_reason"] == "Synthetic source is unavailable"
+    assert unavailable["matched"] == unavailable["only_in_1c"] == []
+    available = await reconcile_with_onec(session, Available())
+    assert available["source_available"] is True
+    assert available["matched"] == available["only_in_1c"] == []
+
+
+async def test_reconcile_endpoint_reports_unavailable_source(api, monkeypatch):
+    services = api._transport.app.state.core.services
+    monkeypatch.setattr(services, "onec", OneCClient(base_url=""))
+    response = await api.get("/finance/reconcile-1c")
+    assert response.status_code == 200
+    assert response.json()["source_available"] is False
+    assert "проверенный" in response.json()["source_reason"]
+    assert response.json()["only_in_1c"] == []
+
+
 async def test_onec_facade_implements_full_protocol(services):
     """Фасад собран при load_modules: все read-методы доступны, fetch_payments НЕ AttributeError."""
     onec = services.onec
@@ -37,7 +76,7 @@ async def test_onec_facade_implements_full_protocol(services):
 
 async def test_reference_mocks_do_not_extend_to_financial_facades_when_base_url_empty():
     """Dev mock remains for references, while financial values stay unknown."""
-    c = OneCClient(base_url="")
+    c = OneCClient(base_url="", allow_demo=True)
     assert await c.fetch_counterparties()
     assert await c.fetch_stock()
     assert await c.fetch_payments() == []

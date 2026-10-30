@@ -1947,12 +1947,10 @@ async def test_inventory_posting_serializes_with_competing_writer(pg_factory, pg
     from modules.wms.routes import router
 
     async with pg_factory() as session:
-        connection = await session.connection()
-        def catalog(sync):
-            Sku.metadata.tables["ref_nomenclature_category"].create(sync)
-            Sku.__table__.create(sync)
-        await connection.run_sync(catalog)
-        session.add(StockMovement(organization_id=pg_book[0], sku_code="A", warehouse="Test",
+        # pg_factory installs the registered schema. Seed current catalog facts,
+        # never recreate its existing tables or remove their SQL guards.
+        session.add(Sku(code="A", title="Synthetic counted SKU", unit="шт", is_active=True))
+        session.add(StockMovement(organization_id=pg_book[0], sku_code="A", warehouse="warehouse1",
                                   kind="in", qty="30", reason="receipt"))
         await session.commit()
     app = FastAPI()
@@ -1965,7 +1963,7 @@ async def test_inventory_posting_serializes_with_competing_writer(pg_factory, pg
     app.dependency_overrides[get_current_user] = lambda: CurrentUser("tester", ["director"])
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         created = await client.post("/wms/inventory", json={"organization_id": pg_book[0],
-            "warehouse": "Test", "expected_source": "wms_physical", "journal_complete": True,
+            "warehouse": "warehouse1", "expected_source": "wms_physical", "journal_complete": True,
             "source_evidence": "Synthetic PostgreSQL physical journal"})
         assert created.status_code == 201, created.text
         count_id = created.json()["id"]
@@ -1976,7 +1974,7 @@ async def test_inventory_posting_serializes_with_competing_writer(pg_factory, pg
         assert edited.status_code == 200, edited.text
         competing = (client.post(f"/wms/inventory/{count_id}/complete") if competitor == "complete"
                      else client.post("/wms/adjustment", json={"organization_id": pg_book[0],
-                          "warehouse": "Test", "sku_code": "A", "qty": "5"}))
+                          "warehouse": "warehouse1", "sku_code": "A", "qty": "5"}))
         posted, other = await asyncio.gather(client.post(f"/wms/inventory/{count_id}/complete"), competing)
         if competitor == "complete":
             assert [posted.status_code, other.status_code] == [200, 200], [posted.text, other.text]
@@ -1986,12 +1984,17 @@ async def test_inventory_posting_serializes_with_competing_writer(pg_factory, pg
     async with pg_factory() as session:
         movements = (await session.scalars(select(StockMovement))).all()
         adjustments = [m for m in movements if m.reason == "adjustment"]
-        assert len(adjustments) == (1 if posted.status_code == 200 else 0)
+        inventory_adjustments = [m for m in adjustments if m.doc_ref == created.json()["number"]]
+        manual_adjustments = [m for m in adjustments if m not in inventory_adjustments]
+        assert len(inventory_adjustments) == (1 if posted.status_code == 200 else 0)
+        assert len(manual_adjustments) == (1 if competitor == "adjustment" else 0)
+        assert all(m.kind == "in" and m.qty == 5 for m in manual_adjustments)
         assert all(m.organization_id == pg_book[0] for m in movements)
-        if adjustments:
-            assert adjustments[0].kind == "out" and adjustments[0].qty == 3
+        assert all(m.warehouse == "warehouse1" and m.sku_code == "A" for m in movements)
+        if inventory_adjustments:
+            assert inventory_adjustments[0].kind == "out" and inventory_adjustments[0].qty == 3
         total = sum(m.qty if m.kind == "in" else -m.qty for m in movements)
-        assert total == (27 if competitor == "complete" else 32 if adjustments else 35)
+        assert total == (27 if competitor == "complete" else 32 if inventory_adjustments else 35)
 
 
 async def test_invoice_reservation_concurrent_replay_and_stale_completed_pick(pg_factory, pg_book):
@@ -2101,7 +2104,7 @@ async def test_addressed_invoice_allocations_cannot_overbook_concurrently(pg_fac
     async with pg_factory() as session:
         for document_id in (1, 2):
             await invoice(session, document_id, [{"sku_code": "A", "qty": "5"}], pg_book[0])
-        session.add(StockMovement(organization_id=pg_book[0], sku_code="A", warehouse="W",
+        session.add(StockMovement(organization_id=pg_book[0], sku_code="A", warehouse="warehouse1",
                                   kind="in", qty="6", reason="receipt"))
         await session.commit()
     async def allocate(document_id):
@@ -2110,7 +2113,7 @@ async def test_addressed_invoice_allocations_cannot_overbook_concurrently(pg_fac
             source = await SalesReservationSource().invoice_reservation(session, document_id)
             try:
                 await reserve(session, pg_book[0], source, ReserveInput(allocations=[
-                    {"line_no": 1, "warehouse": "W", "qty": "5"}], journal_complete=True,
+                    {"line_no": 1, "warehouse": "warehouse1", "qty": "5"}], journal_complete=True,
                     evidence="Synthetic physical journal"), actor)
                 await session.commit()
                 return 201
@@ -2120,10 +2123,14 @@ async def test_addressed_invoice_allocations_cannot_overbook_concurrently(pg_fac
     assert sorted(await asyncio.gather(allocate(1), allocate(2))) == [201, 409]
     async with pg_factory() as session:
         assert len((await session.scalars(select(InvoiceReservation))).all()) == 1
+        reservation = await session.scalar(select(InvoiceReservation))
+        assert reservation.execution_modes == {"warehouse1": False}
         rows = (await session.scalars(select(ReservationVersion))).all()
         assert len(rows) == 1 and rows[0].qty == 5 and rows[0].organization_id == pg_book[0]
+        assert rows[0].warehouse == "warehouse1"
         physical = (await session.scalars(select(StockMovement))).all()
         assert len(physical) == 1 and physical[0].qty == 6
+        assert physical[0].warehouse == "warehouse1" and physical[0].organization_id == pg_book[0]
 
 
 async def test_wms_concurrent_accept_preserves_owner_without_duplicate_moves(pg_factory, pg_book):

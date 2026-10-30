@@ -2,7 +2,7 @@
 
 import { ArrowRight, Mail, Package, Phone, Receipt, Star, User, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CatalogPickerModal } from "@/components/kanban/catalog-picker-modal";
 import { useProductPicker } from "@/components/kanban/product-picker";
 import { LeadAttachments } from "@/components/leads/lead-attachments";
@@ -99,13 +99,22 @@ export function LeadDrawerPreview({
   // --- Цикл 3: подбор товара (КП) на лиде + цепочка «В сделку + счёт» ---
   const [savedItems, setSavedItems] = useState<LeadCartItem[]>([]);
   const [catalogOpen, setCatalogOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const leadId = lead?.id ?? null;
+  const leadContext = useMemo(() => ({ leadId }), [leadId]);
+  const [savingContext, setSavingContext] = useState<typeof leadContext | null>(null);
+  const saving = savingContext === leadContext;
   const [saveError, setSaveError] = useState<string | null>(null);
   const [chain, setChain] = useState<ChainState | null>(null);
   // Общий стейт пикера (справочник+остатки+корзина) — как в окне звонка/сделке; грузится
   // только когда каталог открыт (active=catalogOpen), refetchKey — id лида.
   const picker = useProductPicker(catalogOpen, lead ? `lead-${lead.id}` : undefined);
   const hydratedRef = useRef(false);
+  // A → B → A is a new editing context even when the original lead ID returns.
+  const activeLeadContextRef = useRef<typeof leadContext | null>(null);
+  useLayoutEffect(() => {
+    activeLeadContextRef.current = leadContext;
+    return () => { activeLeadContextRef.current = null; };
+  }, [leadContext]);
 
   useEffect(() => {
     if (!lead || catalogOpen) return;
@@ -178,21 +187,22 @@ export function LeadDrawerPreview({
       const discountPct = base && base > 0 && price < base ? Math.round((1 - price / base) * 1000) / 10 : 0;
       items.push({ skuId: r.skuId, skuCode: r.code, name: r.title, qty: r.qty, price, discountPct });
     }
-    setSaving(true);
+    setSavingContext(leadContext);
     try {
       if (!await saveLeadItems(lead.id, items)) {
-        setSaveError("Не удалось сохранить подбор. Товары и цены оставлены для повторной попытки.");
+        if (leadContext === activeLeadContextRef.current) setSaveError("Не удалось сохранить подбор. Товары и цены оставлены для повторной попытки.");
         return;
       }
+      const total = items.reduce((s, it) => s + it.qty * it.price, 0);
+      onItemsSaved?.(lead.id, items.length, total);
+      if (leadContext !== activeLeadContextRef.current) return;
       setSavedItems(items);
       setCatalogOpen(false);
       picker.reset();
-      const total = items.reduce((s, it) => s + it.qty * it.price, 0);
-      onItemsSaved?.(lead.id, items.length, total);
     } catch {
-      setSaveError("Не удалось сохранить подбор. Товары и цены оставлены для повторной попытки.");
+      if (leadContext === activeLeadContextRef.current) setSaveError("Не удалось сохранить подбор. Товары и цены оставлены для повторной попытки.");
     } finally {
-      setSaving(false);
+      if (leadContext === activeLeadContextRef.current) setSavingContext(null);
     }
   }
 

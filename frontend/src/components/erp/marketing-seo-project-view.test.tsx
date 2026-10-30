@@ -118,7 +118,7 @@ describe("MarketingSeoProjectView", () => {
     const tile = screen.getByText("Критические задачи").closest("div")?.parentElement;
     expect(tile).toHaveTextContent("9");
     // и quick wins показывает пустую подсказку
-    expect(screen.getByText("Нет quick wins в последнем снимке.")).toBeInTheDocument();
+    expect(screen.getByText("В последнем снимке нет быстрых побед.")).toBeInTheDocument();
   });
 
   it("статус «active» отображается как «Активен»", async () => {
@@ -173,9 +173,33 @@ describe("MarketingSeoProjectView", () => {
 
     expect(await screen.findByText("Ускорить LCP")).toBeInTheDocument();
     expect(screen.getByText("Закрыть 404")).toBeInTheDocument();
-    expect(screen.getByText("in_progress")).toBeInTheDocument();
+    expect(screen.getByText("В работе")).toBeInTheDocument();
+    expect(screen.getByText("Новая")).toBeInTheDocument();
+    expect(screen.getByText("Техническое SEO")).toBeInTheDocument();
+    expect(screen.getByText("Контент")).toBeInTheDocument();
+    expect(screen.getByText("Высокий")).toBeInTheDocument();
+    expect(screen.getByText("Средний")).toBeInTheDocument();
     // подсказки про пустоту нет
     expect(screen.queryByText(/Задачи не синхронизированы/)).not.toBeInTheDocument();
+  });
+
+  it("переводит известные коды SEO, сохраняя неизвестные значения интеграции", async () => {
+    fetchDashboard.mockResolvedValue({ ...dashboard, quickWins: [] });
+    fetchTasks.mockResolvedValue([
+      { ...blankTask(), id: 23, title: "Проверить страницу", type: "on_page", priority: "critical" },
+      { ...blankTask(), id: 24, title: "Внешняя задача", type: "custom_type", priority: "custom_priority", status: "custom_status" },
+      { ...blankTask(), id: 25, title: "Задача без кодов", type: "", priority: "", status: "" },
+    ]);
+    render(<MarketingSeoProjectView projectId="5" />);
+    await screen.findByRole("heading", { name: "microchips.by" });
+    expect(screen.getByText("Критический")).toBeInTheDocument();
+    expect(screen.getByText("В последнем снимке нет быстрых побед.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /SEO-задачи/ }));
+    expect(await screen.findByText("Оптимизация страниц")).toBeInTheDocument();
+    for (const value of ["custom_type", "custom_priority", "custom_status"]) {
+      expect(screen.getByText(value)).toBeInTheDocument();
+    }
+    expect(screen.getAllByText("—")).toHaveLength(3);
   });
 
   it("быстрые победы из дашборда показывают ключ и потенциал", async () => {

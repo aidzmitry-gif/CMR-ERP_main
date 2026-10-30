@@ -17,8 +17,8 @@ from modules.wms.models import ReservationVersion, StockMovement
 from tests.test_invoice_issuance import create, seed
 
 
-async def late_reservation_flow(api, session, *, concurrent=False):
-    ids, base = await seed(api, session, physical="0")
+async def late_reservation_flow(api, session, *, concurrent=False, wms_enabled=False):
+    ids, base = await seed(api, session, physical="0", wms_enabled=wms_enabled)
     # An empty warehouse is not a synthetic zero-quantity movement.
     await session.execute(delete(StockMovement).where(StockMovement.organization_id == ids["org"]))
     await session.commit()
@@ -39,8 +39,13 @@ async def late_reservation_flow(api, session, *, concurrent=False):
         allocations=[{"line_no": 1, "warehouse": "W", "qty": "2.00"}], evidence="Confirmed arrival and complete journal", journal_complete=True)
     core = api._transport.app.state.core
     user, access = CurrentUser("issuer", ["director"]), DealAccess("all")
-    with pytest.raises(HTTPException, match="Ожидаемый остаток неизвестен"):
+    with pytest.raises(HTTPException) as unknown_stock:
         await reserve_later(session, core, user, access, ids["deal"], doc_id, data)
+    assert unknown_stock.value.status_code == 409
+    assert unknown_stock.value.detail["code"] == "stock_shortage"
+    assert unknown_stock.value.detail["reason"] == "unknown_stock"
+    assert unknown_stock.value.detail["physical"] is None
+    assert unknown_stock.value.detail["available"] is None
     await session.rollback()
     assert await session.scalar(select(func.count()).select_from(InvoiceLateReservationReceipt)) == 0
     session.add(StockMovement(organization_id=ids["org"], sku_code=ids["code"], warehouse="W", kind="in", qty=Decimal("2"), reason="receipt"))

@@ -6,6 +6,8 @@
 """
 from decimal import Decimal
 
+import pytest
+
 from modules.office import events
 from modules.office.models import OfficeDoc
 
@@ -77,7 +79,7 @@ def test_emit_payment_overdue_delegates_to_ladder():
 # --- Гард готовности к заявке перевозчику --------------------------------- #
 def test_is_ready_for_carrier_only_ready_stage():
     assert events.is_ready_for_carrier(_doc(stage="ready")) is True
-    for stage in ("shipped", "docs", "await_pay", "paid"):
+    for stage in ("draft", "shipped", "docs", "await_pay", "paid"):
         assert events.is_ready_for_carrier(_doc(stage=stage)) is False
 
 
@@ -110,20 +112,18 @@ def test_emit_simple_outgoing_helpers():
     assert bus.events[0][1]["company"] == "ООО Альфа"
 
 
-def test_emit_carrier_request_payload():
+def test_legacy_carrier_emitter_rejects_without_emitting():
     doc = _doc(number="ДОК-2026-0009", region="Минск")
     bus = FakeBus()
-    events.emit_carrier_request(
-        bus, None, doc,
-        log_ref="ЛОГ-2026-0009", carrier="cdek", carrier_name="СДЭК",
-        region="Гомель", pickup_date="2026-06-15", contact="Склад", comment="до 12:00",
-    )
-    assert bus.types() == ["logistics.delivery.requested"]
-    p = bus.events[0][1]
-    assert p["log_ref"] == "ЛОГ-2026-0009"
-    assert p["carrier"] == "cdek" and p["carrier_name"] == "СДЭК"
-    assert p["region"] == "Гомель"            # переданное направление перекрывает doc.region
-    assert p["entity_ref"] == "ЛОГ-2026-0009"  # entity_ref = номер заявки логистики
+    # Positive payload/identity assertions belong to the immutable producer
+    # tests in test_office_shipping_associations, not this disabled loose path.
+    with pytest.raises(ValueError, match="immutable Office shipping request through OfficeShippingProducer"):
+        events.emit_carrier_request(
+            bus, None, doc,
+            log_ref="ЛОГ-2026-0009", carrier="cdek", carrier_name="СДЭК",
+            region="Гомель", pickup_date="2026-06-15", contact="Склад", comment="до 12:00",
+        )
+    assert bus.events == []
 
 
 def test_first_picks_first_non_empty():

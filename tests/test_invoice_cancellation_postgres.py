@@ -60,7 +60,8 @@ async def cancel_pg(issuance_pg, request):
         for model in (User, CarrierBid, CarrierRfqInvite):
             await connection.run_sync(lambda conn, model=model: model.__table__.create(conn, checkfirst=True))
         await session.commit()
-        await erp_money_flow(api, session)
+        # This native fixture exercises actual WMS shipment/cancellation races.
+        await erp_money_flow(api, session, wms_enabled=True)
         policy = await session.scalar(select(Policy))
         org, policy_id = policy.organization_id, policy.id
         doc = await session.get(DealDocument, 1)

@@ -67,30 +67,44 @@ def test_summarize_without_import_freight_defaults_zero():
 
 
 @pytest.mark.api
-async def test_cost_insights_endpoint_returns_import_freight(api):
-    """GET /logistics/cost-insights возвращает import_freight_total ровно по warehouse-поставкам.
+async def test_cost_insights_endpoint_returns_import_freight(api, session):
+    """Qualified own warehouse sources retain 17000/2/8500; not ledger-posting proof."""
+    from core.domain.models import User
 
-    B1 ревью круга 3: KPI считается ровно по тем поставкам, фрахт которых УЖЕ ушёл в
-    finance (stage='warehouse' + amount>0). Поставка в in_transit — пока не «деньги в финансах».
-    """
-    # in_transit — НЕ в KPI (фрахт ещё не эмитился в finance)
-    await api.post("/logistics/imports", json={
+    session.add(User(username="import-cost-test-owner", full_name="Synthetic import cost owner", role="director", status="active"))
+    await session.commit()
+    api.headers["X-User"] = "import-cost-test-owner"
+    book = await api.post("/accounting/organizations", json={"name": "Synthetic import costs", "unp": "999999966"})
+    assert book.status_code == 201, book.text
+    org = book.json()["id"]
+    # In-transit freight is outside the selected arrived-import projection.
+    transit = await api.post("/logistics/imports", json={
         "supplier": "Shenzhen", "cargo": "Контейнер 1", "qty": 1,
         "amount": 8000.0, "stage": "in_transit", "po_ref": "purchase:c1",
     })
     # 2 warehouse-поставки — попадут в KPI
-    await api.post("/logistics/imports", json={
+    first = await api.post("/logistics/imports", json={
         "supplier": "Shenzhen", "cargo": "Контейнер 2", "qty": 1,
         "amount": 12000.0, "stage": "warehouse", "po_ref": "purchase:c2",
     })
-    await api.post("/logistics/imports", json={
+    second = await api.post("/logistics/imports", json={
         "supplier": "Shenzhen", "cargo": "Контейнер 3", "qty": 1,
         "amount": 5000.0, "stage": "warehouse", "po_ref": "purchase:c3",
     })
 
-    r = await api.get("/logistics/cost-insights")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["import_freight_total"] == 17000.0, "только warehouse-поставки (B1)"
-    assert body["import_freight_count"] == 2
-    assert body["import_freight_avg"] == 8500.0
+    for source in (transit, first, second):
+        assert source.status_code == 201, source.text
+        bound = await api.post(f"/accounting/organizations/{org}/source-bindings", json={
+            "source_type": "logistics_import", "source_id": source.json()["id"], "ownership": "own",
+            "evidence": "Synthetic explicit ownership of this logistics import",
+        })
+        assert bound.status_code == 201, bound.text
+    r = await api.get(f"/logistics/organizations/{org}/cost-insights")
+    assert r.status_code == 200, r.text
+    assert r.json()["complete_cost_coverage"] is False and r.json()["posting_status"] == "not_verified"
+    body = r.json()["import_freight"]
+    assert body["total"] == "17000.00", "только подтверждённые собственные warehouse-поставки"
+    assert body["known_count"] == 2
+    assert body["known_average"] == "8500.00"
+    assert body["excluded_nonwarehouse_count"] == 1
+    assert (await api.get("/logistics/cost-insights")).status_code == 409

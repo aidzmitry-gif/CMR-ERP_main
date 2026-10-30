@@ -1,15 +1,62 @@
 """Real company-scoped physical movements: snapshot provenance, freshness and rollback."""
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import event, select
 
-from modules.wms.models import CycleCountPlan, InventoryCount, InventoryLine, StockMovement
+from core.domain.models import Counterparty, Sku
+from modules.procurement.models import Supplier
+from modules.wms.models import (
+    CycleCountPlan,
+    InventoryCount,
+    InventoryLine,
+    Receipt,
+    ReceiptLine,
+    StockMovement,
+    WarehouseDirectory,
+)
+from tests.accounting.test_procurement_receipt_drafts import document
 from tests.test_inventory_organization import CONFIRM, count, ready_line
 from tests.test_inventory_organization import books as _books_fixture
 
 # Expose the shared fixture without importing a name shadowed by test parameters.
 books = _books_fixture
+
+
+async def receive_one_from_primary(api, session, organization_id):
+    """Change the journal through the supported primary-document/QC workflow."""
+    session.add_all([
+        Counterparty(id=1, name="supplier1", unp="190000001"),
+        Supplier(id=1, counterparty_id=1, name="supplier1", unp="190000001", status="active"),
+        Sku(id=1, code="A", title="Synthetic receipt item", unit="шт"),
+    ])
+    warehouse = WarehouseDirectory(organization_id=organization_id, name="Shared", title="Shared",
+                                   created_by="inventory-owner")
+    session.add(warehouse)
+    await session.commit()
+    data = document()
+    data.update(warehouse_id=warehouse.id, warehouse=warehouse.name, warehouse_title=warehouse.title)
+    data["items"][0].update(sku="A", quantity="2.00")
+    response = await api.post(f"/procurement/organizations/{organization_id}/receipt-documents",
+                              json={"key": "snapshot-primary", "document": data})
+    assert response.status_code == 201, response.text
+    source_id = response.json()["id"]
+    response = await api.post(f"/wms/organizations/{organization_id}/primary-receipts/{source_id}", json={
+        "request_key": str(uuid4()), "expected_version": 1, "warehouse_id": warehouse.id, "warehouse": "Shared",
+        "evidence": "Synthetic primary receipt and explicit warehouse correspondence",
+        "lines": [{"position": 1, "sku_code": "A", "quantity": "1.00"}],
+    })
+    assert response.status_code == 201, response.text
+    receipt_id = response.json()["receipt_id"]
+    receipt = await session.get(Receipt, receipt_id)
+    line = await session.scalar(select(ReceiptLine).where(ReceiptLine.receipt_id == receipt_id))
+    line.accepted_qty, line.rejected_qty = Decimal("1.00"), Decimal("0.00")
+    await session.commit()
+    response = await api.post(f"/wms/receipts/{receipt_id}/accept")
+    assert response.status_code == 200, response.text
+    movement = await session.scalar(select(StockMovement).where(StockMovement.doc_ref == receipt.number))
+    assert movement is not None and movement.qty == 1 and movement.organization_id == organization_id
 
 
 @pytest.mark.parametrize("field,value", [
@@ -85,7 +132,9 @@ async def test_stale_snapshot_cannot_adjust_changed_ledger(api, session, books, 
     doc_id = await count(api, books[0])
     await ready_line(api, session, doc_id)
     original = (await api.get(f"/wms/inventory/{doc_id}")).json()
-    if change in {"receipt", "shipment"}:
+    if change == "receipt":
+        await receive_one_from_primary(api, session, books[0])
+    elif change == "shipment":
         response = await api.post(f"/wms/{change}", json={"organization_id": books[0], "warehouse": "Shared", "sku_code": "A", "qty": 1})
         assert response.status_code == 201
     elif change == "net_zero_transfer":
@@ -132,16 +181,16 @@ async def test_cycle_run_requires_fresh_user_confirmation(api, session, books):
 
 
 async def test_inventory_and_physical_writer_use_same_organization_lock(api, session, books, monkeypatch):
-    from modules.accounting import gateway
+    from modules.accounting import service
 
     calls = []
-    original = gateway.lock_organization
+    original = service.lock_organization
 
     async def tracked_lock(session, organization_id):
         calls.append(organization_id)
         return await original(session, organization_id)
 
-    monkeypatch.setattr(gateway, "lock_organization", tracked_lock)
+    monkeypatch.setattr(service, "lock_organization", tracked_lock)
     response = await api.post("/wms/adjustment", json={"organization_id": books[0], "warehouse": "Shared", "sku_code": "A", "qty": 30})
     assert response.status_code == 201 and calls == [books[0]]
     calls.clear()
