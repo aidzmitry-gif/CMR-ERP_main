@@ -105,6 +105,55 @@ test("procurement keeps navigation on the left and renders the approved board de
   await page.unroute(historyUrl);
   await page.getByRole("button", { name: "Включить светлую тему", exact: true }).click();
 
+  // A failed supplier refresh is explicit; cached rows survive and recovery is manual.
+  let supplierRecovery = false;
+  let supplierFailedReads = 0;
+  let supplierSuccessfulReads = 0;
+  const suppliersUrl = "**/api/procurement/suppliers";
+  const supplierFixture = [
+    { id: 2681, counterparty_id: 2681, name: "Учебный поставщик Север", unp: "000002681", country: "Беларусь", flag: "", contact_person: "", phone: "", email: "", payment_terms: "По факту", lead_time_days: 7, incoterms: "DAP", status: "active", notes: "" },
+    { id: 2682, counterparty_id: 2682, name: "Учебный поставщик Восток", unp: "000002682", country: "Беларусь", flag: "", contact_person: "", phone: "", email: "", payment_terms: "", lead_time_days: null, incoterms: "", status: "blocked", notes: "" },
+  ];
+  await page.route(suppliersUrl, async route => {
+    expect(route.request().method()).toBe("GET");
+    if (supplierRecovery) {
+      supplierSuccessfulReads += 1;
+      await route.fulfill({ json: supplierFixture });
+    } else {
+      supplierFailedReads += 1;
+      await route.fulfill({ status: 503, json: { detail: "PRIVATE_SUPPLIER_INTERNAL_DETAILS" } });
+    }
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/erp/procurement/suppliers");
+  const supplierAlert = page.getByRole("alert").filter({ hasText: "Не удалось загрузить поставщиков" });
+  await expect(supplierAlert).toBeVisible();
+  await expect(supplierAlert).not.toContainText("PRIVATE_SUPPLIER_INTERNAL_DETAILS");
+  await page.screenshot({ path: testInfo.outputPath("suppliers-load-error.png"), fullPage: true });
+  await testInfo.attach("suppliers-load-error", { path: testInfo.outputPath("suppliers-load-error.png"), contentType: "image/png" });
+  supplierRecovery = true;
+  await page.getByRole("button", { name: "Обновить", exact: true }).click();
+  await expect(page.getByText("Учебный поставщик Север", { exact: true })).toBeVisible();
+  await expect(page.getByText("Учебный поставщик Восток", { exact: true })).toBeVisible();
+  await expect(supplierAlert).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("suppliers-recovered.png"), fullPage: true });
+  await testInfo.attach("suppliers-recovered", { path: testInfo.outputPath("suppliers-recovered.png"), contentType: "image/png" });
+  supplierRecovery = false;
+  await page.getByRole("button", { name: "Обновить", exact: true }).click();
+  await expect(supplierAlert).toContainText("Показаны ранее загруженные данные");
+  await expect(page.getByText("Учебный поставщик Север", { exact: true })).toBeVisible();
+  await expect(page.getByText("Учебный поставщик Восток", { exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("suppliers-stale-data.png"), fullPage: true });
+  await testInfo.attach("suppliers-stale-data", { path: testInfo.outputPath("suppliers-stale-data.png"), contentType: "image/png" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await supplierAlert.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("suppliers-mobile-error.png"), fullPage: true });
+  await testInfo.attach("suppliers-mobile-error", { path: testInfo.outputPath("suppliers-mobile-error.png"), contentType: "image/png" });
+  expect(supplierSuccessfulReads).toBe(1);
+  expect(supplierFailedReads).toBeGreaterThanOrEqual(2);
+  console.log("SUPPLIERS_AVAILABILITY_READS", JSON.stringify({ failed: supplierFailedReads, successful: supplierSuccessfulReads, manualRefreshClicks: 2 }));
+  await page.unroute(suppliersUrl);
+
   // Inspect the existing calculator within the same synthetic procurement workflow.
   await page.goto("/erp/procurement/cost-calc");
   await expect(page.getByRole("heading", { name: "Предварительная себестоимость (Китай) → цена реализации", exact: true })).toBeVisible();

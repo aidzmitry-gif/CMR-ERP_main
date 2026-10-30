@@ -65,8 +65,10 @@ function Field({
   );
 }
 
- function ProcurementSuppliersTableWorkspace({ initial }: { initial: Supplier[] }) {
-  const [rows, setRows] = useState<Supplier[]>(initial);
+ function ProcurementSuppliersTableWorkspace({ initial }: { initial: Supplier[] | null }) {
+  const [rows, setRows] = useState<Supplier[]>(initial ?? []);
+  const [hasSnapshot, setHasSnapshot] = useState(initial !== null);
+  const [listFailed, setListFailed] = useState(false);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -97,7 +99,9 @@ function Field({
 
   useEffect(() => {
     void fetchSuppliers().then((d) => {
-      if (d) setRows(d); // null = ошибка fetch → не затираем SSR-данные
+      if (d !== null) {
+        setRows(d); setHasSnapshot(true); setListFailed(false);
+      } else setListFailed(true);
     });
   }, []);
 
@@ -114,8 +118,11 @@ function Field({
 
   async function refresh() {
     setBusy(true);
+    setListFailed(false);
     const d = await fetchSuppliers();
-    if (d) setRows(d);
+    if (d !== null) {
+      setRows(d); setHasSnapshot(true);
+    } else setListFailed(true);
     setBusy(false);
   }
 
@@ -180,10 +187,14 @@ function Field({
         </div>
       </div>
 
+      {listFailed && <div role="alert" className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+        Не удалось загрузить поставщиков. {hasSnapshot ? "Показаны ранее загруженные данные." : "Количество пока не подтверждено."} Повторите загрузку кнопкой «Обновить».
+      </div>}
+
       <div className="mt-4 grid grid-cols-3 gap-3">
-        <Kpi label="Поставщиков" value={formatNumber(rows.length)} />
-        <Kpi label="Активных" value={formatNumber(active)} />
-        <Kpi label="Заблокировано" value={formatNumber(rows.length - active)} />
+        <Kpi label="Поставщиков" value={hasSnapshot ? formatNumber(rows.length) : "—"} />
+        <Kpi label="Активных" value={hasSnapshot ? formatNumber(active) : "—"} />
+        <Kpi label="Заблокировано" value={hasSnapshot ? formatNumber(rows.length - active) : "—"} />
       </div>
 
       <div className="mt-5 flex items-center">
@@ -217,7 +228,7 @@ function Field({
             {filtered.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-4 py-6 text-center text-muted">
-                  {rows.length === 0 ? "Поставщиков пока нет — добавьте первого" : "Ничего не найдено"}
+                  {!hasSnapshot ? (listFailed ? "Список поставщиков недоступен" : "Загрузка поставщиков…") : rows.length === 0 ? "Поставщиков пока нет — добавьте первого" : "Ничего не найдено"}
                 </td>
               </tr>
             )}

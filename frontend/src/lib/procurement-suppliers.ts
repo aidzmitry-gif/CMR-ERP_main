@@ -117,17 +117,18 @@ function roleHeaders(roles?: string): Record<string, string> | undefined {
   return roles ? { "X-User-Roles": roles } : undefined;
 }
 
-/** Поставщики для SSR (server component); при недоступности бэка — пусто. */
-export async function fetchSuppliersServer(roles?: string): Promise<Supplier[]> {
+/** `null` при недоступном SSR-списке; подтверждённый пустой список — `[]`. */
+export async function fetchSuppliersServer(roles?: string): Promise<Supplier[] | null> {
   try {
     const res = await fetch(`${BASE}/procurement/suppliers`, {
       cache: "no-store",
       headers: roleHeaders(roles),
     });
-    if (!res.ok) return [];
-    return (await res.json()) as Supplier[];
+    if (!res.ok) return null;
+    const rows: unknown = await res.json();
+    return Array.isArray(rows) ? rows as Supplier[] : null;
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -136,7 +137,8 @@ export async function fetchSuppliers(): Promise<Supplier[] | null> {
   try {
     const res = await fetch("/api/procurement/suppliers", { cache: "no-store" });
     if (!res.ok) return null;
-    return (await res.json()) as Supplier[];
+    const rows: unknown = await res.json();
+    return Array.isArray(rows) ? rows as Supplier[] : null;
   } catch {
     return null;
   }

@@ -107,6 +107,34 @@ beforeEach(() => {
 });
 
 describe("ProcurementSuppliersTable", () => {
+  it("не выдаёт отсутствие данных за ноль и восстанавливает подтверждённый пустой список вручную", async () => {
+    const serverFetch = vi.spyOn(globalThis, "fetch").mockResolvedValue({ ok: false } as Response);
+    const initial = await api.fetchSuppliersServer("procurement_head");
+    serverFetch.mockRestore();
+    render(<ProcurementSuppliersTable initial={initial} />);
+    await waitForCompany();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить поставщиков");
+    expect(screen.queryByText("Поставщиков пока нет — добавьте первого")).not.toBeInTheDocument();
+    for (const label of ["Поставщиков", "Активных", "Заблокировано"]) {
+      expect(within(screen.getByText(label, { exact: true }).parentElement!).getByText("—")).toBeInTheDocument();
+    }
+    fetchSuppliers.mockResolvedValueOnce([]);
+    fireEvent.click(screen.getByRole("button", { name: /Обновить/ }));
+    expect(await screen.findByText("Поставщиков пока нет — добавьте первого")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    for (const label of ["Поставщиков", "Активных", "Заблокировано"]) {
+      expect(within(screen.getByText(label, { exact: true }).parentElement!).getByText("0")).toBeInTheDocument();
+    }
+  });
+
+  it("сохраняет загруженные данные и явно предупреждает о неудачном обновлении", async () => {
+    render(<ProcurementSuppliersTable initial={rows} />);
+    await waitForCompany();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Показаны ранее загруженные данные");
+    expect(screen.getByText("Shenzhen Power Co")).toBeInTheDocument();
+    expect(within(screen.getByText("Поставщиков", { exact: true }).parentElement!).getByText("3")).toBeInTheDocument();
+  });
+
   it("читает показатели только при открытии поставщика в юрлице установки и показывает неполноту данных", async () => {
     render(<ProcurementSuppliersTable initial={rows} />);
   await waitForCompany();

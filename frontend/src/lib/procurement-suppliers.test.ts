@@ -89,18 +89,27 @@ describe("fetchSuppliersServer", () => {
     });
   });
 
-  it("не ok — пустой массив", async () => {
+  it("не ok — null: наличие поставщиков не подтверждено", async () => {
     stubFetch([S({ id: 1 })], false);
-    expect(await fetchSuppliersServer()).toEqual([]);
+    expect(await fetchSuppliersServer()).toBeNull();
   });
 
-  it("исключение сети — пустой массив", async () => {
+  it("исключение сети — null: наличие поставщиков не подтверждено", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
-    expect(await fetchSuppliersServer()).toEqual([]);
+    expect(await fetchSuppliersServer()).toBeNull();
+  });
+
+  it("не принимает объект ошибки HTTP200 за серверный список", async () => {
+    stubFetch({ detail: "PRIVATE_INTERNAL_DETAILS" });
+    expect(await fetchSuppliersServer()).toBeNull();
   });
 });
 
 describe("fetchSuppliers", () => {
+  it("не принимает объект ошибки HTTP200 за клиентский список", async () => {
+    stubFetch({ detail: "PRIVATE_INTERNAL_DETAILS" });
+    expect(await fetchSuppliers()).toBeNull();
+  });
   it("ходит через прокси /api", async () => {
     const fn = stubFetch([S({ id: 2 })]);
     const result = await fetchSuppliers();
