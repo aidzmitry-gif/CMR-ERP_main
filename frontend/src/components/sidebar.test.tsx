@@ -50,6 +50,73 @@ vi.mock("next/navigation", () => ({
 import { Sidebar } from "@/components/sidebar";
 
 describe("Sidebar", () => {
+  it.each([
+    ["/erp/wms/inventory", "Склад: разделы", "Инвентаризация"],
+    ["/erp/wms/inventory/7", "Склад: разделы", "Инвентаризация"],
+    ["/erp/wms/locations/7/label", "Склад: разделы", "Размещение (ячейки)"],
+    ["/erp/wms/settings", "Склад: разделы", null],
+    ["/erp/production/norms", "Производство: разделы", "Нормы и нормативы"],
+    ["/erp/production/bom", "Производство: разделы", "Спецификации · BOM"],
+    ["/erp/hr/worktime", "HR: разделы", "Учёт времени"],
+    ["/erp/office/contracts", "Офис-менеджер: разделы", null],
+    ["/erp/knowledge/enrollments", "База знаний: разделы", null],
+    ["/crm/tasks", "CRM: разделы", null],
+    ["/crm/mail", "CRM: разделы", null],
+    ["/crm/plan", "CRM: разделы", null],
+  ])("сохраняет собственное подменю на %s", async (path, groupName, activeLabel) => {
+    mockUsePathname.mockReturnValue(path!);
+    render(<Sidebar />);
+    const group = await screen.findByRole("group", { name: groupName! });
+    expect(screen.getAllByRole("group")).toHaveLength(1);
+    if (activeLabel) {
+      expect(screen.getByRole("link", { name: activeLabel, exact: true })).toHaveAttribute("aria-current", "page");
+    }
+    expect(group).toBeVisible();
+    expect(screen.getByRole("link", { name: "Закупки", exact: true })).toHaveAttribute("href", "/erp/procurement");
+  });
+
+  it.each([
+    ["/erp/accounting/opening-stock", "Бухгалтерия"],
+    ["/erp/settings/access", "IT и настройки"],
+  ])("подсвечивает модуль без подменю на %s", async (path, label) => {
+    mockUsePathname.mockReturnValue(path);
+    render(<Sidebar />);
+    expect(await screen.findByRole("link", { name: label, exact: true })).toHaveClass("bg-accent-soft");
+    expect(screen.queryByRole("group")).not.toBeInTheDocument();
+  });
+
+  it.each(["/erp/wms-shadow", "/erp/marketing-archive", "/erp/spravochniki-backup", "/crm2/clients"])(
+    "не раскрывает чужой модуль по похожему префиксу %s", async (path) => {
+      mockUsePathname.mockReturnValue(path);
+      render(<Sidebar />);
+      await screen.findByRole("link", { name: "CRM", exact: true });
+      expect(screen.queryByRole("group")).not.toBeInTheDocument();
+    },
+  );
+
+  it("переход по общей ссылке SKU раскрывает Справочники, а не Закупки", async () => {
+    mockUsePathname.mockReturnValue("/erp/spravochniki/sku");
+    render(<Sidebar />);
+    expect(await screen.findByRole("group", { name: "Справочники: разделы" })).toBeVisible();
+    expect(screen.queryByRole("group", { name: "Разделы закупок" })).not.toBeInTheDocument();
+  });
+
+  it("вложенный адрес недоступного склада не раскрывает складские ссылки", async () => {
+    mockUsePathname.mockReturnValue("/erp/wms/inventory/7");
+    render(<Sidebar allowedSlugs={["crm"]} />);
+    await screen.findByRole("link", { name: "CRM", exact: true });
+    expect(screen.queryByRole("group")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Инвентаризация", exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Склад", exact: true })).not.toBeInTheDocument();
+  });
+
+  it("панель владельца остаётся отдельным разделом без раскрытого CRM", async () => {
+    mockUsePathname.mockReturnValue("/crm/owner");
+    render(<Sidebar />);
+    expect(await screen.findByRole("link", { name: "Главная", exact: true })).toHaveClass("bg-accent-soft");
+    expect(screen.queryByRole("group", { name: "CRM: разделы" })).not.toBeInTheDocument();
+  });
+
   it.each(["/erp/procurement/planning", "/erp/procurement/orders/12", "/erp/procurement/rfq"])("keeps procurement navigation on %s", async (path) => {
     mockUsePathname.mockReturnValue(path);
     render(<Sidebar allowedSlugs={["procurement"]} />);

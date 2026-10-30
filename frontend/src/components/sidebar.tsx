@@ -368,29 +368,16 @@ export function Sidebar({ allowedSlugs, accessUnavailable = false, userName, rol
     return allowedSlugs == null ? ordered : ordered.filter((m) => allowedSlugs.includes(m.slug));
   }, [order, allowedSlugs, accessUnavailable]);
 
-  const crmActive =
-    pathname.startsWith("/crm/sales") ||
-    pathname.startsWith("/crm/deals") ||
-    pathname.startsWith("/crm/leads") ||
-    pathname.startsWith("/crm/clients") ||
-    pathname.startsWith("/crm/contacts") ||
-    pathname.startsWith("/crm/calls") ||
-    pathname.startsWith("/crm/catalog") ||
-    pathname.startsWith("/crm/docs") ||
-    pathname.startsWith("/crm/regular") ||
-    pathname.startsWith("/crm/shipments") ||
-    pathname.startsWith("/crm/margin") ||
-    pathname.startsWith("/crm/plan") ||
-    pathname.startsWith("/crm/rop");
-
-  const marketingActive = pathname.startsWith("/erp/marketing");
+  function withinRoute(href?: string): boolean {
+    return !!href && (pathname === href || pathname.startsWith(href + "/"));
+  }
 
   function moduleActive(m: ModuleItem): boolean {
-    if (m.slug === "crm") return crmActive;
-    if (m.slug === "marketing") return marketingActive;
-    if (m.slug === "procurement") return pathname === "/erp/procurement" || pathname.startsWith("/erp/procurement/");
-    if (m.slug === "spravochniki") return pathname.startsWith("/erp/spravochniki");
-    return !!m.href && pathname === m.href;
+    // CRM includes tasks/mail and the legacy plan route; the owner dashboard
+    // belongs to Home. Borrowed links (such as procurement's SKU) keep their
+    // destination module's context rather than opening two module menus.
+    if (m.slug === "crm") return withinRoute("/crm") && !withinRoute("/crm/owner");
+    return withinRoute(m.href);
   }
 
   function subActive(href?: string): boolean {

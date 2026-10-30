@@ -2,7 +2,8 @@ import { expect, test } from "@playwright/test";
 import { configureInstallationCompany } from "./installation-company";
 
 // Сквозная навигация: панель владельца и переход в ERP-модуль через сайдбар.
-test("навигация: панель владельца → ERP-модуль", async ({ page }) => {
+test("навигация: панель владельца → ERP-модули и вложенные страницы", async ({ page }) => {
+  test.setTimeout(90_000);
   const created = await page.request.post("/api/accounting/organizations", { data: {
     name: "Synthetic navigation seller", unp: `986${Date.now().toString().slice(-6)}`,
   } });
@@ -19,4 +20,18 @@ test("навигация: панель владельца → ERP-модуль",
   await expect(sidebar.getByRole("group", { name: "Разделы закупок" })).toBeVisible();
   await expect(sidebar.getByRole("link", { name: "Обзор и воронка", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("navigation", { name: "Разделы закупок" })).toHaveCount(0);
+
+  for (const [path, group, activeLink] of [
+    ["/erp/wms/inventory", "Склад: разделы", "Инвентаризация"],
+    ["/erp/production/norms", "Производство: разделы", "Нормы и нормативы"],
+    ["/erp/hr/worktime", "HR: разделы", "Учёт времени"],
+  ]) {
+    await test.step(path, async () => {
+      await page.goto(path);
+      await expect(sidebar.getByRole("group", { name: group, exact: true })).toBeVisible();
+      await expect(sidebar.getByRole("group")).toHaveCount(1);
+      await expect(sidebar.getByRole("link", { name: activeLink, exact: true })).toHaveAttribute("aria-current", "page");
+      await expect(sidebar.getByRole("group", { name: "Разделы закупок" })).toHaveCount(0);
+    });
+  }
 });
