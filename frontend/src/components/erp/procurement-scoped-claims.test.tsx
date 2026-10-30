@@ -1,5 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, expect, it, vi } from "vitest";
+import { configureCompany,render,resetCompany,waitForCompany } from "@/test/installation-company";
+import { fireEvent,screen,waitFor } from "@testing-library/react";
+import { beforeEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
 vi.mock("@/lib/procurement-machine", () => ({
   organizations: vi.fn(), identity: vi.fn(), fetchProcurementSuppliers: vi.fn(),
@@ -47,11 +52,12 @@ beforeEach(() => {
     source: "production", entity_ref: "production:qc:23", order_code: "QC-12" } });
 });
 
-it("loads claims only after selecting a company and creates with directory supplier ID", async () => {
+it("loads claims for the installation company and creates with directory supplier ID", async () => {
   render(<ProcurementScopedClaims />);
-  await screen.findByRole("option", { name: "Компания А · 123" });
-  expect(list).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText("Юрлицо претензий"), { target: { value: "7" } });
+  await waitForCompany();
+  await waitForCompany();
+  await waitFor(() => expect(list).toHaveBeenCalledWith(7));
+  await configureCompany("7");
   await screen.findByText("Battery");
   fireEvent.click(screen.getByRole("button", { name: "Новая претензия" }));
   fireEvent.change(screen.getByLabelText("Поиск поставщика"), { target: { value: "Vendor" } });
@@ -73,11 +79,12 @@ it("does not render a late response from another company", async () => {
   list.mockImplementation(org => org === 7 ? new Promise(done => { release = done; })
     : Promise.resolve({ organization_id: 8, items: [], next_after_id: null, unassigned_claims_excluded: true }));
   render(<ProcurementScopedClaims />);
-  await screen.findByRole("option", { name: "Компания А · 123" });
-  const selector = screen.getByLabelText("Юрлицо претензий");
-  fireEvent.change(selector, { target: { value: "7" } });
+  await waitForCompany();
+  await waitForCompany();
+  await waitForCompany();
+  await configureCompany("7");
   await waitFor(() => expect(list).toHaveBeenCalledWith(7));
-  fireEvent.change(selector, { target: { value: "8" } });
+  await configureCompany("8");
   await screen.findByText("Подтверждённых претензий этого юрлица пока нет.");
   release({ organization_id: 7, items: [row], next_after_id: null, unassigned_claims_excluded: true });
   await waitFor(() => expect(screen.queryByText("Battery")).toBeNull());
@@ -86,8 +93,9 @@ it("does not render a late response from another company", async () => {
 it("keeps resolution command for exact retry after an uncertain result", async () => {
   resolve.mockRejectedValueOnce(new Error("network"));
   render(<ProcurementScopedClaims />);
-  await screen.findByRole("option", { name: "Компания А · 123" });
-  fireEvent.change(screen.getByLabelText("Юрлицо претензий"), { target: { value: "7" } });
+  await waitForCompany();
+  await waitForCompany();
+  await configureCompany("7");
   await screen.findByText("Battery");
   fireEvent.click(screen.getByRole("button", { name: "Решить" }));
   fireEvent.change(screen.getByLabelText("Как урегулировано"), { target: { value: "Replacement" } });
@@ -102,8 +110,9 @@ it("keeps resolution command for exact retry after an uncertain result", async (
 it("binds an exact QC source to a directory supplier and reuses the command on retry", async () => {
   bind.mockRejectedValueOnce(new Error("network"));
   render(<ProcurementScopedClaims />);
-  await screen.findByRole("option", { name: "Компания А · 123" });
-  fireEvent.change(screen.getByLabelText("Юрлицо претензий"), { target: { value: "7" } });
+  await waitForCompany();
+  await waitForCompany();
+  await configureCompany("7");
   await screen.findByText("Battery");
   fireEvent.click(screen.getByRole("button", { name: "Сопоставить претензию ОТК" }));
   for (const [label, value] of [
@@ -132,3 +141,5 @@ it("binds an exact QC source to a directory supplier and reuses the command on r
   await waitFor(() => expect(bind).toHaveBeenCalledTimes(2));
   expect(bind.mock.calls[1][3]).toEqual(original);
 });
+
+configureBeforeEach(() => resetCompany(7));

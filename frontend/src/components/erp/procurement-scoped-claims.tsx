@@ -1,14 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
 
-import { fetchProcurementSuppliers, identity, organizations,
-  type Identity, type Organization, type ProcurementSupplierOption } from "@/lib/procurement-machine";
+import { useEffect,useRef,useState } from "react";
+
 import { claimStatusLabel } from "@/lib/procurement-claims";
-import { bindUnassignedClaim, claimHistory, createClaim, listClaims, previewUnassignedClaim,
-  resolveClaim, searchClaimOrders, type ClaimBindCommand, type ClaimCommand,
-  type ClaimHistory, type ClaimOrder, type ClaimPreview, type ClaimPreviewFacts, type ClaimResolution,
-  type OwnedClaim } from "@/lib/procurement-scoped-claims";
+import {
+fetchProcurementSuppliers,identity,
+type Identity,
+type ProcurementSupplierOption
+} from "@/lib/procurement-machine";
+import {
+bindUnassignedClaim,claimHistory,createClaim,listClaims,previewUnassignedClaim,
+resolveClaim,searchClaimOrders,type ClaimBindCommand,type ClaimCommand,
+type ClaimHistory,type ClaimOrder,type ClaimPreview,type ClaimPreviewFacts,type ClaimResolution,
+type OwnedClaim
+} from "@/lib/procurement-scoped-claims";
 
 const inputClass = "rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink";
 const newKey = () => crypto.randomUUID();
@@ -23,10 +30,10 @@ type BindDraft = { facts: ClaimPreviewFacts; preview: ClaimPreview | null; comma
 const emptyBinding = (): BindDraft => ({ facts: { entity_ref: "", item: "", reason: "", order_code: "" },
   preview: null, command: null });
 
-export function ProcurementScopedClaims() {
-  const [companies, setCompanies] = useState<Organization[]>([]);
-  const [companyError, setCompanyError] = useState("");
-  const [org, setOrg] = useState("");
+ function ProcurementScopedClaimsWorkspace() {
+
+  const [companyError] = useState("");
+  const org = String(useInstanceOrganization().id);
   const selected = useRef("");
   const supplierLookup = useRef(0);
   const orderLookup = useRef(0);
@@ -35,7 +42,7 @@ export function ProcurementScopedClaims() {
   const [next, setNext] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<ClaimCommand | null>(null);
   const [binding, setBinding] = useState<BindDraft | null>(null);
   const [supplierSearch, setSupplierSearch] = useState("");
@@ -45,31 +52,18 @@ export function ProcurementScopedClaims() {
   const [resolution, setResolution] = useState<(ClaimResolution & { claimId: number }) | null>(null);
   const [history, setHistory] = useState<ClaimHistory | null>(null);
 
-  useEffect(() => {
-    let live = true;
-    void organizations().then(value => { if (live) setCompanies(value); })
-      .catch(() => { if (live) setCompanyError("Не удалось загрузить юрлица"); });
-    return () => { live = false; };
-  }, []);
 
-  async function chooseOrganization(value: string) {
-    selected.current = value;
-    supplierLookup.current++; orderLookup.current++;
-    setOrg(value); setAccess(null); setRows([]); setNext(null); setForm(null); setBinding(null);
-    setResolution(null); setHistory(null); setError(""); setSuppliers([]); setOrders([]);
-    if (!value) return;
-    setLoading(true);
-    try {
-      const [scope, page] = await Promise.all([identity(Number(value)), listClaims(Number(value))]);
-      if (selected.current !== value) return;
-      if (scope.organization_id !== Number(value)) throw new Error("Юрлицо доступа не совпало");
-      setAccess(scope); setRows(page.items); setNext(page.next_after_id);
-    } catch (cause) {
-      if (selected.current === value) setError(String(cause));
-    } finally {
-      if (selected.current === value) setLoading(false);
-    }
-  }
+
+  useEffect(() => {
+    let active = true;
+    selected.current = org;
+    void Promise.all([identity(Number(org)), listClaims(Number(org))]).then(([scope, page]) => {
+      if (!active) return;
+      if (scope.organization_id !== Number(org)) throw new Error("Юрлицо доступа не совпало");
+      setAccess(scope); setRows(page.items); setNext(page.next_after_id); setLoading(false);
+    }).catch(cause => { if (active) { setError(String(cause)); setLoading(false); } });
+    return () => { active = false; selected.current = ""; };
+  }, [org]);
 
   async function refresh() {
     if (!org) return;
@@ -172,11 +166,7 @@ export function ProcurementScopedClaims() {
 
   return <div className="flex-1 space-y-4 overflow-auto p-6">
     <div className="flex flex-wrap items-center gap-3">
-      <label className="text-sm">Юрлицо <select aria-label="Юрлицо претензий" className={inputClass}
-        value={org} onChange={event => void chooseOrganization(event.target.value)}>
-        <option value="">Выберите юрлицо</option>
-        {companies.map(row => <option key={row.id} value={row.id}>{row.name} · {row.unp}</option>)}
-      </select></label>
+      <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
       {org && <span className="text-sm text-muted">Загружено претензий: {rows.length}</span>}
       {access?.can_manage && <button type="button" disabled={busy} className="rounded-lg bg-accent px-3 py-2 text-sm text-white"
         onClick={() => { supplierLookup.current++; orderLookup.current++; setBinding(null); setForm(emptyCommand());
@@ -318,3 +308,5 @@ export function ProcurementScopedClaims() {
     </section>}
   </div>;
 }
+
+export const ProcurementScopedClaims = withInstanceOrganization(ProcurementScopedClaimsWorkspace);

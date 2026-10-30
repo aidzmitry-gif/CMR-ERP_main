@@ -1,13 +1,15 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import type { DealDoc } from "@/lib/api";
-import { fetchRegisterOrganizations, type RegisterOrganization } from "@/lib/document-register-api";
-import { allocationError, exact, type Allocation } from "@/lib/invoice-issuance-api";
-import { loadReservation, previewReservation, submitReservation, type PendingReservation, type ReservationPreview } from "@/lib/invoice-late-reservation-api";
 
-export function InvoiceLateReservation({ dealId, doc, refresh }: { dealId: string; doc: DealDoc; refresh: () => Promise<void> }) {
-  const [orgs, setOrgs] = useState<RegisterOrganization[]>([]);
-  const [org, setOrg] = useState("");
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+import type { DealDoc } from "@/lib/api";
+import { fetchRegisterOrganizations,type RegisterOrganization } from "@/lib/document-register-api";
+import { allocationError,exact,type Allocation } from "@/lib/invoice-issuance-api";
+import { loadReservation,previewReservation,submitReservation,type PendingReservation,type ReservationPreview } from "@/lib/invoice-late-reservation-api";
+import { useEffect,useRef,useState } from "react";
+
+ function InvoiceLateReservationWorkspace({ dealId, doc, refresh }: { dealId: string; doc: DealDoc; refresh: () => Promise<void> }) {
+  const [, setOrgs] = useState<RegisterOrganization[]>([]);
+  const org = String(useInstanceOrganization().id);
   const [preview, setPreview] = useState<ReservationPreview | null>(null);
   const [allocations, setAllocations] = useState<Allocation[]>([]);
   const [pending, setPending] = useState<PendingReservation | null>(null);
@@ -22,11 +24,11 @@ export function InvoiceLateReservation({ dealId, doc, refresh }: { dealId: strin
     let active = true;
     fetchRegisterOrganizations().then(rows => {
       const saved = loadReservation(dealId, doc.id);
-      if (saved && !rows.some(r => r.id === saved.command.organization_id)) throw new Error("Нет доступа к юрлицу сохранённого запроса.");
-      if (active) { setOrgs(rows); setPending(saved); setOrg(saved ? String(saved.command.organization_id) : ""); setLoaded(true); }
+      if (saved && (saved.command.organization_id !== Number(org) || !rows.some(r => r.id === saved.command.organization_id))) throw new Error("Нет доступа к юрлицу сохранённого запроса.");
+      if (active) { setOrgs(rows); setPending(saved);  setLoaded(true); }
     }).catch(e => { if (active) setError(e instanceof Error ? e.message : "Ошибка загрузки"); });
     return () => { active = false; };
-  }, [dealId, doc.id]);
+  }, [dealId, doc.id, org]);
   async function run(send: boolean) {
     if (lock.current) return;
     lock.current = true; setBusy(true); setError("");
@@ -59,8 +61,7 @@ export function InvoiceLateReservation({ dealId, doc, refresh }: { dealId: strin
     {error && <p role="alert" className="my-2 text-red-600">{error}</p>}
     {pending ? <><p>Сохранён запрос резерва для юрлица #{pending.command.organization_id}. Повтор сохраняет исходное распределение.</p>
       <button disabled={!loaded || busy} onClick={() => void run(true)}>Повторить исходный запрос резерва</button></> : <fieldset disabled={!loaded || busy}>
-      <label>Юрлицо<select className="m-2 rounded border p-2" value={org} onChange={e => { setOrg(e.target.value); setPreview(null); setConfirmed(false); }}>
-        <option value="">Выберите юрлицо</option>{orgs.map(o => <option key={o.id} value={o.id}>{o.name} · {o.unp}</option>)}</select></label>
+      <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
       <button disabled={!org || !doc.version || !doc.content_sha256} onClick={() => void run(false)}>Проверить доступность</button>
       {preview && <><p>Резерв по строкам оригинала счёта. Физическая отгрузка оформляется отдельно.</p>
         {preview.lines.map(line => <p key={line.line_no}>{line.line_no}. {line.name} · {line.sku_code} · {line.qty} {line.unit}</p>)}
@@ -78,3 +79,5 @@ export function InvoiceLateReservation({ dealId, doc, refresh }: { dealId: strin
     </fieldset>}
   </details>;
 }
+
+export const InvoiceLateReservation = withInstanceOrganization(InvoiceLateReservationWorkspace);

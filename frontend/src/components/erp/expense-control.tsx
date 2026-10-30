@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+
 import * as api from "@/lib/expense-control-api";
+import { useEffect,useRef,useState } from "react";
 
 const field = "rounded border border-line bg-surface px-2 py-1 text-ink";
 const button = `${field} disabled:opacity-50 disabled:cursor-not-allowed`;
@@ -124,25 +126,19 @@ function ActualsPanel({ title, actuals, error, scope, onEntry, catalog, canAttri
   </div>;
 }
 
-export function ExpenseControl({ org, onEntry }: { org?: string; onEntry?: (id: number) => void }) {
-  const [selected, setSelected] = useState("");
-  const [books, setBooks] = useState<{ id: number; name: string; unp: string }[]>([]);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    if (org !== undefined) return;
-    let active = true;
-    void api.organizations().then(v => { if (active) setBooks(v); }).catch(e => { if (active) setError(errorText(e)); });
-    return () => { active = false; };
-  }, [org]);
-  const chosen = org ?? selected;
+ function ExpenseControlWorkspace({ org, onEntry }: { org?: string; onEntry?: (id: number) => void }) {
+  const selected = String(useInstanceOrganization().id);
+
+  const [error] = useState("");
+
+  const chosen = selected;
   const valid = /^[1-9]\d*$/.test(chosen) && Number.isSafeInteger(Number(chosen));
   return <section aria-label="Контроль расходов" className="space-y-4">
     <h2 className="text-xl font-semibold">Контроль расходов</h2>
     <p className="text-sm text-muted">Справочник, версии бюджета и утверждение главным бухгалтером. Начисления и оплаты показываются отдельно только при явной аналитике статьи; обязательства пока не подключены.</p>
     {error && <p role="alert">{error}</p>}
-    {org === undefined && <label>Юрлицо расходов <select aria-label="Юрлицо расходов" className={field} value={selected} onChange={e => setSelected(e.target.value)}>
-      <option value="">Выберите юрлицо</option>{books.map(b => <option key={b.id} value={b.id}>{b.name} · {b.unp}</option>)}</select></label>}
-    {valid ? <Book key={chosen} org={Number(chosen)} onEntry={onEntry} /> : <p>Выберите юридическое лицо. Данные других книг не объединяются.</p>}
+    {org === undefined && <span className="text-sm text-muted">Юрлицо задано в настройках.</span>}
+    {org !== undefined && org !== selected ? <p role="alert">Юрлицо ссылки не совпадает с настройкой установки.</p> : valid ? <Book key={chosen} org={Number(chosen)} onEntry={onEntry} /> : <p>Выберите юридическое лицо. Данные других книг не объединяются.</p>}
   </section>;
 }
 
@@ -393,3 +389,5 @@ function Book({ org, onEntry }: { org: number; onEntry?: (id: number) => void })
     </>}
   </div>;
 }
+
+export const ExpenseControl = withInstanceOrganization(ExpenseControlWorkspace);

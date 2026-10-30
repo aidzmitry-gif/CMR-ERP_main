@@ -1,13 +1,31 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import { fetchInstanceOrganization, type InstanceOrganization } from "@/lib/instance-organization";
 import { Button } from "@/components/ui/button";
+import { fetchInstanceOrganization,type InstanceOrganization } from "@/lib/instance-organization";
+import { createContext,useContext,useEffect,useState,type ComponentType,type ReactNode } from "react";
+
+const InstanceContext = createContext<InstanceOrganization | null>(null);
+
+export function useInstanceOrganization() {
+  const organization = useContext(InstanceContext);
+  if (!organization) throw new Error("Юрлицо установки не подтверждено.");
+  return organization;
+}
+
+export function withInstanceOrganization<P extends object>(Component: ComponentType<P>) {
+  function ScopedComponent(props: P) {
+    return <InstanceOrganizationGate>{() => <Component {...props} />}</InstanceOrganizationGate>;
+  }
+  return ScopedComponent;
+}
 
 /** Mount scoped screens only after the server confirms the installation's company. */
-export function InstanceOrganizationGate({ children }: {
-  children: (organization: InstanceOrganization) => ReactNode;
-}) {
+export function InstanceOrganizationGate({ children }: { children: (organization: InstanceOrganization) => ReactNode }) {
+  const inherited = useContext(InstanceContext);
+  return inherited ? children(inherited) : <LoadInstanceOrganization>{children}</LoadInstanceOrganization>;
+}
+
+function LoadInstanceOrganization({ children }: { children: (organization: InstanceOrganization) => ReactNode }) {
   const [organization, setOrganization] = useState<InstanceOrganization | null>(null);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -24,8 +42,8 @@ export function InstanceOrganizationGate({ children }: {
     <Button variant="secondary" onClick={() => { setOrganization(null); setError(""); setAttempt(value => value + 1); }}>Повторить загрузку юрлица</Button>
   </div>;
   if (!organization) return <p role="status">Загрузка юрлица установки…</p>;
-  return <div className="min-w-0 space-y-4" key={organization.id}>
+  return <InstanceContext.Provider value={organization}><div className="min-w-0 space-y-4" key={organization.id}>
     <p className="text-sm text-muted">{organization.name} · УНП {organization.unp}</p>
     {children(organization)}
-  </div>;
+  </div></InstanceContext.Provider>;
 }

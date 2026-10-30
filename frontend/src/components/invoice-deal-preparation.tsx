@@ -1,15 +1,17 @@
 "use client";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+claimOwnership,clearOwnership,loadOwnership,ownershipCommand,OwnershipError,previewOwnership,saveOwnership,
+type OwnershipCommand,type OwnershipPreview
+} from "@/lib/deal-ownership-api";
+import { fetchDocumentRegister,type DocumentRegisterPage } from "@/lib/document-register-api";
+import { useEffect,useLayoutEffect,useRef,useState } from "react";
 import { DealClientBinding } from "./deal-client-binding";
-import { fetchDocumentRegister, type DocumentRegisterPage } from "@/lib/document-register-api";
-import { claimOwnership, clearOwnership, loadOwnership, ownershipCommand, OwnershipError, previewOwnership, saveOwnership,
-  type OwnershipCommand, type OwnershipPreview } from "@/lib/deal-ownership-api";
 
-type Props = { org: string; dealId: string; onReady: (ready: boolean) => void; onSelectOrg: (org: string) => void };
+type Props = { org: string; dealId: string; onReady: (ready: boolean) => void; onSelectOrg?: (org: string) => void };
 export function InvoiceDealPreparation(props: Props) {
   return <Preparation key={`${props.dealId}/${props.org}`} {...props} />;
 }
-function Preparation({ org, dealId, onReady, onSelectOrg }: Props) {
+function Preparation({ org, dealId, onReady }: Props) {
   const [loaded, setLoaded] = useState(false), [busy, setBusy] = useState(false), [owned, setOwned] = useState(false);
   const [preview, setPreview] = useState<OwnershipPreview | null>(null);
   const [readAttempted, setReadAttempted] = useState(false);
@@ -90,7 +92,7 @@ function Preparation({ org, dealId, onReady, onSelectOrg }: Props) {
       <p>Основание: {pendingFacts?.evidence}</p>
       <p>Сделка: {pendingFacts?.expected_snapshot.number} · {pendingFacts?.expected_snapshot.counterparty}.</p>
       {pendingFacts?.expected_snapshot.documents.map(d => <p key={d.id}>{d.kind} {d.number} · #{d.id} · версия {d.version} · сумма {d.amount}</p>)}
-      {foreign ? <button onClick={() => onSelectOrg(pending.org)}>Вернуться к организации #{pending.org}</button>
+      {foreign ? <p role="alert">Незавершённая команда относится к другому юрлицу. Проверьте настройки установки; команда сохранена без изменений.</p>
         : <button disabled={busy} onClick={() => void run(confirm)}>Повторить исходное подтверждение организации</button>}
     </div>}
     {loaded && !pending && !owned && <>

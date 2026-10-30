@@ -1,27 +1,38 @@
 "use client";
 
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+
+import { createInventory,fetchInventoryList,type InventoryCount,type InventoryOrganization,inventoryStatusLabel } from "@/lib/wms-inventory";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { createInventory, fetchInventoryList, type InventoryCount, type InventoryOrganization, inventoryStatusLabel } from "@/lib/wms-inventory";
-import { emptySourceDraft, InventoryOrganizationSelect, InventorySourceFields, sourcePayload, sourceReady, useInventoryRequestScope } from "./wms-inventory-source";
+import { useEffect,useState } from "react";
+import { emptySourceDraft,InventorySourceFields,sourcePayload,sourceReady,useInventoryRequestScope } from "./wms-inventory-source";
 
 interface Props { initial: InventoryCount[]; organizations: InventoryOrganization[]; initialOrganizationId: number | null }
-export function WmsInventoryList(props: Props) {
+ function WmsInventoryListWorkspace(props: Props) {
   return <InventoryListBody key={JSON.stringify([props.initialOrganizationId, props.initial])} {...props} />;
 }
 
-function InventoryListBody({ initial, organizations, initialOrganizationId }: Props) {
+function InventoryListBody({ initial, initialOrganizationId }: Props) {
   const router = useRouter();
   const request = useInventoryRequestScope();
-  const [organizationId, setOrganizationId] = useState(initialOrganizationId);
-  const [docs, setDocs] = useState<InventoryCount[] | null>(initialOrganizationId === null ? null : initial);
+  const organizationId = useInstanceOrganization().id;
+  const [docs, setDocs] = useState<InventoryCount[] | null>(initialOrganizationId === organizationId ? initial.filter(row => row.organization_id === organizationId) : null);
   const [warehouse, setWarehouse] = useState("");
   const [source, setSource] = useState(emptySourceDraft);
 
+  const { setError: setReadError } = request;
+  useEffect(() => {
+    if (initialOrganizationId === organizationId) return;
+    let active = true;
+    void fetchInventoryList(organizationId).then(rows => { if (active) setDocs(rows); })
+      .catch(error => { if (active) setReadError(error instanceof Error ? error.message : "Не удалось загрузить документы."); });
+    return () => { active = false; };
+  }, [organizationId, initialOrganizationId, setReadError]);
+
   async function changeOrganization(id: number | null) {
     const ticket = request.begin();
-    setOrganizationId(id); setDocs(null); setSource(emptySourceDraft());
+     setDocs(null); setSource(emptySourceDraft());
     try {
       if (id !== null) { const rows = await fetchInventoryList(id); if (request.current(ticket)) setDocs(rows); }
     } catch (error) { request.fail(ticket, error); }
@@ -38,7 +49,7 @@ function InventoryListBody({ initial, organizations, initialOrganizationId }: Pr
   }
   return <div className="min-w-0 flex-1 overflow-auto p-6">
     <p className="mb-4 text-sm text-muted">Пересчёт физического журнала склада выбранного юрлица. Неизвестный остаток не считается нулём.</p>
-    <InventoryOrganizationSelect organizations={organizations} value={organizationId} onChange={changeOrganization} />
+    <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
     <label className="mt-4 block text-sm">Склад
       <input aria-label="Склад" value={warehouse} onChange={(e) => { setWarehouse(e.target.value); setSource({ ...source, confirmed: false }); }}
         className="ml-2 rounded-lg border border-line bg-surface px-3 py-2" />
@@ -62,3 +73,5 @@ function InventoryListBody({ initial, organizations, initialOrganizationId }: Pr
         </tbody></table></div>}
   </div>;
 }
+
+export const WmsInventoryList = withInstanceOrganization(WmsInventoryListWorkspace);

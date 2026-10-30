@@ -1,17 +1,19 @@
 "use client";
 
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+
 import clsx from "clsx";
-import { RefreshCw, Search } from "lucide-react";
+import { RefreshCw,Search } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo,useState } from "react";
 
 import { formatNumber } from "@/lib/format";
-import { type Balances, fetchBalances } from "@/lib/wms-ops";
+import { type Balances,fetchBalances } from "@/lib/wms-ops";
 
-export function WmsBalances({ initial }: { initial: Balances }) {
+ function WmsBalancesWorkspace({ initial }: { initial: Balances }) {
   const [data, setData] = useState<Balances>(initial);
   const [query, setQuery] = useState("");
-  const [organization, setOrganization] = useState("");
+  const organization = String(useInstanceOrganization().id);
   const [warehouse, setWarehouse] = useState("");
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -36,8 +38,8 @@ export function WmsBalances({ initial }: { initial: Balances }) {
         && (!q || `${r.sku_code} ${r.sku_title} ${r.location_code} ${r.batch_ref}`.toLowerCase().includes(q)),
     );
   }, [data.rows, query, organization, warehouse]);
-  const organizations = Array.from(new Set(data.rows.map((r) => String(r.organization_id ?? "unknown")))).sort();
-  const warehouses = Array.from(new Set(data.rows.map((r) => r.warehouse))).sort();
+  const scopedRows = data.rows.filter(row => row.organization_id === Number(organization));
+  const warehouses = Array.from(new Set(scopedRows.map((r) => r.warehouse))).sort();
 
   return (
     <div className="flex-1 overflow-auto p-6">
@@ -75,17 +77,14 @@ export function WmsBalances({ initial }: { initial: Balances }) {
             className="w-64 rounded-lg border border-line bg-surface py-2 pl-8 pr-3 text-sm text-ink outline-none focus:border-accent"
           />
         </div>
-        <select aria-label="Юрлицо остатков" value={organization} onChange={(e) => setOrganization(e.target.value)} className="rounded-lg border border-line bg-surface px-3 py-2 text-sm">
-          <option value="">Все юрлица</option>
-          {organizations.map((id) => <option key={id} value={id}>{id === "unknown" ? "Юрлицо не определено" : `Юрлицо №${id}`}</option>)}
-        </select>
+        <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
         <select aria-label="Склад остатков" value={warehouse} onChange={(e) => setWarehouse(e.target.value)} className="rounded-lg border border-line bg-surface px-3 py-2 text-sm">
           <option value="">Все склады</option>
           {warehouses.map((name) => <option key={name} value={JSON.stringify(name)}>{name || "Склад не указан"}</option>)}
         </select>
-        <button type="button" onClick={() => { setQuery(""); setOrganization(""); setWarehouse(""); }} className="rounded-lg border border-line px-3 py-2 text-sm">Сбросить фильтры</button>
-        <span className="text-xs text-faint">SKU: {data.sku_count}</span>
-        <span className="text-xs text-faint">Строк: {rows.length} из {data.rows.length}</span>
+        <button type="button" onClick={() => { setQuery("");  setWarehouse(""); }} className="rounded-lg border border-line px-3 py-2 text-sm">Сбросить фильтры</button>
+        <span className="text-xs text-faint">SKU: {new Set(scopedRows.map(row => row.sku_code)).size}</span>
+        <span className="text-xs text-faint">Строк: {rows.length} из {scopedRows.length}</span>
       </div>
 
       <div className="mt-3 overflow-x-auto rounded-xl border border-line bg-surface">
@@ -133,3 +132,5 @@ export function WmsBalances({ initial }: { initial: Balances }) {
     </div>
   );
 }
+
+export const WmsBalances = withInstanceOrganization(WmsBalancesWorkspace);

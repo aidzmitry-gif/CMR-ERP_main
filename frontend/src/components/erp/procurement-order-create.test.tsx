@@ -1,6 +1,11 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { configureCompany,render,resetCompany,waitForCompany } from "@/test/installation-company";
+import { fireEvent,screen,waitFor } from "@testing-library/react";
+import { afterEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
 import { ProcurementOrderCreate } from "./procurement-order-create";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
 const ok = (body: unknown, status = 200) => ({ ok: true, status, json: async () => body });
 
@@ -28,8 +33,9 @@ it("requires supplier and SKU selections and creates the order with immutable sn
   });
   vi.stubGlobal("fetch", fetcher);
   render(<ProcurementOrderCreate />);
-  await screen.findByRole("option", { name: "Компания · 123" });
-  fireEvent.change(screen.getByLabelText("Юрлицо заказа"), { target: { value: "1" } });
+  await waitForCompany();
+  await waitForCompany();
+  await configureCompany("1");
   await screen.findByRole("option", { name: "SKU-A · Товар А · шт" });
   await screen.findByRole("option", { name: "Поставщик · 190000001" });
   fireEvent.change(screen.getByLabelText("Основание заказа"), { target: { value: "standalone" } });
@@ -51,3 +57,5 @@ it("requires supplier and SKU selections and creates the order with immutable sn
   expect(command.document.lines[0]).toMatchObject({ sku_id: 42, sku_code: "SKU-A", sku_title: "Товар А", sku_unit: "шт" });
   expect(command.document.lines[0]).toMatchObject({ qty: "10.00", goods_value_byn: "200.00" });
 });
+
+configureBeforeEach(() => resetCompany(1));

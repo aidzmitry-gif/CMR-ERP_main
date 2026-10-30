@@ -1,11 +1,13 @@
 "use client";
 
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+
 import { businessDate } from "@/lib/business-date";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect,useRef,useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
 
 type Organization = { id: number; name: string; unp: string };
 type Applied = { org: string; start: string; end: string };
@@ -93,10 +95,10 @@ function checkedEntry(value: unknown, expectedId: number): EntryDetail {
   return entry as EntryDetail;
 }
 
-export function FinanceLedgerBalance() {
+ function FinanceLedgerBalanceWorkspace() {
   const now = today();
   const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [org, setOrg] = useState("");
+  const org = String(useInstanceOrganization().id);
   const [start, setStart] = useState(`${now.slice(0, 7)}-01`);
   const [end, setEnd] = useState(now);
   const [applied, setApplied] = useState<Applied | null>(null);
@@ -166,7 +168,7 @@ export function FinanceLedgerBalance() {
   return <section aria-label="Баланс бухгалтерской книги" className="space-y-4 rounded-xl border border-line bg-surface p-4">
     <div><h2 className="text-lg font-bold text-ink">Баланс бухгалтерской книги</h2><p className="text-sm text-muted">Накопительные остатки по проведённым строкам до конца выбранного периода. Все суммы — BYN; валюта позиции показывается отдельно только для переоценки.</p></div>
     <div className="flex flex-wrap gap-3">
-      <label className="min-w-56 flex-1 text-sm">Организация<Select aria-label="Организация баланса" value={org} onChange={event => setOrg(event.target.value)}><option value="">Выберите организацию</option>{organizations.map(item => <option key={item.id} value={item.id}>{item.name} · {item.unp}</option>)}</Select></label>
+      <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
       <label className="text-sm">С<Input aria-label="Начало периода баланса" type="date" value={start} onChange={event => setStart(event.target.value)} /></label>
       <label className="text-sm">По<Input aria-label="Конец периода баланса" type="date" value={end} onChange={event => setEnd(event.target.value)} /></label>
       <div className="self-end"><Button variant="secondary" onClick={() => void apply()}>Применить</Button></div>
@@ -189,3 +191,5 @@ export function FinanceLedgerBalance() {
 function Metric({ label, value, tone = "text-ink" }: { label: string; value: string; tone?: string }) {
   return <div className="rounded-xl bg-sunken p-4"><p className="text-sm text-muted">{label}</p><p className={`mt-1 text-xl font-bold ${tone}`}>{value} BYN</p></div>;
 }
+
+export const FinanceLedgerBalance = withInstanceOrganization(FinanceLedgerBalanceWorkspace);

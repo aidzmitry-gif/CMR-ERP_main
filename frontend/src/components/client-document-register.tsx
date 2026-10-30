@@ -1,21 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { documentStatusLabels as states } from "@/lib/document-status-labels";
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
 
+import { documentStatusLabels as states } from "@/lib/document-status-labels";
+import { useEffect,useRef,useState } from "react";
+
+import { ShipmentDocumentsRegister } from "@/components/erp/shipment-documents-register";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
-import { fetchRegisterOrganizations, registerId, type RegisterOrganization } from "@/lib/document-register-api";
-import { fetchClientDocument, fetchClientDocuments, fetchClientOriginal, type ClientDocument, type ClientDocumentPage } from "@/lib/client-document-register-api";
-import { ShipmentDocumentsRegister } from "@/components/erp/shipment-documents-register";
+import { fetchClientDocument,fetchClientDocuments,fetchClientOriginal,type ClientDocument,type ClientDocumentPage } from "@/lib/client-document-register-api";
+import { fetchRegisterOrganizations,registerId,type RegisterOrganization } from "@/lib/document-register-api";
 
 const kinds: Record<string, string> = { invoice: "Счёт", contract: "Договор", order: "Заказ" };
 
-export function ClientDocumentRegister({ clientId }: { clientId: string }) {
+ function ClientDocumentRegisterWorkspace({ clientId }: { clientId: string }) {
   return <ClientSelection key={clientId} clientId={clientId} />;
 }
 function ClientSelection({ clientId }: { clientId: string }) {
-  const [org, setOrg] = useState("");
+  const org = String(useInstanceOrganization().id);
   const [organizations, setOrganizations] = useState<RegisterOrganization[] | null>(null);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -30,7 +32,7 @@ function ClientSelection({ clientId }: { clientId: string }) {
     <h2 className="font-semibold">Документы клиента по юрлицу</h2>
     {!registerId(clientId) ? <p role="alert">Некорректный ID клиента.</p> : <>
       <p className="text-sm">Точный клиент MDM ID {clientId}. Включаются только сделки с подтверждённой принадлежностью этому ID.</p>
-      <label className="block text-sm">Юрлицо документов клиента<Select aria-label="Юрлицо документов клиента" disabled={!organizations} value={org} onChange={(e) => setOrg(e.target.value)}><option value="">Выберите юрлицо</option>{organizations?.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.unp}</option>)}</Select></label>
+      <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
       {!organizations && !error && <p role="status">Загрузка доступных юрлиц…</p>}
       {organizations?.length === 0 && <p>Нет доступных юрлиц.</p>}
       {error && <><p role="alert" className="text-red-700">{error}</p><Button variant="secondary" onClick={() => { setError(""); setAttempt((n) => n + 1); }}>Повторить список юрлиц</Button></>}
@@ -147,3 +149,5 @@ function ClientOriginal({ org, clientId, id, onClose }: { org: string; clientId:
     {html !== null && <iframe title={`Оригинал клиента ${clientId} документ ${id}`} sandbox="" referrerPolicy="no-referrer" srcDoc={html} className="h-[32rem] w-full rounded-lg border border-line bg-white" />}
   </div>;
 }
+
+export const ClientDocumentRegister = withInstanceOrganization(ClientDocumentRegisterWorkspace);

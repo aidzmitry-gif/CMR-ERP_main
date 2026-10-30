@@ -1,6 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { configureCompany,render,resetCompany,waitForCompany } from "@/test/installation-company";
+import { fireEvent,screen,waitFor } from "@testing-library/react";
+import { afterEach,beforeEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
 import { AccountingChart } from "./accounting-chart";
 
@@ -31,6 +35,7 @@ afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 it("shows a searchable historical chart without implying current certification", async () => {
   render(<AccountingChart />);
+  await waitForCompany();
   await screen.findByText("Товары на складах");
   expect(screen.getByText(/Доступный официальный текст подтверждает исторический справочник/)).toBeInTheDocument();
   expect(screen.getByText(/Проверка сведений: 2026-09-21/)).toBeInTheDocument();
@@ -43,12 +48,14 @@ it("shows a searchable historical chart without implying current certification",
 
 it("separates organization working accounts with historical date and analytics", async () => {
   render(<AccountingChart />);
+  await waitForCompany();
   await screen.findByText("Товары на складах");
   fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
   expect(await screen.findByText("Рабочие товары")).toBeInTheDocument();
   expect(screen.getByText("Склад · Номенклатура")).toBeInTheDocument();
   expect(screen.getByText("Количественный")).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Юридическое лицо"), { target: { value: "2" } });
+  await configureCompany("2");
+  fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
   expect(screen.queryByText("Рабочие товары")).not.toBeInTheDocument();
   await screen.findByText("Рабочие счета на эту дату не настроены.");
   fireEvent.change(screen.getByLabelText("Дата рабочего плана"), { target: { value: "2025-12-31" } });
@@ -58,13 +65,15 @@ it("separates organization working accounts with historical date and analytics",
 it("isolates catalog adoptions by organization and selected date, including empty and uncertified states", async () => {
   adoptionRows = { "1": [adoption(1)] };
   render(<AccountingChart />);
+  await waitForCompany();
   await screen.findByText("Товары на складах");
   fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
   expect(await screen.findByText(/Регламентированная готовность не подтверждена/)).toBeInTheDocument();
   expect(fetchMock.mock.calls.some(([url]) => url.includes("/1/catalog-adoptions"))).toBe(true);
   fireEvent.change(screen.getByLabelText("Дата рабочего плана"), { target: { value: "2025-12-31" } });
   expect(await screen.findByText(/На выбранную дату запись о рассмотрении нормативного каталога не найдена/)).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Юридическое лицо"), { target: { value: "2" } });
+  await configureCompany("2");
+  fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
   await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.includes("/2/catalog-adoptions"))).toBe(true));
   expect(await screen.findByText(/На выбранную дату запись о рассмотрении нормативного каталога не найдена/)).toBeInTheDocument();
 });
@@ -77,6 +86,7 @@ it("submits only explicit adoption data and shows the server-confirmed uncertifi
     return respond({ ...adoption(1, body.request_key), effective_from: body.effective_from, evidence: body.evidence });
   };
   render(<AccountingChart />);
+  await waitForCompany();
   await screen.findByText("Товары на складах");
   fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
   await screen.findByText(/запись о рассмотрении нормативного каталога не найдена/i);
@@ -100,6 +110,7 @@ it("retries one frozen adoption body after an unknown POST result", async () => 
     return respond({ ...adoption(1, body.request_key), effective_from: "2026-10-01", evidence: "Явное evidence для повторного запроса" });
   };
   render(<AccountingChart />);
+  await waitForCompany();
   await screen.findByText("Товары на складах");
   fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
   await screen.findByText(/запись о рассмотрении нормативного каталога не найдена/i);
@@ -126,6 +137,7 @@ it("treats a 5xx adoption result as unknown and retries its frozen body", async 
     return respond({ ...adoption(1, body.request_key), effective_from: "2026-10-01", evidence: "5xx retry evidence" });
   };
   render(<AccountingChart />);
+  await waitForCompany();
   await screen.findByText("Товары на складах");
   fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
   await screen.findByText(/запись о рассмотрении нормативного каталога не найдена/i);
@@ -142,7 +154,7 @@ it("treats a 5xx adoption result as unknown and retries its frozen body", async 
   expect(posts[1]).toBe(posts[0]);
 });
 
-it("keeps an unknown adoption in its original organization across a switch and exact retry", async () => {
+it("keeps an unknown adoption in the fixed installation company and retries its exact command", async () => {
   const posts: { url: string; body: string }[] = [];
   adoptionPost = async (url, init) => {
     posts.push({ url, body: String(init?.body) });
@@ -151,6 +163,7 @@ it("keeps an unknown adoption in its original organization across a switch and e
     return respond({ ...adoption(1, body.request_key), ...body });
   };
   render(<AccountingChart />);
+  await waitForCompany();
   await screen.findByText("Товары на складах");
   fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
   await screen.findByText(/запись о рассмотрении нормативного каталога не найдена/i);
@@ -159,15 +172,12 @@ it("keeps an unknown adoption in its original organization across a switch and e
   fireEvent.click(screen.getByText("Зафиксировать рассмотрение каталога"));
   expect(await screen.findByRole("alert")).toHaveTextContent(/Статус принятия неизвестен/);
 
-  fireEvent.change(screen.getByLabelText("Юридическое лицо"), { target: { value: "2" } });
-  fireEvent.click(screen.getByText("Повторить фиксацию рассмотрения"));
-  expect(await screen.findByRole("alert")).toHaveTextContent(/для другого юрлица/);
+  expect(screen.queryByRole("combobox", { name: /Юрлицо|Организация/ })).not.toBeInTheDocument();
   expect(posts).toHaveLength(1);
   expect(screen.getByLabelText("Дата рассмотрения каталога")).toBeDisabled();
   expect(screen.getByLabelText("Основание рассмотрения каталога")).toBeDisabled();
   expect(screen.getByRole("status")).toHaveTextContent("Original organization evidence");
 
-  fireEvent.change(screen.getByLabelText("Юридическое лицо"), { target: { value: "1" } });
   fireEvent.click(screen.getByText("Повторить фиксацию рассмотрения"));
   await screen.findByText("Запись о рассмотрении каталога сохранена сервером.");
   expect(posts).toHaveLength(2);
@@ -187,6 +197,7 @@ it("unlocks a known rejected adoption and sends a new explicit command with a ne
     return posts.length === 1 ? respond({ detail: "Explicit rejection" }, false, 400) : respond({ ...adoption(1, body.request_key), ...body });
   };
   render(<AccountingChart />);
+  await waitForCompany();
   await screen.findByText("Товары на складах");
   fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
   await screen.findByText(/запись о рассмотрении нормативного каталога не найдена/i);
@@ -207,7 +218,7 @@ it("unlocks a known rejected adoption and sends a new explicit command with a ne
   ]);
 });
 
-it("locks the organization selector while an adoption POST is pending and unlocks after completion", async () => {
+it("has no company selector during posting and uses a fresh configuration only on a new page", async () => {
   let finishPost!: () => void;
   const posts: string[] = [];
   adoptionPost = async (url, init) => {
@@ -217,23 +228,26 @@ it("locks the organization selector while an adoption POST is pending and unlock
     return respond({ ...adoption(1, body.request_key), ...body });
   };
   render(<AccountingChart />);
+  await waitForCompany();
   await screen.findByText("Товары на складах");
   fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
   await screen.findByText(/запись о рассмотрении нормативного каталога не найдена/i);
   fireEvent.change(screen.getByLabelText("Дата рассмотрения каталога"), { target: { value: "2026-10-01" } });
   fireEvent.change(screen.getByLabelText("Основание рассмотрения каталога"), { target: { value: "Deferred organization evidence" } });
   fireEvent.click(screen.getByText("Зафиксировать рассмотрение каталога"));
-  const organization = screen.getByLabelText("Юридическое лицо");
-  expect(organization).toBeDisabled();
-  await userEvent.setup().selectOptions(organization, "2");
-  expect(organization).toHaveValue("1");
+  await waitForCompany();
+  expect(screen.queryByRole("combobox", { name: /Юрлицо|Организация|Компания ячеек|Юридическое лицо/ })).not.toBeInTheDocument();
+  expect(screen.getAllByText(new RegExp(`Юрлицо установки ${"1"} ·`)).length).toBeGreaterThan(0);
   expect(posts).toEqual(["/api/accounting/organizations/1/catalog-adoptions"]);
   finishPost();
   await screen.findByText("Запись о рассмотрении каталога сохранена сервером.");
-  expect(organization).toBeEnabled();
-  await userEvent.setup().selectOptions(organization, "2");
-  expect(organization).toHaveValue("2");
+  expect(screen.queryByRole("combobox", { name: /Юрлицо|Организация|Компания ячеек|Юридическое лицо/ })).not.toBeInTheDocument();
+  await configureCompany(2);
+  fireEvent.click(screen.getByText("Рабочий план", { exact: true }));
+  expect(screen.getAllByText(new RegExp(`Юрлицо установки ${"2"} ·`)).length).toBeGreaterThan(0);
   await screen.findByText(/запись о рассмотрении нормативного каталога не найдена/i);
   expect(screen.queryByText("Основание: Deferred organization evidence")).not.toBeInTheDocument();
   expect(posts).toHaveLength(1);
 });
+
+configureBeforeEach(() => resetCompany(1));

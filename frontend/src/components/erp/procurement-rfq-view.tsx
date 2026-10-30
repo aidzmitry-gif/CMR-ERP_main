@@ -1,18 +1,20 @@
 "use client";
 
-import Link from "next/link";
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+
 import clsx from "clsx";
-import { Award, Plus, RefreshCw } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Award,Plus,RefreshCw } from "lucide-react";
+import Link from "next/link";
+import { useEffect,useMemo,useRef,useState } from "react";
 
 import { formatNumber } from "@/lib/format";
 import {
-  addBid,
-  awardRfq,
-  createRfq,
-  fetchRfqs,
-  type Rfq,
-  statusLabel,
+addBid,
+awardRfq,
+createRfq,
+fetchRfqs,
+type Rfq,
+statusLabel,
 } from "@/lib/procurement-rfq";
 
 type Organization = { id: number; name: string; unp: string };
@@ -67,9 +69,9 @@ const STATUS_TONE: Record<string, string> = {
   cancelled: "bg-sunken text-muted",
 };
 
-export function ProcurementRfqView() {
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [org, setOrg] = useState("");
+ function ProcurementRfqViewWorkspace() {
+  const [, setOrganizations] = useState<Organization[]>([]);
+  const org = String(useInstanceOrganization().id);
   const [requests, setRequests] = useState<RequestOption[]>([]);
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
   const [rfqs, setRfqs] = useState<Rfq[]>([]);
@@ -100,9 +102,9 @@ export function ProcurementRfqView() {
         setOrganizations(rows);
         const pending = pendingJournal();
         if (!pending) return;
-        if (!rows.some((row) => row.id === pending.org))
+        if (pending.org !== Number(org) || !rows.some((row) => row.id === pending.org))
           throw new Error("Юрлицо незавершённого RFQ недоступно. Новая отправка запрещена.");
-        setOrg(String(pending.org));
+
         if (pending.kind === "create") {
           pendingCreate.current = pending.key;
           setRequestId(String(pending.requestId)); setUncertainCreate(true);
@@ -117,7 +119,7 @@ export function ProcurementRfqView() {
       })
       .catch((cause) => { if (live) { setError(String(cause)); setJournalBlocked(true); } });
     return () => { live = false; };
-  }, []);
+  }, [org]);
 
   useEffect(() => {
     if (!org) return;
@@ -279,18 +281,7 @@ export function ProcurementRfqView() {
         </button>
       </div>
 
-      <label className="mt-4 block text-sm text-muted">Юрлицо RFQ
-        <select aria-label="Юрлицо RFQ" value={org} disabled={busy || uncertainCreate || uncertainBid || journalBlocked} onChange={(event) => {
-          setOrg(event.target.value); setRfqs([]); setRequests([]); setSuppliers([]);
-          setNext(null); setSelId(null); setRequestId(""); setError("");
-          setHistory([]); setHistoryError(""); setHistoryLoaded(false);
-          pendingCreate.current = null; pendingBid.current = null;
-          setUncertainCreate(false); setUncertainBid(false);
-        }} className="mt-1 block w-full max-w-md rounded-lg border border-line bg-surface px-3 py-2 text-ink">
-          <option value="">Выберите юрлицо</option>
-          {organizations.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.unp}</option>)}
-        </select>
-      </label>
+      <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
 
       {error && <div className="mt-3 text-sm text-red-600">{error}</div>}
 
@@ -516,3 +507,5 @@ export function ProcurementRfqView() {
     </div>
   );
 }
+
+export const ProcurementRfqView = withInstanceOrganization(ProcurementRfqViewWorkspace);

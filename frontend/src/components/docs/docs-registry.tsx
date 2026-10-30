@@ -1,9 +1,11 @@
 "use client";
 
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+
+import { fetchRegisterOriginal } from "@/lib/document-register-api";
+import { kindTitle,loadRegistry,loadSourcePreview,type RegistryPage,type RegistryRow,type SourcePreview } from "@/lib/global-document-register";
 import Link from "next/link";
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { fetchRegisterOrganizations, fetchRegisterOriginal, type RegisterOrganization } from "@/lib/document-register-api";
-import { kindTitle, loadRegistry, loadSourcePreview, type RegistryPage, type RegistryRow, type SourcePreview } from "@/lib/global-document-register";
+import { useEffect,useRef,useState,type FormEvent } from "react";
 
 const box = "rounded-xl border border-line bg-surface px-3 py-2";
 const emptyFilters = { q: "", kind: "", date_from: "", date_to: "", limit: 50 };
@@ -11,18 +13,14 @@ const errorMessage = (error: unknown) => error instanceof Error ? error.message 
 const money = (amount: string | null, currency: string | null) => amount === null ? "Сумма не указана" : `${amount}${currency ? ` ${currency}` : " · валюта не указана"}`;
 const dateLabel = (date: string | null) => date ? date.slice(0, 10).split("-").reverse().join(".") : "Дата не указана";
 
-export function DocsRegistry() {
-  const [organizations, setOrganizations] = useState<RegisterOrganization[]>([]);
-  const [orgError, setOrgError] = useState("");
-  const [org, setOrg] = useState("");
-  useEffect(() => {
-    let active = true;
-    void fetchRegisterOrganizations().then(rows => { if (active) setOrganizations(rows); }).catch(error => { if (active) setOrgError(errorMessage(error)); });
-    return () => { active = false; };
-  }, []);
+ function DocsRegistryWorkspace() {
+
+  const [orgError] = useState("");
+  const org = String(useInstanceOrganization().id);
+
   return <main className="flex-1 overflow-auto p-4 sm:p-6"><div className="mx-auto max-w-6xl space-y-5">
     <div><h1 className="text-2xl font-bold">Реестр документов</h1><p className="mt-2 text-sm text-muted">Документы выбранной организации. Список, поиск и просмотр учитывают ваши права доступа.</p></div>
-    <label className="block max-w-xl text-sm font-semibold">Организация<select className={`${box} mt-2 w-full`} value={org} onChange={event => setOrg(event.target.value)}><option value="">Выберите организацию</option>{organizations.map(row => <option key={row.id} value={row.id}>{row.name} · УНП {row.unp}</option>)}</select></label>
+    <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
     {orgError && <p role="alert" className="text-red-700">{orgError}</p>}
     {!org && <p className="rounded-xl bg-surface p-5 text-muted">Выберите организацию, чтобы открыть её документы. Данные разных организаций отображаются отдельно.</p>}
     {org && <OrganizationRegistry key={org} org={org} />}
@@ -105,3 +103,5 @@ function DocumentView({ org, row, onClose }: { org: string; row: RegistryRow; on
     {row.source === 'erp' && <div className="mt-4 space-y-3"><p>{dateLabel(row.date)} · {money(row.amount, row.currency)} · {row.status}</p>{row.deal_id && <Link className="text-accent underline" href={`/crm/deals/${row.deal_id}?org=${org}&invoice=${row.id}#document-register`}>Открыть документ в сделке</Link>}{!row.original_available && <p className="text-sm text-muted">Сохранённый оригинал отсутствует. Черновик и доступные действия откройте в карточке сделки.</p>}{row.original_available && !html && !error && <p role="status">Проверка оригинала…</p>}{html !== null && <iframe title={`Оригинал документа ${row.number}`} sandbox="" referrerPolicy="no-referrer" srcDoc={html} className="h-[36rem] w-full rounded-xl border border-line bg-white" />}</div>}
   </dialog>;
 }
+
+export const DocsRegistry = withInstanceOrganization(DocsRegistryWorkspace);

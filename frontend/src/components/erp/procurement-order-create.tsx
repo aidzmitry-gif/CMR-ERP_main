@@ -1,11 +1,12 @@
 "use client";
-import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
-import { fetchProcurementSkus, fetchProcurementSuppliers, type ProcurementSkuOptions, type ProcurementSupplierOption, type ProcurementSupplierOptions } from "@/lib/procurement-machine";
 
-type Org = { id: number; name: string; unp: string };
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+import { Button } from "@/components/ui/button";
+import { Input,Select } from "@/components/ui/input";
+import { fetchProcurementSkus,fetchProcurementSuppliers,type ProcurementSkuOptions,type ProcurementSupplierOption,type ProcurementSupplierOptions } from "@/lib/procurement-machine";
+import Link from "next/link";
+import { useEffect,useRef,useState } from "react";
+
 type Identity = { organization_id: number; principal: string; can_manage: boolean };
 type Source = { id: number; number: string; supplier: string; stage?: string; status?: string };
 type Page = { organization_id: number; items: Source[]; next_after_id: number | null };
@@ -95,13 +96,13 @@ async function get<T>(path: string): Promise<T> {
   return r.json();
 }
 
-export function ProcurementOrderCreate({ suggestedOrg, suggestedRequest }: { suggestedOrg?: string; suggestedRequest?: string }) {
-  const [orgs, setOrgs] = useState<Org[]>([]), [org, setOrg] = useState(""), [error, setError] = useState("");
-  useEffect(() => { let live = true; get<Org[]>("/api/procurement/receipt-organizations").then(x => { if (live) setOrgs(x); }).catch(e => { if (live) setError(errorText(e)); }); return () => { live = false; }; }, []);
+ function ProcurementOrderCreateWorkspace({ suggestedOrg, suggestedRequest }: { suggestedOrg?: string; suggestedRequest?: string }) {
+  const org = String(useInstanceOrganization().id), [error] = useState("");
+
   return <section className="space-y-4 p-6"><h1 className="text-xl font-semibold">Заказы поставщикам</h1><p>Создайте черновик с позициями в выбранном юрлице. Изменения доступны главному бухгалтеру с доступом к закупкам.</p>
     {suggestedOrg && suggestedRequest && <p>Переход из плана: юрлицо {suggestedOrg}, заявка {suggestedRequest}. Подтвердите выбор в форме.</p>}
     <Link href="/erp/procurement/ownership" className="text-accent underline">Указать юрлицо старых заказов</Link>
-    {error && <p role="alert">{error}</p>}<Select aria-label="Юрлицо заказа" value={org} onChange={e => setOrg(e.target.value)}><option value="">Выберите юрлицо</option>{orgs.map(o => <option value={o.id} key={o.id}>{o.name} · {o.unp}</option>)}</Select>
+    {error && <p role="alert">{error}</p>}<span className="text-sm text-muted">Юрлицо задано в настройках.</span>
     {org && <OrderWorkspace key={org} org={Number(org)} />}
   </section>;
 }
@@ -275,3 +276,5 @@ function OrderWorkspace({ org }: { org: number }) {
     {detail && <article aria-label="Состав заказа" className="space-y-2 rounded border border-line p-4"><h2>{detail.number} · {detail.supplier}</h2><Link className="underline" href={`/erp/procurement/orders/${detail.id}?org=${detail.organization_id}`}>Открыть редактор заказа</Link><p>Статус: {detail.status}. Фрахт: {detail.freight_byn} BYN. Дата: {detail.eta_date ?? "не задана"}.</p>{detail.lines.map(x => <p key={x.id}>{x.sku_code} · {x.qty} · {x.goods_value_byn} BYN · {x.weight} кг · {x.volume} м³</p>)}{detail.next_after_line_id !== null && <Button disabled={busy} onClick={() => void run(token => loadDetail(detail.id, token, detail.next_after_line_id!))}>Ещё позиции заказа</Button>}</article>}
   </div>;
 }
+
+export const ProcurementOrderCreate = withInstanceOrganization(ProcurementOrderCreateWorkspace);

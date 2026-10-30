@@ -1,13 +1,18 @@
+import { commandHash,emptyLine,type EditCommand } from "@/lib/procurement-machine";
+import { configureCompany,render,resetCompany,waitForCompany } from "@/test/installation-company";
+import { act,fireEvent,screen,waitFor } from "@testing-library/react";
+import { afterEach,beforeEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
+import { ProcurementMachineEditor } from "./procurement-machine-editor";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
 function milestones(target: string) {
   const stages = ["collection", "payment", "production", "to_cn_warehouse", "to_minsk", "customs"]; const durations = [28, 7, 14, 7, 20, 7]; let day = new Date(target);
   const result = stages.map((stage, seq) => ({ stage, title: stage, seq, duration_days: durations[seq], planned_date: "", actual_date: null }));
   for (const m of [...result].reverse()) { m.planned_date = day.toISOString().slice(0, 10); day = new Date(day.getTime() - m.duration_days * 86400000); } return { milestones: result, start_date: day.toISOString().slice(0, 10) };
 }
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, afterEach, expect, it, vi } from "vitest";
-import { ProcurementMachineEditor } from "./procurement-machine-editor";
-import { commandHash, emptyLine, type EditCommand } from "@/lib/procurement-machine";
 const navigation = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => navigation }));
 const storage = vi.hoisted(() => ({ rows: new Map<string, unknown>(), tail: Promise.resolve(), fail: false }));
@@ -70,7 +75,8 @@ beforeEach(() => {
   }); vi.stubGlobal("fetch", f);
 });
 afterEach(() => vi.unstubAllGlobals());
-async function ready() { render(<ProcurementMachineEditor orderId={7} suggestedOrg="1" />); await screen.findByText("Состав заказа ZAK-7"); await waitFor(() => expect(screen.getByRole("button", { name: "Проверить состав" })).toBeEnabled()); }
+async function ready() { render(<ProcurementMachineEditor orderId={7} suggestedOrg="1" />);
+  await waitForCompany(); await screen.findByText("Состав заказа ZAK-7"); await waitFor(() => expect(screen.getByRole("button", { name: "Проверить состав" })).toBeEnabled()); }
 async function selectNewSku() { await screen.findByRole("option", { name: "NEW · Новый товар · шт" }); fireEvent.change(screen.getByLabelText("Номенклатура из справочника"), { target: { value: "99" } }); }
 it("renders header, status and backend preview through scoped reads", async () => { await ready(); expect(screen.getByText(/Shenzhen Co/)).toHaveTextContent("Черновик"); expect(screen.getByText(/Shenzhen Co/)).toHaveTextContent("ETA 2026-08-01"); expect(screen.getByText("475")).toBeInTheDocument(); expect(screen.getByText("Итого landed: 950.00 BYN")).toBeInTheDocument(); });
 it("shows saved order changes with actor and server time", async () => {
@@ -97,7 +103,12 @@ it("separates expected, client-bound and free quantities without calling them ph
   const reserve = screen.getByRole("button", { name: "Закрепить ожидаемые 8.00" }); expect(reserve).toBeEnabled(); fireEvent.click(reserve);
   await waitFor(() => expect(f.mock.calls.find(([url]) => String(url).endsWith("demands/31/allocations"))?.[1]?.body).toContain('"qty":"8.00"'));
 });
-it("does not fetch an order without explicit organization", async () => { render(<ProcurementMachineEditor orderId={7} />); await screen.findByRole("option", { name: "A · 1" }); expect(f.mock.calls.map(([url]) => url)).toEqual(["/api/procurement/receipt-organizations"]); });
+it("does not fetch an order without a verified installation company", async () => {
+  resetCompany(0); render(<ProcurementMachineEditor orderId={7} />);
+  expect(await screen.findByRole("alert")).toBeInTheDocument();
+  expect(f).not.toHaveBeenCalled();
+});
+
 it("empty lines show the original add hint", async () => { lines = []; await ready(); expect(screen.getByText(/Позиций нет/)).toBeInTheDocument(); });
 it("missing preview shows a dash and an error, never zero cost", async () => { mode = "no-preview"; await ready(); expect(screen.getByText("—")).toBeInTheDocument(); expect(screen.getByRole("alert")).toHaveTextContent("503"); expect(screen.queryByText(/Итого landed/)).not.toBeInTheDocument(); });
 it("validates empty SKU before posting", async () => { await ready(); fireEvent.click(screen.getByRole("button", { name: "Добавить позицию" })); expect(screen.getByRole("alert")).toHaveTextContent("Выберите номенклатуру"); expect(writes()).toHaveLength(0); });
@@ -148,19 +159,13 @@ it("keeps the editor open when the save result is unknown", async () => {
   await screen.findByText(/Исход команды не подтверждён сервером/);
   expect(navigation.push).not.toHaveBeenCalled(); expect(screen.getByLabelText("Фрахт партии, BYN")).toHaveValue("200.13");
 });
-it("warns before changing legal entity with unsaved order fields", async () => {
+it("has no in-form company switch and retains unsaved order fields", async () => {
   await ready();
-  const confirm = vi.fn(() => false);
-  vi.stubGlobal("confirm", confirm);
   fireEvent.change(screen.getByLabelText("Фрахт партии, BYN"), { target: { value: "200.13" } });
-  fireEvent.change(screen.getByLabelText("Юрлицо заказа"), { target: { value: "2" } });
-  expect(confirm).toHaveBeenCalledTimes(1);
-  expect(screen.getByLabelText("Юрлицо заказа")).toHaveValue("1");
+  expect(screen.queryByRole("combobox", { name: /Юрлицо|Организация/ })).not.toBeInTheDocument();
   expect(screen.getByLabelText("Фрахт партии, BYN")).toHaveValue("200.13");
-  confirm.mockReturnValue(true);
-  fireEvent.change(screen.getByLabelText("Юрлицо заказа"), { target: { value: "2" } });
-  expect(await screen.findByText("Состав заказа B-7")).toBeInTheDocument();
 });
+
 it("does not close with an incomplete new position", async () => {
   await ready(); fireEvent.change(screen.getByLabelText("Количество"), { target: { value: "3.00" } });
   fireEvent.click(screen.getByRole("button", { name: "Сохранить и закрыть" }));
@@ -176,13 +181,15 @@ it("chief can change lifecycle status and plan with an explicit date", async () 
 });
 it("principal change before send blocks the command and clears old data", async () => { await ready(); principal = "bob"; fireEvent.click(screen.getByRole("button", { name: "Изменить статус" })); await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Пользователь изменился")); expect(writes()).toHaveLength(0); expect(screen.queryByText("Состав заказа ZAK-7")).not.toBeInTheDocument(); });
 it("lost response remains unknown across reload and is never automatically resent", async () => {
-  const view = render(<ProcurementMachineEditor orderId={7} suggestedOrg="1" />); await waitFor(() => expect(screen.getByRole("button", { name: "Изменить статус" })).toBeEnabled()); mode = "lost";
+  const view = render(<ProcurementMachineEditor orderId={7} suggestedOrg="1" />);
+  await waitForCompany(); await waitFor(() => expect(screen.getByRole("button", { name: "Изменить статус" })).toBeEnabled()); mode = "lost";
   fireEvent.click(screen.getByRole("button", { name: "Изменить статус" })); await screen.findByText(/Исход команды не подтверждён сервером/); expect(writes()).toHaveLength(1); expect(pending()).toHaveLength(1);
   view.unmount(); mode = "ok"; await ready(); expect(screen.getByRole("button", { name: "Добавить позицию" })).toBeDisabled(); expect(writes()).toHaveLength(1);
 });
 it("late org A response cannot overwrite org B", async () => {
   let release!: (v: unknown) => void; const original = f.getMockImplementation()!; f.mockImplementation((url: string, init?: RequestInit) => url.includes("organizations/1/orders/7?") ? new Promise(r => { release = r; }) : original(url, init));
-  render(<ProcurementMachineEditor orderId={7} suggestedOrg="1" />); await waitFor(() => expect(release).toBeTypeOf("function")); fireEvent.change(screen.getByLabelText("Юрлицо заказа"), { target: { value: "2" } }); await screen.findByText("Состав заказа B-7");
+  render(<ProcurementMachineEditor orderId={7} />);
+  await waitForCompany(); await waitFor(() => expect(release).toBeTypeOf("function")); await configureCompany("2"); await screen.findByText("Состав заказа B-7");
   await act(async () => { release(ok({ organization_id: 1, id: 7, number: "ZAK-7", supplier: "S", status: "draft", eta_date: null, freight_byn: "1.00", lines: [], next_after_line_id: null })); }); expect(screen.queryByText("Состав заказа ZAK-7")).not.toBeInTheDocument();
 });
 it("storage failure prevents dispatch", async () => { await ready(); storage.fail = true; fireEvent.click(screen.getByRole("button", { name: "Изменить статус" })); await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("storage unavailable")); expect(writes()).toHaveLength(0); });
@@ -236,3 +243,5 @@ it("legacy nonUUID attempt is not migrated or unlocked by a GET", async () => {
   sessionStorage.setItem("procurement-editor/1/7", JSON.stringify({ action: "add_line", body: { sku_code: "OLD" } })); await ready();
   expect(screen.getByText(/Старая попытка без UUID остаётся/)).toBeInTheDocument(); expect(screen.getByRole("button", { name: "Добавить позицию" })).toBeDisabled(); expect(screen.queryByRole("button", { name: "Сверить и закрыть неисполненную" })).not.toBeInTheDocument(); expect(writes()).toHaveLength(0); expect(storage.rows.size).toBe(0);
 });
+
+configureBeforeEach(() => resetCompany(1));

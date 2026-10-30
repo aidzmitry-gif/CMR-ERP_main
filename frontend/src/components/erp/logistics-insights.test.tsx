@@ -1,5 +1,10 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { configureCompany,render,resetCompany,waitForCompany } from "@/test/installation-company";
+import { act,cleanup,fireEvent,screen,waitFor,within } from "@testing-library/react";
+import { afterEach,beforeEach,beforeEach as configureBeforeEach,describe,expect,it,vi } from "vitest";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
 vi.mock("@/lib/logistics-owned-costs", async importOriginal => ({
   ...await importOriginal<typeof import("@/lib/logistics-owned-costs")>(),
@@ -24,8 +29,8 @@ function deferred<T>() {
   return { promise: new Promise<T>(done => { resolve = done; }), resolve: (value: T) => resolve(value) };
 }
 async function choose(org = "1") {
-  const select = await screen.findByLabelText("Юрлицо аналитики");
-  fireEvent.change(select, { target: { value: org } });
+  const select = await waitForCompany();
+  await configureCompany(org);
   return select;
 }
 async function knownShown(amount = "17000.00") {
@@ -43,15 +48,17 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("company-owned LogisticsInsights", () => {
-  it("waits for the authorized company catalog", () => {
+  it("waits for the authorized company catalog", async () => {
     vi.mocked(api.fetchCostCatalog).mockReturnValue(new Promise(() => {}));
     render(<LogisticsInsights />);
-    expect(screen.getByText("Проверка доступа к юрлицам…")).toBeInTheDocument();
+  await waitForCompany();
+    expect(await screen.findByText("Проверка доступа к юрлицам…")).toBeInTheDocument();
     expect(api.fetchOwnedCostReview).not.toHaveBeenCalled();
   });
   it("requires an explicit company selection", async () => {
     render(<LogisticsInsights />);
-    expect(await screen.findByLabelText("Юрлицо аналитики")).toHaveValue("");
+  await waitForCompany();
+    expect(screen.queryByRole("combobox", { name: /Юрлицо|Организация|Компания ячеек|Юридическое лицо/ })).not.toBeInTheDocument();
     expect(api.fetchOwnedCostReview).not.toHaveBeenCalled();
     await choose(); await knownShown();
     expect(api.fetchOwnedCostReview).toHaveBeenCalledWith({ organization_id: 1, principal: "A" }, expect.any(AbortSignal));
@@ -59,6 +66,7 @@ describe("company-owned LogisticsInsights", () => {
   it("keeps an empty company catalog separate from zero expenses", async () => {
     vi.mocked(api.fetchCostCatalog).mockResolvedValue({ ...catalog(), items: [] });
     render(<LogisticsInsights />);
+  await waitForCompany();
     expect(await screen.findByText("Нет доступных юрлиц для просмотра затрат.")).toBeInTheDocument();
     expect(api.fetchOwnedCostReview).not.toHaveBeenCalled();
     expect(screen.queryByText(/0,00 Br/)).not.toBeInTheDocument();
@@ -66,12 +74,14 @@ describe("company-owned LogisticsInsights", () => {
   it("shows a catalog denial without any cost data", async () => {
     vi.mocked(api.fetchCostCatalog).mockRejectedValue(new LogisticsReadError(403));
     render(<LogisticsInsights />);
+  await waitForCompany();
     expect(await screen.findByRole("alert")).toHaveTextContent("Недостаточно прав");
     expect(api.fetchOwnedCostReview).not.toHaveBeenCalled();
     noAmount();
   });
   it("shows exact qualified amounts and explicitly unavailable remaining sections", async () => {
-    render(<LogisticsInsights />); await choose(); await knownShown();
+    render(<LogisticsInsights />);
+  await waitForCompany(); await choose(); await knownShown();
     expect(within(screen.getByText("Средний известный фрахт").parentElement!).getByText(moneyText("8500.00"))).toBeInTheDocument();
     expect(within(screen.getByText("Поставок с известной ценой").parentElement!).getByText("2")).toBeInTheDocument();
     expect(screen.getByText(/Охват затрат неполный/)).toBeInTheDocument();
@@ -85,7 +95,8 @@ describe("company-owned LogisticsInsights", () => {
     value.import_freight = { status: "unknown", qualified_import_count: 0, warehouse_import_count: 0,
       known_count: 0, unpriced_count: 0, excluded_nonwarehouse_count: 0, known_total: null, total: null, known_average: null };
     vi.mocked(api.fetchOwnedCostReview).mockResolvedValue(value);
-    render(<LogisticsInsights />); await choose();
+    render(<LogisticsInsights />);
+  await waitForCompany(); await choose();
     expect(await screen.findByText(/Нет подтверждённых источников для расчёта/)).toBeInTheDocument();
     expect(within(screen.getByText("Известный фрахт").parentElement!).getByText("Не определён")).toBeInTheDocument();
     expect(screen.queryByText(/0,00 Br/)).not.toBeInTheDocument();
@@ -94,15 +105,17 @@ describe("company-owned LogisticsInsights", () => {
     const value = review();
     Object.assign(value.import_freight, { status: "partial", qualified_import_count: 4, warehouse_import_count: 3, unpriced_count: 1, total: null });
     vi.mocked(api.fetchOwnedCostReview).mockResolvedValue(value);
-    render(<LogisticsInsights />); await choose(); await knownShown();
+    render(<LogisticsInsights />);
+  await waitForCompany(); await choose(); await knownShown();
     expect(screen.getByRole("alert")).toHaveTextContent("Не оценён фрахт поставок: 1");
     expect(within(screen.getByText("Итог по подтверждённым поставкам").parentElement!).getByText("Не определён")).toBeInTheDocument();
   });
   it("removes A amounts immediately while company B is loading", async () => {
     const pending = deferred<api.OwnedCostReview>();
     vi.mocked(api.fetchOwnedCostReview).mockResolvedValueOnce(review()).mockReturnValueOnce(pending.promise);
-    render(<LogisticsInsights />); const select = await choose(); await knownShown();
-    fireEvent.change(select, { target: { value: "2" } });
+    render(<LogisticsInsights />);
+  await waitForCompany(); await choose(); await knownShown();
+    await configureCompany("2");
     noAmount(); expect(screen.getByText("Загрузка фрахта выбранного юрлица…")).toBeInTheDocument();
     await act(async () => pending.resolve(review(2, "A", "600.00", "300.00")));
     await knownShown("600.00"); noAmount();
@@ -111,22 +124,25 @@ describe("company-owned LogisticsInsights", () => {
     const oldA = deferred<api.OwnedCostReview>(), oldB = deferred<api.OwnedCostReview>();
     vi.mocked(api.fetchOwnedCostReview).mockReturnValueOnce(oldA.promise).mockReturnValueOnce(oldB.promise)
       .mockResolvedValueOnce(review(1, "A", "200.00", "100.00"));
-    render(<LogisticsInsights />); const select = await choose();
+    render(<LogisticsInsights />);
+  await waitForCompany(); await choose();
     await waitFor(() => expect(api.fetchOwnedCostReview).toHaveBeenCalledTimes(1));
-    fireEvent.change(select, { target: { value: "2" } });
+    await configureCompany("2");
     await waitFor(() => expect(api.fetchOwnedCostReview).toHaveBeenCalledTimes(2));
-    fireEvent.change(select, { target: { value: "1" } }); await knownShown("200.00");
+    await configureCompany("1"); await knownShown("200.00");
     await act(async () => { oldA.resolve(review()); oldB.resolve(review(2, "A", "600.00", "300.00")); });
     await knownShown("200.00"); noAmount(); noAmount("600.00");
   });
   it("clears accepted amounts before a refresh that denies access", async () => {
-    render(<LogisticsInsights />); await choose(); await knownShown();
+    render(<LogisticsInsights />);
+  await waitForCompany(); await choose(); await knownShown();
     vi.mocked(api.fetchOwnedCostReview).mockRejectedValueOnce(new LogisticsReadError(403));
     fireEvent.click(screen.getByRole("button", { name: "Обновить" })); noAmount();
     expect(await screen.findByRole("alert")).toHaveTextContent("Недостаточно прав"); noAmount();
   });
   it("hides on blur and reloads authorization and costs on focus", async () => {
-    render(<LogisticsInsights />); await choose(); await knownShown();
+    render(<LogisticsInsights />);
+  await waitForCompany(); await choose(); await knownShown();
     fireEvent.blur(window);
     expect(screen.getByText("Данные скрыты до проверки доступа.")).toBeInTheDocument(); noAmount();
     fireEvent.focus(window);
@@ -134,10 +150,12 @@ describe("company-owned LogisticsInsights", () => {
     await waitFor(() => expect(api.fetchOwnedCostReview).toHaveBeenCalledTimes(2)); await knownShown();
   });
   it("requires a fresh selection after the authenticated principal changes", async () => {
-    render(<LogisticsInsights />); await choose(); await knownShown();
+    render(<LogisticsInsights />);
+  await waitForCompany(); await choose(); await knownShown();
     vi.mocked(api.fetchCostCatalog).mockResolvedValueOnce(catalog("B"));
+    await waitFor(() => expect(api.fetchCostCatalog).toHaveBeenCalledTimes(1));
     fireEvent.blur(window); fireEvent.focus(window);
-    await waitFor(() => expect(screen.getByLabelText("Юрлицо аналитики")).toHaveValue(""));
+    await waitFor(() => expect(screen.queryByRole("combobox", { name: /Юрлицо|Организация|Компания ячеек|Юридическое лицо/ })).not.toBeInTheDocument());
     expect(api.fetchOwnedCostReview).toHaveBeenCalledTimes(1); noAmount();
     await choose(); await knownShown();
     expect(vi.mocked(api.fetchOwnedCostReview).mock.calls.at(-1)?.[0]).toEqual({ organization_id: 1, principal: "B" });
@@ -148,15 +166,21 @@ describe("company-owned LogisticsInsights", () => {
       ...catalog("B"), items: [{ id: 2, name: "Fresh current company", unp: "" }],
     });
     render(<LogisticsInsights />);
+  await waitForCompany();
+    await waitFor(() => expect(api.fetchCostCatalog).toHaveBeenCalledTimes(1));
     fireEvent.blur(window); fireEvent.focus(window);
-    expect(await screen.findByRole("option", { name: "Fresh current company" })).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Нет доступа к данным юрлица установки.");
     await act(async () => old.resolve(catalog("A")));
-    expect(screen.queryByRole("option", { name: /Company One/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /Юрлицо/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Нет доступа к данным юрлица установки.");
     expect(api.fetchOwnedCostReview).not.toHaveBeenCalled();
   });
   it("refuses an envelope that belongs to another selected identity", async () => {
     vi.mocked(api.fetchOwnedCostReview).mockResolvedValue(review(2));
-    render(<LogisticsInsights />); await choose();
+    render(<LogisticsInsights />);
+  await waitForCompany(); await choose();
     expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось подтвердить владельца ответа"); noAmount();
   });
 });
+
+configureBeforeEach(() => resetCompany(1));

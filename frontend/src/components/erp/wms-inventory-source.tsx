@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import {
-  type InventoryConfirmation, type InventoryOrganization, inventoryErrorMessage,
+type InventoryConfirmation,inventoryErrorMessage,
 } from "@/lib/wms-inventory";
+import { useEffect,useRef,useState } from "react";
 
 export interface SourceDraft { source: "" | "wms_physical"; evidence: string; confirmed: boolean }
 export const emptySourceDraft = (): SourceDraft => ({ source: "", evidence: "", confirmed: false });
@@ -13,19 +13,6 @@ export function sourceReady(draft: SourceDraft) {
 export function sourcePayload(draft: SourceDraft): InventoryConfirmation {
   if (!sourceReady(draft)) throw new Error("Выберите источник, укажите основание и подтвердите полноту журнала.");
   return { expected_source: "wms_physical", source_evidence: draft.evidence.trim(), journal_complete: true };
-}
-
-export function InventoryOrganizationSelect({ organizations, value, onChange }: {
-  organizations: InventoryOrganization[]; value: number | null; onChange: (id: number | null) => void;
-}) {
-  return <label className="block text-sm">Юрлицо
-    <select aria-label="Юрлицо" value={value ?? ""} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
-      className="ml-2 rounded-lg border border-line bg-surface px-3 py-2">
-      <option value="">Выберите юрлицо</option>
-      {organizations.map((org) => <option key={org.id} value={org.id}>{org.name} · {org.unp}</option>)}
-    </select>
-    {organizations.length === 0 && <span className="ml-2 text-muted">Нет доступных юрлиц</span>}
-  </label>;
 }
 
 export function InventorySourceFields({ draft, onChange, disabled = false }: {

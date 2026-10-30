@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { InstanceOrganizationGate } from "@/components/instance-organization-gate";
+
+import { ShieldCheck,UserPlus } from "lucide-react";
 import Link from "next/link";
-import { ShieldCheck, UserPlus } from "lucide-react";
+import { useEffect,useState } from "react";
 
 interface SystemInfo {
   loaded_modules: string[];
@@ -47,6 +49,10 @@ export function SettingsView() {
           </Link>
         </div>
       </div>
+      <section className="mt-5 space-y-3 rounded-2xl bg-surface p-5 shadow-card" aria-label="Юрлицо установки">
+        <h2 className="font-semibold text-ink">Юрлицо установки</h2>
+        <InstanceOrganizationGate>{() => <p className="text-sm text-muted">Это юрлицо применяется во всех рабочих разделах. Изменение выполняет администратор в настройках установки. Ранее оформленные документы сохраняют свою принадлежность.</p>}</InstanceOrganizationGate>
+      </section>
       {!sys && <p className="mt-5 text-sm text-muted">Загрузка…</p>}
       {sys && (
         <>

@@ -1,6 +1,11 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { render,resetCompany,waitForCompany } from "@/test/installation-company";
+import { act,fireEvent,screen,waitFor,within } from "@testing-library/react";
 import { createHash } from "node:crypto";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
 import { ProcurementReceiptDrafts } from "./procurement-receipt-drafts";
 import { ProcurementReceipts } from "./procurement-receipts";
@@ -290,18 +295,13 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-it("requires an explicit legal entity before opening supplier invoices", async () => {
-  const fetcher = vi.fn(async () => ({ ok: true, json: async () => [
-    { id: 7, name: "Белакб", unp: "123456789" },
-  ] }));
-  vi.stubGlobal("fetch", fetcher);
-
+it("requires configured installation company before opening supplier invoices", async () => {
+  resetCompany(0);
+  const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
   render(<ProcurementReceipts />);
-  expect(await screen.findByRole("option", { name: /Белакб/ })).toBeInTheDocument();
-  expect(screen.getByLabelText("Юрлицо поступления")).toHaveValue("");
-  expect(screen.getByText("Выберите юрлицо перед просмотром или созданием накладной.")).toBeInTheDocument();
+  expect(await screen.findByRole("alert")).toHaveTextContent("не настроено");
   expect(screen.queryByText("Новая первичная накладная")).not.toBeInTheDocument();
-  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher).not.toHaveBeenCalled();
 });
 
 it("shows draft and posted invoices from every date in the procurement register", async () => {
@@ -905,23 +905,16 @@ it("warns before replacing an unsaved new receipt", async () => {
   expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("");
 });
 
-it("keeps the legal entity when an unsaved receipt switch is cancelled", async () => {
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, json: async () =>
-    url.includes("unlinked-primary") ? { rows: [], next_after_id: null } : url.endsWith("receipt-organizations") ? [
-      { id: 7, name: "Белакб", unp: "123456789" }, { id: 8, name: "Второе ООО", unp: "987654321" },
-    ] : [] })));
-  const confirm = vi.fn(() => false);
-  vi.stubGlobal("confirm", confirm);
+it("has no company switch that could discard an unsaved supplier invoice", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes("unlinked-primary") ? { rows: [], next_after_id: null } : [] })));
+  const confirm = vi.fn(() => false); vi.stubGlobal("confirm", confirm);
   render(<ProcurementReceipts initialOrganization="7" />);
+  await waitForCompany();
   await screen.findByText("Показано 0 из 0 накладных выбранного юрлица за все даты.");
   fireEvent.change(screen.getByLabelText("Номер первичной накладной"), { target: { value: "INV-UNSAVED" } });
-  fireEvent.change(screen.getByLabelText("Юрлицо поступления"), { target: { value: "8" } });
-  expect(confirm).toHaveBeenCalledTimes(1);
-  expect(screen.getByLabelText("Юрлицо поступления")).toHaveValue("7");
+  expect(screen.queryByLabelText("Юрлицо поступления")).not.toBeInTheDocument();
+  expect(confirm).not.toHaveBeenCalled();
   expect(screen.getByLabelText("Номер первичной накладной")).toHaveValue("INV-UNSAVED");
-  confirm.mockReturnValue(true);
-  fireEvent.change(screen.getByLabelText("Юрлицо поступления"), { target: { value: "8" } });
-  expect(screen.getByLabelText("Юрлицо поступления")).toHaveValue("8");
 });
 
 it("closes a new receipt only after the server confirms its saved version", async () => {
@@ -1652,3 +1645,5 @@ it("shows a 403 from the workpaper history endpoint without enabling confirmatio
   expect(screen.getByRole("alert")).toHaveTextContent("403");
   expect(screen.queryByRole("button", { name: /Провести|Рассчитать вычет/ })).not.toBeInTheDocument();
 });
+
+configureBeforeEach(() => resetCompany(7));

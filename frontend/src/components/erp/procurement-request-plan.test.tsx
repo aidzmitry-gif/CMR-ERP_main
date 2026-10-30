@@ -1,5 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { render,resetCompany,waitForCompany } from "@/test/installation-company";
+import { screen,waitFor } from "@testing-library/react";
+import { afterEach,beforeEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
 import { ProcurementRequestPlan } from "@/components/erp/procurement-request-plan";
 
@@ -23,13 +28,18 @@ afterEach(() => vi.unstubAllGlobals());
 
 it("предвыбирает только доступное юрлицо после загрузки списка", async () => {
   render(<ProcurementRequestPlan suggestedOrg="2" />);
-  await waitFor(() => expect(screen.getByLabelText("Юрлицо плана закупок")).toHaveValue("2"));
+  await waitForCompany();
+  await waitFor(() => expect(screen.getAllByText(new RegExp(`Юрлицо установки ${"2"} ·`)).length).toBeGreaterThan(0));
   expect(await screen.findByText("Доступен просмотр. Для изменения нужен главный бухгалтер этого юрлица с доступом к закупкам.")).toBeInTheDocument();
 });
 
 it.each(["0", "abc", "3", "2147483648"])("игнорирует недоступный или некорректный org %s", async (suggestedOrg) => {
   render(<ProcurementRequestPlan suggestedOrg={suggestedOrg} />);
-  await screen.findByRole("option", { name: "Вторая · 222222222" });
-  expect(screen.getByLabelText("Юрлицо плана закупок")).toHaveValue("");
+  await waitForCompany();
+  expect(await screen.findByRole("alert")).toHaveTextContent("не совпадает");
+  expect(fetch).not.toHaveBeenCalled();
+  expect(screen.queryByRole("combobox", { name: /Юрлицо|Организация|Компания ячеек|Юридическое лицо/ })).not.toBeInTheDocument();
   expect(screen.queryByText("Проверка доступа…")).toBeNull();
 });
+
+configureBeforeEach(() => resetCompany(2));

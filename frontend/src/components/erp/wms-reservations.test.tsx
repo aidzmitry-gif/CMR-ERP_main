@@ -1,6 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { configureCompany,render,resetCompany,waitForCompany } from "@/test/installation-company";
+import { act,fireEvent,screen,waitFor } from "@testing-library/react";
+import { afterEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
 import { WmsReservations } from "./wms-reservations";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
 afterEach(() => { vi.unstubAllGlobals(); });
 const companies = [{ id: 1, name: "One", unp: "1" }, { id: 2, name: "Two", unp: "2" }];
@@ -11,9 +16,10 @@ it("requires explicit company, shows exact quantities and source history", async
   const fetcher = vi.fn(async (url: string) => ok(url.includes("receipt-organizations") ? companies : url.includes("/summary?") ? [{ ...row, source_count: 1 }] : [row]));
   vi.stubGlobal("fetch", fetcher);
   render(<WmsReservations />);
-  await screen.findByRole("option", { name: "One · 1" });
-  expect(fetcher).toHaveBeenCalledTimes(1);
-  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "1" } });
+  await waitForCompany();
+  await waitForCompany();
+  expect(fetcher.mock.calls.every(([url]) => url.includes("organization_id=1") || url.includes("receipt-organizations"))).toBe(true);
+  await configureCompany("1");
   expect(await screen.findByText("1.25")).toBeInTheDocument();
   expect(await screen.findByText("SKU-A · Own · Резерв 1.25 · Исходных строк: 1")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "История doc:1/line:1" }));
@@ -31,9 +37,10 @@ it("ignores late company responses and reports failures with retry", async () =>
     return Promise.resolve(failSecond ? { ok: false } : ok([]));
   }));
   render(<WmsReservations />);
-  await screen.findByRole("option", { name: "One · 1" });
-  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "1" } });
-  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "2" } });
+  await waitForCompany();
+  await waitForCompany();
+  await configureCompany("1");
+  await configureCompany("2");
   expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить резервы");
   await act(async () => { resolveFirst(ok([row])); });
   expect(screen.queryByText("SKU-A")).not.toBeInTheDocument();
@@ -46,10 +53,13 @@ it("links invoice reservations to their original and offers editing only for man
   const invoice = { ...row, id: 2, source: "invoice:22:1:warehouse", version: 1 };
   vi.stubGlobal("fetch", vi.fn(async (url: string) => ok(url.includes("receipt-organizations") ? companies : url.includes("/summary?") ? [] : [row, invoice])));
   render(<WmsReservations />);
-  await screen.findByRole("option", { name: "One · 1" });
-  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "1" } });
+  await waitForCompany();
+  await waitForCompany();
+  await configureCompany("1");
   expect(await screen.findByRole("link", { name: "Оригинал счёта" })).toHaveAttribute("href", "/api/sales/documents/22/render");
   expect(screen.queryByRole("button", { name: "Изменить invoice:22:1:warehouse" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "История invoice:22:1:warehouse" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "Изменить doc:1/line:1" })).toBeEnabled();
 });
+
+configureBeforeEach(() => resetCompany(1));

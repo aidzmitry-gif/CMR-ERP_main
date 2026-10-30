@@ -1,5 +1,10 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { configureCompany,render,resetCompany,waitForCompany } from "@/test/installation-company";
+import { act,fireEvent,screen,waitFor,within } from "@testing-library/react";
+import { afterEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
 const api = vi.hoisted(() => ({
   context: vi.fn(), getBudgets: vi.fn(), getActuals: vi.fn(), getUnmatchedActuals: vi.fn(), journal: vi.fn(),
@@ -86,6 +91,7 @@ it("shows a month plan-fact percentage and warnings for partial and unplanned ac
   });
 
   render(<ExpenseControl org="1" />);
+  await waitForCompany();
   await screen.findByText("Книга № 1. Учётная запись: chief. Версия справочника: 1.");
   fireEvent.change(screen.getByLabelText("Валюта бюджета"), { target: { value: "BYN" } });
   fireEvent.change(screen.getByLabelText("Основа"), { target: { value: "accrual" } });
@@ -114,6 +120,7 @@ it("uses the approved immutable budget instead of a newer draft for plan-fact", 
   });
 
   render(<ExpenseControl org="1" />);
+  await waitForCompany();
   await screen.findByText("Книга № 1. Учётная запись: chief. Версия справочника: 1.");
   fireEvent.change(screen.getByLabelText("Валюта бюджета"), { target: { value: "BYN" } });
   fireEvent.change(screen.getByLabelText("Основа"), { target: { value: "accrual" } });
@@ -136,6 +143,7 @@ it("shows accrual and cash actuals separately with their own coverage", async ()
     reason: basis === "accrual" ? "Есть строки без статьи" : "Все оплаты размечены", rows: [] }));
 
   render(<ExpenseControl org="1" />);
+  await waitForCompany();
   await screen.findByText("Книга № 1. Учётная запись: chief. Версия справочника: 1.");
   fireEvent.change(screen.getByLabelText("Год бюджета"), { target: { value: "2026" } });
   fireEvent.change(screen.getByLabelText("Валюта бюджета"), { target: { value: "BYN" } });
@@ -161,6 +169,7 @@ it("matches a cash budget only with cash actuals", async () => {
     rows: [{ article_id: 1, article_code: "supplies", article_title: "Материалы", group_id: 1, group_title: "Офис", amount: basis === "cash" ? "80.00" : "140.00", lines: 1 }] }));
 
   render(<ExpenseControl org="1" />);
+  await waitForCompany();
   await screen.findByText("Книга № 1. Учётная запись: chief. Версия справочника: 1.");
   fireEvent.change(screen.getByLabelText("Год бюджета"), { target: { value: "2026" } });
   fireEvent.change(screen.getByLabelText("Валюта бюджета"), { target: { value: "BYN" } });
@@ -183,6 +192,7 @@ it("keeps accrual visible when cash is unavailable and never derives commitments
   api.getActuals.mockImplementation((_scope, year, month, basis) => basis === "cash" ? Promise.reject(new Error("cash ledger unavailable")) : Promise.resolve({ year, month, currency: "BYN", basis, amount: "140.00", coverage: "complete", matched_lines: 1, unmatched_lines: 0, reason: "complete", rows: [] }));
 
   render(<ExpenseControl org="1" />);
+  await waitForCompany();
   await screen.findByText("Книга № 1. Учётная запись: chief. Версия справочника: 1.");
   fireEvent.change(screen.getByLabelText("Год бюджета"), { target: { value: "2026" } });
   fireEvent.change(screen.getByLabelText("Валюта бюджета"), { target: { value: "BYN" } });
@@ -204,6 +214,7 @@ it("opens a listed unmatched entry without replacing the fact on list failure", 
   api.getActuals.mockImplementation((_s, year, month, basis) => Promise.resolve({ year, month, currency: "BYN", basis, amount: "10.00", coverage: "partial", matched_lines: 1, unmatched_lines: 1, reason: "partial", rows: [] }));
   api.getUnmatchedActuals.mockResolvedValue({ year: 2026, month: 1, currency: "BYN", basis: "accrual", total: 1, next_after_line_id: null, items: [{ entry_id: 7, line_id: 8, posting_date: "2026-01-02", source: "source", operation: "manual", account_code: "90.4", side: "debit", amount: "2.00", dimensions: {}, reason: "нет статьи" }] });
   render(<ExpenseControl org="1" onEntry={onEntry} />);
+  await waitForCompany();
   await screen.findByText("Книга № 1. Учётная запись: chief. Версия справочника: 1.");
   fireEvent.change(screen.getByLabelText("Год бюджета"), { target: { value: "2026" } }); fireEvent.change(screen.getByLabelText("Валюта бюджета"), { target: { value: "BYN" } }); fireEvent.change(screen.getByLabelText("Основа"), { target: { value: "accrual" } }); fireEvent.change(screen.getByLabelText("Месяц факта"), { target: { value: "1" } }); fireEvent.click(screen.getByRole("button", { name: "Загрузить бюджет" }));
   const accrualPanel = await screen.findByLabelText("Фактические начисления расходов");
@@ -221,12 +232,15 @@ it.each(["month", "basis", "scope"] as const)("drops an unmatched response from 
     return listCalls === 1 ? old.promise : Promise.resolve(unmatched(scope.org, month, basis, "new-row"));
   });
   const view = render(<ExpenseControl org="1" />);
+  await waitForCompany();
   await loadFacts();
   const panel = () => screen.getByLabelText("Фактические начисления расходов");
   fireEvent.click(within(panel()).getByRole("button", { name: "Показать неразнесённые строки" }));
 
   if (dimension === "scope") {
+    await configureCompany(2);
     view.rerender(<ExpenseControl org="2" />);
+    await waitForCompany();
     await loadFacts();
   } else {
     if (dimension === "month") fireEvent.change(screen.getByLabelText("Месяц факта"), { target: { value: "2" } });
@@ -257,6 +271,7 @@ it("does not start a duplicate B while stale A is finishing", async () => {
     return monthTwoCalls === 1 ? second.promise : Promise.resolve(unmatched(scope.org, month, basis, "duplicate"));
   });
   render(<ExpenseControl org="1" />);
+  await waitForCompany();
   await loadFacts();
   const panel = screen.getByLabelText("Фактические начисления расходов");
   fireEvent.click(within(panel).getByRole("button", { name: "Показать неразнесённые строки" }));
@@ -282,6 +297,7 @@ it("keeps the fact visible when the unmatched register request fails", async () 
   setupActualMocks();
   api.getUnmatchedActuals.mockRejectedValue(new Error("registry unavailable"));
   render(<ExpenseControl org="1" />);
+  await waitForCompany();
   await loadFacts();
   const panel = screen.getByLabelText("Фактические начисления расходов");
   fireEvent.click(within(panel).getByRole("button", { name: "Показать неразнесённые строки" }));
@@ -308,6 +324,7 @@ it("previews and confirms an append-only attribution from an unmatched accrual l
   });
 
   render(<ExpenseControl org="1" />);
+  await waitForCompany();
   await loadFacts();
   const panel = screen.getByLabelText("Фактические начисления расходов");
   fireEvent.click(within(panel).getByRole("button", { name: "Показать неразнесённые строки" }));
@@ -337,6 +354,7 @@ it("keeps manual attribution controls hidden from a reader", async () => {
   api.getUnmatchedActuals.mockResolvedValue(unmatched(1, 1, "accrual", "source"));
 
   render(<ExpenseControl org="1" />);
+  await waitForCompany();
   await loadFacts();
   const panel = screen.getByLabelText("Фактические начисления расходов");
   fireEvent.click(within(panel).getByRole("button", { name: "Показать неразнесённые строки" }));
@@ -345,3 +363,5 @@ it("keeps manual attribution controls hidden from a reader", async () => {
   expect(within(panel).queryByRole("button", { name: "Разнести" })).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Статья разнесения")).not.toBeInTheDocument();
 });
+
+configureBeforeEach(() => resetCompany(1));

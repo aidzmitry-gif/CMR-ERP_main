@@ -1,7 +1,12 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { configureCompany,render,resetCompany,waitForCompany } from "@/test/installation-company";
+import { fireEvent,screen,waitFor } from "@testing-library/react";
+import { afterEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
-import { balanceCsv, FinanceLedgerBalance } from "./finance-ledger-balance";
+import { balanceCsv,FinanceLedgerBalance } from "./finance-ledger-balance";
 
 const report = {
   organization_id: 7, from: "2026-09-01", to: "2026-09-30", status: "preliminary", pending_documents: 2,
@@ -24,12 +29,12 @@ it("requires an applied organization, exposes the exact balance equation, and dr
   });
   vi.stubGlobal("fetch", fetchMock);
   render(<FinanceLedgerBalance />);
-  await screen.findByRole("option", { name: "Компания A · 111" });
-  fireEvent.click(screen.getByRole("button", { name: "Применить" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Выберите организацию");
+  await waitForCompany();
+  await waitForCompany();
+  expect(screen.queryByRole("combobox", { name: /Юрлицо|Организация/ })).not.toBeInTheDocument();
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/reports?"))).toBe(false);
 
-  fireEvent.change(screen.getByLabelText("Организация баланса"), { target: { value: "7" } });
+  await configureCompany("7");
   fireEvent.change(screen.getByLabelText("Начало периода баланса"), { target: { value: "2026-09-01" } });
   fireEvent.change(screen.getByLabelText("Конец периода баланса"), { target: { value: "2026-09-30" } });
   fireEvent.click(screen.getByRole("button", { name: "Применить" }));
@@ -57,11 +62,14 @@ it("exports the displayed response and rejects malformed balance totals", async 
     ? [{ id: 7, name: "A", unp: "1" }]
     : { ...report, balance: { ...report.balance, assets: "NaN" } } })));
   render(<FinanceLedgerBalance />);
-  await screen.findByRole("option", { name: "A · 1" });
-  fireEvent.change(screen.getByLabelText("Организация баланса"), { target: { value: "7" } });
+  await waitForCompany();
+  await waitForCompany();
+  await configureCompany("7");
   fireEvent.change(screen.getByLabelText("Начало периода баланса"), { target: { value: "2026-09-01" } });
   fireEvent.change(screen.getByLabelText("Конец периода баланса"), { target: { value: "2026-09-30" } });
   fireEvent.click(screen.getByRole("button", { name: "Применить" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("неверный формат");
   await waitFor(() => expect(screen.queryByText("NaN BYN")).not.toBeInTheDocument());
 });
+
+configureBeforeEach(() => resetCompany(7));

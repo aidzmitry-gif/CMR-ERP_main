@@ -1,6 +1,11 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, expect, it, vi } from "vitest";
+import { configureCompany,render,resetCompany,waitForCompany } from "@/test/installation-company";
+import { act,fireEvent,screen,waitFor,within } from "@testing-library/react";
+import { beforeEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
 import { DocsRegistry } from "./docs-registry";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
 const request = vi.fn();
 const organizations = [{ id: 1, name: "Организация А", unp: "111111111" }, { id: 2, name: "Организация Б", unp: "222222222" }];
@@ -14,24 +19,25 @@ beforeEach(() => {
   HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); };
 });
 async function selectOrganization(value = "1") {
-  await screen.findByRole("option", { name: /Организация А/ });
-  fireEvent.change(screen.getByRole("combobox", { name: "Организация" }), { target: { value } });
+  await waitForCompany();
+  await configureCompany(value);
 }
 
-it("requires an explicit organization and never shows demo documents or role switching", async () => {
-  request.mockResolvedValue(response(organizations)); render(<DocsRegistry />);
-  await screen.findByRole("option", { name: /Организация А/ });
-  expect(request).toHaveBeenCalledTimes(1);
-  expect(screen.getByText(/Выберите организацию, чтобы открыть/)).toBeInTheDocument();
+it("requires a verified installation company and never shows demo documents or role switching", async () => {
+  resetCompany(0); render(<DocsRegistry />);
+  expect(await screen.findByRole("alert")).toBeInTheDocument();
+  expect(request).not.toHaveBeenCalled();
   expect(screen.queryByText(/СЧ-0461|Я вошёл как/)).not.toBeInTheDocument();
 });
+
 it("paginates real results and resets to page one on submitted search", async () => {
   request.mockImplementation(async (path: string) => {
     if (path.endsWith("/organizations")) return response(organizations);
     const params = new URL(path, "https://example.invalid").searchParams;
     return response(page([row(params.get("page") === "2" ? 51 : 1)], Number(params.get("page")), params.get("q") ? 1 : 51));
   });
-  render(<DocsRegistry />); await selectOrganization(); await screen.findByText(/Показано 1–50/);
+  render(<DocsRegistry />);
+  await waitForCompany(); await selectOrganization(); await screen.findByText(/Показано 1–50/);
   fireEvent.click(screen.getAllByRole("button", { name: "Далее", exact: true })[0]);
   await screen.findByText(/Показано 51–51/);
   fireEvent.change(screen.getByRole("searchbox"), { target: { value: " SOURCE-1 " } });
@@ -42,7 +48,8 @@ it("paginates real results and resets to page one on submitted search", async ()
 });
 it("opens source preview with contents and a clear original/posting distinction", async () => {
   request.mockImplementation(async (path: string) => response(path.endsWith("/organizations") ? organizations : path.includes("/source/1?") ? preview : page()));
-  render(<DocsRegistry />); await selectOrganization();
+  render(<DocsRegistry />);
+  await waitForCompany(); await selectOrganization();
   fireEvent.click(await screen.findByRole("button", { name: "Открыть / предпросмотр" }));
   const dialog = await screen.findByRole("dialog");
   expect(await within(dialog).findByText("Аккумулятор")).toBeInTheDocument();
@@ -55,7 +62,8 @@ it("links_source_preview_client_only_after_authorized_preview", async () => {
   const confirmedPreview = { ...preview, client: { id: 42, name: "Synthetic confirmed company" } };
   request.mockImplementation(async (path: string) => path.endsWith("/organizations") ? response(organizations)
     : path.includes("/source/1?") ? response(confirmedPreview) : response(page([row()])));
-  render(<DocsRegistry />); await selectOrganization();
+  render(<DocsRegistry />);
+  await waitForCompany(); await selectOrganization();
   fireEvent.click(await screen.findByRole("button", { name: "Открыть / предпросмотр" }));
   const dialog = await screen.findByRole("dialog");
   const link = await within(dialog).findByRole("link", { name: "Открыть связанную карточку" });
@@ -68,7 +76,8 @@ it("drops an old response and preview when the organization changes", async () =
     if (path.includes("/organizations/1/")) return new Promise<Response>(resolve => { finish = resolve; });
     return Promise.resolve(response(page([row(99, 2)], 1, 1, 2)));
   });
-  render(<DocsRegistry />); await selectOrganization(); await selectOrganization("2");
+  render(<DocsRegistry />);
+  await waitForCompany(); await selectOrganization(); await selectOrganization("2");
   await screen.findByText(/SOURCE-99/);
   await act(async () => finish(response(page())));
   expect(screen.queryByText(/SOURCE-1$/)).not.toBeInTheDocument();
@@ -77,7 +86,8 @@ it("drops an old response and preview when the organization changes", async () =
 it("uses the protected native original route and an empty iframe sandbox", async () => {
   const native = { ...row(7), source: "erp", kind: "invoice", status: "issued", deal_id: 9, original_available: true };
   request.mockImplementation(async (path: string) => path.endsWith("/original") ? new Response("<h1>Saved original</h1>", { headers: { "Content-Type": "text/html" } }) : response(path.endsWith("/organizations") ? organizations : { ...page(), source: "erp", items: [native] }));
-  render(<DocsRegistry />); await selectOrganization();
+  render(<DocsRegistry />);
+  await waitForCompany(); await selectOrganization();
   fireEvent.click(screen.getByRole("button", { name: "Документы сделок ERP" }));
   fireEvent.click(await screen.findByRole("button", { name: "Открыть / предпросмотр" }));
   await waitFor(() => expect(screen.getByTitle("Оригинал документа SOURCE-7")).toHaveAttribute("srcdoc", "<h1>Saved original</h1>"));
@@ -87,7 +97,10 @@ it("uses the protected native original route and an empty iframe sandbox", async
 });
 it("shows denied access as an error and does not claim an empty register", async () => {
   request.mockImplementation(async (path: string) => response(path.endsWith("/organizations") ? organizations : {}, path.endsWith("/organizations") ? 200 : 403));
-  render(<DocsRegistry />); await selectOrganization();
+  render(<DocsRegistry />);
+  await waitForCompany(); await selectOrganization();
   expect(await screen.findByRole("alert")).toHaveTextContent("Нет доступа");
   expect(screen.queryByText("Документов по выбранным условиям нет.")).not.toBeInTheDocument();
 });
+
+configureBeforeEach(() => resetCompany(1));

@@ -1,21 +1,23 @@
 "use client";
 
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+
 import clsx from "clsx";
-import { ArrowLeftRight, ArrowUpFromLine, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { ArrowLeftRight,ArrowUpFromLine,RefreshCw,SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo,useState } from "react";
 
 import { formatNumber } from "@/lib/format";
 import {
-  adjustment,
-  fetchMovements,
-  locationLabel,
-  REASON_LABELS,
-  reasonLabel,
-  shipment,
-  type StockMovement,
-  transfer,
-  type WmsLocation,
+adjustment,
+fetchMovements,
+locationLabel,
+REASON_LABELS,
+reasonLabel,
+shipment,
+type StockMovement,
+transfer,
+type WmsLocation,
 } from "@/lib/wms-ops";
 
 const KIND_BADGE: Record<string, string> = {
@@ -155,19 +157,18 @@ const OPS: { id: OpKind; label: string; Icon: typeof ArrowUpFromLine }[] = [
   { id: "adjustment", label: "Коррекция", Icon: SlidersHorizontal },
 ];
 
-const EMPTY = { sku: "", qty: "", warehouse: "Главный", loc: "", locTo: "", batch: "", note: "" };
+const EMPTY = { sku: "", qty: "", warehouse: "", loc: "", locTo: "", batch: "", note: "" };
 
-export function WmsMovements({
+ function WmsMovementsWorkspace({
   initial,
   locations,
-  organizations = [],
 }: {
   initial: StockMovement[];
   locations: WmsLocation[];
   organizations?: { id: number; name: string }[];
 }) {
-  const [organizationId, setOrganizationId] = useState("");
-  const [rows, setRows] = useState<StockMovement[]>(initial);
+  const organizationId = String(useInstanceOrganization().id);
+  const [rows, setRows] = useState<StockMovement[]>(initial.filter(row => row.organization_id === Number(organizationId)));
   const [op, setOp] = useState<OpKind>("shipment");
   const [f, setF] = useState({ ...EMPTY });
   const [busy, setBusy] = useState(false);
@@ -181,7 +182,7 @@ export function WmsMovements({
   async function refresh() {
     setBusy(true);
     try {
-      setRows(await fetchMovements());
+      setRows((await fetchMovements()).filter(row => row.organization_id === Number(organizationId)));
       setMsg(null);
     } catch {
       setMsg({ ok: false, text: "Не удалось обновить журнал. Показаны ранее загруженные движения." });
@@ -205,9 +206,13 @@ export function WmsMovements({
       setMsg({ ok: false, text: "Укажите SKU и количество" });
       return;
     }
+    if (!f.warehouse.trim()) {
+      setMsg({ ok: false, text: "Укажите склад операции" });
+      return;
+    }
     setBusy(true);
     const loc = f.loc ? Number(f.loc) : null;
-    const base = { organization_id: Number(organizationId), sku_code: f.sku.trim(), qty, warehouse: f.warehouse.trim() || "Главный", batch_ref: f.batch.trim(), note: f.note.trim() };
+    const base = { organization_id: Number(organizationId), sku_code: f.sku.trim(), qty, warehouse: f.warehouse.trim(), batch_ref: f.batch.trim(), note: f.note.trim() };
     try {
       let ok = false;
       if (op === "shipment") ok = await shipment({ ...base, location_id: loc });
@@ -219,7 +224,7 @@ export function WmsMovements({
       }
       setF({ ...EMPTY, warehouse: f.warehouse });
       try {
-        setRows(await fetchMovements());
+        setRows((await fetchMovements()).filter(row => row.organization_id === Number(organizationId)));
         setMsg({ ok: true, text: "Движение записано" });
       } catch {
         setMsg({ ok: false, text: "Движение записано, но журнал не обновился. Нажмите «Обновить»; повторно записывать операцию не нужно." });
@@ -252,12 +257,7 @@ export function WmsMovements({
         </div>
       </div>
 
-      <label className="mt-4 block text-sm">Юрлицо операции
-        <select aria-label="Юрлицо операции" value={organizationId} disabled={busy} onChange={(event) => setOrganizationId(event.target.value)} className="ml-2 rounded-lg border border-line bg-surface p-2">
-          <option value="">Выберите юрлицо</option>
-          {organizations.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
-        </select>
-      </label>
+      <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
       {/* Панель операции */}
       <fieldset disabled={busy} className="mt-4 rounded-xl border border-line bg-surface p-4">
         <div className="inline-flex rounded-lg border border-line bg-sunken p-1">
@@ -305,3 +305,5 @@ export function WmsMovements({
     </div>
   );
 }
+
+export const WmsMovements = withInstanceOrganization(WmsMovementsWorkspace);

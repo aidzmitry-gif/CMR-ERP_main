@@ -1,10 +1,12 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+
+import { InstanceOrganizationGate } from "@/components/instance-organization-gate";
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Input,Select } from "@/components/ui/input";
+import { useEffect,useRef,useState } from "react";
 import { ProcurementSourcePicker } from "./procurement-source-picker";
 
-type Organization = { id: number; name: string; unp: string };
+
 type Ownership = { id: number; kind: string; source_id: number; snapshot: Record<string, string | number | null>; evidence: string };
 type Link = { id: number; order_ownership_id: number; request_ownership_id: number; evidence: string };
 async function api<T>(path: string, body?: unknown): Promise<T> {
@@ -14,17 +16,11 @@ async function api<T>(path: string, body?: unknown): Promise<T> {
   return data;
 }
 export function ProcurementOwnership() {
-  const [organizations, setOrganizations] = useState<Organization[]>([]), [org, setOrg] = useState("");
-  const [error, setError] = useState("");
-  useEffect(() => {
-    let active = true;
-    void api<Organization[]>("/receipt-organizations").then((rows) => { if (active) setOrganizations(rows); }).catch((e: Error) => { if (active) setError(e.message); });
-    return () => { active = false; };
-  }, []);
-  return <main className="min-w-0 w-0 flex-1 space-y-4 overflow-auto p-6 lg:pr-24"><h1 className="text-2xl font-semibold">Юрлица и связи закупок</h1>
-    <label>Юрлицо закупок<Select value={org} onChange={(e) => setOrg(e.target.value)}><option value="">Выберите организацию</option>{organizations.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.unp}</option>)}</Select></label>
-    {error && <p role="alert">{error}</p>}{org && <OwnershipBook key={org} org={org} />}
-  </main>;
+  return <InstanceOrganizationGate>{org => <main className="min-w-0 w-0 flex-1 space-y-4 overflow-auto p-6 lg:pr-24">
+    <h1 className="text-2xl font-semibold">Принадлежность и связи закупок</h1>
+    <p>Настройка установки не подтверждает принадлежность старых документов. Сопоставляйте их только по первичным основаниям.</p>
+    <OwnershipBook key={org.id} org={String(org.id)} />
+  </main>}</InstanceOrganizationGate>;
 }
 function OwnershipBook({ org }: { org: string }) {
   const [rows, setRows] = useState<Ownership[]>([]), [links, setLinks] = useState<Link[]>([]);

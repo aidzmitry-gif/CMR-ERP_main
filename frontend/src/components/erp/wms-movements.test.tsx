@@ -1,5 +1,10 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { configureCompany,render,resetCompany,waitForCompany } from "@/test/installation-company";
+import { fireEvent,screen,waitFor,within } from "@testing-library/react";
+import { beforeEach,beforeEach as configureBeforeEach,describe,expect,it,vi } from "vitest";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
 // next/link → простая <a> (в jsdom роутинга нет; ссылка «Остаток из движений» — просто href).
 vi.mock("next/link", () => ({
@@ -22,12 +27,13 @@ vi.mock("@/lib/wms-ops", async (importActual) => {
 });
 
 import { WmsMovements } from "@/components/erp/wms-movements";
+import type { StockMovement,WmsLocation } from "@/lib/wms-ops";
 import * as wms from "@/lib/wms-ops";
-import type { StockMovement, WmsLocation } from "@/lib/wms-ops";
 
 function mv(over: Partial<StockMovement> = {}): StockMovement {
   return {
     id: 1,
+    organization_id: 7,
     sku_code: "6СТ-190",
     warehouse: "Главный",
     kind: "in",
@@ -62,10 +68,12 @@ beforeEach(() => {
 });
 
 describe("WmsMovements", () => {
-  it("offers only active cells in the explicitly selected company and exact warehouse", () => {
+  it("offers only active cells in the explicitly selected company and exact warehouse", async () => {
     render(<WmsMovements organizations={[{ id: 7, name: "Учебная А" }, { id: 8, name: "Учебная Б" }]} initial={[]} locations={[...locations, { ...locations[0], id: 99, organization_id: 8, code: "FOREIGN" }]} />);
+  await waitForCompany();
     expect(screen.queryByRole("option", { name: /A · 01/ })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Юрлицо операции"), { target: { value: "7" } });
+    fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "Главный" } });
+    await configureCompany("7");
     expect(screen.getByRole("option", { name: /A · 01/ })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /FOREIGN/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /B · 99/ })).not.toBeInTheDocument();
@@ -74,15 +82,19 @@ describe("WmsMovements", () => {
     expect(screen.queryByRole("option", { name: /A · 01/ })).not.toBeInTheDocument();
   });
 
-  it("направляет накладную поставщика в закупки и не даёт вручную создать приёмку", () => {
+  it("направляет накладную поставщика в закупки и не даёт вручную создать приёмку", async () => {
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={[]} />);
+  await waitForCompany();
+  fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "Главный" } });
     expect(screen.getByRole("link", { name: /Накладные на поступление/ })).toHaveAttribute("href", "/erp/procurement/receipts");
     expect(screen.queryByRole("button", { name: "Приёмка" })).not.toBeInTheDocument();
   });
 
   it("clears the selected location when warehouse changes", async () => {
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={locations} />);
-    fireEvent.change(screen.getByLabelText("Юрлицо операции"), { target: { value: "7" } });
+  await waitForCompany();
+  fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "Главный" } });
+    await configureCompany("7");
     const locationSelect = screen.getAllByRole("combobox").find((el) => el.textContent?.includes("Ячейка"))!;
     fireEvent.change(locationSelect, { target: { value: "10" } });
     fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "Второй" } });
@@ -95,13 +107,15 @@ describe("WmsMovements", () => {
     let finish!: (value: boolean) => void;
     asMock(wms.shipment).mockReturnValueOnce(new Promise<boolean>((resolve) => { finish = resolve; }));
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={[]} />);
-    fireEvent.change(screen.getByLabelText("Юрлицо операции"), { target: { value: "7" } });
+  await waitForCompany();
+  fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "Главный" } });
+    await configureCompany("7");
     fireEvent.change(screen.getByPlaceholderText("Код SKU*"), { target: { value: "A" } });
     fireEvent.change(screen.getByPlaceholderText("Кол-во*"), { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: "Записать" }));
     expect(screen.getByPlaceholderText("Код SKU*")).toBeDisabled();
     expect(screen.getByRole("button", { name: /Отгрузка/ })).toBeDisabled();
-    expect(screen.getByLabelText("Юрлицо операции")).toBeDisabled();
+    expect(screen.queryByRole("combobox", { name: /Юрлицо|Организация|Компания ячеек|Юридическое лицо/ })).not.toBeInTheDocument();
     finish(false);
     await screen.findByText(/Не удалось подтвердить запись/);
     expect(screen.getByPlaceholderText("Код SKU*")).toHaveValue("A");
@@ -110,6 +124,8 @@ describe("WmsMovements", () => {
   it("keeps previous rows on failed refresh and allows read-only retry", async () => {
     asMock(wms.fetchMovements).mockRejectedValueOnce(new Error("unavailable"));
     render(<WmsMovements initial={[inRow]} locations={[]} />);
+  await waitForCompany();
+  fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "Главный" } });
     fireEvent.click(screen.getByRole("button", { name: /Обновить/ }));
     expect(await screen.findByText(/Показаны ранее загруженные движения/)).toBeInTheDocument();
     expect(screen.getByText("6СТ-190")).toBeInTheDocument();
@@ -121,7 +137,9 @@ describe("WmsMovements", () => {
   it("does not report failed posting when only refresh failed after saved movement", async () => {
     asMock(wms.fetchMovements).mockRejectedValueOnce(new Error("unavailable"));
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[inRow]} locations={[]} />);
-    fireEvent.change(screen.getByLabelText("Юрлицо операции"), { target: { value: "7" } });
+  await waitForCompany();
+  fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "Главный" } });
+    await configureCompany("7");
     fireEvent.change(screen.getByPlaceholderText("Код SKU*"), { target: { value: "A" } });
     fireEvent.change(screen.getByPlaceholderText("Кол-во*"), { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: "Записать" }));
@@ -130,16 +148,20 @@ describe("WmsMovements", () => {
     expect(wms.shipment).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Записать" })).toBeEnabled();
   });
-  it("requires explicit organization even when only one is available", () => {
+  it("requires an explicit warehouse with the installation company", async () => {
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={[]} />);
+  await waitForCompany();
+
     fireEvent.change(screen.getByPlaceholderText("Код SKU*"), { target: { value: "A" } });
     fireEvent.change(screen.getByPlaceholderText("Кол-во*"), { target: { value: "1.25" } });
     fireEvent.click(screen.getByRole("button", { name: "Записать" }));
-    expect(screen.getByText("Выберите юрлицо операции")).toBeInTheDocument();
+    expect(screen.getByText("Укажите склад операции")).toBeInTheDocument();
     expect(wms.shipment).not.toHaveBeenCalled();
   });
-  it("рендерит журнал: русская подпись типа, знаковое кол-во и цвет прихода/расхода", () => {
+  it("рендерит журнал: русская подпись типа, знаковое кол-во и цвет прихода/расхода", async () => {
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[inRow, outRow]} locations={[]} />);
+  await waitForCompany();
+  fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "Главный" } });
 
     // подписи типов в журнале (внутри таблицы, вне панели операций) — из настоящего REASON_LABELS
     const journal = within(screen.getByRole("table"));
@@ -157,13 +179,17 @@ describe("WmsMovements", () => {
     expect(screen.getByText("6СТ-100")).toBeInTheDocument();
   });
 
-  it("пустой журнал показывает заглушку «Движений по фильтру нет»", () => {
+  it("пустой журнал показывает заглушку «Движений по фильтру нет»", async () => {
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={[]} />);
+  await waitForCompany();
+  fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "Главный" } });
     expect(screen.getByText("Движений по фильтру нет")).toBeInTheDocument();
   });
 
-  it("фильтр по типу движения прячет строки другого типа", () => {
+  it("фильтр по типу движения прячет строки другого типа", async () => {
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[inRow, outRow]} locations={[]} />);
+  await waitForCompany();
+  fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "Главный" } });
     expect(screen.getByText("6СТ-190")).toBeInTheDocument();
 
     // выбор селекта журнала (тот, где есть опция «Все типы») → только «Отгрузка»
@@ -176,18 +202,22 @@ describe("WmsMovements", () => {
     expect(screen.getByText("6СТ-100")).toBeInTheDocument();
   });
 
-  it("селект ячейки показывает только активные ячейки текущего склада", () => {
+  it("селект ячейки показывает только активные ячейки текущего склада", async () => {
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={locations} />);
-    fireEvent.change(screen.getByLabelText("Юрлицо операции"), { target: { value: "7" } });
+  await waitForCompany();
+  fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "Главный" } });
+    await configureCompany("7");
     // склад по умолчанию «Главный»: активная A·01 есть, неактивная B·99 и чужой склад C·07 — нет
     expect(screen.getByRole("option", { name: "A · 01" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "B · 99" })).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "C · 07" })).not.toBeInTheDocument();
   });
 
-  it("отправка без SKU/кол-ва показывает ошибку и не дёргает бэкенд", () => {
+  it("отправка без SKU/кол-ва показывает ошибку и не дёргает бэкенд", async () => {
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={[]} />);
-    fireEvent.change(screen.getByLabelText("Юрлицо операции"), { target: { value: "7" } });
+  await waitForCompany();
+  fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "Главный" } });
+    await configureCompany("7");
     fireEvent.click(screen.getByRole("button", { name: "Записать" }));
 
     expect(screen.getByText("Укажите корректное количество, не более двух знаков после запятой")).toBeInTheDocument();
@@ -199,10 +229,12 @@ describe("WmsMovements", () => {
       mv({ id: 9, sku_code: "НОВЫЙ-SKU", kind: "out", qty: 3, reason: "shipment" }),
     ]);
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={[]} />);
+  await waitForCompany();
+  fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "Главный" } });
 
     fireEvent.change(screen.getByPlaceholderText("Код SKU*"), { target: { value: "6СТ-190" } });
     fireEvent.change(screen.getByPlaceholderText("Кол-во*"), { target: { value: "2,5" } });
-    fireEvent.change(screen.getByLabelText("Юрлицо операции"), { target: { value: "7" } });
+    await configureCompany("7");
     fireEvent.click(screen.getByRole("button", { name: "Записать" }));
 
     await waitFor(() =>
@@ -219,10 +251,12 @@ describe("WmsMovements", () => {
   it("сбой записи показывает ошибку и НЕ обновляет журнал", async () => {
     asMock(wms.shipment).mockResolvedValue(false);
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={[]} />);
+  await waitForCompany();
+  fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "Главный" } });
 
     fireEvent.change(screen.getByPlaceholderText("Код SKU*"), { target: { value: "6СТ-190" } });
     fireEvent.change(screen.getByPlaceholderText("Кол-во*"), { target: { value: "5" } });
-    fireEvent.change(screen.getByLabelText("Юрлицо операции"), { target: { value: "7" } });
+    await configureCompany("7");
     fireEvent.click(screen.getByRole("button", { name: "Записать" }));
 
     expect(await screen.findByText(/Не удалось подтвердить запись/)).toBeInTheDocument();
@@ -231,11 +265,13 @@ describe("WmsMovements", () => {
 
   it("переключение операции на «Коррекция» шлёт adjustment, а не shipment", async () => {
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={[]} />);
+  await waitForCompany();
+  fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "Главный" } });
 
     fireEvent.click(screen.getByRole("button", { name: /Коррекция/ }));
     fireEvent.change(screen.getByPlaceholderText("Код SKU*"), { target: { value: "6СТ-100" } });
     fireEvent.change(screen.getByPlaceholderText("Кол-во (±)"), { target: { value: "4" } });
-    fireEvent.change(screen.getByLabelText("Юрлицо операции"), { target: { value: "7" } });
+    await configureCompany("7");
     fireEvent.click(screen.getByRole("button", { name: "Записать" }));
 
     await waitFor(() =>
@@ -251,6 +287,8 @@ describe("WmsMovements", () => {
       mv({ id: 7, sku_code: "ОБНОВЛ-SKU", kind: "in", qty: 1, reason: "receipt" }),
     ]);
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={[]} />);
+  await waitForCompany();
+  fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "Главный" } });
     expect(screen.getByText("Движений по фильтру нет")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Обновить/ }));
@@ -261,12 +299,14 @@ describe("WmsMovements", () => {
 
   it("перемещение шлёт transfer с from/to ячейками", async () => {
     render(<WmsMovements organizations={[{ id: 7, name: "Synthetic company" }]} initial={[]} locations={locations} />);
+  await waitForCompany();
+  fireEvent.change(screen.getByPlaceholderText("Склад"), { target: { value: "Главный" } });
 
     fireEvent.click(screen.getByRole("button", { name: /Перемещение/ }));
     fireEvent.change(screen.getByPlaceholderText("Код SKU*"), { target: { value: "6СТ-190" } });
     fireEvent.change(screen.getByPlaceholderText("Кол-во*"), { target: { value: "2" } });
 
-    fireEvent.change(screen.getByLabelText("Юрлицо операции"), { target: { value: "7" } });
+    await configureCompany("7");
 
     // селекты «Из ячейки» / «В ячейку» — оба содержат активную A·01 (id 10)
     const selects = screen.getAllByRole("combobox") as HTMLSelectElement[];
@@ -285,3 +325,5 @@ describe("WmsMovements", () => {
     expect(wms.shipment).not.toHaveBeenCalled();
   });
 });
+
+configureBeforeEach(() => resetCompany(7));

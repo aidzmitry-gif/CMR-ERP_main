@@ -1,14 +1,19 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { WmsLocations } from "@/components/erp/wms-locations";
 import type { WmsLocation } from "@/lib/wms-ops";
+import * as wms from "@/lib/wms-ops";
+import { configureCompany,render,resetCompany } from "@/test/installation-company";
+import { act,fireEvent,screen,waitFor } from "@testing-library/react";
+import { beforeEach,beforeEach as configureBeforeEach,describe,expect,it,vi } from "vitest";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
 vi.mock("next/link", () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }));
 vi.mock("@/lib/wms-ops", async (importActual) => ({
   ...await importActual<typeof import("@/lib/wms-ops")>(),
   fetchLocations: vi.fn(), fetchLocationWarehouses: vi.fn(), createLocation: vi.fn(),
 }));
-import { WmsLocations } from "@/components/erp/wms-locations";
-import * as wms from "@/lib/wms-ops";
 
 const organizations = [{ id: 7, name: "Учебная А" }, { id: 8, name: "Учебная Б" }];
 const locations: WmsLocation[] = [
@@ -19,7 +24,7 @@ const created: WmsLocation = { id: 3, organization_id: 7, warehouse: "Второ
 const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 function show(initial = locations) { return render(<WmsLocations initial={initial} organizations={organizations} />); }
 async function chooseCompany(id = 7) {
-  fireEvent.change(screen.getByLabelText("Компания ячеек"), { target: { value: String(id) } });
+  await configureCompany(String(id));
   await waitFor(() => expect(screen.getByLabelText("Склад ячейки")).toBeEnabled());
 }
 function fill() {
@@ -36,19 +41,16 @@ beforeEach(() => {
 });
 
 describe("WmsLocations", () => {
-  it("empty overview is read only and requires explicit company selection", () => {
-    show([]);
-    expect(screen.getByText("Ячеек в выбранном обзоре нет")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Добавить" })).not.toBeInTheDocument();
+  it("does not load or create cells without a verified installation company", async () => {
+    resetCompany(0); show([]);
+    expect(await screen.findByRole("alert")).toHaveTextContent("не настроено");
     expect(wms.fetchLocationWarehouses).not.toHaveBeenCalled();
   });
-  it("renders company, label, status and specific print links", () => {
-    show();
-    expect(screen.getByText("A · A-01")).toBeInTheDocument();
+  it("renders company, label, status and specific print links", async () => {
+    show(); await screen.findByText("A · A-01");
     expect(screen.getByText("B-02")).toBeInTheDocument();
     expect(screen.getByText("Активна")).toBeInTheDocument();
     expect(screen.getByText("Архив")).toBeInTheDocument();
-    expect(screen.getAllByText("—")).toHaveLength(2);
     expect(screen.getAllByRole("link", { name: /Этикетка/ })[0]).toHaveAttribute("href", "/erp/wms/locations/1/label");
     expect(screen.getAllByRole("link", { name: /Этикетка/ })[1]).toHaveAttribute("href", "/erp/wms/locations/2/label");
   });
@@ -93,27 +95,27 @@ describe("WmsLocations", () => {
     let finish!: (value: WmsLocation[]) => void;
     mock(wms.fetchLocations).mockReturnValueOnce(new Promise<WmsLocation[]>((resolve) => { finish = resolve; })).mockResolvedValueOnce([{ ...locations[0], id: 9, organization_id: 8, code: "B-09" }]);
     show();
-    fireEvent.change(screen.getByLabelText("Компания ячеек"), { target: { value: "7" } });
+    await configureCompany("7");
     expect(screen.queryByText("A · A-01")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Компания ячеек"), { target: { value: "8" } });
+    await configureCompany("8");
     await screen.findByText("A · B-09");
     await act(async () => finish(locations));
     expect(screen.queryByText("A · A-01")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Склад ячейки")).toHaveValue("");
-    fireEvent.change(screen.getByLabelText("Компания ячеек"), { target: { value: "" } });
+    await configureCompany("");
     expect(screen.queryByText("A · A-01")).not.toBeInTheDocument();
-    await screen.findByText("Ячеек в выбранном обзоре нет");
+    expect(await screen.findByRole("alert")).toHaveTextContent("не настроено");
   });
   it("keeps read-only company cells visible when creation permission is denied", async () => {
     mock(wms.fetchLocationWarehouses).mockRejectedValue(new wms.LocationRequestError("Нет доступа", 403));
-    show(); fireEvent.change(screen.getByLabelText("Компания ячеек"), { target: { value: "7" } });
+    show(); await configureCompany("7");
     await screen.findByText(/Создание ячеек для выбранной компании недоступно/);
     expect(screen.getByText("A · A-01")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Добавить" })).toBeDisabled();
   });
   it("failed read is not empty success and cannot create until a successful read retry", async () => {
     mock(wms.fetchLocations).mockRejectedValueOnce(new wms.LocationRequestError("Сессия истекла", 401));
-    show(); fireEvent.change(screen.getByLabelText("Компания ячеек"), { target: { value: "7" } });
+    show(); await configureCompany("7");
     expect(await screen.findByRole("alert")).toHaveTextContent("Сессия истекла");
     expect(screen.queryByText("Ячеек в выбранном обзоре нет")).not.toBeInTheDocument();
     expect(screen.queryByText("A · A-01")).not.toBeInTheDocument();
@@ -128,10 +130,10 @@ describe("WmsLocations", () => {
     const add = screen.getByRole("button", { name: "Добавить" });
     fireEvent.click(add); fireEvent.click(add);
     expect(wms.createLocation).toHaveBeenCalledTimes(1);
-    expect(screen.getByLabelText("Компания ячеек")).toBeDisabled();
+    expect(screen.queryByRole("combobox", { name: /Юрлицо|Организация|Компания ячеек|Юридическое лицо/ })).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Ячейка*")).toBeDisabled();
     await act(async () => finish(created));
-    expect(screen.getByLabelText("Компания ячеек")).toBeEnabled();
+    expect(screen.queryByRole("combobox", { name: /Юрлицо|Организация|Компания ячеек|Юридическое лицо/ })).not.toBeInTheDocument();
   });
   it("blocks resending an unknown write until the list has been checked", async () => {
     mock(wms.createLocation).mockRejectedValue(new wms.LocationRequestError("Результат неизвестен", null, true));
@@ -168,3 +170,5 @@ describe("WmsLocations", () => {
     expect(screen.queryByText(/FOREIGN/)).not.toBeInTheDocument();
   });
 });
+
+configureBeforeEach(() => resetCompany(7));

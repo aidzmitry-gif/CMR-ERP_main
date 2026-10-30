@@ -1,30 +1,33 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { InstanceOrganizationGate } from "@/components/instance-organization-gate";
+
 import { formatNumber } from "@/lib/format";
-import { sendEdit, fetchOrder, fetchEditHistory, fetchProcurementSkus, fetchLandedPreview, fetchExpectedReservations, fetchDealDemandOrder, fetchPlan, identity, organizations, emptyLine, decimalInput, ReadFailure, MutationUnknown, type EditCommand, type Identity, type Organization, type MachineOrder, type OrderEditHistory, type ProcurementSkuOption, type ProcurementSkuOptions, type LandedPreview, type ExpectedOrder, type DealDemandOrder, type Plan, type NewLine } from "@/lib/procurement-machine";
-import { allocateDealDemand, clearDealDemandAllocation, loadDealDemandAllocation, type DealDemandAllocationScope, type PendingDealDemandAllocation, DealDemandError } from "@/lib/procurement-deal-demand";
+import { allocateDealDemand,clearDealDemandAllocation,DealDemandError,loadDealDemandAllocation,type DealDemandAllocationScope,type PendingDealDemandAllocation } from "@/lib/procurement-deal-demand";
+import { decimalInput,emptyLine,fetchDealDemandOrder,fetchEditHistory,fetchExpectedReservations,fetchLandedPreview,fetchOrder,fetchPlan,fetchProcurementSkus,identity,MutationUnknown,ReadFailure,sendEdit,type DealDemandOrder,type EditCommand,type ExpectedOrder,type Identity,type LandedPreview,type MachineOrder,type NewLine,type OrderEditHistory,type Plan,type ProcurementSkuOption,type ProcurementSkuOptions } from "@/lib/procurement-machine";
+import { useRouter } from "next/navigation";
+import { useEffect,useRef,useState } from "react";
 import { ProcurementCustomerDeadlines } from "./procurement-customer-deadlines";
 import { ProcurementPurchaseChain } from "./procurement-purchase-chain";
 
-import { editorJournal, type Attempt, type Scope } from "@/lib/procurement-editor-journal";
-import { confirmDiscardUnsaved, useUnsavedDocumentGuard } from "@/lib/use-unsaved-document-guard";
+import { editorJournal,type Attempt,type Scope } from "@/lib/procurement-editor-journal";
+import { useUnsavedDocumentGuard } from "@/lib/use-unsaved-document-guard";
 
 const STATUS: Record<string, string> = { draft: "Черновик", ordered: "Заказан", shipped: "Отгружен", customs: "Таможня", received: "Принят", cancelled: "Отменён" };
 const CHANGE_LABELS: Record<string, string> = { freight_byn: "Фрахт, BYN", supplier: "Поставщик", supplier_id: "Поставщик из справочника", eta_date: "Дата прибытия", status: "Статус", plan: "План поставки" };
 const changeValue = (value: unknown) => value === null ? "—" : typeof value === "object" ? JSON.stringify(value) : String(value);
 const message = (e: unknown) => e instanceof Error ? e.message : "Не удалось выполнить действие";
-const validId = (s?: string) => s && /^[1-9]\d*$/.test(s) && Number(s) <= 2147483647 ? s : "";
+
 const reserveUnits = (value: string) => { const [whole, fraction] = value.split("."); return BigInt(whole) * 100n + BigInt(fraction); };
 const maxReserve = (left: string, right: string) => {
   const units = reserveUnits(left) < reserveUnits(right) ? reserveUnits(left) : reserveUnits(right);
   return `${units / 100n}.${String(units % 100n).padStart(2, "0")}`;
 };
 export function ProcurementMachineEditor({ orderId, suggestedOrg }: { orderId: number; suggestedOrg?: string }) {
-  const [companies, setCompanies] = useState<Organization[]>([]); const [org, setOrg] = useState(validId(suggestedOrg)); const [error, setError] = useState(""); const [pending, setPending] = useState(false);
-  useEffect(() => { let live = true; organizations().then(v => { if (live) setCompanies(v); }).catch(e => { if (live) setError(message(e)); }); return () => { live = false; }; }, []);
-  return <main className="w-full space-y-4 overflow-auto p-6"><label>Юрлицо заказа<select className="ml-2 rounded border p-2" value={org} onChange={e => { if (confirmDiscardUnsaved(pending)) setOrg(e.target.value); }}><option value="">Выберите юрлицо</option>{companies.map(x => <option key={x.id} value={x.id}>{x.name} · {x.unp}</option>)}</select></label>{error && <p role="alert">{error}</p>}{org && <Editor key={`${org}/${orderId}`} org={Number(org)} orderId={orderId} onPendingChange={setPending} />}</main>;
+  const [, setPending] = useState(false);
+  return <InstanceOrganizationGate>{org => <main className="w-full space-y-4 overflow-auto p-6">
+    {suggestedOrg && suggestedOrg !== String(org.id) ? <p role="alert">Юрлицо ссылки не совпадает с настройкой установки.</p> : <Editor key={`${org.id}/${orderId}`} org={org.id} orderId={orderId} onPendingChange={setPending} />}
+  </main>}</InstanceOrganizationGate>;
 }
 function Editor({ org, orderId, onPendingChange }: { org: number; orderId: number; onPendingChange: (pending: boolean) => void }) {
   const router = useRouter();

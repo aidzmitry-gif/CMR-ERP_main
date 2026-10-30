@@ -1,49 +1,41 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { documentStatusLabels as statuses, reservationStatusLabels as reserves } from "@/lib/document-status-labels";
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+
+import { reservationStatusLabels as reserves,documentStatusLabels as statuses } from "@/lib/document-status-labels";
+import { useEffect,useRef,useState } from "react";
 
 import { DealClientBinding } from "@/components/deal-client-binding";
-import { InvoicePhysicalShipment } from "@/components/erp/invoice-physical-shipment";
-import { InvoiceCancellation } from "@/components/erp/invoice-cancellation";
-import { InvoiceNotificationRegister } from "@/components/invoice-notification-register";
-import { ShipmentDocumentsRegister } from "@/components/erp/shipment-documents-register";
 import { DealDocumentCard } from "@/components/deal-document-card";
+import { InvoiceCancellation } from "@/components/erp/invoice-cancellation";
+import { InvoicePhysicalShipment } from "@/components/erp/invoice-physical-shipment";
+import { ShipmentDocumentsRegister } from "@/components/erp/shipment-documents-register";
+import { InvoiceNotificationRegister } from "@/components/invoice-notification-register";
 
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
-import { fetchDocumentRegister, fetchRegisterDocument, fetchRegisterOrganizations, fetchRegisterOriginal, registerId,
-  type DocumentRegisterItem, type DocumentRegisterPage, type RegisterOrganization } from "@/lib/document-register-api";
+import {
+fetchDocumentRegister,fetchRegisterDocument,
+fetchRegisterOriginal,registerId,
+type DocumentRegisterItem,type DocumentRegisterPage
+} from "@/lib/document-register-api";
 
 const kinds: Record<string, string> = { invoice: "Счёт", contract: "Договор", order: "Заказ" };
 const message = (e: unknown) => e instanceof Error ? e.message : "Не удалось загрузить документы.";
 
-export function DealDocumentRegister({ dealId, org, initialDocumentId }: { dealId: string; org?: string; initialDocumentId?: number }) {
+ function DealDocumentRegisterWorkspace({ dealId, org, initialDocumentId }: { dealId: string; org?: string; initialDocumentId?: number }) {
+  const configured = String(useInstanceOrganization().id);
+  if (org && org !== configured) return <p role="alert">Юрлицо ссылки не совпадает с настройкой установки.</p>;
   return <RegisterSelection key={`${dealId}/${org || ""}/${initialDocumentId ?? ""}`} dealId={dealId} confirmedOrg={org} initialDocumentId={Number.isSafeInteger(initialDocumentId) && initialDocumentId! > 0 ? initialDocumentId : undefined} />;
 }
 
-function RegisterSelection({ dealId, confirmedOrg, initialDocumentId }: { dealId: string; confirmedOrg?: string; initialDocumentId?: number }) {
-  const [organizations, setOrganizations] = useState<RegisterOrganization[] | null>(null);
-  const [org, setOrg] = useState(confirmedOrg || "");
-  const [error, setError] = useState("");
-  const [revision, setRevision] = useState(0);
-  useEffect(() => {
-    if (confirmedOrg || !registerId(dealId)) return;
-    let active = true;
-    void fetchRegisterOrganizations().then((rows) => { if (active) setOrganizations(rows); })
-      .catch((e: unknown) => { if (active) setError(message(e)); });
-    return () => { active = false; };
-  }, [confirmedOrg, dealId, revision]);
+function RegisterSelection({ dealId, initialDocumentId }: { dealId: string; confirmedOrg?: string; initialDocumentId?: number }) {
+  const org = String(useInstanceOrganization().id);
   return <section aria-label="Реестр документов сделки" className="space-y-3 rounded-xl border border-line bg-surface p-4">
     <h2 className="font-semibold">Реестр документов сделки</h2>
     {!registerId(dealId) ? <p role="alert">Некорректный ID сделки.</p> : <>
-      <p className="text-sm text-muted">Сделка ID {dealId}. Выберите юридическое лицо, которому принадлежит сделка.</p>
-      {confirmedOrg ? <p>Юрлицо ID {confirmedOrg}</p> : <>
-        <label className="block text-sm">Юрлицо реестра<Select aria-label="Юрлицо реестра" value={org} disabled={!organizations} onChange={(e) => setOrg(e.target.value)}><option value="">Выберите юридическое лицо</option>{organizations?.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.unp}</option>)}</Select></label>
-        {!organizations && !error && <p role="status">Загрузка доступных книг…</p>}
-        {organizations?.length === 0 && <p>Доступных книг нет.</p>}
-      </>}
-      {error && <><p role="alert" className="text-red-700">{error}</p><Button variant="secondary" onClick={() => { setError(""); setRevision((n) => n + 1); }}>Повторить загрузку книг</Button></>}
+      <p className="text-sm text-muted">Сделка ID {dealId}. Юрлицо задано в настройках установки.</p>
+      <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
       {org && !registerId(org) && <p role="alert">Некорректный ID юрлица.</p>}
       {registerId(org) && <RegisterBody key={`${org}/${dealId}`} org={org} dealId={dealId} initialDocumentId={initialDocumentId} />}
     </>}
@@ -183,3 +175,5 @@ function Original({ org, dealId, id, onClose }: { org: string; dealId: string; i
     {html !== null && <iframe title={`Сохранённый оригинал ID ${id}`} sandbox="" referrerPolicy="no-referrer" srcDoc={html} className="h-[32rem] w-full rounded-lg border border-line bg-white" />}
   </div>;
 }
+
+export const DealDocumentRegister = withInstanceOrganization(DealDocumentRegisterWorkspace);

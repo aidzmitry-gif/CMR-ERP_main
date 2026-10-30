@@ -1,28 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { InvoicePhysicalShipment } from "./invoice-physical-shipment";
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+
 import type { Scope } from "@/lib/invoice-physical-shipment-api";
+import { useEffect,useState } from "react";
+import { InvoicePhysicalShipment } from "./invoice-physical-shipment";
 
 type Invoice = { document_id: number; deal_id: number; number: string; status: string };
-export function AccountingStockIssues() {
-  const [organizations, setOrganizations] = useState<{ id: number; name: string }[]>([]);
-  const [org, setOrg] = useState("");
+ function AccountingStockIssuesWorkspace() {
+
+  const org = String(useInstanceOrganization().id);
   const [rows, setRows] = useState<Invoice[] | null>(null);
   const [cursor, setCursor] = useState(0);
   const [next, setNext] = useState<number | null>(null);
   const [scope, setScope] = useState<Scope | null>(null);
   const [error, setError] = useState("");
-  useEffect(() => {
-    const abort = new AbortController();
-    void fetch("/api/accounting/organizations", { cache: "no-store", signal: abort.signal })
-      .then(async response => { if (!response.ok) throw new Error("Не удалось загрузить организации."); return response.json(); })
-      .then(data => {
-        if (!Array.isArray(data) || data.some(r => !Number.isSafeInteger(r.id) || r.id <= 0 || typeof r.name !== "string")) throw new Error("Список организаций не подтверждён.");
-        if (!abort.signal.aborted) setOrganizations(data);
-      }).catch(e => { if (!abort.signal.aborted) setError(String(e.message)); });
-    return () => abort.abort();
-  }, []);
+
   useEffect(() => {
     if (!org) return;
     const abort = new AbortController();
@@ -39,9 +32,7 @@ export function AccountingStockIssues() {
   return <main className="space-y-4 p-6">
     <h1 className="text-xl font-semibold">Списание по накладной</h1>
     <p>Накладную заполняет сотрудник. Выберите организацию и исходный счёт, затем укажите оформленную накладную и фактическое количество. Режим каждого склада определяется его настройкой.</p>
-    <label>Организация <select className="rounded border border-line p-2" value={org} onChange={e => { setOrg(e.target.value); setCursor(0); setRows(null); setNext(null); setScope(null); setError(""); }}>
-      <option value="">Выберите организацию</option>{organizations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-    </select></label>
+    <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
     {error && <p role="alert">{error}</p>}
     {org && rows === null && !error && <p role="status">Загрузка счетов…</p>}
     {rows?.length === 0 && !error && <p>Счета с зарегистрированным складским резервом не найдены.</p>}
@@ -50,3 +41,5 @@ export function AccountingStockIssues() {
     {scope && <InvoicePhysicalShipment scope={scope} remainderReadOnly />}
   </main>;
 }
+
+export const AccountingStockIssues = withInstanceOrganization(AccountingStockIssuesWorkspace);

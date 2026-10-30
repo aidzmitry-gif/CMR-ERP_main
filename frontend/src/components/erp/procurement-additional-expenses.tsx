@@ -1,16 +1,17 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
-import { forgetExpense, pendingExpense, rememberExpense, type ExpenseCommand } from "@/lib/additional-expense-journal";
-import { AccountingLateCostPreview } from "./accounting-late-cost-preview";
-import { AccountingLateCostPosted } from "./accounting-late-cost-posted";
-import { AccountingLateCostConfirmation } from "./accounting-late-cost-confirmation";
-import type { LateCostPending } from "@/lib/late-cost-journal";
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
 
-type Organization = { id: number; name: string; unp: string };
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { forgetExpense,pendingExpense,rememberExpense,type ExpenseCommand } from "@/lib/additional-expense-journal";
+import type { LateCostPending } from "@/lib/late-cost-journal";
+import Link from "next/link";
+import { useEffect,useRef,useState } from "react";
+import { AccountingLateCostConfirmation } from "./accounting-late-cost-confirmation";
+import { AccountingLateCostPosted } from "./accounting-late-cost-posted";
+import { AccountingLateCostPreview } from "./accounting-late-cost-preview";
+
 type Source = { receipt_id: number; version: number; line_number: number };
 type Document = { invoice_reference: string; supplier: string; contract: string; document_date: string;
   operation_date: string; currency: string; amount: string; explanation: string; receipt_lines: Source[] };
@@ -31,21 +32,13 @@ async function read<T>(path: string, signal?: AbortSignal): Promise<T> {
   return data as T;
 }
 
-export function ProcurementAdditionalExpenses() {
-  const [organizations, setOrganizations] = useState<Organization[]>([]), [org, setOrg] = useState("");
-  const [locked, setLocked] = useState(false), [error, setError] = useState("");
-  useEffect(() => {
-    const controller = new AbortController();
-    void read<Organization[]>("/receipt-organizations", controller.signal).then(setOrganizations)
-      .catch((e: Error) => { if (!controller.signal.aborted) setError(e.message); });
-    return () => controller.abort();
-  }, []);
+ function ProcurementAdditionalExpensesWorkspace() {
+  const org = String(useInstanceOrganization().id);
+  const [, setLocked] = useState(false), [error] = useState("");
   return <main className="min-w-0 flex-1 space-y-4 overflow-auto p-6">
     <h1 className="text-2xl font-semibold">Дополнительные расходы</h1>
     <p className="text-sm text-muted">Документы перевозчика, брокера и других поставщиков услуг, связанные с поступлениями. Сохранённые черновики ожидают бухгалтерской обработки.</p>
-    <label className="block">Юрлицо<Select aria-label="Юрлицо" value={org} disabled={locked} onChange={e => setOrg(e.target.value)}>
-      <option value="">Выберите организацию</option>{organizations.map(row => <option key={row.id} value={row.id}>{row.name} · {row.unp}</option>)}
-    </Select></label>
+    <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
     {error && <p role="alert">{error}</p>}
     {org && <ExpenseBook key={org} org={org} onLock={setLocked} />}
   </main>;
@@ -210,3 +203,5 @@ function ExpenseBook({ org, onLock }: { org: string; onLock: (locked: boolean) =
       }} />}
   </>;
 }
+
+export const ProcurementAdditionalExpenses = withInstanceOrganization(ProcurementAdditionalExpensesWorkspace);

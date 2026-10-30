@@ -1,13 +1,15 @@
 "use client";
 
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+
 import { businessDate } from "@/lib/business-date";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect,useRef,useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
-import { CatalogAdoption, CatalogAdoptionApiError, CatalogAdoptionCommand, createCatalogAdoption, listCatalogAdoptions, newCatalogAdoptionRequestKey } from "@/lib/catalog-adoption-api";
+import { Input } from "@/components/ui/input";
+import { CatalogAdoption,CatalogAdoptionApiError,CatalogAdoptionCommand,createCatalogAdoption,listCatalogAdoptions,newCatalogAdoptionRequestKey } from "@/lib/catalog-adoption-api";
 import { AccountingControls } from "./accounting-controls";
 
 type ChartRow = { code: string; title: string; parent?: string | null; off_balance?: boolean; category?: string; valid_from?: string; required_dimensions?: string[]; currency_tracking?: boolean; quantity_tracking?: boolean };
@@ -35,10 +37,10 @@ async function read<T>(path: string): Promise<T> {
   return data as T;
 }
 
-export function AccountingChart() {
+ function AccountingChartWorkspace() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
-  const [organizations, setOrganizations] = useState<Org[]>([]);
-  const [org, setOrg] = useState("");
+  const [, setOrganizations] = useState<Org[]>([]);
+  const org = String(useInstanceOrganization().id);
   const [on, setOn] = useState(businessDate());
   const [mode, setMode] = useState("catalog");
   const [query, setQuery] = useState("");
@@ -56,7 +58,7 @@ export function AccountingChart() {
   useEffect(() => {
     let active = true;
     void read<Catalog>("/catalog").then((data) => { if (active) setCatalog(data); }).catch((e: Error) => { if (active) setError(e.message); });
-    void read<Org[]>("/organizations").then((data) => { if (active) { setOrganizations(data); setOrg((current) => data.some((o) => String(o.id) === current) ? current : data[0] ? String(data[0].id) : ""); } }).catch((e: Error) => { if (active) setError(e.message); });
+    void read<Org[]>("/organizations").then((data) => { if (active) { setOrganizations(data);  } }).catch((e: Error) => { if (active) setError(e.message); });
     return () => { active = false; };
   }, [reload]);
   useEffect(() => {
@@ -67,7 +69,7 @@ export function AccountingChart() {
   }, [org, on, reload]);
   useEffect(() => {
     const request = ++adoptionLoad.current;
-    if (!org || mode !== "working") { setAdoptions(null); return; }
+    if (!org || mode !== "working") return;
     let active = true;
     void listCatalogAdoptions(Number(org)).then((rows) => { if (active && request === adoptionLoad.current) setAdoptions(rows); }).catch((reason: Error) => { if (active && request === adoptionLoad.current) setError(reason.message); });
     return () => { active = false; };
@@ -105,7 +107,7 @@ export function AccountingChart() {
     {error && <p role="alert" className="rounded-xl border border-red-300 p-3 text-red-700">{error}</p>}
     <div className="flex flex-wrap gap-3">{[["catalog", "Типовой справочник"], ["working", "Рабочий план"], ["settings", "Настроить счета"]].map(([id, title]) => <Button key={id} variant={mode === id ? "primary" : "secondary"} onClick={() => setMode(id)}>{title}</Button>)}</div>
     {mode === "catalog" && catalog && <div className="rounded-xl border border-line bg-surface p-3 text-sm text-muted"><p>Основа — постановление Минфина № 50, транскрипция проверена по {catalog.verified_through}. {catalog.chart_codes_verified ? "Номера счетов и субсчета приложения 1 сверены с применимой первичной редакцией." : "Доступный официальный текст подтверждает исторический справочник; актуальность на 2026 год требует первичной сверки."} <a className="text-accent underline" href={catalog.source} target="_blank" rel="noreferrer">Официальный источник</a></p>{catalog.verification_note && <p className="mt-2">{catalog.verification_note}</p>}{catalog.normative_review && <><p className="mt-2">Проверка сведений: {catalog.normative_review.checked_at}; {catalog.chart_codes_verified ? "приложение 1 сверено с применимой первичной редакцией." : "статус: первичная проверка редакции 2026 года требуется."} Проверено до {catalog.normative_review.verified_through}.</p>{catalog.normative_review.blocking_reasons?.length ? <div className="mt-2"><b className="text-ink">До регламентированного применения нужно:</b><ul className="list-disc pl-5">{catalog.normative_review.blocking_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></div> : null}{catalog.normative_review.evidence?.length ? <div className="mt-2"><b className="text-ink">Источники проверки:</b><ul className="list-disc pl-5">{catalog.normative_review.evidence.map((item) => <li key={item.document}><a className="text-accent underline" href={item.url} target="_blank" rel="noreferrer">{item.document}</a>: {item.coverage} {item.full_text_verified ? "Полный текст проверен." : "Полный текст не получен."}</li>)}</ul></div> : null}</>}{catalog.known_amendments?.length ? <ul className="mt-2 list-disc pl-5">{catalog.known_amendments.map((amendment) => <li key={amendment.document}><span>{amendment.document} от {amendment.date}, действует с {amendment.effective_from}: {amendmentImpact(amendment)}</span>{amendment.chart_appendix_verified && <div className="mt-1">Приложение 1 сверено с применимой первичной редакцией.</div>}{amendment.review_scope && <div className="mt-1">Область проверки: {amendment.review_scope}</div>}{amendment.evidence && <div className="mt-1">{amendment.evidence}</div>}{amendment.source_url && <a className="mt-1 inline-block text-accent underline" href={amendment.source_url} target="_blank" rel="noreferrer">Открыть карточку кандидата</a>}</li>)}</ul> : null}</div>}
-    {mode !== "catalog" && <div className="flex flex-wrap gap-3 rounded-xl border border-line bg-surface p-4"><label className="min-w-64 flex-1 text-sm">Юридическое лицо<Select aria-label="Юридическое лицо" value={org} disabled={adoptionBusy} onChange={(e) => { setWorking(null); setError(""); setOrg(e.target.value); }}><option value="">Выберите организацию</option>{organizations.map((o) => <option key={o.id} value={o.id}>{o.name} · {o.unp}</option>)}</Select></label><label className="text-sm">Действует на дату<Input aria-label="Дата рабочего плана" type="date" value={on} onChange={(e) => { setWorking(null); setOn(e.target.value); }} /></label></div>}
+    {mode !== "catalog" && <div className="flex flex-wrap gap-3 rounded-xl border border-line bg-surface p-4"><span className="text-sm text-muted">Юрлицо задано в настройках.</span><label className="text-sm">Действует на дату<Input aria-label="Дата рабочего плана" type="date" value={on} onChange={(e) => { setWorking(null); setOn(e.target.value); }} /></label></div>}
     {mode === "settings" ? <AccountingControls key={org} org={org} onChanged={() => { setWorking(null); setReload((v) => v + 1); }} /> : <>
       {mode === "working" && org && <section className="space-y-3 rounded-xl border border-line bg-surface p-4" aria-label="Рассмотрение нормативного каталога">
         <div><h2 className="font-semibold">Рассмотрение нормативного каталога</h2>{adoptions === null ? <p className="text-sm text-muted">Загрузка записей рассмотрения…</p> : activeAdoption ? <div className="mt-2 space-y-1 text-sm"><p>Рассмотрено с {activeAdoption.effective_from}. Версия: {activeAdoption.catalog_version}.</p><p>Источник: <a className="text-accent underline" href={activeAdoption.catalog_source} target="_blank" rel="noreferrer">{activeAdoption.catalog_source}</a></p><p>Основание: {activeAdoption.evidence}</p><p>Review-state: {reviewSummary(activeAdoption.catalog_review_state)}</p><p>{activeAdoption.current_normative_verified ? "Нормативная верификация указана сервером." : "Регламентированная готовность не подтверждена: server current_normative_verified=false."}</p></div> : <p className="mt-2 text-sm text-muted">На выбранную дату запись о рассмотрении нормативного каталога не найдена; готовность не предполагается.</p>}</div>
@@ -119,3 +121,5 @@ export function AccountingChart() {
     </>}
   </div>;
 }
+
+export const AccountingChart = withInstanceOrganization(AccountingChartWorkspace);

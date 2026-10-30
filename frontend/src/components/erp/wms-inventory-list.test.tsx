@@ -1,7 +1,12 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { configureCompany,render,resetCompany,waitForCompany } from "@/test/installation-company";
+import { deferred,inventory,jsonResponse,organizations } from "@/test/inventory-fixtures";
+import { act,fireEvent,screen,waitFor } from "@testing-library/react";
+import { afterEach,beforeEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
 import { WmsInventoryList } from "./wms-inventory-list";
-import { deferred, inventory, jsonResponse, organizations } from "@/test/inventory-fixtures";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
 const { push } = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
@@ -15,14 +20,15 @@ function confirm() {
   fireEvent.click(screen.getByRole("checkbox"));
 }
 
-it("ничего не выбирает автоматически; создание требует всех полей", async () => {
+it("юрлицо из настройки; создание требует явного склада и подтверждения источника", async () => {
   const fetcher = vi.fn().mockResolvedValue(jsonResponse([])); vi.stubGlobal("fetch", fetcher);
   render(<WmsInventoryList {...props} />);
-  expect(screen.getByLabelText("Юрлицо")).toHaveValue("");
+  await waitForCompany();
+  expect(screen.queryByRole("combobox", { name: /Юрлицо|Организация|Компания ячеек|Юридическое лицо/ })).not.toBeInTheDocument();
   expect(screen.getByRole("checkbox")).not.toBeChecked();
   expect(screen.getByRole("button", { name: "Новая инвентаризация" })).toBeDisabled();
-  expect(fetcher).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "1" } });
+  expect(fetcher).toHaveBeenCalledWith("/api/wms/inventory?organization_id=1", expect.anything());
+  await configureCompany("1");
   await screen.findByText("Инвентаризаций пока нет");
   fireEvent.change(screen.getByLabelText("Склад"), { target: { value: "Минск" } }); confirm();
   fetcher.mockResolvedValueOnce(jsonResponse(inventory()));
@@ -35,7 +41,8 @@ it("ничего не выбирает автоматически; создан�
 it.each([403, 409, 503])("HTTP %s при чтении показывает ошибку вместо пустого списка", async (status) => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ detail: "Ошибка чтения" }, status)));
   render(<WmsInventoryList {...props} />);
-  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "1" } });
+  await waitForCompany();
+  await configureCompany("1");
   expect(await screen.findByRole("alert")).toHaveTextContent("Ошибка чтения");
   expect(screen.queryByText("Инвентаризаций пока нет")).not.toBeInTheDocument();
 });
@@ -44,8 +51,9 @@ it("смена юрлица игнорирует поздний список и 
   const old = deferred<Response>();
   vi.stubGlobal("fetch", vi.fn((url: string) => url.endsWith("=1") ? old.promise : Promise.resolve(jsonResponse([inventory({ id: 8, number: "ИНВ-Б", organization_id: 2 })]))));
   render(<WmsInventoryList {...props} />);
-  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "1" } });
-  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "2" } });
+  await waitForCompany();
+  await configureCompany("1");
+  await configureCompany("2");
   await screen.findByText("ИНВ-Б");
   await act(async () => old.resolve(jsonResponse([inventory({ number: "СТАРЫЙ" })])));
   expect(screen.queryByText("СТАРЫЙ")).not.toBeInTheDocument();
@@ -56,9 +64,10 @@ it("поздний ответ создания не переводит на до
   const old = deferred<Response>();
   vi.stubGlobal("fetch", vi.fn((url: string, options?: RequestInit) => options?.method === "POST" ? old.promise : Promise.resolve(jsonResponse([]))));
   render(<WmsInventoryList initial={[]} organizations={organizations} initialOrganizationId={1} />);
+  await waitForCompany();
   fireEvent.change(screen.getByLabelText("Склад"), { target: { value: "Минск" } }); confirm();
   fireEvent.click(screen.getByRole("button", { name: "Новая инвентаризация" }));
-  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "2" } });
+  await configureCompany("2");
   await screen.findByText("Инвентаризаций пока нет");
   await act(async () => old.resolve(jsonResponse(inventory())));
   expect(push).not.toHaveBeenCalled();
@@ -68,9 +77,12 @@ it("поздний ответ создания не переводит на до
 it("сетевая ошибка создания сохраняет введённые данные и видимый сбой", async () => {
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
   render(<WmsInventoryList initial={[]} organizations={organizations} initialOrganizationId={1} />);
+  await waitForCompany();
   fireEvent.change(screen.getByLabelText("Склад"), { target: { value: "Минск" } }); confirm();
   fireEvent.click(screen.getByRole("button", { name: "Новая инвентаризация" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Ошибка сети");
   expect(screen.getByLabelText("Основание проверки полноты")).toHaveValue("Полнота проверена");
   expect(push).not.toHaveBeenCalled();
 });
+
+configureBeforeEach(() => resetCompany(1));

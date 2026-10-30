@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+
+import { useEffect,useState } from "react";
 import { WmsReservationEditor } from "./wms-reservation-editor";
 
 type Summary = { sku_code: string; warehouse: string; qty: string; source_count: number };
@@ -27,11 +29,11 @@ function useRows<T>(url: string | null, reload: number) {
   return { rows: current?.rows ?? [], error: current?.error ?? false, loading: Boolean(url && !current) };
 }
 
-export function WmsReservations() {
+ function WmsReservationsWorkspace() {
   const [editor, setEditor] = useState<{ row: Reservation | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [organization, setOrganization] = useState("");
+  const organization = String(useInstanceOrganization().id);
   const [source, setSource] = useState("");
   const [reload, setReload] = useState(0);
   const companies = useRows<Company>("/api/wms/receipt-organizations", reload);
@@ -42,10 +44,7 @@ export function WmsReservations() {
     <h1 className="text-xl font-semibold">Резервы товаров</h1>
     <p className="mt-2 text-sm text-muted">Отдельный регистр резервов. Количество резерва не является физическим остатком. Включает резервы выпущенных счетов ERP и ручные записи. Старые записи требуют отдельного переноса и сверки. Резерв счёта изменяется через отгрузку или подтверждённое аннулирование счёта.</p>
     <fieldset disabled={busy} className="my-4 flex flex-wrap items-center gap-3">
-      <label>Юрлицо <select aria-label="Юрлицо" className="rounded border border-line bg-surface p-2" value={organization} onChange={(event) => { setOrganization(event.target.value); setSource(""); setEditor(null); setSaved(false); }}>
-        <option value="">Выберите юрлицо</option>
-        {companies.rows.map((company) => <option key={company.id} value={company.id}>{company.name} · {company.unp}</option>)}
-      </select></label>
+      <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
       <button type="button" className="rounded border border-line p-2" onClick={() => setReload((value) => value + 1)}>Обновить</button>
       <button type="button" disabled={!organization} className="rounded border border-line p-2" onClick={() => { setEditor({ row: null }); setSaved(false); }}>Создать резерв</button>
     </fieldset>
@@ -74,3 +73,5 @@ export function WmsReservations() {
     </section>}
   </main>;
 }
+
+export const WmsReservations = withInstanceOrganization(WmsReservationsWorkspace);

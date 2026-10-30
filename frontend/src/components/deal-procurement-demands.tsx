@@ -1,11 +1,12 @@
 "use client";
 
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+
+import type { DealItemFull } from "@/lib/api";
+import { createDealDemand,fetchDealDemands,type DealDemand } from "@/lib/procurement-deal-demand";
 import { ShoppingCart } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import type { DealItemFull } from "@/lib/api";
-import { createDealDemand, fetchDealDemands, type DealDemand } from "@/lib/procurement-deal-demand";
-import { organizations, type Organization } from "@/lib/procurement-machine";
+import { useEffect,useRef,useState } from "react";
 
 type Props = { dealId: string; items: DealItemFull[] };
 
@@ -19,9 +20,9 @@ function message(error: unknown) {
   return error instanceof Error ? error.message : "Не удалось создать потребность закупки.";
 }
 
-export function DealProcurementDemands({ dealId, items }: Props) {
-  const [orgs, setOrgs] = useState<Organization[]>([]);
-  const [org, setOrg] = useState("");
+ function DealProcurementDemandsWorkspace({ dealId, items }: Props) {
+
+  const org = String(useInstanceOrganization().id);
   const [demands, setDemands] = useState<DealDemand[]>([]);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState<number | null>(null);
@@ -29,25 +30,13 @@ export function DealProcurementDemands({ dealId, items }: Props) {
   const keys = useRef(new Map<string, string>());
   const numericDealId = Number(dealId);
 
-  useEffect(() => {
-    let active = true;
-    void organizations().then((rows) => {
-      if (active) setOrgs(rows);
-    }).catch((reason: unknown) => {
-      if (active) setError(message(reason));
-    });
-    return () => { active = false; };
-  }, []);
+
 
   useEffect(() => {
-    if (!org || !Number.isInteger(numericDealId) || numericDealId <= 0) {
-      setDemands([]);
-      return;
-    }
+    if (!Number.isInteger(numericDealId) || numericDealId <= 0) return;
     let active = true;
-    setError(null);
     void fetchDealDemands(Number(org), numericDealId).then((rows) => {
-      if (active) setDemands(rows);
+      if (active) { setDemands(rows); setError(null); }
     }).catch((reason: unknown) => {
       if (active) setError(message(reason));
     });
@@ -85,12 +74,7 @@ export function DealProcurementDemands({ dealId, items }: Props) {
     <section className="mt-4 rounded-xl border border-line p-4" aria-label="Потребности закупки">
       <div className="flex items-center gap-2 font-semibold text-ink"><ShoppingCart size={18} className="text-accent-ink" /> Потребности закупки</div>
       <p className="mt-1 text-sm text-muted">Передайте дефицитную позицию в закупки. Это не создаёт резерв на складе или бухгалтерскую проводку.</p>
-      <label className="mt-3 block text-sm text-ink">Юрлицо закупки
-        <select aria-label="Юрлицо закупки для потребности" value={org} onChange={(event) => setOrg(event.target.value)} disabled={busy !== null} className="ml-2 rounded-lg border border-line bg-surface px-2 py-1 text-sm">
-          <option value="">Выберите юрлицо</option>
-          {orgs.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.unp}</option>)}
-        </select>
-      </label>
+      <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
       {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
       {org && <ul className="mt-3 space-y-2">
         {items.map((item) => {
@@ -111,3 +95,5 @@ export function DealProcurementDemands({ dealId, items }: Props) {
     </section>
   );
 }
+
+export const DealProcurementDemands = withInstanceOrganization(DealProcurementDemandsWorkspace);

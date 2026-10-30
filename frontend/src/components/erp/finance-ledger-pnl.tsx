@@ -1,11 +1,13 @@
 "use client";
 
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+
 import { businessDate } from "@/lib/business-date";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect,useRef,useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
 
 type Organization = { id: number; name: string; unp: string };
 type PnlMovement = {
@@ -66,10 +68,10 @@ function checkedEntry(value: unknown, entryId: number): EntryDetail {
   return entry as EntryDetail;
 }
 
-export function FinanceLedgerPnl() {
+ function FinanceLedgerPnlWorkspace() {
   const initial = today();
   const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [org, setOrg] = useState("");
+  const org = String(useInstanceOrganization().id);
   const [start, setStart] = useState(`${initial.slice(0, 7)}-01`);
   const [end, setEnd] = useState(initial);
   const [applied, setApplied] = useState<Applied | null>(null);
@@ -145,7 +147,7 @@ export function FinanceLedgerPnl() {
   return <section aria-label="Бухгалтерский P&L" className="space-y-4 rounded-xl border border-line bg-surface p-4">
     <div><h2 className="text-lg font-bold text-ink">Финансовый результат бухгалтерской книги</h2><p className="text-sm text-muted">Доходы и расходы по проведённым строкам учёта. Все суммы — BYN; валюта строки или позиции не является суммой операции. Не является операционной маржой или регламентированной отчётностью.</p></div>
     <div className="flex flex-wrap gap-3">
-      <label className="min-w-56 flex-1 text-sm">Организация<Select aria-label="Организация P&L" value={org} onChange={(event) => setOrg(event.target.value)}><option value="">Выберите организацию</option>{organizations.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.unp}</option>)}</Select></label>
+      <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
       <label className="text-sm">С<Input aria-label="Начало периода P&L" type="date" value={start} onChange={(event) => setStart(event.target.value)} /></label>
       <label className="text-sm">По<Input aria-label="Конец периода P&L" type="date" value={end} onChange={(event) => setEnd(event.target.value)} /></label>
       <div className="self-end"><Button variant="secondary" aria-busy={loading} onClick={() => void apply()}>Применить</Button></div>
@@ -168,3 +170,5 @@ export function FinanceLedgerPnl() {
 function Metric({ label, value, tone }: { label: string; value: string; tone: string }) {
   return <div className="rounded-xl bg-sunken p-4"><p className="text-sm text-muted">{label}</p><p className={`mt-1 text-xl font-bold ${tone}`}>{money(value)}</p></div>;
 }
+
+export const FinanceLedgerPnl = withInstanceOrganization(FinanceLedgerPnlWorkspace);

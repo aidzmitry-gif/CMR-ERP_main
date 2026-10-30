@@ -1,5 +1,10 @@
-import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { render,resetCompany,waitForCompany } from "@/test/installation-company";
+import { screen } from "@testing-library/react";
+import { afterEach,beforeEach as configureBeforeEach,describe,expect,it,vi } from "vitest";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
 import { SettingsView } from "@/components/erp/settings-view";
 
@@ -24,6 +29,7 @@ describe("SettingsView", () => {
       }),
     );
     render(<SettingsView />);
+  await waitForCompany();
     expect(await screen.findByText(/Подключённые модули/)).toBeInTheDocument();
     expect(screen.getAllByText("sales").length).toBeGreaterThan(0);
     expect(screen.getByText("integrations")).toBeInTheDocument();
@@ -34,6 +40,7 @@ describe("SettingsView", () => {
   it("показывает загрузку при ошибке запроса", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
     render(<SettingsView />);
+  await waitForCompany();
     expect(await screen.findByText("Загрузка…")).toBeInTheDocument();
   });
 
@@ -50,6 +57,7 @@ describe("SettingsView", () => {
     }));
 
     render(<SettingsView />);
+  await waitForCompany();
 
     const link = await screen.findByRole("link", { name: "Открыть Бухгалтерия" });
     expect(link).toHaveAttribute("href", "/erp/accounting");
@@ -57,3 +65,5 @@ describe("SettingsView", () => {
     expect(screen.getByText("sales")).toBeInTheDocument();
   });
 });
+
+configureBeforeEach(() => resetCompany(1));

@@ -1,5 +1,10 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { configureCompany,render,resetCompany,waitForCompany } from "@/test/installation-company";
+import { screen,waitFor,within } from "@testing-library/react";
+import { afterEach,beforeEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
 import { ProcurementKanban } from "@/components/erp/procurement-kanban";
 
@@ -39,7 +44,8 @@ afterEach(() => vi.unstubAllGlobals());
 
 it("строит девять живых этапов из scoped заявок, заказов и первичных документов", async () => {
   render(<ProcurementKanban />);
-  fireEvent.change(await screen.findByLabelText("Юрлицо канбана закупок"), { target: { value: "1" } });
+  await waitForCompany();
+  await configureCompany("1");
   await screen.findByText("REQ-001");
   await waitFor(() => expect(within(screen.getByLabelText("Колонка Завершено")).getByText("PO-013")).toBeInTheDocument());
 
@@ -74,9 +80,12 @@ it("показывает источник дефицита только у по�
     return original(input, init);
   });
   render(<ProcurementKanban suggestedOrg="1" />);
+  await waitForCompany();
   const automatic = (await screen.findByText("REQ-001")).closest("article")!;
   expect(within(automatic).getByText("Авто: дефицит склада")).toBeInTheDocument();
   const manual = screen.getByText("REQ-002").closest("article")!;
   expect(within(manual).queryByText("Авто: дефицит склада")).toBeNull();
   expect(screen.getAllByText("Авто: дефицит склада")).toHaveLength(1);
 });
+
+configureBeforeEach(() => resetCompany(1));

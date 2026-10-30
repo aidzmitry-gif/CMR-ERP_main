@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { InstanceOrganizationGate } from "@/components/instance-organization-gate";
 
-type Organization = { id: number; name: string; unp: string };
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useEffect,useState } from "react";
+
+
 type Receipt = { id: number; number: string; counterparty: string; warehouse: string; entity_ref: string };
 type Detail = Receipt & { lines: { id: number; sku_code: string; sku_title: string; expected_qty: number | string }[] };
 type Queue = { items: Receipt[]; next_after_id: number | null };
@@ -15,20 +17,12 @@ async function request<T>(path: string, body?: object): Promise<T> {
 }
 
 export function WmsReceiptReconciliation() {
-  const [organizations, setOrganizations] = useState<Organization[]>([]), [org, setOrg] = useState("");
-  const [busy, setBusy] = useState(false), [error, setError] = useState("");
-  useEffect(() => {
-    let active = true;
-    request<Organization[]>("/receipt-organizations").then((rows) => { if (active) setOrganizations(rows); }).catch((e: Error) => { if (active) setError(e.message); });
-    return () => { active = false; };
-  }, []);
-  return <main className="min-w-0 w-0 flex-1 space-y-4 overflow-auto p-6 lg:pr-24">
+  const [busy, setBusy] = useState(false);
+  return <InstanceOrganizationGate>{org => <main className="min-w-0 w-0 flex-1 space-y-4 overflow-auto p-6 lg:pr-24">
     <h1 className="text-2xl font-semibold">Сопоставление приёмок</h1>
-    <p className="text-sm text-muted">Общая очередь документов без владельца. Выбор юрлица не означает, что документы принадлежат ему. Проверьте первичные основания перед подтверждением. Уже принятые старые документы требуют отдельной сверки.</p>
-    <label>Юрлицо для подтверждения<Select value={org} disabled={busy} onChange={(e) => setOrg(e.target.value)}><option value="">Выберите организацию</option>{organizations.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.unp}</option>)}</Select></label>
-    {error && <p role="alert">{error}</p>}
-    {org && <ReceiptQueue key={org} org={org} busy={busy} onBusy={setBusy} />}
-  </main>;
+    <p className="text-sm text-muted">Общая очередь документов без владельца. Настройка юрлица не доказывает принадлежность документов. Проверьте первичные основания перед подтверждением. Уже принятые старые документы требуют отдельной сверки.</p>
+    <ReceiptQueue key={org.id} org={String(org.id)} busy={busy} onBusy={setBusy} />
+  </main>}</InstanceOrganizationGate>;
 }
 
 function ReceiptQueue({ org, busy, onBusy }: { org: string; busy: boolean; onBusy: (value: boolean) => void }) {

@@ -1,55 +1,56 @@
 "use client";
 
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+
 import { businessDate } from "@/lib/business-date";
 
-import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { searchAccountingBuyers,type AccountingBuyer } from "@/lib/accounting-buyers";
+import { searchAccountingContracts,type AccountingContract } from "@/lib/accounting-contracts";
+import { searchAccountingEmployees,type AccountingEmployee } from "@/lib/accounting-employees";
+import { searchAccountingProductionOrders,type AccountingProductionOrder } from "@/lib/accounting-orders";
+import { searchAccountingSettlementDocuments,type AccountingSettlementDocument } from "@/lib/accounting-settlement-documents";
+import { searchAccountingSkus,type AccountingSku } from "@/lib/accounting-skus";
+import { searchAccountingWarehouses,type AccountingWarehouse } from "@/lib/accounting-warehouses";
 import { useUnsavedDocumentGuard } from "@/lib/use-unsaved-document-guard";
-import { searchAccountingBuyers, type AccountingBuyer } from "@/lib/accounting-buyers";
-import { searchAccountingContracts, type AccountingContract } from "@/lib/accounting-contracts";
-import { searchAccountingEmployees, type AccountingEmployee } from "@/lib/accounting-employees";
-import { searchAccountingProductionOrders, type AccountingProductionOrder } from "@/lib/accounting-orders";
-import { searchAccountingSettlementDocuments, type AccountingSettlementDocument } from "@/lib/accounting-settlement-documents";
-import { searchAccountingSkus, type AccountingSku } from "@/lib/accounting-skus";
-import { searchAccountingWarehouses, type AccountingWarehouse } from "@/lib/accounting-warehouses";
+import Link from "next/link";
+import { useCallback,useEffect,useRef,useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
-import { AccountingCurrencyFields, type CurrencyFields } from "./accounting-currency-fields";
-import { downloadTrialBalance, type ExportTrial } from "./accounting-export";
-import { AccountingReconciliation } from "./accounting-reconciliation";
-import { AccountingInventoryIssue } from "./accounting-inventory-issue";
-import { AccountingInputVat } from "./accounting-input-vat";
-import { AccountingOutputVat } from "./accounting-output-vat";
-import { AccountingForeignTrade } from "./accounting-foreign-trade";
-import { AccountingFixedAssets } from "./accounting-fixed-assets";
-import { AccountingRepairs } from "./accounting-repairs";
-import { AccountingProductionCostSources } from "./accounting-production-cost-sources";
+import { Input,Select } from "@/components/ui/input";
 import { AccountingAssemblyEstimate } from "./accounting-assembly-estimate";
-import { AccountingShipmentProfit } from "./accounting-shipment-profit";
-import { AccountingPayrollAccrualImport } from "./accounting-payroll-accrual-import";
-import { AccountingPayrollStatutoryImport } from "./accounting-payroll-statutory-import";
-import { AccountingPayrollControl } from "./accounting-payroll-control";
-import { AccountingPayrollWorkpaper } from "./accounting-payroll-workpaper";
-import { AccountingPayrollRuleSet } from "./accounting-payroll-rule-set";
-import { AccountingStatutoryRequirements } from "./accounting-statutory-requirements";
 import { AccountingBank } from "./accounting-bank";
 import { AccountingBankImport } from "./accounting-bank-import";
+import { AccountingCurrencyFields,type CurrencyFields } from "./accounting-currency-fields";
+import { downloadTrialBalance,type ExportTrial } from "./accounting-export";
+import { AccountingFixedAssets } from "./accounting-fixed-assets";
+import { AccountingForeignTrade } from "./accounting-foreign-trade";
+import { AccountingInputVat } from "./accounting-input-vat";
+import { AccountingInventoryIssue } from "./accounting-inventory-issue";
+import { AccountingOutputVat } from "./accounting-output-vat";
+import { AccountingPayrollAccrualImport } from "./accounting-payroll-accrual-import";
+import { AccountingPayrollControl } from "./accounting-payroll-control";
+import { AccountingPayrollRuleSet } from "./accounting-payroll-rule-set";
+import { AccountingPayrollStatutoryImport } from "./accounting-payroll-statutory-import";
+import { AccountingPayrollWorkpaper } from "./accounting-payroll-workpaper";
+import { AccountingProductionCostSources } from "./accounting-production-cost-sources";
+import { AccountingReconciliation } from "./accounting-reconciliation";
+import { AccountingRepairs } from "./accounting-repairs";
 import { AccountingSellerProfiles } from "./accounting-seller-profiles";
+import { AccountingShipmentProfit } from "./accounting-shipment-profit";
+import { AccountingStatutoryRequirements } from "./accounting-statutory-requirements";
 
-import { AccountingInvoiceSettlements } from "./accounting-invoice-settlements";
+import { AccountingAccountActivity,type AccountMovement } from "./accounting-account-activity";
 import { AccountingControls } from "./accounting-controls";
-import { AccountingSourceLink } from "./accounting-source-link";
-import { AccountingShipmentPreview } from "./accounting-shipment-preview";
-import { AccountingShipmentPackage } from "./accounting-shipment-package";
 import { AccountingFxRevaluation } from "./accounting-fx-revaluation";
-import { ExpenseControl } from "./expense-control";
-import { AccountingHome, type AccountingDestination } from "./accounting-home";
-import { AccountingReportCatalog, type ReportFavoriteState } from "./accounting-report-catalog";
+import { AccountingHome,type AccountingDestination } from "./accounting-home";
+import { AccountingInvoiceSettlements } from "./accounting-invoice-settlements";
+import { AccountingReportCatalog,type ReportFavoriteState } from "./accounting-report-catalog";
+import { AccountingShipmentPackage } from "./accounting-shipment-package";
+import { AccountingShipmentPreview } from "./accounting-shipment-preview";
+import { AccountingSourceLink } from "./accounting-source-link";
 import { AccountingTradeSettlements } from "./accounting-trade-settlements";
-import { AccountingAccountActivity, type AccountMovement } from "./accounting-account-activity";
+import { ExpenseControl } from "./expense-control";
 
-type Organization = { id: number; name: string; unp: string };
 type Account = { id: number; code: string; title: string; cash: boolean; category: string; required_dimensions: string[]; currency_tracking: boolean; quantity_tracking: boolean };
 type Policy = { id: number; effective_from: string; reference: string; normative_verified: boolean; inventory_method?: "specific" | "fifo" | "weighted_average"; currency_revaluation?: { monetary_accounts: string[]; gain_account: string; loss_account: string; gain_dimensions: Record<string, string>; loss_dimensions: Record<string, string>; reference: string; settlement_allocation?: "proportional_carrying"; settlement_rate_date?: "posting_date" } | null };
 type JournalLine = CurrencyFields & { account: string; title?: string; side: "debit" | "credit"; amount: string; dimensions: Record<string, string>; cash_activity?: string };
@@ -743,12 +744,10 @@ function FixedAssetDimensionPicker({ org, index, dimensions, assets, assetsOrg, 
   </div>;
 }
 
-export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?: string; suggestedEntry?: string }) {
+ function AccountingViewWorkspace({ suggestedOrg, suggestedEntry }: { suggestedOrg?: string; suggestedEntry?: string }) {
   const today = businessDate();
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [organizationRefresh, setOrganizationRefresh] = useState(0);
-  const [organizationError, setOrganizationError] = useState("");
-  const [org, setOrg] = useState("");
+  const organization = useInstanceOrganization();
+  const org = String(organization.id);
   const [start, setStart] = useState(`${today.slice(0, 7)}-01`);
   const [end, setEnd] = useState(today);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -790,7 +789,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
   const generation = useRef(0);
   const entryGeneration = useRef(0);
   const previewGeneration = useRef(0);
-  const appliedSuggestedOrg = useRef<string | undefined>(undefined);
+
   const openedSuggestedEntry = useRef("");
   const manualListGeneration = useRef(0);
   const fixedAssetsGeneration = useRef(0);
@@ -798,19 +797,6 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
   const postCommand = useRef<{ fingerprint: string; key: string } | null>(null);
   const voidCommand = useRef<{ fingerprint: string; key: string } | null>(null);
   const confirmDiscard = useUnsavedDocumentGuard(tab === "entry" && manualDirty);
-
-  useEffect(() => {
-    let active = true;
-    request<Organization[]>("/organizations").then((rows) => { if (active) { setOrganizationError(""); setOrganizations(rows); setOrg((current) => {
-      if (appliedSuggestedOrg.current !== suggestedOrg) {
-        appliedSuggestedOrg.current = suggestedOrg;
-        const hint = organizationHint(suggestedOrg);
-        if (hint && rows.some((row) => String(row.id) === hint)) return hint;
-      }
-      return rows.some((row) => String(row.id) === current) ? current : rows[0] ? String(rows[0].id) : "";
-    }); } }).catch((e: Error) => { if (active) setOrganizationError(e.message); });
-    return () => { active = false; };
-  }, [organizationRefresh, suggestedOrg]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setManualCreateRecovery(readManualCreateRecovery()), 0);
@@ -1042,6 +1028,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
   async function retryManualCreate() {
     if (manualCreateRecovery.status !== "pending") return;
     const { journal, raw } = manualCreateRecovery;
+    if (journal.organization_id !== org) { setError("Незавершённая команда относится к другому юрлицу. Команда сохранена, отправка запрещена."); return; }
     const current = readManualCreateRecovery();
     if (current.status !== "pending" || current.raw !== raw) {
       setManualCreateRecovery(current);
@@ -1058,7 +1045,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
       }
       clearExactManualCreateJournal(raw);
       setManualCreateRecovery({ status: "none" });
-      setOrg(journal.organization_id);
+
       setError("");
       saveCommand.current = null; postCommand.current = null;
       if (journal.close_after_save && result.version === 1 && result.status === "draft") {
@@ -1157,18 +1144,16 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
 
   return <div className="min-w-0 w-full space-y-5 p-6 lg:pr-24 text-ink">
     <header><h1 className="text-2xl font-semibold">Бухгалтерия</h1><p className="mt-1 text-sm text-muted">Проводки и регистры по каждому юридическому лицу. Суммы в BYN.</p></header>
-    {organizationError && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-300 bg-surface p-3 text-red-700"><span>{organizationError}</span><Button variant="secondary" onClick={() => { setOrganizationError(""); setOrganizationRefresh((value) => value + 1); }}>Повторить список организаций</Button></div>}
     {error && <div role="alert" className="rounded-xl border border-red-300 bg-surface p-3 text-red-700">{error}</div>}
     {manualCreateRecovery.status === "pending" && <section role="status" aria-label="Восстановление создания справки" className="space-y-2 rounded-xl border border-amber-300 bg-surface p-3 text-sm"><p className="font-semibold">Результат создания справки неизвестен · организация {manualCreateRecovery.journal.organization_id}</p><p>Создание и сохранение новой справки заблокированы. Повтор отправит сохранённые ключ и тело команды (digest {manualCreateRecovery.journal.reviewed_digest}).</p><Button variant="secondary" disabled={locked} onClick={() => void retryManualCreate()}>Повторить создание справки</Button></section>}
     {manualCreateRecovery.status === "blocked" && <section role="alert" aria-label="Создание справки заблокировано" className="rounded-xl border border-red-300 bg-surface p-3 text-sm text-red-700">{manualCreateRecovery.reason} Журнал не очищен автоматически.</section>}
     {notice && <p role="status" className="text-money">{notice}</p>}
     <div className="flex flex-wrap gap-4 rounded-xl border border-line bg-surface p-4">
-      <label className="min-w-0 basis-64 flex-1 text-sm">Организация<Select className="min-w-0" aria-label="Организация" value={org} disabled={locked} onChange={(e) => { const next = e.target.value; if (next === org || !confirmDiscard()) return; generation.current += 1; setReport(null); setAccountActivity(null); setDetail(null); setPreview(null); setPrepared(null); setManualDocument(null); setManualDocuments(null); setManualDirty(false); setSource(""); setSourceVersion(1); setCorrectionOf(""); setExplanation(""); setNotice(""); setLines([{ account: "", side: "debit", amount: "", dimensions: {} }, { account: "", side: "credit", amount: "", dimensions: {} }]); setOrg(next); }}><option value="">Выберите организацию</option>{organizations.map((o) => <option key={o.id} value={o.id}>{o.name} · {o.unp}</option>)}</Select></label>
+      <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
       <label className="text-sm">С<Input aria-label="Начало периода" type="date" value={start} disabled={locked} onChange={(e) => changeDate("start", e.target.value)} /></label>
       <label className="text-sm">По<Input aria-label="Конец периода" type="date" value={end} disabled={locked} onChange={(e) => changeDate("end", e.target.value)} /></label>
       <Button variant="secondary" disabled={locked || !org} onClick={() => void refresh()}>Обновить</Button>
     </div>
-    {!organizations.length && !organizationError && !error && <p className="rounded-xl border border-line p-5 text-muted">Нет доступных книг. Руководитель создаёт организацию и назначает доступ бухгалтеру.</p>}
     <nav aria-label="Разделы бухгалтерии" className="flex flex-wrap gap-2">{accountingSections.map((section) =>
       <Button key={section.id} disabled={locked} aria-pressed={currentSection.id === section.id} variant={currentSection.id === section.id ? "primary" : "secondary"} onClick={() => { if (section.pages[0].id !== tab && !confirmDiscard()) return; if (section.id === "closing") setControlSection("periods"); setTab(section.pages[0].id); }}>{section.label}</Button>
     )}</nav>
@@ -1178,7 +1163,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     {tab === "expenses" && <ExpenseControl org={org} onEntry={(id) => void openEntry(id)} />}
     {tab === "crm-sales" && <section aria-label="Продажи из CRM" className="space-y-3 rounded-xl border border-line bg-surface p-4"><h2 className="font-semibold">Продажа через сделку и отгрузку</h2><p>Счёт и резерв создаются в CRM, товар отгружается со склада по акту. Проводки выручки, НДС и себестоимости бухгалтер готовит по этому акту в очереди документов. Повторно вводить продажу здесь не нужно.</p><div className="flex flex-wrap gap-3"><Link className="text-accent underline" href="/crm/deals">Открыть сделки CRM</Link><Button variant="secondary" disabled={!org} onClick={() => { setControlSection("inbox"); setTab("controls"); }}>Отгрузки, ожидающие проводок</Button></div></section>}
     {tab === "home" && <AccountingHome selected={!!org} pending={report?.pending_documents ?? null} onOpen={openWorkspace} />}
-    {tab === "seller-profiles" && <AccountingSellerProfiles org={org} organization={organizations.find((row) => String(row.id) === org)} onBusyChange={setControlsBusy} />}
+    {tab === "seller-profiles" && <AccountingSellerProfiles org={org} organization={organization} onBusyChange={setControlsBusy} />}
     {tab === "invoice-settlements" && <AccountingInvoiceSettlements org={org} onBusyChange={setControlsBusy} />}
     {tab === "reconciliation" && <AccountingReconciliation key={org} org={org} start={start} end={end} />}
     {tab === "input-vat" && <AccountingInputVat org={org} start={start} end={end} onEntry={(id) => void openEntry(id)} />}
@@ -1187,7 +1172,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     {tab === "fx-revaluation" && <AccountingFxRevaluation org={org} month={operationDate.slice(0, 7)} date={operationDate} policy={policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]} disabled={locked} onEntry={(id) => void openEntry(id)} />}
     {tab === "fixed-assets" && <AccountingFixedAssets org={org} month={operationDate.slice(0, 7)} policyId={String(policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id || "")} onEntry={(id) => void openEntry(id)} disabled={locked} />}
     {tab === "repairs" && <AccountingRepairs org={org} month={operationDate.slice(0, 7)} policyId={String(policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id || "")} onEntry={(id) => void openEntry(id)} disabled={locked} />}
-    {tab === "production" && <AccountingProductionCostSources org={org} month={operationDate.slice(0, 7)} disabled={locked} onEntry={(id) => void openEntry(id)} onLock={setControlsBusy} onChanged={() => { setOrganizationRefresh((value) => value + 1); void refresh(); }} />}
+    {tab === "production" && <AccountingProductionCostSources org={org} month={operationDate.slice(0, 7)} disabled={locked} onEntry={(id) => void openEntry(id)} onLock={setControlsBusy} onChanged={() => { void refresh(); }} />}
     {tab === "payroll-control" && <AccountingPayrollControl key={`${org}:${end.slice(0, 7)}`} org={org} month={end.slice(0, 7)} onEntry={(id) => void openEntry(id)} />}
     {tab === "payroll-hr-draft" && <section aria-label="Черновая ведомость HR" className="space-y-3 rounded-xl border border-line bg-surface p-4"><h2 className="text-lg font-semibold">Черновая ведомость HR</h2><p className="text-sm text-muted">В HR можно подготовить расчёт и распечатать листки сотрудников. Черновик пока не связан с выбранным здесь юрлицом и не создаёт бухгалтерские проводки. Для учёта начислений используйте проверенный импорт с основаниями.</p><Link className="text-accent underline" href="/erp/hr/payroll">Открыть черновую ведомость HR</Link></section>}
     {tab === "payroll-workpaper" && <AccountingPayrollWorkpaper key={`${org}:${end.slice(0, 7)}`} org={org} month={end.slice(0, 7)} disabled={locked} onBusyChange={setControlsBusy} onOpenRules={() => setTab("payroll-rules")} />}
@@ -1201,7 +1186,7 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     {tab === "bank" && <AccountingBank key={org} org={org} accounts={accounts} policyId={policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id} date={operationDate} onDate={(value) => changeDate("operation", value)} onPosted={() => void refresh()} />}
     {tab === "bank-import" && <AccountingBankImport key={org} org={org} accounts={accounts} policyId={policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id} date={operationDate} onDate={(value) => changeDate("operation", value)} onPosted={() => void refresh()} onEntry={(id) => void openEntry(id)} />}
     {tab === "shipment-preview" && <AccountingShipmentPreview key={`${org}/${shipmentSource}`} org={org} source={shipmentSource} accounts={accounts} date={operationDate} policyId={policies.filter((p) => p.effective_from <= operationDate).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.id} disabled={locked} onDate={(value) => changeDate("operation", value)} onPosted={async () => { setNotice("Отгрузка проведена."); await refresh(); }} />}
-    {tab === "controls" && <AccountingControls onEntry={id => void openEntry(id)} onShipment={(source) => { setShipmentSource(source); setTab("shipment-preview"); }} key={`${org}/${controlSection}`} org={org} initialSection={controlSection} onBusyChange={setControlsBusy} onChanged={() => { setOrganizationRefresh((v) => v + 1); void refresh(); }} />}
+    {tab === "controls" && <AccountingControls onEntry={id => void openEntry(id)} onShipment={(source) => { setShipmentSource(source); setTab("shipment-preview"); }} key={`${org}/${controlSection}`} org={org} initialSection={controlSection} onBusyChange={setControlsBusy} onChanged={() => { void refresh(); }} />}
     {busy && <p role="status">Загрузка…</p>}
     {tab === "trade-settlements" && <AccountingTradeSettlements org={org} start={start} end={end} onEntry={(id) => void openEntry(id)} />}
     {tab === "reports" && <AccountingReportCatalog onOpen={setTab} reportReady={!!org && !!report} favoriteState={reportFavoriteState} setFavoriteState={setReportFavoriteState} />}
@@ -1266,3 +1251,10 @@ export function AccountingView({ suggestedOrg, suggestedEntry }: { suggestedOrg?
     </section>}
   </div>;
 }
+
+function AccountingViewScope(props: { suggestedOrg?: string; suggestedEntry?: string }) {
+  const org = useInstanceOrganization();
+  if (props.suggestedOrg && props.suggestedOrg !== String(org.id)) return <p role="alert">Юрлицо ссылки не совпадает с настройкой установки.</p>;
+  return <AccountingViewWorkspace {...props} />;
+}
+export const AccountingView = withInstanceOrganization(AccountingViewScope);

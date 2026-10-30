@@ -1,28 +1,22 @@
 "use client";
 
+import { InstanceOrganizationGate } from "@/components/instance-organization-gate";
+
+import { createLocation,fetchLocations,fetchLocationWarehouses,locationLabel,LocationRequestError,type LocationOrganization,type WmsLocation } from "@/lib/wms-ops";
 import clsx from "clsx";
-import { Plus, Printer } from "lucide-react";
+import { Plus,Printer } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import { createLocation, fetchLocations, fetchLocationWarehouses, LocationRequestError, locationLabel, type LocationOrganization, type WmsLocation } from "@/lib/wms-ops";
+import { useEffect,useRef,useState } from "react";
 
 const control = "rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink disabled:opacity-60";
 const message = (error: unknown) => error instanceof Error ? error.message : "Не удалось загрузить данные ячеек.";
 
-export function WmsLocations({ initial, organizations }: { initial: WmsLocation[]; organizations: LocationOrganization[] }) {
-  const [company, setCompany] = useState("");
-  const [posting, setPosting] = useState(false);
-  const [overviewFresh, setOverviewFresh] = useState(false);
-  return <div className="flex-1 overflow-auto p-6">
-    <p className="text-sm text-muted">Ячейки принадлежат компании и зарегистрированному складу. Общий обзор предназначен для просмотра.</p>
-    <label className="mt-4 flex max-w-lg flex-col gap-1 text-sm text-muted">Компания
-      <select aria-label="Компания ячеек" value={company} disabled={posting} onChange={(event) => { setOverviewFresh(true); setCompany(event.target.value); }} className={control}>
-        <option value="">Все доступные компании · обзор</option>
-        {organizations.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
-      </select>
-    </label>
-    <LocationScope key={company || "overview"} organizationId={company ? Number(company) : undefined} initial={company ? [] : initial} organizations={organizations} refreshOnMount={overviewFresh} onPosting={setPosting} />
-  </div>;
+export function WmsLocations(props: { initial: WmsLocation[]; organizations: LocationOrganization[] }) {
+  const [, setPosting] = useState(false);
+  return <InstanceOrganizationGate>{org => <div className="flex-1 overflow-auto p-6">
+    <p className="text-sm text-muted">Ячейки принадлежат юрлицу установки и зарегистрированному складу. Для создания ячейки выберите склад.</p>
+    <LocationScope key={org.id} organizationId={org.id} initial={[]} organizations={props.organizations.filter(row => row.id === org.id)} refreshOnMount onPosting={setPosting} />
+  </div>}</InstanceOrganizationGate>;
 }
 
 function LocationScope({ organizationId, initial, organizations, refreshOnMount, onPosting }: {

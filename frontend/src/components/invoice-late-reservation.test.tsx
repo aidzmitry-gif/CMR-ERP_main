@@ -1,7 +1,12 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, expect, it, vi } from "vitest";
-import { InvoiceLateReservation } from "./invoice-late-reservation";
 import type { DealDoc } from "@/lib/api";
+import { configureCompany,render,resetCompany,waitForCompany } from "@/test/installation-company";
+import { fireEvent,screen,waitFor } from "@testing-library/react";
+import { beforeEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
+import { InvoiceLateReservation } from "./invoice-late-reservation";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 vi.mock("@/lib/document-register-api", () => ({ fetchRegisterOrganizations: async () => [{ id: 7, name: "Компания", unp: "123" }] }));
 const doc: DealDoc = { id: 3, kind: "invoice", number: "1", amount: 200, status: "issued", version: 1, content_sha256: "a".repeat(64), reserve_mode: "on_order", reserve_status: "unreserved", valid_until: "2026-09-15", onec_ref: null };
 beforeEach(() => { sessionStorage.clear(); vi.restoreAllMocks(); });
@@ -15,8 +20,9 @@ it("reserves from original lines and restores the same request after remount", a
     .mockResolvedValueOnce(Response.json([reserved]));
   const refresh = vi.fn(async () => {});
   const view = render(<InvoiceLateReservation dealId="1" doc={doc} refresh={refresh} />);
-  await screen.findByRole("option", { name: "Компания · 123" });
-  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "7" } });
+  await waitForCompany();
+  await waitForCompany();
+  await configureCompany("7");
   fireEvent.click(screen.getByText("Проверить доступность"));
   await screen.findByText("1. Товар · SKU · 2.00 шт");
   fireEvent.change(screen.getByLabelText("Склад распределения 1"), { target: { value: "W" } });
@@ -26,6 +32,7 @@ it("reserves from original lines and restores the same request after remount", a
   await screen.findByRole("alert");
   view.unmount();
   render(<InvoiceLateReservation dealId="1" doc={reserved} refresh={refresh} />);
+  await waitForCompany();
   const retry = await screen.findByText("Повторить исходный запрос резерва");
   await waitFor(() => expect(retry).not.toBeDisabled());
   fireEvent.click(retry);
@@ -33,3 +40,5 @@ it("reserves from original lines and restores the same request after remount", a
   expect(fetcher.mock.calls[1][1]?.body).toBe(fetcher.mock.calls[2][1]?.body);
   expect(refresh).toHaveBeenCalledOnce();
 });
+
+configureBeforeEach(() => resetCompany(7));

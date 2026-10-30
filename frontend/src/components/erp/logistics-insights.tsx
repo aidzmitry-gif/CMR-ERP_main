@@ -1,15 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
 
-import { Card, KpiTile } from "@/components/erp/logistics-ui";
+import { useEffect,useRef,useState } from "react";
+
+import { Card,KpiTile } from "@/components/erp/logistics-ui";
 import { logisticsReadMessage } from "@/lib/logistics-api";
 import {
-  fetchCostCatalog, fetchOwnedCostReview, formatFreightByn,
-  type CostCatalog, type CostSelection, type OwnedCostReview,
+fetchCostCatalog,fetchOwnedCostReview,formatFreightByn,
+type CostCatalog,type CostSelection,type OwnedCostReview,
 } from "@/lib/logistics-owned-costs";
 
-export function LogisticsInsights() {
+function LogisticsInsightsWorkspace() {
+  const organization = useInstanceOrganization();
   const epoch = useRef(0);
   const [foreground, setForeground] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -58,11 +61,12 @@ export function LogisticsInsights() {
     void fetchCostCatalog(controller.signal).then(value => {
       if (!active || epoch.current !== generation) return;
       setCatalog(value);
-      setSelected(previous => previous && previous.principal === value.principal
-        && value.items.some(item => item.id === previous.organization_id) ? { ...previous } : null);
+      setSelected(value.items.some(item => item.id === organization.id)
+        ? { organization_id: organization.id, principal: value.principal } : null);
+      if (!value.items.some(item => item.id === organization.id)) setError("Нет доступа к данным юрлица установки.");
     }).catch(reason => { if (active && epoch.current === generation) setError(logisticsReadMessage(reason)); });
     return () => { active = false; controller.abort(); };
-  }, [foreground, refresh]);
+  }, [foreground, refresh, organization.id]);
 
   useEffect(() => {
     if (!foreground || !catalog || !selected || selected.principal !== catalog.principal) return;
@@ -91,22 +95,9 @@ export function LogisticsInsights() {
       {error && <p role="alert" className="rounded-xl bg-surface p-4 text-sm text-red-600">{error}</p>}
       {!catalog && !error && <p role="status">Проверка доступа к юрлицам…</p>}
       {catalog && <>
-        <label className="block space-y-1 text-sm text-ink">Юрлицо
-          <select aria-label="Юрлицо аналитики" value={selected?.organization_id ?? ""}
-            className="block w-full max-w-lg rounded-lg border border-line bg-surface px-3 py-2"
-            onChange={event => {
-              epoch.current += 1;
-              setResult(null);
-              setError("");
-              const id = Number(event.target.value);
-              setSelected(id ? { organization_id: id, principal: catalog.principal } : null);
-            }}>
-            <option value="">Выберите юрлицо</option>
-            {catalog.items.map(item => <option key={item.id} value={item.id}>{item.name}{item.unp ? ` · ${item.unp}` : ""}</option>)}
-          </select>
-        </label>
+        <p className="text-sm text-muted">Используется юрлицо установки.</p>
         {!catalog.items.length ? <p>Нет доступных юрлиц для просмотра затрат.</p>
-          : !selected && <p>Выберите юрлицо, чтобы загрузить подтверждённые источники фрахта.</p>}
+          : !selected && <p>Нет подтверждённого доступа к источникам фрахта юрлица установки.</p>}
         {selected && !data && !error && <p role="status">Загрузка фрахта выбранного юрлица…</p>}
       </>}
       {freight && <>
@@ -130,3 +121,5 @@ export function LogisticsInsights() {
     </>}
   </section>;
 }
+
+export const LogisticsInsights = withInstanceOrganization(LogisticsInsightsWorkspace);

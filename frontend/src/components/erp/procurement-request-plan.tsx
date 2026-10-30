@@ -1,11 +1,13 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { InstanceOrganizationGate } from "@/components/instance-organization-gate";
 
-type Organization = { id: number; name: string; unp: string };
+import { Button } from "@/components/ui/button";
+import { Input,Select } from "@/components/ui/input";
+import Link from "next/link";
+import { useEffect,useRef,useState } from "react";
+
+
 type Identity = { organization_id: number; principal: string; can_manage: boolean };
 type Source = { id: number; number: string; supplier: string; item?: string; stage?: string; status?: string; quantity?: string; planned_amount?: string; due_date?: string | null };
 type Page = { organization_id: number; items: Source[]; next_after_id: number | null };
@@ -59,31 +61,15 @@ function persist(org: number, principal: string, expected: string | null, value:
   return raw;
 }
 
-const organizationHint = (value: string | undefined) =>
-  value && /^[1-9]\d*$/.test(value) && Number(value) <= 2147483647 ? value : undefined;
 
-export function ProcurementRequestPlan({ suggestedOrg }: { suggestedOrg?: string }) {
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [org, setOrg] = useState("");
-  const [error, setError] = useState("");
-  useEffect(() => {
-    let live = true;
-    api<Organization[]>("/api/procurement/receipt-organizations").then(v => {
-      if (!live) return;
-      setOrganizations(v);
-      const hint = organizationHint(suggestedOrg);
-      if (hint && v.some(row => String(row.id) === hint)) setOrg(hint);
-    }).catch(e => { if (live) setError(message(e)); });
-    return () => { live = false; };
-  }, [suggestedOrg]);
-  return <section className="space-y-4 p-6"><h1 className="text-xl font-semibold">План закупок</h1>
-    <p>Создание и изменение плана доступны главному бухгалтеру выбранного юрлица с доступом к закупкам.</p>
+
+export function ProcurementRequestPlan(props: { suggestedOrg?: string }) {
+  return <InstanceOrganizationGate>{org => <section className="space-y-4 p-6"><h1 className="text-xl font-semibold">План закупок</h1>
+    <p>Создание и изменение плана доступны главному бухгалтеру юрлица установки с доступом к закупкам.</p>
     <p>Свяжите заявку с существующим заказом своего юрлица или создайте заказ из согласованной заявки в разделе заказов поставщикам.</p>
-    <Link href="/erp/procurement/ownership" className="text-accent underline">Указать юрлицо старых документов и проверить связи</Link>
-    {error && <p role="alert">{error}</p>}
-    <Select aria-label="Юрлицо плана закупок" value={org} onChange={e => setOrg(e.target.value)}><option value="">Выберите юрлицо</option>{organizations.map(o => <option key={o.id} value={o.id}>{o.name} · {o.unp}</option>)}</Select>
-    {org && <CompanyPlan key={org} org={Number(org)} />}
-  </section>;
+    <Link href="/erp/procurement/ownership" className="text-accent underline">Проверить принадлежность старых документов и связи</Link>
+    {props.suggestedOrg && props.suggestedOrg !== String(org.id) ? <p role="alert">Юрлицо ссылки не совпадает с настройкой установки.</p> : <CompanyPlan key={org.id} org={org.id} />}
+  </section>}</InstanceOrganizationGate>;
 }
 
 function CompanyPlan({ org }: { org: number }) {

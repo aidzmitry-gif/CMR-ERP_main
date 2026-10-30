@@ -1,31 +1,42 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { createCyclePlan, type CyclePlan, fetchCyclePlans, runCyclePlan } from "@/lib/wms-cycle-count";
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+
+import { createCyclePlan,type CyclePlan,fetchCyclePlans,runCyclePlan } from "@/lib/wms-cycle-count";
 import { type InventoryOrganization } from "@/lib/wms-inventory";
 import { dueState } from "@/lib/wms-warehouse";
-import { emptySourceDraft, InventoryOrganizationSelect, InventorySourceFields, sourcePayload, sourceReady, useInventoryRequestScope } from "./wms-inventory-source";
+import { useRouter } from "next/navigation";
+import { useEffect,useState } from "react";
+import { emptySourceDraft,InventorySourceFields,sourcePayload,sourceReady,useInventoryRequestScope } from "./wms-inventory-source";
 
 interface Props { initial: CyclePlan[]; today: string; organizations: InventoryOrganization[]; initialOrganizationId: number | null }
-export function WmsCycleCounts(props: Props) {
+ function WmsCycleCountsWorkspace(props: Props) {
   return <CycleCountsBody key={JSON.stringify([props.initialOrganizationId, props.initial])} {...props} />;
 }
 
-function CycleCountsBody({ initial, today, organizations, initialOrganizationId }: Props) {
+function CycleCountsBody({ initial, today, initialOrganizationId }: Props) {
   const router = useRouter();
   const request = useInventoryRequestScope();
-  const [organizationId, setOrganizationId] = useState(initialOrganizationId);
-  const [plans, setPlans] = useState<CyclePlan[] | null>(initialOrganizationId === null ? null : initial);
+  const organizationId = useInstanceOrganization().id;
+  const [plans, setPlans] = useState<CyclePlan[] | null>(initialOrganizationId === organizationId ? initial.filter(row => row.organization_id === organizationId) : null);
   const [form, setForm] = useState({ warehouse: "", zone: "", cadence: "30" });
   const [source, setSource] = useState(emptySourceDraft);
   const [runTarget, setRunTarget] = useState<CyclePlan | null>(null);
   const [runSource, setRunSource] = useState(emptySourceDraft);
   const cadence = Number(form.cadence);
   const validForm = organizationId !== null && form.warehouse.trim() && Number.isSafeInteger(cadence) && cadence > 0 && sourceReady(source);
+  const { setError: setReadError } = request;
+  useEffect(() => {
+    if (initialOrganizationId === organizationId) return;
+    let active = true;
+    void fetchCyclePlans(organizationId).then(rows => { if (active) setPlans(rows); })
+      .catch(error => { if (active) setReadError(error instanceof Error ? error.message : "Не удалось загрузить документы."); });
+    return () => { active = false; };
+  }, [organizationId, initialOrganizationId, setReadError]);
+
   async function changeOrganization(id: number | null) {
     const ticket = request.begin();
-    setOrganizationId(id); setPlans(null); setSource(emptySourceDraft()); setRunTarget(null); setRunSource(emptySourceDraft());
+     setPlans(null); setSource(emptySourceDraft()); setRunTarget(null); setRunSource(emptySourceDraft());
     try { if (id !== null) { const rows = await fetchCyclePlans(id); if (request.current(ticket)) setPlans(rows); } }
     catch (error) { request.fail(ticket, error); }
     finally { request.finish(ticket); }
@@ -53,7 +64,7 @@ function CycleCountsBody({ initial, today, organizations, initialOrganizationId 
   function chooseRun(plan: CyclePlan) { setRunTarget(plan); setRunSource(emptySourceDraft()); request.setError(""); }
   return <div className="min-w-0 flex-1 overflow-auto p-6">
     <p className="mb-4 text-sm text-muted">Планы пересчёта физического журнала. Каждый запуск требует нового подтверждения полноты и основания.</p>
-    <InventoryOrganizationSelect organizations={organizations} value={organizationId} onChange={changeOrganization} />
+    <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
     <div className="mt-4 flex flex-wrap gap-3">
       <label className="text-sm">Склад <input aria-label="Склад" value={form.warehouse} onChange={(e) => { setForm({ ...form, warehouse: e.target.value }); setSource({ ...source, confirmed: false }); }} className="rounded-lg border border-line px-2 py-1" /></label>
       <label className="text-sm">Зона (справочно) <input aria-label="Зона" value={form.zone} onChange={(e) => setForm({ ...form, zone: e.target.value })} className="rounded-lg border border-line px-2 py-1" /></label>
@@ -84,3 +95,5 @@ function CycleCountsBody({ initial, today, organizations, initialOrganizationId 
         </tbody></table></div>}
   </div>;
 }
+
+export const WmsCycleCounts = withInstanceOrganization(WmsCycleCountsWorkspace);

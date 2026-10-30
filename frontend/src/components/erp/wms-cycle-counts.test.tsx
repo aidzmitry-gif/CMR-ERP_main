@@ -1,7 +1,12 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { configureCompany,render,resetCompany,waitForCompany } from "@/test/installation-company";
+import { deferred,detail,jsonResponse,organizations,plan } from "@/test/inventory-fixtures";
+import { act,fireEvent,screen,waitFor,within } from "@testing-library/react";
+import { afterEach,beforeEach,beforeEach as configureBeforeEach,expect,it,vi } from "vitest";
 import { WmsCycleCounts } from "./wms-cycle-counts";
-import { deferred, detail, jsonResponse, organizations, plan } from "@/test/inventory-fixtures";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
 const { push } = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
@@ -17,6 +22,7 @@ function confirm(scope: ReturnType<typeof within> = screen) {
 it("создание плана требует org/склад/корректный период/подтверждение", async () => {
   const fetcher = vi.fn().mockResolvedValue(jsonResponse(plan({ id: 4, warehouse: "Новый" }))); vi.stubGlobal("fetch", fetcher);
   render(<WmsCycleCounts {...props} />);
+  await waitForCompany();
   expect(screen.getByRole("button", { name: "Создать план" })).toBeDisabled();
   expect(screen.getByRole("checkbox")).not.toBeChecked();
   fireEvent.change(screen.getByLabelText("Склад"), { target: { value: "Новый" } }); confirm();
@@ -32,6 +38,7 @@ it("создание плана требует org/склад/корректны
 it("run требует новое незаполненное подтверждение и передаёт его без org из клиента", async () => {
   const fetcher = vi.fn().mockResolvedValue(jsonResponse(detail())); vi.stubGlobal("fetch", fetcher);
   render(<WmsCycleCounts {...props} />);
+  await waitForCompany();
   expect(screen.getByText("Просрочено")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Запустить" }));
   const scope = within(screen.getByRole("region", { name: "Подтверждение запуска" }));
@@ -44,8 +51,9 @@ it("run требует новое незаполненное подтвержд�
   expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ expected_source: "wms_physical", source_evidence: "Полнота проверена", journal_complete: true });
 });
 
-it("отмена и повторный выбор run не переиспользуют подтверждение", () => {
+it("отмена и повторный выбор run не переиспользуют подтверждение", async () => {
   render(<WmsCycleCounts {...props} />);
+  await waitForCompany();
   fireEvent.click(screen.getByRole("button", { name: "Запустить" }));
   const scope = within(screen.getByRole("region", { name: "Подтверждение запуска" })); confirm(scope);
   fireEvent.click(scope.getByRole("button", { name: "Отмена" }));
@@ -57,7 +65,8 @@ it("отмена и повторный выбор run не переисполь�
 
 it("409 run не превращается в обновление пустого списка или переход", async () => {
   const fetcher = vi.fn().mockResolvedValue(jsonResponse({ detail: "Журнал изменился" }, 409)); vi.stubGlobal("fetch", fetcher);
-  render(<WmsCycleCounts {...props} />); fireEvent.click(screen.getByRole("button", { name: "Запустить" }));
+  render(<WmsCycleCounts {...props} />);
+  await waitForCompany(); fireEvent.click(screen.getByRole("button", { name: "Запустить" }));
   const scope = within(screen.getByRole("region", { name: "Подтверждение запуска" })); confirm(scope);
   fireEvent.click(scope.getByRole("button", { name: "Подтвердить и запустить" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Журнал изменился");
@@ -69,9 +78,11 @@ it("409 run не превращается в обновление пустого
 
 it("смена страницы игнорирует поздний run прежнего плана", async () => {
   const old = deferred<Response>(); vi.stubGlobal("fetch", vi.fn(() => old.promise));
-  const view = render(<WmsCycleCounts {...props} />); fireEvent.click(screen.getByRole("button", { name: "Запустить" }));
+  const view = render(<WmsCycleCounts {...props} />);
+  await waitForCompany(); fireEvent.click(screen.getByRole("button", { name: "Запустить" }));
   const scope = within(screen.getByRole("region", { name: "Подтверждение запуска" })); confirm(scope);
   fireEvent.click(scope.getByRole("button", { name: "Подтвердить и запустить" }));
+  await configureCompany(2);
   view.rerender(<WmsCycleCounts {...props} initial={[plan({ id: 9, organization_id: 2, warehouse: "Другой" })]} initialOrganizationId={2} />);
   await act(async () => old.resolve(jsonResponse(detail())));
   expect(screen.getByText("Другой")).toBeInTheDocument(); expect(push).not.toHaveBeenCalled();
@@ -81,10 +92,13 @@ it("смена org игнорирует поздний сбой списка п�
   const old = deferred<Response>();
   vi.stubGlobal("fetch", vi.fn((url: string) => url.endsWith("=1") ? old.promise : Promise.resolve(jsonResponse([plan({ id: 9, organization_id: 2, warehouse: "Компания Б склад" })]))));
   render(<WmsCycleCounts {...props} initial={[]} initialOrganizationId={null} />);
-  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "1" } });
-  fireEvent.change(screen.getByLabelText("Юрлицо"), { target: { value: "2" } });
+  await waitForCompany();
+  await configureCompany("1");
+  await configureCompany("2");
   await screen.findByText("Компания Б склад");
   await act(async () => old.reject(new Error("Old connection failed")));
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(screen.getByText("Компания Б склад")).toBeInTheDocument();
 });
+
+configureBeforeEach(() => resetCompany(1));

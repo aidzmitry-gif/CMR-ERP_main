@@ -1,12 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+
+import { fetchRegisterOrganizations,type RegisterOrganization } from "@/lib/document-register-api";
+import {
+allocationError,clearPending,exact,
+InvoiceError,
+invoiceItems,
+issueInvoice,loadPending,prepareCommand,previewInvoice,savePending,units,
+type Allocation,type InvoiceInput,type InvoiceItem,type InvoicePreview,type InvoiceResult,type PendingInvoice
+} from "@/lib/invoice-issuance-api";
+import { useUnsavedDocumentGuard } from "@/lib/use-unsaved-document-guard";
+import { useEffect,useRef,useState } from "react";
 import { createRoot } from "react-dom/client";
 import { InvoiceDealPreparation } from "./invoice-deal-preparation";
-import { fetchRegisterOrganizations, type RegisterOrganization } from "@/lib/document-register-api";
-import { useUnsavedDocumentGuard } from "@/lib/use-unsaved-document-guard";
-import { allocationError, clearPending, exact, invoiceItems, InvoiceError, issueInvoice, loadPending, prepareCommand, previewInvoice, savePending, units,
-  type Allocation, type InvoiceInput, type InvoiceItem, type InvoicePreview, type InvoiceResult, type PendingInvoice } from "@/lib/invoice-issuance-api";
 
 const field = "block w-full rounded border border-line bg-surface p-2 text-ink";
 const requisiteLabels: Record<string, string> = {
@@ -25,14 +32,14 @@ function requisiteText(value: unknown): string {
 }
 type Props = { dealId: string; documentId?: number; initialMode?: "stock" | "on_order"; onClose: (result: InvoiceResult | null) => void };
 
-export function InvoiceIssuanceDialog({ dealId, documentId, initialMode = "stock", onClose }: Props) {
+ function InvoiceIssuanceDialogWorkspace({ dealId, documentId, initialMode = "stock", onClose }: Props) {
   return <InvoiceDialogForScope key={`${dealId}:${documentId ?? "new"}`} dealId={dealId} documentId={documentId} initialMode={initialMode} onClose={onClose} />;
 }
 
 function InvoiceDialogForScope({ dealId, documentId, initialMode = "stock", onClose }: Props) {
   const [organizations, setOrganizations] = useState<RegisterOrganization[]>([]);
   const [items, setItems] = useState<InvoiceItem[]>([]);
-  const [org, setOrg] = useState("");
+  const org = String(useInstanceOrganization().id);
   const [preparedOrg, setPreparedOrg] = useState("");
   const [mode, setMode] = useState<"stock" | "on_order">(initialMode);
   const [currency, setCurrency] = useState("");
@@ -54,7 +61,7 @@ function InvoiceDialogForScope({ dealId, documentId, initialMode = "stock", onCl
   const submitting = useRef(false);
   const capturedInput = useRef<InvoiceInput | null>(null);
   const root = useRef<HTMLDivElement>(null);
-  const hasUnsavedInput = loaded && !pending && !completed && (org !== "" || mode !== initialMode || currency !== ""
+  const hasUnsavedInput = loaded && !pending && !completed && (mode !== initialMode || currency !== ""
     || documentDate !== "" || validUntil !== "" || pricingEvidence !== "" || evidence !== ""
     || Object.values(pricing).some(value => value.price !== "" || value.rate !== ""));
   const confirmClose = useUnsavedDocumentGuard(hasUnsavedInput);
@@ -68,12 +75,12 @@ function InvoiceDialogForScope({ dealId, documentId, initialMode = "stock", onCl
     Promise.all([fetchRegisterOrganizations(), invoiceItems(dealId)]).then(([orgs, lines]) => {
       if (!active) return;
       const saved = loadPending(dealId);
-      if (saved && !orgs.some(o => o.id === saved.command.organization_id)) throw new InvoiceError("Нет доступа к юрлицу сохранённого запроса.", 403);
+      if (saved && (saved.command.organization_id !== Number(org) || !orgs.some(o => o.id === saved.command.organization_id))) throw new InvoiceError("Нет доступа к юрлицу сохранённого запроса.", 403);
       setOrganizations(orgs); setItems(lines); setPending(saved); setLoaded(true); setError("");
     }).catch(e => { if (active) { setLoaded(false); setError(e instanceof Error ? e.message : "Ошибка загрузки"); } });
     root.current?.focus();
     return () => { active = false; generation.current += 1; };
-  }, [dealId, attempt]);
+  }, [dealId, attempt, org]);
 
   function invalidate() {
     generation.current += 1; capturedInput.current = null; setPreview(null); setAllocations([]); setConfirmed(false); setError("");
@@ -157,9 +164,9 @@ function InvoiceDialogForScope({ dealId, documentId, initialMode = "stock", onCl
       </section>}
       {loaded && !completed && !pending && items.length === 0 && <p role="status">В сделке нет товарных строк. Выпуск счёта только на услуги пока не поддерживается.</p>}
       {loaded && !completed && !pending && items.length > 0 && <>
-        <label className="block">Юрлицо<select aria-label="Юрлицо" disabled={busy} className={field} value={org} onChange={e => { setOrg(e.target.value); setPreparedOrg(""); invalidate(); }}><option value="">Выберите юрлицо</option>{organizations.map(o => <option key={o.id} value={o.id}>{o.name} · {o.unp} · #{o.id}</option>)}</select></label>
+        <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
         {org && <InvoiceDealPreparation org={org} dealId={dealId}
-          onSelectOrg={value => { setOrg(value); setPreparedOrg(""); invalidate(); }}
+
           onReady={ready => { setPreparedOrg(ready ? org : ""); if (!ready) invalidate(); }} />}
         <fieldset disabled={busy} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <label>Режим выпуска<select aria-label="Режим выпуска" className={field} value={mode} onChange={e => { setMode(e.target.value as "stock" | "on_order"); invalidate(); }}><option value="stock">Со склада — с резервом</option><option value="on_order">Под заказ — без резерва</option></select></label>
@@ -219,3 +226,5 @@ export function openInvoiceIssuance(dealId: string, documentId?: number, initial
   });
   active = { key, promise }; return promise;
 }
+
+export const InvoiceIssuanceDialog = withInstanceOrganization(InvoiceIssuanceDialogWorkspace);

@@ -1,24 +1,25 @@
 "use client";
 
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+
 import clsx from "clsx";
-import { Plus, RefreshCw, Search, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Plus,RefreshCw,Search,X } from "lucide-react";
+import { useEffect,useMemo,useState } from "react";
 
 import { formatNumber } from "@/lib/format";
-import { organizations, type Organization } from "@/lib/procurement-machine";
 import {
-  createSupplier,
-  emptySupplier,
-  fetchSuppliers,
-  fetchSupplierScorecard,
-  filterSuppliers,
-  searchSupplierCounterparties,
-  type Supplier,
-  type SupplierCounterparty,
-  type SupplierInput,
-  type SupplierScorecard,
-  statusLabel,
-  updateSupplier,
+createSupplier,
+emptySupplier,
+fetchSuppliers,
+fetchSupplierScorecard,
+filterSuppliers,
+searchSupplierCounterparties,
+statusLabel,
+updateSupplier,
+type Supplier,
+type SupplierCounterparty,
+type SupplierInput,
+type SupplierScorecard,
 } from "@/lib/procurement-suppliers";
 
 function Kpi({ label, value }: { label: string; value: string }) {
@@ -64,7 +65,7 @@ function Field({
   );
 }
 
-export function ProcurementSuppliersTable({ initial }: { initial: Supplier[] }) {
+ function ProcurementSuppliersTableWorkspace({ initial }: { initial: Supplier[] }) {
   const [rows, setRows] = useState<Supplier[]>(initial);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
@@ -74,9 +75,9 @@ export function ProcurementSuppliersTable({ initial }: { initial: Supplier[] }) 
   const [mdmSearch, setMdmSearch] = useState("");
   const [mdmOptions, setMdmOptions] = useState<SupplierCounterparty[]>([]);
   const [mdmError, setMdmError] = useState("");
-  const [companies, setCompanies] = useState<Organization[]>([]);
-  const [companyError, setCompanyError] = useState("");
-  const [orgId, setOrgId] = useState("");
+
+  const [companyError] = useState("");
+  const orgId = String(useInstanceOrganization().id);
   const [scoreSupplierId, setScoreSupplierId] = useState<number | null>(null);
   const [scorecard, setScorecard] = useState<SupplierScorecard | null>(null);
   const [scoreError, setScoreError] = useState("");
@@ -100,12 +101,7 @@ export function ProcurementSuppliersTable({ initial }: { initial: Supplier[] }) 
     });
   }, []);
 
-  useEffect(() => {
-    let live = true;
-    void organizations().then(items => { if (live) setCompanies(items); })
-      .catch(() => { if (live) setCompanyError("Не удалось загрузить доступные юрлица"); });
-    return () => { live = false; };
-  }, []);
+
 
   useEffect(() => {
     if (!orgId || scoreSupplierId === null) return;
@@ -191,14 +187,7 @@ export function ProcurementSuppliersTable({ initial }: { initial: Supplier[] }) 
       </div>
 
       <div className="mt-5 flex items-center">
-        <label className="text-sm text-muted">Юрлицо для показателей поставщика
-          <select aria-label="Юрлицо для показателей поставщика" value={orgId}
-            onChange={event => { setOrgId(event.target.value); setScoreSupplierId(null); setScorecard(null); setScoreError(""); }}
-            className="ml-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink">
-            <option value="">Выберите юрлицо</option>
-            {companies.map(company => <option key={company.id} value={company.id}>{company.name} · {company.unp}</option>)}
-          </select>
-        </label>
+        <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
         <div className="relative ml-auto">
           <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
           <input
@@ -390,3 +379,5 @@ export function ProcurementSuppliersTable({ initial }: { initial: Supplier[] }) 
     </div>
   );
 }
+
+export const ProcurementSuppliersTable = withInstanceOrganization(ProcurementSuppliersTableWorkspace);

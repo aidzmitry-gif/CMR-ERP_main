@@ -1,17 +1,17 @@
 "use client";
 
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
+
 import { businessDate } from "@/lib/business-date";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect,useState } from "react";
 
-import { Input, Select } from "@/components/ui/input";
-import { confirmDiscardUnsaved } from "@/lib/use-unsaved-document-guard";
+import { Input } from "@/components/ui/input";
 
 import { ProcurementReceiptDrafts } from "./procurement-receipt-drafts";
 import { ProcurementUnlinkedPurchases } from "./procurement-unlinked-purchases";
 
-type Organization = { id: number; name: string; unp: string };
 type Account = { code: string; title: string; category: string; cash: boolean; quantity_tracking: boolean };
 type Policy = { id: number; effective_from: string };
 type Entry = { id: number; source: string; source_version: number; document_date: string; posting_date: string; operation: string; explanation: string };
@@ -21,43 +21,31 @@ async function get<T>(path: string): Promise<T> {
   if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Не удалось загрузить поступления.");
   return data as T;
 }
-export function ProcurementReceipts({ initialOrganization, initialReceipt }: { initialOrganization?: string; initialReceipt?: string } = {}) {
-  const [organizations, setOrganizations] = useState<Organization[]>([]), [org, setOrg] = useState("");
-  const [pendingDocument, setPendingDocument] = useState(false);
+ function ProcurementReceiptsWorkspace({ initialOrganization, initialReceipt }: { initialOrganization?: string; initialReceipt?: string } = {}) {
+  const org = String(useInstanceOrganization().id);
+  const [, setPendingDocument] = useState(false);
   const [date, setDate] = useState(businessDate());
   const [generation, setGeneration] = useState(0), [error, setError] = useState("");
   const [loaded, setLoaded] = useState<{ key: string; accounts: Account[]; policies: Policy[]; entries: Entry[] } | null>(null);
-  useEffect(() => {
-    let active = true;
-    void fetch("/api/procurement/receipt-organizations", { cache: "no-store" }).then(async (response) => {
-      if (!response.ok) throw new Error("Не удалось загрузить организации закупок.");
-      return await response.json() as Organization[];
-    }).then((rows) => { if (active) {
-      setOrganizations(rows);
-      if (initialOrganization !== undefined) {
-        const found = rows.find(row => String(row.id) === initialOrganization);
-        setOrg(found ? String(found.id) : "");
-        if (!found) setError("Юрлицо из ссылки недоступно. Выберите организацию с подтверждённым доступом.");
-      } else setOrg("");
-    } }).catch((e: Error) => { if (active) setError(e.message); });
-    return () => { active = false; };
-  }, [initialOrganization]);
+
+  const foreignLink = initialOrganization !== undefined && initialOrganization !== org;
   const key = `${org}/${date}/${generation}`;
   useEffect(() => {
-    if (!org) return;
+    if (!org || foreignLink) return;
     let active = true;
     const prefix = `/organizations/${org}`;
     void Promise.all([get<Account[]>(`${prefix}/accounts?on=${date}`), get<Policy[]>(`${prefix}/policies`), get<Entry[]>(`${prefix}/entries?start=${date.slice(0, 7)}-01&end=${date}`)])
       .then(([accounts, policies, entries]) => { if (active) { setLoaded({ key, accounts, policies, entries }); setError(""); } })
       .catch((e: Error) => { if (active) { setError(e.message); setLoaded(null); } });
     return () => { active = false; };
-  }, [org, date, key]);
+  }, [org, date, key, foreignLink]);
   const current = loaded?.key === key ? loaded : null;
   const policy = current?.policies.filter((p) => p.effective_from <= date).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0];
+  if (foreignLink) return <p role="alert">Юрлицо ссылки не совпадает с настройкой установки.</p>;
   return <main className="min-w-0 w-0 flex-1 space-y-4 overflow-auto p-6 lg:pr-24">
     <h1 className="text-2xl font-semibold">Накладные на поступление</h1>
     <div className="grid gap-3 rounded-xl border border-line bg-surface p-4 md:grid-cols-2">
-      <label>Юрлицо поступления<Select aria-label="Юрлицо поступления" value={org} onChange={(e) => { if (confirmDiscardUnsaved(pendingDocument)) setOrg(e.target.value); }}><option value="">Выберите организацию</option>{organizations.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.unp}</option>)}</Select></label>
+      <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
       <label>Дата отражения<Input aria-label="Дата отражения" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
     </div>
     {error && <p role="alert" className="text-red-700">{error}</p>}
@@ -72,3 +60,5 @@ export function ProcurementReceipts({ initialOrganization, initialReceipt }: { i
     </section>}
   </main>;
 }
+
+export const ProcurementReceipts = withInstanceOrganization<{ initialOrganization?: string; initialReceipt?: string }>(ProcurementReceiptsWorkspace);

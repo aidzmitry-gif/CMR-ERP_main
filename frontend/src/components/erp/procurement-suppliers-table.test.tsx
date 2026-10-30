@@ -1,5 +1,10 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { configureCompany,render,resetCompany,waitForCompany } from "@/test/installation-company";
+import { fireEvent,screen,waitFor,within } from "@testing-library/react";
+import { beforeEach,beforeEach as configureBeforeEach,describe,expect,it,vi } from "vitest";
+vi.mock("@/lib/instance-organization", async () => {
+ const fixture = await import("@/test/installation-company");
+ return { fetchInstanceOrganization: fixture.fetchTestInstanceOrganization };
+});
 
 vi.mock("@/lib/procurement-machine", () => ({ organizations: vi.fn() }));
 
@@ -18,9 +23,9 @@ vi.mock("@/lib/procurement-suppliers", async (importActual) => {
 });
 
 import { ProcurementSuppliersTable } from "@/components/erp/procurement-suppliers-table";
-import * as api from "@/lib/procurement-suppliers";
 import { organizations } from "@/lib/procurement-machine";
 import type { Supplier } from "@/lib/procurement-suppliers";
+import * as api from "@/lib/procurement-suppliers";
 
 function supplier(over: Partial<Supplier> = {}): Supplier {
   return {
@@ -102,11 +107,11 @@ beforeEach(() => {
 });
 
 describe("ProcurementSuppliersTable", () => {
-  it("не читает показатели до выбора юрлица и показывает неполноту данных", async () => {
+  it("читает показатели только при открытии поставщика в юрлице установки и показывает неполноту данных", async () => {
     render(<ProcurementSuppliersTable initial={rows} />);
+  await waitForCompany();
     expect(fetchSupplierScorecard).not.toHaveBeenCalled();
-    await screen.findByRole("option", { name: "Компания А · 123" });
-    fireEvent.change(screen.getByLabelText("Юрлицо для показателей поставщика"), { target: { value: "7" } });
+    expect(screen.queryByRole("combobox", { name: /Юрлицо/ })).not.toBeInTheDocument();
     fireEvent.click(within(screen.getByText("Shenzhen Power Co").closest("tr")!).getByRole("button", { name: "Открыть показатели" }));
     await waitFor(() => expect(fetchSupplierScorecard).toHaveBeenCalledWith(7, 1));
     const panel = await screen.findByRole("region", { name: "Показатели поставщика" });
@@ -123,12 +128,11 @@ describe("ProcurementSuppliersTable", () => {
         score: null, status: "provisional_claims_unattributed", reason: "Claims unattributed" })
       : new Promise(resolve => { resolveOther = resolve; }));
     render(<ProcurementSuppliersTable initial={rows} />);
-    await screen.findByRole("option", { name: "Компания А · 123" });
-    const select = screen.getByLabelText("Юрлицо для показателей поставщика");
-    fireEvent.change(select, { target: { value: "7" } });
+  await waitForCompany();
+    await waitForCompany();
     fireEvent.click(within(screen.getByText("Shenzhen Power Co").closest("tr")!).getByRole("button", { name: "Открыть показатели" }));
     await screen.findByText(/Заказов: 2/);
-    fireEvent.change(select, { target: { value: "8" } });
+    await configureCompany("8");
     expect(screen.queryByText(/Заказов: 2/)).toBeNull();
     expect(fetchSupplierScorecard).toHaveBeenCalledTimes(1);
     fireEvent.click(within(screen.getByText("Shenzhen Power Co").closest("tr")!).getByRole("button", { name: "Открыть показатели" }));
@@ -140,16 +144,18 @@ describe("ProcurementSuppliersTable", () => {
       score: null, status: "provisional_claims_unattributed", reason: "Claims unattributed" });
     await screen.findByText(/Заказов: 1/);
   });
-  it("считает KPI: всего / активных / заблокировано по статусам", () => {
+  it("считает KPI: всего / активных / заблокировано по статусам", async () => {
     render(<ProcurementSuppliersTable initial={rows} />);
+  await waitForCompany();
     // 3 всего, 2 active, 1 blocked — проверяем внутри плитки (label+value в одном контейнере)
     expect(screen.getByText("Поставщиков").parentElement).toHaveTextContent("3");
     expect(screen.getByText("Активных").parentElement).toHaveTextContent("2");
     expect(screen.getByText("Заблокировано").parentElement).toHaveTextContent("1");
   });
 
-  it("рендерит строки поставщиков с человекочитаемым статусом и прочерком для пустых полей", () => {
+  it("рендерит строки поставщиков с человекочитаемым статусом и прочерком для пустых полей", async () => {
     render(<ProcurementSuppliersTable initial={rows} />);
+  await waitForCompany();
     expect(screen.getByText("Shenzhen Power Co")).toBeInTheDocument();
     expect(screen.getByText("МинскМеталл")).toBeInTheDocument();
     // statusLabel (настоящий): active → «Активен», blocked → «Заблокирован»
@@ -161,13 +167,15 @@ describe("ProcurementSuppliersTable", () => {
     expect(within(badRow).getAllByText("—").length).toBeGreaterThanOrEqual(2);
   });
 
-  it("пустой список показывает призыв добавить первого поставщика", () => {
+  it("пустой список показывает призыв добавить первого поставщика", async () => {
     render(<ProcurementSuppliersTable initial={[]} />);
+  await waitForCompany();
     expect(screen.getByText("Поставщиков пока нет — добавьте первого")).toBeInTheDocument();
   });
 
-  it("поиск фильтрует строки по подстроке, а без совпадений — «Ничего не найдено»", () => {
+  it("поиск фильтрует строки по подстроке, а без совпадений — «Ничего не найдено»", async () => {
     render(<ProcurementSuppliersTable initial={rows} />);
+  await waitForCompany();
     const search = screen.getByPlaceholderText("Поиск: имя, УНП, страна");
 
     fireEvent.change(search, { target: { value: "минск" } });
@@ -182,6 +190,7 @@ describe("ProcurementSuppliersTable", () => {
 
   it("«Обновить» подтягивает свежие строки из API", async () => {
     render(<ProcurementSuppliersTable initial={rows} />);
+  await waitForCompany();
     expect(screen.queryByText("Свежий Поставщик")).not.toBeInTheDocument();
 
     fetchSuppliers.mockResolvedValueOnce([supplier({ id: 7, name: "Свежий Поставщик" })]);
@@ -191,8 +200,9 @@ describe("ProcurementSuppliersTable", () => {
     expect(screen.queryByText("Shenzhen Power Co")).not.toBeInTheDocument();
   });
 
-  it("сохранение нового поставщика без имени блокируется валидацией, API не зовётся", () => {
+  it("сохранение нового поставщика без имени блокируется валидацией, API не зовётся", async () => {
     render(<ProcurementSuppliersTable initial={rows} />);
+  await waitForCompany();
     fireEvent.click(screen.getByRole("button", { name: /Добавить/ }));
     expect(screen.getByRole("heading", { name: "Новый поставщик" })).toBeInTheDocument();
 
@@ -203,6 +213,7 @@ describe("ProcurementSuppliersTable", () => {
 
   it("создание с выбранным MDM ID шлёт createSupplier, закрывает форму и обновляет список", async () => {
     render(<ProcurementSuppliersTable initial={rows} />);
+  await waitForCompany();
     fireEvent.click(screen.getByRole("button", { name: /Добавить/ }));
     await chooseMdm("ООО Ромашка");
 
@@ -224,6 +235,7 @@ describe("ProcurementSuppliersTable", () => {
   it("сбой сохранения показывает ошибку и не закрывает форму", async () => {
     createSupplier.mockResolvedValueOnce(null); // сеть/сервер упали
     render(<ProcurementSuppliersTable initial={rows} />);
+  await waitForCompany();
     fireEvent.click(screen.getByRole("button", { name: /Добавить/ }));
     await chooseMdm("ООО Сбой");
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
@@ -235,6 +247,7 @@ describe("ProcurementSuppliersTable", () => {
 
   it("исторический профиль сопоставляется с MDM ID без свободного ввода имени", async () => {
     render(<ProcurementSuppliersTable initial={rows} />);
+  await waitForCompany();
     fireEvent.click(screen.getByText("МинскМеталл"));
 
     // drawer правки — заголовок «Поставщик» (не «Новый поставщик»), имя предзаполнено
@@ -255,3 +268,5 @@ describe("ProcurementSuppliersTable", () => {
     expect(createSupplier).not.toHaveBeenCalled(); // правка, не создание
   });
 });
+
+configureBeforeEach(() => resetCompany(7));

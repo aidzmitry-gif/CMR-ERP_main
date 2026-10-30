@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { useInstanceOrganization,withInstanceOrganization } from "@/components/instance-organization-gate";
 
-type Organization = { id: number; name: string };
+import { Button } from "@/components/ui/button";
+import { useEffect,useState } from "react";
+
 type Warehouse = { id: number; organization_id: number; name: string; title: string; wms_enabled: boolean; prohibit_negative_stock: boolean };
 
 async function responseJson(response: Response) {
@@ -33,9 +34,9 @@ function warehouseOptions(data: unknown, organization: string): { items: Warehou
   return { items, truncated: value.truncated === true };
 }
 
-export function WarehouseExecutionSettings() {
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [organization, setOrganization] = useState("");
+ function WarehouseExecutionSettingsWorkspace() {
+
+  const organization = String(useInstanceOrganization().id);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -44,17 +45,7 @@ export function WarehouseExecutionSettings() {
   const [reload, setReload] = useState(0);
   const [selected, setSelected] = useState<Warehouse | null>(null);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    void fetch("/api/accounting/organizations", { cache: "no-store", signal: controller.signal })
-      .then(responseJson).then((rows: Organization[]) => {
-        if (!Array.isArray(rows) || rows.some(row => !Number.isSafeInteger(row.id) || typeof row.name !== "string")) {
-          throw new Error("Не удалось проверить список организаций.");
-        }
-        if (!controller.signal.aborted) setOrganizations(rows);
-      }).catch(reason => { if (!controller.signal.aborted) setError(String(reason.message ?? reason)); });
-    return () => controller.abort();
-  }, []);
+
 
   useEffect(() => {
     const controller = new AbortController();
@@ -127,15 +118,7 @@ export function WarehouseExecutionSettings() {
     <h1 className="text-2xl font-semibold">Режим работы склада</h1>
     <p>Без WMS списание оформляется по документу. С WMS движение подтверждается складским процессом. Новые склады создаются с выключенным WMS.</p>
     <p className="text-sm text-muted">Изменять режим может главный бухгалтер с правом управления складом. Сначала завершите открытые резервы и складские задания. История проведённых операций сохраняется.</p>
-    <label className="block">Организация
-      <select className="ml-3 rounded border border-line p-2" value={organization} disabled={busy} onChange={event => {
-        setWarehouses([]); setSelected(null); setError(""); setNotice("");
-        setLoading(Boolean(event.target.value)); setOrganization(event.target.value);
-      }}>
-        <option value="">Выберите организацию</option>
-        {organizations.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
-      </select>
-    </label>
+    <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
     {error && <p role="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}
     {loading && <p>Загрузка режимов…</p>}
@@ -163,3 +146,5 @@ export function WarehouseExecutionSettings() {
     }}>Обновить список</Button>}
   </section>;
 }
+
+export const WarehouseExecutionSettings = withInstanceOrganization(WarehouseExecutionSettingsWorkspace);
