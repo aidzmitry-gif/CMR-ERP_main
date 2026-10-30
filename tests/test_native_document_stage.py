@@ -348,7 +348,7 @@ def test_resource_limits_reject_before_database_queries(db, monkeypatch, kind):
 def test_alembic_discovery_and_one_linear_head():
     config = Config("alembic.ini")
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == ["0200"]
+    assert script.get_heads() == ["0204"]
     assert "crm_rel_001_native_docs_01" in {revision.revision for revision in script.walk_revisions()}
     with (
         EnvironmentContext(config, script),

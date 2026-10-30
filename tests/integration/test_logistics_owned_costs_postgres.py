@@ -20,7 +20,7 @@ pytestmark = pytest.mark.integration
 async def test_native_decimal_ownership_unknowns_and_readonly_projection(issuance_pg):
     api, factory = issuance_pg
     async with factory() as session:
-        assert await session.scalar(text("SELECT version_num FROM alembic_version")) == "0200"
+        assert await session.scalar(text("SELECT version_num FROM alembic_version")) == "0204"
         assert await session.scalar(text("SELECT to_regclass('logistics.import_shipment')")) is not None
         if await session.scalar(select(User).where(User.username == "issuer")) is None:
             session.add(User(username="issuer", full_name="Synthetic native cost owner", role="director", status="active"))

@@ -116,9 +116,12 @@ def test_release_head_preserves_the_joint_revision_and_exact_frozen_parents():
     assert not duplicates, f"Duplicate migration revisions: {sorted(duplicates)}"
     assert not parents - set(definitions), f"Missing migration parents: {sorted(parents - set(definitions))}"
     assert {revision.revision for revision in scripts.walk_revisions()} == set(definitions)
-    # The additive 0200 correction follows 0199; all frozen release and
-    # historical joint parents remain exact ancestors of the single head.
-    assert scripts.get_heads() == ["0200"]
+    # Registered additions preserve the exact frozen release and joint parents.
+    assert scripts.get_heads() == ["0204"]
+    assert scripts.get_revision("0204").down_revision == "0203"
+    assert scripts.get_revision("0203").down_revision == "0202"
+    assert scripts.get_revision("0202").down_revision == "0201"
+    assert scripts.get_revision("0201").down_revision == "0200"
     assert scripts.get_revision("0200").down_revision == "0199"
     assert scripts.get_revision("0199").down_revision == "0198"
     assert scripts.get_revision("0198").down_revision == "0194"
