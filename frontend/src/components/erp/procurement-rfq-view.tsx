@@ -267,11 +267,15 @@ const STATUS_TONE: Record<string, string> = {
   }
 
   return (
-    <div className="flex-1 overflow-auto p-6">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-muted">
-          Тендер выбранного юрлица: заявка → запрос цен → предложения поставщиков → победитель.
-        </p>
+    <div className="min-w-0 flex-1 overflow-auto px-4 py-5 [color-scheme:light] sm:p-6 dark:[color-scheme:dark] [&_button]:min-h-10 [&_button:focus-visible]:outline [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-offset-2 [&_button:focus-visible]:outline-accent [&_input]:min-h-10 [&_input:focus-visible]:ring-2 [&_input:focus-visible]:ring-accent [&_select]:min-h-10 [&_select:focus-visible]:ring-2 [&_select:focus-visible]:ring-accent">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 flex-1 basis-64">
+          <p className="mb-1 text-[11px] font-bold uppercase tracking-widest text-accent">Закупки · RFQ</p>
+          <h1 className="text-2xl font-bold tracking-tight text-ink">Запросы цен</h1>
+          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted">
+            Сравнивайте цены и сроки поставщиков, чтобы выбрать предложение по заявке.
+          </p>
+        </div>
         <button
           onClick={() => void refresh(selId ?? undefined)}
           disabled={busy || !org}
@@ -281,24 +285,28 @@ const STATUS_TONE: Record<string, string> = {
         </button>
       </div>
 
-      <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
+      <p className="mt-3 text-xs text-muted">Юрлицо задано в настройках.</p>
 
       {error && <div className="mt-3 text-sm text-red-600">{error}</div>}
 
       {!org && <p className="mt-5 text-sm text-muted">Выберите юрлицо, чтобы открыть его запросы цен.</p>}
       {org && <>
-      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[320px_1fr]">
+      <div className="mt-5 grid min-w-0 grid-cols-1 items-start gap-5 lg:grid-cols-[300px_minmax(0,1fr)]">
         {/* Список RFQ */}
-        <div>
+        <div className="min-w-0 space-y-4">
+          <div className="rounded-2xl border border-line bg-surface p-4">
+          <h2 className="mb-3 text-sm font-semibold text-ink">Новый запрос цен</h2>
+          <label htmlFor="rfq-request-search" className="mb-1.5 block text-xs font-medium text-muted">Поиск заявки</label>
           <div className="mb-2 flex gap-2">
-            <input aria-label="Поиск заявки" value={requestSearch} onChange={(event) => setRequestSearch(event.target.value)}
+            <input id="rfq-request-search" aria-label="Поиск заявки" value={requestSearch} onChange={(event) => setRequestSearch(event.target.value)}
               disabled={busy || uncertainCreate || journalBlocked} placeholder="Найти заявку"
               className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink" />
             <button type="button" onClick={() => void searchOptions("request")}
               disabled={busy || uncertainCreate || journalBlocked} className="rounded-lg border border-line px-2 text-sm">Найти</button>
           </div>
-          <div className="mb-2 flex gap-2">
-            <select aria-label="Заявка на закупку" value={requestId} disabled={busy || uncertainCreate || uncertainBid || journalBlocked}
+          <label htmlFor="rfq-request" className="mb-1.5 mt-3 block text-xs font-medium text-muted">Заявка на закупку</label>
+          <div className="flex flex-col gap-3">
+            <select id="rfq-request" aria-label="Заявка на закупку" value={requestId} disabled={busy || uncertainCreate || uncertainBid || journalBlocked}
               onChange={(e) => setRequestId(e.target.value)}
               className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink">
               <option value="">Заявка на закупку</option>
@@ -310,12 +318,14 @@ const STATUS_TONE: Record<string, string> = {
               onClick={onCreate}
               disabled={busy || !requestId || uncertainBid || journalBlocked}
               aria-label="Создать RFQ"
-              className="inline-flex items-center gap-1 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60"
             >
-              <Plus size={15} />
+              <Plus size={15} aria-hidden /> Создать RFQ
             </button>
           </div>
-          <div className="overflow-hidden rounded-xl border border-line bg-surface">
+          </div>
+          <div className="overflow-hidden rounded-2xl border border-line bg-surface">
+            <h2 className="border-b border-line px-4 py-3 text-sm font-semibold text-ink">Запросы цен</h2>
             {rfqs.length === 0 && <div className="px-4 py-6 text-center text-sm text-muted">Запросов нет</div>}
             {rfqs.map((r) => (
               <button
@@ -324,12 +334,13 @@ const STATUS_TONE: Record<string, string> = {
                   setSelId(r.id); setHistory([]); setHistoryError(""); setHistoryLoaded(false);
                 }}
                 disabled={busy || uncertainBid}
+                aria-pressed={selId === r.id}
                 className={clsx(
-                  "flex w-full items-center justify-between border-b border-line px-4 py-2.5 text-left last:border-0 hover:bg-sunken/50",
-                  selId === r.id && "bg-sunken/60",
+                  "flex w-full items-start justify-between gap-3 border-b border-line px-4 py-3 text-left last:border-0 hover:bg-sunken/50",
+                  selId === r.id && "bg-accent/5 shadow-[inset_3px_0_0_rgb(var(--accent))]",
                 )}
               >
-                <span className="truncate text-sm text-ink">{r.number} · {r.item}</span>
+                <span className="min-w-0 break-words text-sm text-ink"><span className="font-semibold">{r.number}</span><span className="mt-1 block text-xs leading-relaxed text-muted">{r.item}</span></span>
                 <span className="ml-2 shrink-0 text-[11px] text-faint">{r.bids.length} пред.</span>
               </button>
             ))}
@@ -343,15 +354,16 @@ const STATUS_TONE: Record<string, string> = {
         </div>
 
         {/* Карточка RFQ с предложениями */}
-        <div>
+        <div className="min-w-0">
           {!selected ? (
             <div className="rounded-xl border border-line bg-surface px-4 py-10 text-center text-muted">
               Выберите запрос слева
             </div>
           ) : (
-            <div className="rounded-xl border border-line bg-surface">
-              <div className="flex items-center justify-between border-b border-line px-4 py-3">
-                <div>
+            <div className="min-w-0 overflow-hidden rounded-2xl border border-line bg-surface">
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-4 py-4 sm:px-5">
+                <div className="min-w-0 flex-1 basis-48">
+                  <p className="mb-1 text-xs font-medium text-muted">Сравнение предложений</p>
                   <div className="font-semibold text-ink">{selected.number} · {selected.item}</div>
                   <div className="text-[11px] text-faint">
                     {selected.sku_code && `${selected.sku_code} · `}
@@ -368,14 +380,16 @@ const STATUS_TONE: Record<string, string> = {
                 </span>
               </div>
 
-              <table className="w-full text-sm">
+              <p className="px-4 pt-3 text-xs leading-relaxed text-muted sm:px-5">Цена, срок и условия — в одной таблице. На узком экране прокрутите её вправо.</p>
+              <div role="region" aria-label="Сравнение предложений" tabIndex={0} className="mt-3 overflow-x-auto overscroll-x-contain focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+              <table className="w-full min-w-[660px] text-sm">
                 <thead>
                   <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
                     <th className="px-4 py-2 font-medium">Поставщик</th>
                     <th className="px-4 py-2 text-right font-medium">Цена, BYN</th>
                     <th className="px-4 py-2 text-right font-medium">Срок, дн</th>
                     <th className="px-4 py-2 font-medium">Incoterms</th>
-                    <th className="px-4 py-2"></th>
+                    <th className="px-4 py-2 font-medium">Действие</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -427,6 +441,7 @@ const STATUS_TONE: Record<string, string> = {
                   })}
                 </tbody>
               </table>
+              </div>
 
               {selected.status === "awarded" && (
                 <div className="border-t border-line p-4 text-sm text-muted">
@@ -436,58 +451,68 @@ const STATUS_TONE: Record<string, string> = {
               )}
 
               {selected.status === "open" && (
-                <div className="border-t border-line p-4">
-                  <div className="mb-2 flex gap-2"><input aria-label="Поиск поставщика" value={supplierSearch}
+                <div className="border-t border-line p-4 sm:p-5">
+                  <h2 className="mb-4 text-sm font-semibold text-ink">Новое предложение</h2>
+                  <label htmlFor="rfq-supplier-search" className="mb-1.5 block text-xs font-medium text-muted">Поиск поставщика</label>
+                  <div className="mb-4 flex flex-wrap gap-2"><input id="rfq-supplier-search" aria-label="Поиск поставщика" value={supplierSearch}
                     onChange={(event) => setSupplierSearch(event.target.value)}
                     disabled={busy || uncertainBid || journalBlocked} placeholder="Найти поставщика"
-                    className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink" />
+                    className="min-w-0 flex-1 basis-40 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink" />
                     <button type="button" onClick={() => void searchOptions("supplier")}
                       disabled={busy || uncertainBid || journalBlocked}
                       className="rounded-lg border border-line px-2 text-sm">Найти поставщика</button></div>
-                  <div className="flex flex-wrap items-end gap-2">
+                  <div className="grid min-w-0 grid-cols-1 items-end gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <label className="min-w-0 sm:col-span-2 xl:col-span-4"><span className="mb-1.5 block text-xs font-medium text-muted">Поставщик предложения</span>
                   <select aria-label="Поставщик предложения" value={bid.supplier_id}
                     disabled={busy || uncertainBid}
                     onChange={(e) => setBid({ ...bid, supplier_id: e.target.value })}
-                    className="w-48 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink">
+                    className="w-full min-w-0 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink">
                     <option value="">Поставщик из справочника</option>
                     {bid.supplier_id && !suppliers.some((row) => String(row.id) === bid.supplier_id) &&
                       <option value={bid.supplier_id}>Поставщик #{bid.supplier_id} · незавершённая отправка</option>}
                     {suppliers.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.unp}</option>)}
                   </select>
+                  </label>
+                  <label className="min-w-0"><span className="mb-1.5 block text-xs font-medium text-muted">Цена, BYN</span>
                   <input
                     value={bid.price_byn}
                     onChange={(e) => setBid({ ...bid, price_byn: e.target.value })}
                     placeholder="Цена, BYN"
                     inputMode="decimal"
                     disabled={busy || uncertainBid}
-                    className="w-32 rounded-lg border border-line bg-surface px-3 py-2 text-right text-sm tabular-nums text-ink outline-none focus:border-accent"
+                    className="w-full min-w-0 rounded-lg border border-line bg-surface px-3 py-2 text-right text-sm tabular-nums text-ink outline-none focus:border-accent"
                   />
+                  </label>
+                  <label className="min-w-0"><span className="mb-1.5 block text-xs font-medium text-muted">Срок, дн</span>
                   <input
                     value={bid.lead_time_days}
                     onChange={(e) => setBid({ ...bid, lead_time_days: e.target.value })}
                     placeholder="Срок, дн"
                     type="number"
                     disabled={busy || uncertainBid}
-                    className="w-24 rounded-lg border border-line bg-surface px-3 py-2 text-right text-sm tabular-nums text-ink outline-none focus:border-accent"
+                    className="w-full min-w-0 rounded-lg border border-line bg-surface px-3 py-2 text-right text-sm tabular-nums text-ink outline-none focus:border-accent"
                   />
+                  </label>
+                  <label className="min-w-0"><span className="mb-1.5 block text-xs font-medium text-muted">Incoterms</span>
                   <input
                     value={bid.incoterms}
                     onChange={(e) => setBid({ ...bid, incoterms: e.target.value })}
                     placeholder="Incoterms"
                     disabled={busy || uncertainBid}
-                    className="w-28 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
+                    className="w-full min-w-0 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
                   />
+                  </label>
                   <button
                     onClick={onAddBid}
                     disabled={busy || !bid.supplier_id || !bid.price_byn || uncertainCreate || journalBlocked}
-                    className="inline-flex items-center gap-1 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"
+                    className="inline-flex items-center justify-center gap-1 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60"
                   >
                     <Plus size={15} /> Предложение
                   </button>
                   </div>
                 </div>
               )}
-              <div className="border-t border-line p-4 text-sm">
+              <div className="border-t border-line bg-sunken/30 p-4 text-sm sm:p-5">
                 <h3 className="font-semibold text-ink">История RFQ</h3>
                 {historyError && <p className="mt-2 text-red-600">История недоступна: {historyError}</p>}
                 {!historyError && history.length === 0 && <p className="mt-2 text-muted">{historyLoaded ? "Записей истории нет" : "История загружается"}</p>}

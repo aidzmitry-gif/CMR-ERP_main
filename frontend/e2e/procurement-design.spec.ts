@@ -52,6 +52,59 @@ test("procurement keeps navigation on the left and renders the approved board de
   await page.screenshot({ path: testInfo.outputPath("procurement-mobile-board.png"), fullPage: true });
   await testInfo.attach("procurement-mobile-board", { path: testInfo.outputPath("procurement-mobile-board.png"), contentType: "image/png" });
 
+  // RFQ presentation uses explicit synthetic GET fixtures; no create/bid/award commands.
+  const rfqUrl = `**/api/procurement/organizations/${organization.id}/rfq?*`;
+  const supplierUrl = `**/api/procurement/organizations/${organization.id}/supplier-options`;
+  const historyUrl = `**/api/procurement/organizations/${organization.id}/rfq/265/history`;
+  await page.route(rfqUrl, route => route.fulfill({ json: { organization_id: organization.id, next_after_id: null, items: [{
+    id: 265, number: "RFQ-ДИЗАЙН-265", organization_id: organization.id, request_key: "00000000-0000-4000-8000-000000000265",
+    item: "Аккумуляторы для учебной партии", sku_code: "SKU-219", qty: 24, request_id: null, status: "open", due_date: null, best_bid_id: 1,
+    bids: [
+      { id: 1, rfq_id: 265, supplier_id: 1, price_byn: 1850.25, lead_time_days: 7, incoterms: "DAP Минск", note: "", is_winner: false },
+      { id: 2, rfq_id: 265, supplier_id: 2, price_byn: 1920, lead_time_days: null, incoterms: "", note: "", is_winner: false },
+    ],
+  }] } }));
+  await page.route(supplierUrl, route => route.fulfill({ json: { organization_id: organization.id, items: [
+    { id: 1, name: "Учебный поставщик Север", unp: "000000001" }, { id: 2, name: "Учебный поставщик Восток", unp: "000000002" },
+  ] } }));
+  await page.route(historyUrl, route => route.fulfill({ json: { organization_id: organization.id, rfq_id: 265, items: [] } }));
+  await page.goto("/erp/procurement/rfq");
+  await expect(page.getByRole("cell", { name: "Учебный поставщик Север", exact: true })).toBeVisible();
+  await page.getByPlaceholder("Цена, BYN", { exact: true }).fill("1800.25");
+  for (const view of [
+    { name: "rfq-desktop", width: 1440, height: 1000, dark: false },
+    { name: "rfq-mobile", width: 390, height: 844, dark: false },
+    { name: "rfq-dark", width: 1440, height: 1000, dark: true },
+  ]) {
+    await page.setViewportSize({ width: view.width, height: view.height });
+    if (view.dark) await page.getByRole("button", { name: "Включить тёмную тему", exact: true }).click();
+    await page.getByRole("region", { name: "Сравнение предложений", exact: true }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`${view.name}.png`), fullPage: true });
+    await testInfo.attach(view.name, { path: testInfo.outputPath(`${view.name}.png`), contentType: "image/png" });
+    await testInfo.attach(`${view.name}-geometry`, { body: JSON.stringify(await page.evaluate(() => ({ viewport: innerWidth, documentWidth: document.documentElement.scrollWidth, tableWidth: document.querySelector("table")?.getBoundingClientRect().width }))), contentType: "application/json" });
+    console.log("RFQ_GEOMETRY", view.name, JSON.stringify(await page.evaluate(() => ({ viewport: innerWidth, documentWidth: document.documentElement.scrollWidth, scrollX, overflowing: [...document.querySelectorAll("body *")].filter(el => el.getBoundingClientRect().right > innerWidth + 1).slice(0, 16).map(el => ({ tag: el.tagName, role: el.getAttribute("role"), width: el.getBoundingClientRect().width, right: el.getBoundingClientRect().right, overflow: getComputedStyle(el).overflowX })) }))));
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await expect(page.getByRole("columnheader")).toHaveCount(5);
+    await expect(page.getByRole("textbox", { name: "Цена, BYN", exact: true })).toHaveValue("1800.25");
+    await expect(page.locator("label").filter({ has: page.getByRole("textbox", { name: "Цена, BYN", exact: true }) }).locator("span")).toBeVisible();
+    if (view.width === 390) {
+      const comparison = page.getByRole("region", { name: "Сравнение предложений", exact: true });
+      await expect(comparison).toHaveCount(1);
+      {
+        await comparison.focus();
+        await expect(comparison).toBeFocused();
+        await page.keyboard.press("ArrowRight");
+        await expect.poll(() => comparison.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+      }
+      await page.screenshot({ path: testInfo.outputPath("rfq-mobile-table.png"), fullPage: true });
+      await testInfo.attach("rfq-mobile-table", { path: testInfo.outputPath("rfq-mobile-table.png"), contentType: "image/png" });
+    }
+  }
+  await page.unroute(rfqUrl);
+  await page.unroute(supplierUrl);
+  await page.unroute(historyUrl);
+  await page.getByRole("button", { name: "Включить светлую тему", exact: true }).click();
+
   // Inspect the existing calculator within the same synthetic procurement workflow.
   await page.goto("/erp/procurement/cost-calc");
   await expect(page.getByRole("heading", { name: "Предварительная себестоимость (Китай) → цена реализации", exact: true })).toBeVisible();
