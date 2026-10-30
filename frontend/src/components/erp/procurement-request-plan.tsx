@@ -72,10 +72,14 @@ function persist(org: number, principal: string, expected: string | null, value:
 
 
 export function ProcurementRequestPlan(props: { suggestedOrg?: string }) {
-  return <InstanceOrganizationGate>{org => <section className="space-y-4 p-6"><h1 className="text-xl font-semibold">План закупок</h1>
-    <p>Создание и изменение плана доступны главному бухгалтеру юрлица установки с доступом к закупкам.</p>
-    <p>Свяжите заявку с существующим заказом своего юрлица или создайте заказ из согласованной заявки в разделе заказов поставщикам.</p>
-    <Link href="/erp/procurement/ownership" className="text-accent underline">Проверить принадлежность старых документов и связи</Link>
+  return <InstanceOrganizationGate>{org => <section className="mx-auto w-full max-w-7xl min-w-0 space-y-5 p-4 text-ink [&_button]:max-w-full [&_button]:whitespace-normal [&_button]:leading-relaxed [color-scheme:light] dark:[color-scheme:dark] sm:p-6">
+    <header className="space-y-2">
+    <p className="text-xs font-semibold uppercase tracking-widest text-muted">Закупки · планирование</p>
+    <h1 className="text-2xl font-semibold tracking-tight">План закупок</h1>
+    <p className="max-w-3xl text-sm leading-relaxed text-muted">Создание и изменение плана доступны главному бухгалтеру юрлица установки с доступом к закупкам.</p>
+    <p className="max-w-3xl text-sm leading-relaxed text-muted">Свяжите заявку с существующим заказом своего юрлица или создайте заказ из согласованной заявки в разделе заказов поставщикам.</p>
+    <Link href="/erp/procurement/ownership" className="inline-flex min-h-10 items-center rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-accent hover:bg-sunken">Проверить принадлежность старых документов и связи</Link>
+    </header>
     {props.suggestedOrg && props.suggestedOrg !== String(org.id) ? <p role="alert">Юрлицо ссылки не совпадает с настройкой установки.</p> : <CompanyPlan key={org.id} org={org.id} />}
   </section>}</InstanceOrganizationGate>;
 }
@@ -191,27 +195,29 @@ function CompanyPlan({ org }: { org: number }) {
     });
   }
   const pending = journal?.state === "pending";
-  return <div className="space-y-4">
-    {!identity && !error && <p role="status">Проверка доступа…</p>}{error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+  return <div className="min-w-0 space-y-5">
+    {!identity && !error && <p role="status">Проверка доступа…</p>}{error && <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm leading-relaxed text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">{error}</p>}{notice && <p role="status" className="rounded-xl border border-line bg-surface p-4 text-sm text-ink">{notice}</p>}
     {identity && !identity.can_manage && <p>Доступен просмотр. Для изменения нужен главный бухгалтер этого юрлица с доступом к закупкам.</p>}
-    {pending && <div className="rounded border border-amber-400 p-3"><p>Сохранён запрос создания. При неизвестном результате повторяется тот же запрос; новый ключ не создаётся.</p><p>Позиция: {(JSON.parse(journal.body) as Command).document.item}</p><Button disabled={busy || storageBlocked || !identity?.can_manage} onClick={() => create(true)}>Повторить сохранённый запрос</Button></div>}
-    <fieldset disabled={busy || !identity?.can_manage || storageBlocked || pending} className="space-y-2 rounded border border-line p-3"><legend>Новая заявка</legend>
-      {(["supplier", "item", "qty", "amount", "due_date", "evidence"] as const).map(key => <label className="block" key={key}>{({ supplier: "Поставщик", item: "Позиция", qty: "Количество", amount: "Плановая сумма (валюта не задана)", due_date: "Плановая дата", evidence: "Основание выбора юрлица" })[key]}<Input type={key === "due_date" ? "date" : "text"} value={form[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))} /></label>)}
-      <Button onClick={() => create(false)}>Создать заявку</Button>
+    {pending && <div className="space-y-3 rounded-xl border border-amber-400 bg-surface p-4 text-sm"><p>Сохранён запрос создания. При неизвестном результате повторяется тот же запрос; новый ключ не создаётся.</p><p>Позиция: {(JSON.parse(journal.body) as Command).document.item}</p><Button disabled={busy || storageBlocked || !identity?.can_manage} onClick={() => create(true)}>Повторить сохранённый запрос</Button></div>}
+    <fieldset disabled={busy || !identity?.can_manage || storageBlocked || pending} className="grid min-w-0 gap-4 rounded-2xl border border-line bg-surface p-4 shadow-sm sm:grid-cols-2 sm:p-5"><legend className="px-2 text-base font-semibold">Новая заявка</legend>
+      {(["supplier", "item", "qty", "amount", "due_date", "evidence"] as const).map(key => <label className="block min-w-0 space-y-1 text-sm font-medium" key={key}>{({ supplier: "Поставщик", item: "Позиция", qty: "Количество", amount: "Плановая сумма (валюта не задана)", due_date: "Плановая дата", evidence: "Основание выбора юрлица" })[key]}<Input type={key === "due_date" ? "date" : "text"} value={form[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))} /></label>)}
+      <Button className="min-h-10 justify-self-start sm:col-span-2" onClick={() => create(false)}>Создать заявку</Button>
     </fieldset>
-    <Button disabled={busy || !identity} variant="secondary" onClick={() => void run(refresh)}>Обновить документы</Button>
-    <h2 className="font-semibold">Заявки выбранного юрлица</h2>
-    {requests.map(row => <article key={row.id} className="space-y-2 rounded border border-line p-3"><h3>{row.number} · {row.item}</h3><p>{row.supplier} · {row.quantity} шт. · {row.planned_amount} (валюта не задана) · {row.due_date || "Дата не задана"}</p><p>Стадия: {titles[row.stage ?? ""] ?? row.stage}</p>
+    <Button className="min-h-10" disabled={busy || !identity} variant="secondary" onClick={() => void run(refresh)}>Обновить документы</Button>
+    <section aria-label="Заявки плана закупок" className="space-y-3 rounded-2xl border border-line bg-surface p-4 shadow-sm sm:p-5">
+    <h2 className="text-base font-semibold">Заявки выбранного юрлица</h2>
+    {requests.map(row => <article key={row.id} className="min-w-0 space-y-3 rounded-xl border border-line bg-canvas p-4"><h3 className="break-words font-semibold">{row.number} · {row.item}</h3><p className="break-words text-sm leading-relaxed text-muted">{row.supplier} · {row.quantity} шт. · {row.planned_amount} (валюта не задана) · {row.due_date || "Дата не задана"}</p><p className="text-sm font-medium">Стадия: {titles[row.stage ?? ""] ?? row.stage}</p>
       {row.stage === "approval" && <Link className="text-accent underline" href={`/erp/procurement/orders?org=${org}&request=${row.id}`}>Создать заказ из {row.number}</Link>}
       {stages.includes(row.stage ?? "") && row.stage !== "approval" && <Button disabled={busy || !identity?.can_manage} onClick={() => void run(token => mutate(`/requests/${row.id}/stage`, "PATCH", { expected_stage: row.stage, stage: stages[stages.indexOf(row.stage!) + 1] }, token))}>Далее: {titles[stages[stages.indexOf(row.stage!) + 1]]} · {row.number}</Button>}
     </article>)}
-    {identity && hasDocumentSnapshot && !requests.length && <p>На загруженной странице заявок нет.</p>}
+    {identity && hasDocumentSnapshot && !requests.length && <p className="rounded-xl border border-dashed border-line p-5 text-sm text-muted">На загруженной странице заявок нет.</p>}
     {requestNext !== null && <Button disabled={busy} onClick={() => more("request", requestNext)}>Ещё заявки</Button>}
-    <fieldset disabled={busy || !identity?.can_manage} className="space-y-2 rounded border border-line p-3"><legend>Связь с существующим заказом</legend>
+    </section>
+    <fieldset disabled={busy || !identity?.can_manage} className="grid min-w-0 gap-4 rounded-2xl border border-line bg-surface p-4 shadow-sm sm:grid-cols-2 sm:p-5"><legend className="px-2 text-base font-semibold">Связь с существующим заказом</legend>
       <Select aria-label="Согласованная заявка" value={selectedRequest} onChange={e => setSelectedRequest(e.target.value)}><option value="">Выберите заявку</option>{requests.filter(r => r.stage === "approval").map(r => <option key={r.id} value={r.id}>{r.number}</option>)}</Select>
       <Select aria-label="Заказ своего юрлица" value={selectedOrder} onChange={e => setSelectedOrder(e.target.value)}><option value="">Выберите заказ</option>{orders.filter(o => o.status !== "cancelled").map(o => <option key={o.id} value={o.id}>{o.number} · {o.supplier}</option>)}</Select>
-      <label className="block">Основание связи<Input value={linkEvidence} onChange={e => setLinkEvidence(e.target.value)} maxLength={1000} /></label>
-      <Button disabled={!selectedRequest || !selectedOrder || !linkEvidence.trim()} onClick={() => void run(token => mutate(`/requests/${selectedRequest}/order-link`, "POST", { expected_stage: "approval", order_id: Number(selectedOrder), evidence: linkEvidence.trim() }, token))}>Связать заявку с заказом</Button>
+      <label className="block space-y-1 text-sm font-medium sm:col-span-2">Основание связи<Input value={linkEvidence} onChange={e => setLinkEvidence(e.target.value)} maxLength={1000} /></label>
+      <Button className="min-h-10 justify-self-start sm:col-span-2" disabled={!selectedRequest || !selectedOrder || !linkEvidence.trim()} onClick={() => void run(token => mutate(`/requests/${selectedRequest}/order-link`, "POST", { expected_stage: "approval", order_id: Number(selectedOrder), evidence: linkEvidence.trim() }, token))}>Связать заявку с заказом</Button>
     </fieldset>
     {orderNext !== null && <Button disabled={busy} onClick={() => more("order", orderNext)}>Ещё заказы</Button>}
   </div>;

@@ -65,6 +65,35 @@ test("procurement keeps navigation on the left and renders the approved board de
   await expect(page.getByRole("button", { name: "Создать заявку", exact: true })).toBeEnabled();
   console.log("PLAN_SAFE_READS", JSON.stringify({ reads: planReads, manualRefreshClicks: 1, commandWrites: 0 }));
   await page.unroute(planSources);
+  await page.getByRole("button", { name: "Обновить документы", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Заявки плана закупок", exact: true })).toContainText(receipt.number);
+  for (const view of [
+    { name: "plan-desktop", width: 1440, height: 1000, dark: false },
+    { name: "plan-mobile", width: 390, height: 844, dark: false },
+    { name: "plan-dark", width: 1440, height: 1000, dark: true },
+  ]) {
+    await page.setViewportSize({ width: view.width, height: view.height });
+    if (view.width === 390) await left.getByRole("button", { name: "Свернуть меню", exact: true }).click();
+    if (view.name === "plan-dark") await left.getByRole("button", { name: "Раскрыть меню", exact: true }).click();
+    if (view.dark) await page.getByRole("button", { name: "Включить тёмную тему", exact: true }).click();
+    await page.getByRole("heading", { name: "План закупок", exact: true }).scrollIntoViewIfNeeded();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`${view.name}.png`), fullPage: true });
+    await testInfo.attach(view.name, { path: testInfo.outputPath(`${view.name}.png`), contentType: "image/png" });
+    if (view.width === 390) {
+      const list = page.getByRole("region", { name: "Заявки плана закупок", exact: true });
+      await list.scrollIntoViewIfNeeded();
+      const advance = list.getByRole("button", { name: /Далее: Поиск поставщика/ });
+      const bounds = await advance.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+      await page.screenshot({ path: testInfo.outputPath("plan-mobile-list.png"), fullPage: true });
+      await testInfo.attach("plan-mobile-list", { path: testInfo.outputPath("plan-mobile-list.png"), contentType: "image/png" });
+    }
+  }
+  await page.getByRole("button", { name: "Включить светлую тему", exact: true }).click();
+
 
   await page.goto("/erp/procurement");
   await page.setViewportSize({ width: 390, height: 844 });
