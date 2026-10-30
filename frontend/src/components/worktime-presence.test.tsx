@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { WorktimePresence } from "./worktime-presence";
 
@@ -41,6 +41,10 @@ it("shows only addressed safe in-app notices and clears them when access expires
   expect(screen.getByText("Требуется согласование")).toBeInTheDocument();
   expect(screen.queryByText("Чужая ссылка")).not.toBeInTheDocument();
   expect(screen.getByRole("link")).toHaveAttribute("href", "/erp/hr/worktime?tab=sheet&period=2026-10");
+  fireEvent.click(screen.getByRole("button", { name: "Свернуть напоминания" }));
+  expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Напоминания: 1" }));
+  expect(screen.getByRole("link")).toBeInTheDocument();
   permitted = false;
   await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
   expect(screen.queryByLabelText("Уведомления об учёте времени")).not.toBeInTheDocument();

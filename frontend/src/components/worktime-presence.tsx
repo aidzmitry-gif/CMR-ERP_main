@@ -7,6 +7,7 @@ type Notice = { id: string; title: string; href: string };
 /** Visible ERP presence is informational and cannot start or stop a workday. */
 export function WorktimePresence({ enabled }: { enabled: boolean }) {
   const [notices, setNotices] = useState<Notice[]>([]);
+  const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {
     if (!enabled) return;
     let stopped = false, pending = false;
@@ -36,8 +37,11 @@ export function WorktimePresence({ enabled }: { enabled: boolean }) {
     return () => { stopped = true; controller.abort(); clearInterval(interval); document.removeEventListener("visibilitychange", report); };
   }, [enabled]);
   if (!enabled || notices.length === 0) return null;
+  if (collapsed) return <button type="button" className="fixed bottom-4 right-4 z-40 rounded-lg border border-line bg-surface px-4 py-2 shadow-lg"
+    onClick={() => setCollapsed(false)}>Напоминания: {notices.length}</button>;
   return <aside aria-label="Уведомления об учёте времени" className="fixed bottom-4 right-4 z-40 max-h-64 w-80 max-w-[calc(100%-2rem)] space-y-2 overflow-y-auto rounded-xl border border-line bg-surface p-4 shadow-lg">
-    <div role="status">{notices.length === 1 ? "Напоминание" : `Напоминания: ${notices.length}`}</div>
+    <div className="flex items-center justify-between gap-2"><div role="status">{notices.length === 1 ? "Напоминание" : `Напоминания: ${notices.length}`}</div>
+      <button type="button" onClick={() => setCollapsed(true)} className="rounded px-2 py-1 text-sm text-muted hover:bg-sunken" aria-label="Свернуть напоминания">Свернуть</button></div>
     {notices.map(item => <div className="text-sm" key={item.id}><p>{item.title}</p><a href={item.href} className="text-accent underline">Открыть учёт времени</a></div>)}
   </aside>;
 }

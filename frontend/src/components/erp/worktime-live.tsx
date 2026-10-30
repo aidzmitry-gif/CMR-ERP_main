@@ -5,8 +5,8 @@ import { clockLabel, minutesLabel, readPending, validWorkSession, worktimeReques
   type WorkBoard, type WorkContext, type WorkDay, type WorkPending, type WorkSettings, type WorkSheet } from "@/lib/worktime";
 
 const button = "rounded-lg border border-line px-4 py-2 text-sm font-medium disabled:opacity-50";
-const field = "rounded-lg border border-line bg-surface px-3 py-2 text-ink";
-const panel = "rounded-2xl border border-line bg-surface p-5";
+const field = "min-w-0 max-w-full rounded-lg border border-line bg-surface px-3 py-2 text-ink";
+const panel = "min-w-0 rounded-2xl border border-line bg-surface p-5";
 const errorText = (e: unknown) => e instanceof Error ? e.message : "Не удалось получить данные";
 const storageKey = (id: number) => "hr.worktime.pending." + id;
 const dateTime = (v: string) => new Date(v).toLocaleString("ru-RU", { timeZone: "Europe/Minsk" });
@@ -118,8 +118,8 @@ function Settings({ today }: { today: string }) {
     finally { setBusy(false); }
   }
   return <section className={panel}><h2 className="text-lg font-semibold">Настройки договора и коды отсутствия</h2><ErrorNotice text={error} />{success && <p role="status" className="my-3 text-emerald-700">{success}</p>}
-    {!data ? !error && <p>Загрузка настроек…</p> : <div className="mt-4 grid gap-6 lg:grid-cols-2">
-      <form onSubmit={e => void submit(e, false)} className="grid content-start gap-3"><h3 className="font-medium">Норма по договору</h3><fieldset disabled={busy} className="grid gap-3">
+    {!data ? !error && <p>Загрузка настроек…</p> : <div className="mt-4 grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-2">
+      <form onSubmit={e => void submit(e, false)} className="grid min-w-0 grid-cols-1 content-start gap-3"><h3 className="font-medium">Норма по договору</h3><fieldset disabled={busy} className="grid min-w-0 grid-cols-1 gap-3">
         <label>Сотрудник <select required className={field + " block w-full"} value={employee} onChange={e => setEmployee(e.target.value)}><option value="">Выберите сотрудника</option>{data.employees.map(row => <option key={row.id} value={row.id}>{row.full_name}</option>)}</select></label>
         <label>Действует с <input required name="effective" type="date" defaultValue={today} className={field + " block"} /></label>
         <label>Норма рабочего дня, минут <input required name="minutes" type="number" min={1} max={1440} step={1} className={field + " block"} /></label>
@@ -128,7 +128,7 @@ function Settings({ today }: { today: string }) {
         <label>Руководитель <select required name="manager" className={field + " block w-full"} defaultValue=""><option value="">Выберите руководителя</option>{data.managers.filter(row => row.employee_id !== Number(employee)).map(row => <option key={row.id} value={row.id}>{row.full_name}</option>)}</select></label>
         <label>Основание по договору <input required name="reference" minLength={5} maxLength={300} className={field + " block w-full"} /></label><button className={button}>Сохранить норму</button>
       </fieldset></form>
-      <form onSubmit={e => void submit(e, true)} className="grid content-start gap-3"><h3 className="font-medium">Код отсутствия</h3><fieldset disabled={busy || !!absenceIntent} className="grid gap-3">
+      <form onSubmit={e => void submit(e, true)} className="grid min-w-0 grid-cols-1 content-start gap-3"><h3 className="font-medium">Код отсутствия</h3><fieldset disabled={busy || !!absenceIntent} className="grid min-w-0 grid-cols-1 gap-3">
         <label>Сотрудник <select required name="employee" className={field + " block w-full"} defaultValue=""><option value="">Выберите сотрудника</option>{data.employees.map(row => <option key={row.id} value={row.id}>{row.full_name}</option>)}</select></label>
         <label>Дата <input required name="date" type="date" max={today} defaultValue={today} className={field + " block"} /></label>
         <label>Код <select name="code" className={field + " block"}><option value="В">В — выходной</option><option value="О">О — отпуск</option><option value="Б">Б — больничный</option><option value="К">К — командировка</option><option value="А">А — административный отпуск</option></select></label>
@@ -147,8 +147,8 @@ export function WorktimeView({ initialTab = "day", initialPeriod }: { initialTab
     return () => { active = false; };
   }, [today]);
   const tabs = [["day", "Мой день"], ["presence", "Кто онлайн"], ["sheet", "Табель"], ...(access?.can_configure ? [["settings", "Настройки"]] : [])];
-  return <div className="space-y-4"><div><h1 className="text-2xl font-semibold">Учёт рабочего времени</h1><p className="mt-2 text-sm text-muted">Часы считаются между «Начать день» и «Завершить день». Присутствие в ERP показывается отдельно.</p></div>
-    <nav className="flex flex-wrap gap-2" aria-label="Учёт времени">{tabs.map(([key, title]) => <button key={key} className={button} aria-current={tab === key ? "page" : undefined} onClick={() => setTab(key)}>{title}</button>)}</nav>
+  return <div className="min-w-0 flex-1 space-y-4 p-4 sm:p-6"><div><h1 className="text-2xl font-semibold">Учёт рабочего времени</h1><p className="mt-2 text-sm text-muted">Часы считаются между «Начать день» и «Завершить день». Присутствие в ERP показывается отдельно.</p></div>
+    <nav className="flex flex-wrap gap-2" aria-label="Учёт времени">{tabs.map(([key, title]) => <button key={key} className={button + (tab === key ? " bg-accent text-white" : " bg-surface")} aria-current={tab === key ? "page" : undefined} onClick={() => setTab(key)}>{title}</button>)}</nav>
     {tab === "day" ? <MyDay /> : tab === "presence" ? <Presence /> : tab === "sheet" ? <Timesheet today={today} initialPeriod={initialPeriod} /> : <Settings today={today} />}
   </div>;
 }
@@ -223,7 +223,7 @@ function MyDay() {
       <p>{context.session ? context.session.ended_at ? "День завершён" : "День начат" : "День ещё не начат"}</p>
       {context.session && <p className="my-2 text-sm">Начало: {dateTime(context.session.started_at)}{context.session.ended_at && " · Завершение: " + dateTime(context.session.ended_at)}</p>}
       <p className="my-3">Норма по договору: {context.policy ? minutesLabel(context.policy.daily_minutes) : "не настроена"}</p>
-      {context.policy?.start_minute != null && <p className="my-2 text-sm">Плановое начало: {minutesLabel(context.policy.start_minute)}. {context.session ? "Завершите день после окончания работы." : "Начните день, когда приступите к работе."}</p>}
+      {context.policy?.start_minute != null && <p className="my-2 text-sm">Плановое начало: {minutesLabel(context.policy.start_minute)}. {context.session?.ended_at ? "" : context.session ? "Завершите день после окончания работы." : "Начните день, когда приступите к работе."}</p>}
       {!context.policy && <p className="my-3 text-amber-700">Для начала дня HR должен указать норму и руководителя по договору.</p>}
       {pending ? <button disabled={busy} className={button} onClick={() => void command(pending.action)}>Повторить {pending.action === "start" ? "начало" : "завершение"} дня</button>
         : !context.session ? <button disabled={busy || !context.policy} className={button} onClick={() => void command("start")}>Начать день</button>

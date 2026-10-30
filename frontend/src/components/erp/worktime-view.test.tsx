@@ -38,6 +38,7 @@ describe("Real worktime flow", () => {
   });
 
   it("starts and ends only after server confirmation", async () => {
+    current.policy = { ...policy, start_minute: 540 };
     const base = handler;
     handler = (url, init) => {
       if (url.endsWith("/start")) { current.session = session; return reply(session); }
@@ -47,6 +48,7 @@ describe("Real worktime flow", () => {
     render(<WorktimeView />); fireEvent.click(await screen.findByRole("button", { name: "Начать день" }));
     fireEvent.click(await screen.findByRole("button", { name: "Завершить день" }));
     expect(await screen.findByText("День завершён")).toBeInTheDocument();
+    expect(screen.queryByText(/Завершите день после окончания работы/)).not.toBeInTheDocument();
     const body = JSON.parse(fetcher.mock.calls.find(([url]) => url.endsWith("/end"))![1]!.body as string);
     expect(body).toMatchObject({ employee_id: 1, session_id: 9 });
     expect(body.request_key).toMatch(/^[0-9a-f-]{36}$/);

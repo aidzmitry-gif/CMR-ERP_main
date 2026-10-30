@@ -97,11 +97,19 @@ async def seed():
                      department='Продажи', role='sales', status='active', deal_visibility='own')
         foreign = User(username='e2e_foreign', full_name='Чужой менеджер E2E', employee_id=2902,
                        department='Продажи', role='sales', status='active', deal_visibility='own')
+        # The shared auth setup logs in this dev username as director. Bind that
+        # synthetic identity to an actual employee so self-service endpoints
+        # exercise the same identity contract as production, without bypasses.
+        director = User(username='kharkovich_d', full_name='Контрольный директор E2E', employee_id=2903,
+                        department='Контроль E2E', role='director', status='active')
+        director_employee = Employee(id=2903, full_name=director.full_name, department='Контроль E2E',
+                                     position='E2E director', status='active')
         owner_employee = Employee(id=2901, full_name=owner.full_name, department='Продажи',
                                   position='E2E sales', status='active')
         foreign_employee = Employee(id=2902, full_name=foreign.full_name, department='Продажи',
                                     position='E2E sales', status='active')
-        session.add_all([buyer, stocked, ordered, owner_employee, foreign_employee, owner, foreign])
+        session.add_all([buyer, stocked, ordered, owner_employee, foreign_employee, director_employee,
+                         owner, foreign, director])
         await session.flush()
         session.add_all([StockItem(sku_code=stocked.code, qty_available=10, qty_reserved=0),
                          StockItem(sku_code=ordered.code, qty_available=0, qty_reserved=0),
