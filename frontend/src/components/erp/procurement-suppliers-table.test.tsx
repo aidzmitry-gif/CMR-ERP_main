@@ -184,6 +184,10 @@ describe("ProcurementSuppliersTable", () => {
   it("рендерит строки поставщиков с человекочитаемым статусом и прочерком для пустых полей", async () => {
     render(<ProcurementSuppliersTable initial={rows} />);
   await waitForCompany();
+    fireEvent.click(screen.getByRole("button", { name: "Открыть карточку Shenzhen Power Co", exact: true }));
+    expect(screen.getByRole("dialog", { name: "Поставщик", exact: true })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть карточку поставщика", exact: true }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByText("Shenzhen Power Co")).toBeInTheDocument();
     expect(screen.getByText("МинскМеталл")).toBeInTheDocument();
     // statusLabel (настоящий): active → «Активен», blocked → «Заблокирован»

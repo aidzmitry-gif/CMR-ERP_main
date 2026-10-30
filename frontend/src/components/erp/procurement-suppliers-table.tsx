@@ -4,7 +4,7 @@ import { useInstanceOrganization,withInstanceOrganization } from "@/components/i
 
 import clsx from "clsx";
 import { Plus,RefreshCw,Search,X } from "lucide-react";
-import { useEffect,useMemo,useState } from "react";
+import { useEffect,useMemo,useRef,useState, type KeyboardEvent } from "react";
 
 import { formatNumber } from "@/lib/format";
 import {
@@ -24,7 +24,7 @@ type SupplierScorecard,
 
 function Kpi({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-line bg-surface px-4 py-3">
+    <div className="min-w-[148px] flex-1 rounded-2xl border border-line bg-surface px-4 py-4 shadow-sm">
       <div className="text-xs font-medium text-muted">{label}</div>
       <div className="mt-1 text-2xl font-bold text-ink tabular-nums">{value}</div>
     </div>
@@ -53,13 +53,13 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="text-[11px] text-muted">{label}</span>
+      <span className="text-xs font-medium text-muted">{label}</span>
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         readOnly={readOnly}
-        className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
+        className="mt-1 min-h-10 w-full min-w-0 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
       />
     </label>
   );
@@ -84,6 +84,31 @@ function Field({
   const [scorecard, setScorecard] = useState<SupplierScorecard | null>(null);
   const [scoreError, setScoreError] = useState("");
   const drawerOpen = draft !== null;
+  const drawerRoot = useRef<HTMLDivElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const opener = document.activeElement;
+    closeButton.current?.focus();
+    return () => {
+      if (opener instanceof HTMLElement && opener.isConnected && !opener.closest("[inert]")) opener.focus();
+    };
+  }, [drawerOpen]);
+
+  function trapDrawer(event: KeyboardEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    if (event.key === "Escape") { event.preventDefault(); setDraft(null); return; }
+    if (event.key !== "Tab") return;
+    const controls = [...(drawerRoot.current?.querySelectorAll<HTMLElement>(
+      'button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href]'
+    ) ?? [])];
+    const first = controls[0], last = controls.at(-1);
+    if (!first) { event.preventDefault(); return; }
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === drawerRoot.current)) {
+      event.preventDefault(); last?.focus();
+    } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
 
   useEffect(() => {
     const term = mdmSearch.trim();
@@ -164,23 +189,27 @@ function Field({
   }
 
   return (
-    <div className="flex-1 overflow-auto p-6">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-muted">
+    <div className="min-w-0 flex-1 p-4 text-ink [color-scheme:light] dark:[color-scheme:dark] sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 max-w-2xl flex-1 basis-72">
+        <p className="text-xs font-semibold uppercase tracking-widest text-muted">Закупки · справочник</p>
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-ink">Поставщики</h1>
+        <p className="mt-2 text-sm leading-relaxed text-muted">
           Профили поставщиков: реквизиты выбираются из MDM по ID; условия оплаты,
           сроки и Incoterms хранятся в закупках. Старые профили без ID требуют сопоставления.
         </p>
-        <div className="flex shrink-0 items-center gap-2">
+        </div>
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
           <button
             onClick={refresh}
             disabled={busy}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-muted hover:bg-sunken disabled:opacity-60"
+            className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-muted hover:bg-sunken disabled:opacity-60"
           >
             <RefreshCw size={15} className={clsx(busy && "animate-spin")} /> Обновить
           </button>
           <button
             onClick={openCreate}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:opacity-90"
+            className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:opacity-90"
           >
             <Plus size={15} /> Добавить
           </button>
@@ -191,28 +220,29 @@ function Field({
         Не удалось загрузить поставщиков. {hasSnapshot ? "Показаны ранее загруженные данные." : "Количество пока не подтверждено."} Повторите загрузку кнопкой «Обновить».
       </div>}
 
-      <div className="mt-4 grid grid-cols-3 gap-3">
+      <div role="region" aria-label="Показатели списка поставщиков" tabIndex={0} className="mt-5 flex gap-3 overflow-x-auto pb-1 outline-none focus-visible:ring-2 focus-visible:ring-accent sm:grid sm:grid-cols-3">
         <Kpi label="Поставщиков" value={hasSnapshot ? formatNumber(rows.length) : "—"} />
         <Kpi label="Активных" value={hasSnapshot ? formatNumber(active) : "—"} />
         <Kpi label="Заблокировано" value={hasSnapshot ? formatNumber(rows.length - active) : "—"} />
       </div>
 
-      <div className="mt-5 flex items-center">
+      <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
         <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
-        <div className="relative ml-auto">
+        <div className="relative w-full sm:ml-auto sm:w-80">
           <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            aria-label="Поиск поставщиков"
             placeholder="Поиск: имя, УНП, страна"
-            className="w-64 rounded-lg border border-line bg-surface py-2 pl-8 pr-3 text-sm text-ink outline-none focus:border-accent"
+            className="min-h-10 w-full rounded-lg border border-line bg-surface py-2 pl-8 pr-3 text-sm text-ink outline-none focus:border-accent"
           />
         </div>
       </div>
       {companyError && <p role="alert" className="mt-2 text-sm text-red-700">{companyError}</p>}
 
-      <div className="mt-3 overflow-hidden rounded-xl border border-line bg-surface">
-        <table className="w-full text-sm">
+      <div role="region" aria-label="Список поставщиков" tabIndex={0} className="mt-4 overflow-x-auto rounded-2xl border border-line bg-surface shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-accent">
+        <table className="w-full min-w-[920px] text-sm">
           <thead>
             <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
               <th className="px-4 py-2 font-medium">Поставщик</th>
@@ -239,7 +269,9 @@ function Field({
                 className="cursor-pointer border-b border-line last:border-0 hover:bg-sunken/50"
               >
                 <td className="px-4 py-2.5">
-                  <div className="font-medium text-ink">{s.name}</div>
+                  <button type="button" aria-label={`Открыть карточку ${s.name}`}
+                    onClick={event => { event.stopPropagation(); openEdit(s); }}
+                    className="min-h-10 rounded-md text-left font-medium text-ink underline-offset-4 hover:text-accent hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">{s.name}</button>
                   <div className="text-xs text-muted">{s.counterparty_id ? `MDM ID ${s.counterparty_id} · УНП ${s.unp || "не указан"}` : "Не сопоставлен с MDM"}</div>
                 </td>
                 <td className="px-4 py-2.5 text-muted">
@@ -286,35 +318,37 @@ function Field({
       </section>}
 
       {draft && (
-        <div className="fixed inset-0 z-40 flex justify-end bg-black/30" onClick={() => setDraft(null)}>
+        <div className="fixed inset-0 z-40 flex justify-end bg-black/40 backdrop-blur-sm" onClick={() => setDraft(null)} onKeyDown={trapDrawer}>
           <div
-            className="h-full w-full max-w-md overflow-auto bg-canvas p-6 shadow-xl"
+            ref={drawerRoot} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="supplier-drawer-title"
+            className="flex h-full w-full max-w-lg min-w-0 flex-col bg-canvas text-ink shadow-2xl outline-none"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-ink">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line bg-surface px-4 py-4 sm:px-6">
+              <h2 id="supplier-drawer-title" className="text-lg font-semibold text-ink">
                 {draft.id ? "Поставщик" : "Новый поставщик"}
               </h2>
-              <button onClick={() => setDraft(null)} className="text-muted hover:text-ink">
+              <button ref={closeButton} aria-label="Закрыть карточку поставщика" onClick={() => setDraft(null)} className="flex h-10 w-10 items-center justify-center rounded-lg border border-line text-muted hover:bg-sunken hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
                 <X size={18} />
               </button>
             </div>
 
-            <div className="mt-4 grid grid-cols-1 gap-3">
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+            <div className="grid grid-cols-1 gap-4">
               {!rows.find(row => row.id === draft.id)?.counterparty_id && <>
                 <label className="block text-sm">Поиск контрагента MDM
                   <input aria-label="Поиск контрагента MDM" value={mdmSearch} onChange={event => {
                     setMdmSearch(event.target.value); setMdmOptions([]); setMdmError("");
                     const original = rows.find(row => row.id === draft.id);
                     setDraft({ ...draft, counterparty_id: null, name: original?.name ?? "", unp: original?.unp ?? "" });
-                  }} className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-2" />
+                  }} className="mt-1 min-h-10 w-full min-w-0 rounded-lg border border-line bg-surface px-3 py-2" />
                 </label>
                 <label className="block text-sm">Поставщик из справочника
                   <select aria-label="Поставщик из справочника" value={draft.counterparty_id ?? ""}
                     onChange={event => {
                       const selected = mdmOptions.find(row => row.id === Number(event.target.value));
                       if (selected) setDraft({ ...draft, counterparty_id: selected.id, name: selected.name, unp: selected.unp });
-                    }} className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-2">
+                    }} className="mt-1 min-h-10 w-full min-w-0 rounded-lg border border-line bg-surface px-3 py-2">
                     <option value="">Выберите контрагента</option>
                     {draft.counterparty_id && !mdmOptions.some(row => row.id === draft.counterparty_id) &&
                       <option value={draft.counterparty_id}>{draft.name} · {draft.unp || "без УНП"} · ID {draft.counterparty_id}</option>}
@@ -325,16 +359,16 @@ function Field({
               </>}
               {draft.id && !draft.counterparty_id && <p className="text-xs text-amber-700">Исторический профиль не сопоставлен; существующие реквизиты нельзя считать подтверждёнными MDM.</p>}
               <Field label="Название" value={draft.name} onChange={() => {}} readOnly />
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-4 min-[360px]:grid-cols-2">
                 <Field label="УНП (MDM)" value={draft.unp} onChange={() => {}} readOnly />
                 <Field label="Страна" value={draft.country} onChange={(v) => setDraft({ ...draft, country: v })} />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-4 min-[360px]:grid-cols-2">
                 <Field label="Флаг (emoji)" value={draft.flag} onChange={(v) => setDraft({ ...draft, flag: v })} />
                 <Field label="Incoterms" value={draft.incoterms} onChange={(v) => setDraft({ ...draft, incoterms: v })} />
               </div>
               <Field label="Контактное лицо" value={draft.contact_person} onChange={(v) => setDraft({ ...draft, contact_person: v })} />
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-4 min-[360px]:grid-cols-2">
                 <Field label="Телефон" value={draft.phone} onChange={(v) => setDraft({ ...draft, phone: v })} />
                 <Field label="Email" value={draft.email} onChange={(v) => setDraft({ ...draft, email: v })} />
               </div>
@@ -344,7 +378,7 @@ function Field({
                 onChange={(v) => setDraft({ ...draft, payment_terms: v })}
                 placeholder="30% предоплата / 70% по факту"
               />
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-4 min-[360px]:grid-cols-2">
                 <Field
                   label="Срок поставки, дн"
                   value={draft.lead_time_days == null ? "" : String(draft.lead_time_days)}
@@ -353,11 +387,11 @@ function Field({
                   }
                 />
                 <label className="block">
-                  <span className="text-[11px] text-muted">Статус</span>
+                  <span className="text-xs font-medium text-muted">Статус</span>
                   <select
                     value={draft.status}
                     onChange={(e) => setDraft({ ...draft, status: e.target.value })}
-                    className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
+                    className="mt-1 min-h-10 w-full min-w-0 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
                   >
                     <option value="active">Активен</option>
                     <option value="blocked">Заблокирован</option>
@@ -369,17 +403,18 @@ function Field({
 
             {error && <div className="mt-3 text-sm text-red-600">{error}</div>}
 
-            <div className="mt-5 flex gap-2">
+            </div>
+            <div className="flex shrink-0 gap-2 border-t border-line bg-surface px-4 py-4 sm:px-6">
               <button
                 onClick={save}
                 disabled={saving}
-                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"
+                className="min-h-10 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"
               >
                 {saving ? "Сохранение…" : "Сохранить"}
               </button>
               <button
                 onClick={() => setDraft(null)}
-                className="rounded-lg border border-line bg-surface px-4 py-2 text-sm font-medium text-muted hover:bg-sunken"
+                className="min-h-10 rounded-lg border border-line bg-surface px-4 py-2 text-sm font-medium text-muted hover:bg-sunken"
               >
                 Отмена
               </button>
