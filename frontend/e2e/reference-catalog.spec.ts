@@ -65,6 +65,15 @@ for (const scenario of [
     await testInfo.attach("catalog-rendered", {
       body: await page.screenshot(), contentType: "image/png",
     });
+    if (scenario.route === "/crm/catalog") {
+      await page.setViewportSize({ width: 390, height: 900 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        "CRM catalog must fit the viewport; only its table scrolls horizontally").toBe(true);
+      await testInfo.attach("crm-catalog-mobile", {
+        body: await page.screenshot(), contentType: "image/png",
+      });
+      await page.setViewportSize({ width: scenario.width, height: 900 });
+    }
     await page.getByRole("link", { name: "QA-STOCK", exact: true }).click();
     await expect(page).toHaveURL(/\/erp\/spravochniki\/sku\/QA-STOCK$/);
     await expect(page.getByRole("heading", {

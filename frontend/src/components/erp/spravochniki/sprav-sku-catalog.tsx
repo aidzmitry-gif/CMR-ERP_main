@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Search } from "lucide-react";
+import { FolderTree, Search } from "lucide-react";
 
 import type { NomenclatureGroup, SkuRow, VatRateRow } from "@/lib/reference-data";
 import { CATALOG_ROW_LIMIT } from "@/lib/reference-data";
@@ -63,20 +63,18 @@ export function SpravSkuCatalog({
   </section>;
 
   return (
-    <div className="mx-auto min-w-0 max-w-[1280px] space-y-4 p-6">
-      <div className="rounded-2xl bg-surface p-5 shadow-card">
+    <div className="mx-auto w-full min-w-0 max-w-[1280px] space-y-5 px-4 py-5 md:p-6">
+      <div className="rounded-2xl border border-line bg-surface p-4 shadow-card md:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-base font-bold text-ink">Номенклатура (SKU)</h2>
-            <span className="rounded-full bg-sunken px-2 py-0.5 font-mono text-[11px] text-muted">
-              схема: public
-            </span>
-            <span className="rounded-full bg-sunken px-2 py-0.5 text-[11px] text-muted">
+            <h2 className="text-lg font-bold tracking-tight text-ink">Номенклатура (SKU)</h2>
+            <span className="rounded-full bg-sunken px-2.5 py-1 text-xs text-muted">
               {total} позиций
             </span>
           </div>
-          <Link href="/erp/spravochniki/categories" className="text-[12px] font-medium text-accent hover:underline">
-            🌳 дерево категорий
+          <Link href="/erp/spravochniki/categories" className="inline-flex min-h-11 items-center gap-2 rounded-lg text-sm font-medium text-accent hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent">
+            <FolderTree aria-hidden="true" className="h-4 w-4 shrink-0" />
+            Категории товаров
           </Link>
         </div>
 
@@ -87,11 +85,11 @@ export function SpravSkuCatalog({
           Справочник ставок НДС недоступен; названия ставок неизвестны.
         </p>}
 
-        <form key={JSON.stringify([baseHref, search, categoryId])} action={baseHref} method="get" className="mt-4 flex flex-wrap items-center gap-2">
-          <label className="flex min-w-[260px] flex-1 items-center gap-2 rounded-xl bg-sunken px-3 py-2">
+        <form key={JSON.stringify([baseHref, search, categoryId])} action={baseHref} method="get" className="mt-4 flex flex-wrap items-center gap-3">
+          <label className="flex min-h-11 w-full min-w-0 items-center gap-2 rounded-xl border border-line bg-sunken px-3 py-2 focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20 sm:w-auto sm:flex-1">
             <Search aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-faint" />
             <input
-              className="w-full bg-transparent text-ink text-sm outline-none placeholder:text-faint"
+              className="w-full min-w-0 bg-transparent text-sm text-ink outline-none placeholder:text-faint"
               placeholder="Найти по коду или наименованию…"
               aria-label="Поиск номенклатуры"
               name="search"
@@ -103,7 +101,7 @@ export function SpravSkuCatalog({
             aria-label="Группа номенклатуры"
             name="category_subtree_id"
             defaultValue={categoryId === null ? "" : String(categoryId)}
-            className="rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent focus:ring-1 focus:ring-accent/20"
+            className="min-h-11 w-full min-w-0 max-w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 sm:w-auto sm:max-w-[240px]"
           >
             <option value="">Все категории</option>
             {categoryId !== null && !activeCategories.some((group) => group.id === categoryId) && (
@@ -115,9 +113,9 @@ export function SpravSkuCatalog({
               <option key={group.id} value={group.id}>{group.name}</option>
             ))}
           </select>
-          <button type="submit" className="text-sm text-accent">Найти</button>
-          <Link href={baseHref} className="text-sm text-accent">Сбросить фильтры</Link>
-          <span role="status" className="text-sm text-muted">
+          <button type="submit" className="min-h-11 rounded-xl bg-accent px-5 py-2 text-sm font-semibold text-white hover:bg-accent-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent">Найти</button>
+          <Link href={baseHref} className="inline-flex min-h-11 items-center rounded-lg text-sm text-accent hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent">Сбросить фильтры</Link>
+          <span role="status" className="w-full text-sm text-muted">
             {total === 0
               ? "Найдено 0 позиций"
               : isOutOfRange
@@ -136,11 +134,22 @@ export function SpravSkuCatalog({
         </nav>}
       </div>
 
-      <div className="rounded-2xl bg-surface shadow-card">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+      <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-card">
+        <p id="sku-table-scroll-hint" className="border-b border-line px-4 py-3 text-xs leading-relaxed text-muted md:hidden">
+          Листайте таблицу по горизонтали, чтобы увидеть все столбцы →
+        </p>
+        <div role="region" aria-label="Таблица номенклатуры" aria-describedby="sku-table-scroll-hint" tabIndex={0} className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+          <table className="w-full min-w-[880px] table-fixed text-sm">
+            <colgroup>
+              <col className="w-[140px]" />
+              <col className="w-[280px]" />
+              <col className="w-[70px]" />
+              <col className="w-[180px]" />
+              <col className="w-[100px]" />
+              <col className="w-[110px]" />
+            </colgroup>
             <thead>
-              <tr className="border-y border-line bg-sunken/60 text-left text-[11px] uppercase tracking-wide text-faint">
+              <tr className="border-b border-line bg-sunken/60 text-left text-xs text-muted">
                 <th className="px-4 py-2 font-semibold">Код</th>
                 <th className="px-4 py-2 font-semibold">Наименование</th>
                 <th className="px-4 py-2 font-semibold">Ед.</th>
@@ -161,13 +170,13 @@ export function SpravSkuCatalog({
               ) : skus.map((sku) => {
                 const vat = sku.vat_code ? vatTitles.get(sku.vat_code) : undefined;
                 return (
-                  <tr key={sku.code} className="hover:bg-sunken/60">
-                    <td className="px-4 py-2.5 font-mono text-[12px] text-muted">
+                  <tr key={sku.code} className="align-top hover:bg-sunken/60">
+                    <td className="break-all px-4 py-3 font-mono text-xs leading-relaxed text-muted">
                       <Link href={`/erp/spravochniki/sku/${encodeURIComponent(sku.code)}`} className="text-accent hover:underline">
                         {sku.code}
                       </Link>
                     </td>
-                    <td className="max-w-[420px] px-4 py-2.5 text-ink" title={sku.title}>
+                    <td className="px-4 py-3 leading-relaxed text-ink" title={sku.title}>
                       <Link href={`/erp/spravochniki/sku/${encodeURIComponent(sku.code)}`} className="block break-words text-accent hover:underline">
                         {sku.title}
                       </Link>
@@ -196,7 +205,7 @@ export function SpravSkuCatalog({
         </div>
         <div className="border-t border-line px-5 py-3 text-[12px] text-muted">
           Записи архивируются, не удаляются — на них могут ссылаться документы. Клик по коду или наименованию
-          открывает карточку номенклатуры (провенанс, ТН ВЭД, себестоимость, остатки).
+          открывает карточку номенклатуры: источник данных, ТН ВЭД, себестоимость и остатки.
         </div>
       </div>
     </div>
