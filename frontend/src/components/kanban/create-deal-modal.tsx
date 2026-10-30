@@ -212,7 +212,7 @@ export function CreateDealModal({
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Сумма, BYN">
-              <input type="number" min={0} value={form.amount} onChange={(e) => set("amount", Number(e.target.value))} className={INPUT} />
+              <input type="number" min={0} step="0.01" value={form.amount} onChange={(e) => set("amount", Number(e.target.value))} className={INPUT} />
             </Field>
             <Field label="Приоритет">
               <select value={form.priority} onChange={(e) => set("priority", e.target.value)} className={INPUT}>
