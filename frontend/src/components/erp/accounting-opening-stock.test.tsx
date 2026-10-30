@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { OpeningWorkspace } from "./accounting-opening-stock";
 
@@ -51,16 +51,30 @@ it("keeps rows in a review before posting and retries with the identical documen
   expect(screen.getByText(/Текущее складское наличие не изменялось/)).toBeInTheDocument();
 });
 
-it("unlocks editing after an explicit transactional rejection", async () => {
-  vi.stubGlobal("fetch", mockApi("reject"));
+it("rechecks context before restoring editing after a transactional rejection", async () => {
+  const api = mockApi("reject");
+  let contextRequests = 0;
+  let refreshContext!: (response: unknown) => void;
+  vi.stubGlobal("fetch", vi.fn((url: string, options?: RequestInit) => {
+    if (url.includes("context?") && ++contextRequests > 1)
+      return new Promise(resolve => { refreshContext = resolve; });
+    return api(url, options);
+  }));
   render(<OpeningWorkspace org={1} />); await fill();
   fireEvent.click(screen.getByRole("button", { name: "Проверить документ" }));
   await screen.findByText("Результат проверки");
   fireEvent.click(screen.getByRole("checkbox"));
   fireEvent.click(screen.getByRole("button", { name: "Записать начальные остатки" }));
   await screen.findByText("Данные изменились");
-  expect(screen.getByLabelText("Количество 1")).not.toBeDisabled();
+  await waitFor(() => expect(refreshContext).toBeDefined());
+  expect(screen.queryByLabelText("Количество 1")).not.toBeInTheDocument();
   expect(screen.queryByText("Результат проверки")).not.toBeInTheDocument();
+  await act(async () => {
+    refreshContext({ ok: true, json: async () => context });
+  });
+  const quantity = await screen.findByLabelText("Количество 1");
+  expect(quantity).not.toBeDisabled();
+  expect(quantity).toHaveValue("3");
 });
 
 it("shows a preflight block before allowing data entry", async () => {
