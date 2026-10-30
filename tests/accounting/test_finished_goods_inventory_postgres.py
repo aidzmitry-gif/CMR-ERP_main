@@ -483,10 +483,11 @@ async def test_output_cost_correction_marks_downstream_output_stale_without_rewr
     policy_id = await _seed_production_book(factory, pg_book)
     await _seed_wip(factory, pg_book, policy_id)
     async with factory() as session:
-        place = Location(warehouse="Main", code="COST-CHAIN")
+        place = Location(organization_id=pg_book[0], warehouse="Main", code="COST-CHAIN")
         await session.execute(text("SELECT setval(pg_get_serial_sequence('wms.warehouse_directory','id'), (SELECT max(id) FROM wms.warehouse_directory))"))
         session.add(WarehouseDirectory(organization_id=pg_book[0], name="Main", title="Synthetic cost-chain warehouse",
                                        wms_enabled=True, created_by=user.username))
+        await session.flush()
         session.add_all([place, Sku(code="SYN-WIDGET", title="First output", unit="шт"),
                         Sku(code="SYN-WIDGET-2", title="Second output", unit="шт")])
         for order_id, qty in ((42, 2), (43, 1)):

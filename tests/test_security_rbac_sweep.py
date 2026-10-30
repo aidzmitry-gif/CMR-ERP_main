@@ -235,8 +235,15 @@ async def test_write_routes_allowed_for_owner_role(client, write_routes):
             # the module gate passed; director must not bypass book-level checks.
             assert resp.json()["detail"] == "An identified user is required", (url, resp.text)
             continue
+        if (package == "hr" and method == "POST"
+                and re.fullmatch(r"/hr/me/worktime/(?:\d+/)?presence", url)
+                and resp.status_code == 403):
+            # The module gate permits director; presence still needs a real
+            # active employee identity, which a role-only request does not have.
+            assert resp.json()["detail"] == "Нужна действующая учётная запись сотрудника", (url, resp.text)
+            continue
         if resp.status_code == 403:
-            false_blocks.append(f"{method} {url} [{package}]")
+            false_blocks.append(f"{method} {url} [{package}]: {resp.text}")
     assert not false_blocks, (
         f"гейт ложно режет владельца '{_OWNER_ROLE}' (403) на роутах:\n" + "\n".join(false_blocks)
     )

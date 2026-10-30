@@ -83,13 +83,15 @@ async def accepted_production_outputs(api, factory, book, *, same_lot, order_ids
             "SELECT setval(pg_get_serial_sequence('wms.warehouse_directory','id'), "
             "(SELECT max(id) FROM wms.warehouse_directory))"
         ))
-        location = Location(warehouse="Main", code="SYN-OUTPUT")
+        location = Location(organization_id=book[0], warehouse="Main", code="SYN-OUTPUT")
         sku = Sku(code="SYN-WIDGET", title="Synthetic widget", unit="шт", is_active=True)
         other_skus = [Sku(code=code, title="Synthetic other widget", unit="шт", is_active=True)
                       for code in sorted(set((sku_by_order or {}).values()) - {sku.code})]
         directory = WarehouseDirectory(organization_id=book[0], name="Main", title="Main warehouse",
                                        wms_enabled=True, created_by="tester")
-        session.add_all([location, sku, directory, *other_skus])
+        session.add(directory)
+        await session.flush()
+        session.add_all([location, sku, *other_skus])
         await session.flush()
         identities = {
             "warehouse_identity": {"id": directory.id, "name": directory.name, "title": directory.title},

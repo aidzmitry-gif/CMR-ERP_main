@@ -100,7 +100,7 @@ async def test_owned_output_confirm_exact_snapshot_postgres(pg_factory, pg_book,
         await session.flush()
         dimensions = dict(order_snapshot.dimensions_from_ownership(owner), department="SHOP")
         session.add(Sku(code="SYN-WIDGET", title="Synthetic widget", unit="шт", is_active=True))
-        place = Location(warehouse="Main", code="SYN-CELL", zone="SYN", title="Synthetic receiving place", is_active=True)
+        place = Location(organization_id=pg_book[0], warehouse="Main", code="SYN-CELL", zone="SYN", title="Synthetic receiving place", is_active=True)
         session.add(place)
         await session.flush()
         for index, quantity in enumerate(("4.00", "6.00"), start=101):

@@ -639,8 +639,8 @@ async def test_persisted_basis_cannot_be_replaced_by_current_stock_or_client_fla
 
 async def test_neutral_pack_transfer_and_adjustment_do_not_spend_reserve(api, session):
     org, _ = await prepared(api, session)
-    first = await api.post("/wms/locations", json={"warehouse": "W", "code": "L1"})
-    second = await api.post("/wms/locations", json={"warehouse": "W", "code": "L2"})
+    first = await api.post("/wms/locations", json={"organization_id": org, "warehouse": "W", "code": "L1"})
+    second = await api.post("/wms/locations", json={"organization_id": org, "warehouse": "W", "code": "L2"})
     assert first.status_code == second.status_code == 201
     common = {"organization_id": org, "sku_code": "A", "warehouse": "W", "qty": "8"}
     moved = await api.post("/wms/transfer", json={**common, "from_location_id": first.json()["id"], "to_location_id": second.json()["id"]})

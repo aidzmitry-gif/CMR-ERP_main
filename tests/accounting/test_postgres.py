@@ -2253,22 +2253,25 @@ async def test_wms_qc_concurrent_stale_snapshot_cannot_overwrite(pg_factory, pg_
         assert str(line.accepted_qty) == next(amount for status, amount in results if status == 200)
 
 
-async def test_wms_location_guard_holds_lock_and_rejects_stale_cached_location(pg_factory):
+async def test_wms_location_guard_holds_lock_and_rejects_stale_cached_location(pg_factory, pg_book):
     from fastapi import HTTPException
     from sqlalchemy import update
     from sqlalchemy.exc import DBAPIError
 
-    from modules.wms.models import Location
+    from modules.wms.models import Location, WarehouseDirectory
     from modules.wms.routes import _validate_movement_locations
 
     async with pg_factory() as session:
-        location = Location(warehouse="Own", code="GUARD", is_active=True)
+        session.add(WarehouseDirectory(id=9001, organization_id=pg_book[0], name="Own",
+            title="Synthetic lock warehouse", wms_enabled=True, created_by="tester"))
+        await session.flush()
+        location = Location(organization_id=pg_book[0], warehouse="Own", code="GUARD", is_active=True)
         session.add(location)
         await session.commit()
         location_id = location.id
     async with pg_factory() as reader, pg_factory() as writer:
         cached = await reader.get(Location, location_id)
-        await _validate_movement_locations(reader, "Own", location_id)
+        await _validate_movement_locations(reader, pg_book[0], "Own", location_id)
         # A second transaction cannot deactivate the cell while a movement's
         # validation transaction holds its row lock.
         await writer.execute(text("SET LOCAL lock_timeout = '200ms'"))
@@ -2282,7 +2285,7 @@ async def test_wms_location_guard_holds_lock_and_rejects_stale_cached_location(p
         # expire_on_commit=False deliberately leaves reader's ORM identity stale.
         assert cached.is_active is True
         with pytest.raises(HTTPException) as rejected:
-            await _validate_movement_locations(reader, "Own", location_id)
+            await _validate_movement_locations(reader, pg_book[0], "Own", location_id)
         assert rejected.value.status_code == 422
         assert cached.is_active is False
         await reader.rollback()

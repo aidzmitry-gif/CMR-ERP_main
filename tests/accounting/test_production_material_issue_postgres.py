@@ -88,7 +88,7 @@ async def material_output_source(session, organization_id, order_id):
     )
 
     order = await session.get(ProductionOrder, order_id)
-    place = Location(warehouse="Main", code="MATERIAL-OUT", zone="SYN",
+    place = Location(organization_id=organization_id, warehouse="Main", code="MATERIAL-OUT", zone="SYN",
                      title="Synthetic output location", is_active=True)
     session.add(place)
     await session.flush()

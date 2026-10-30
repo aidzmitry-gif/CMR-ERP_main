@@ -262,9 +262,13 @@ async def test_wms_operational(api, session, erp_organization):
     """Операции склада поверх начального остатка → движения и оперативный остаток."""
 
     from modules.wms.events import on_stock_released
+    from modules.wms.models import WarehouseDirectory
 
-    loc1 = (await api.post("/wms/locations", json={"warehouse": "Минск", "zone": "A", "code": "A-01"})).json()
-    loc2 = (await api.post("/wms/locations", json={"warehouse": "Минск", "zone": "A", "code": "A-02"})).json()
+    session.add(WarehouseDirectory(organization_id=erp_organization, name="Минск", title="Synthetic operation warehouse",
+                                   wms_enabled=True, created_by="erp-test-owner"))
+    await session.commit()
+    loc1 = (await api.post("/wms/locations", json={"organization_id": erp_organization, "warehouse": "Минск", "zone": "A", "code": "A-01"})).json()
+    loc2 = (await api.post("/wms/locations", json={"organization_id": erp_organization, "warehouse": "Минск", "zone": "A", "code": "A-02"})).json()
     assert loc1["is_active"] is True
 
     base = {"organization_id": erp_organization, "sku_code": "AKB-60", "warehouse": "Минск"}
@@ -433,8 +437,8 @@ async def test_wms_tasks(api, session, erp_organization):
                                    wms_enabled=True, created_by="erp-test-owner"))
     await session.commit()
 
-    recv = (await api.post("/wms/locations", json={"warehouse": "Минск", "zone": "RECV", "code": "RECV-01"})).json()
-    perm = (await api.post("/wms/locations", json={"warehouse": "Минск", "zone": "A", "code": "A-10"})).json()
+    recv = (await api.post("/wms/locations", json={"organization_id": erp_organization, "warehouse": "Минск", "zone": "RECV", "code": "RECV-01"})).json()
+    perm = (await api.post("/wms/locations", json={"organization_id": erp_organization, "warehouse": "Минск", "zone": "A", "code": "A-10"})).json()
     await on_goods_received(
         {"organization_id": erp_organization, "item": "REBAR-10", "qty": 100, "warehouse": "Минск", "entity_ref": "purchase:11"},
         SimpleNamespace(session=session),
