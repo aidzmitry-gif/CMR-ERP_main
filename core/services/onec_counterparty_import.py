@@ -70,12 +70,11 @@ def _text_valid(value, maximum):
     return not any(ord(char) < 32 or ord(char) == 127 for char in value)
 
 
-def _support(catalogs):
-    if not isinstance(catalogs, dict) or any(not isinstance(catalogs.get(key), list) for key in (KIND, COUNTRY)):
+def legal_address_kind(rows: list[dict]) -> str:
+    """Resolve the single active predefined legal-address kind, without I/O."""
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
         raise CatalogImportConflict("COUNTERPARTY_SUPPORT_SHAPE")
-    if any(not isinstance(row, dict) for key in (KIND, COUNTRY) for row in catalogs[key]):
-        raise CatalogImportConflict("COUNTERPARTY_SUPPORT_SHAPE")
-    legal = [row for row in catalogs[KIND] if row.get("PredefinedDataName") == LEGAL_NAME
+    legal = [row for row in rows if row.get("PredefinedDataName") == LEGAL_NAME
              or row.get("ИмяПредопределенногоВида") == LEGAL_NAME]
     if len(legal) != 1:
         raise CatalogImportConflict("COUNTERPARTY_LEGAL_KIND_CARDINALITY")
@@ -84,7 +83,33 @@ def _support(catalogs):
         or kind.get("PredefinedDataName") != LEGAL_NAME or kind.get("ИмяПредопределенногоВида") != LEGAL_NAME
         or kind.get("Тип") != "Адрес"):
         raise CatalogImportConflict("COUNTERPARTY_LEGAL_KIND_SEMANTICS")
-    legal_key = guid(kind.get("Ref_Key"))
+    return guid(kind.get("Ref_Key"))
+
+
+def legal_address_value(contacts, legal_key: str) -> tuple[str | None, str | None]:
+    """Select the legal address, preserving refusal reasons of the sealed importer."""
+    if not isinstance(contacts, list) or any(not isinstance(line, dict) for line in contacts):
+        return None, "contact_collection_invalid"
+    lines = [line for line in contacts if isinstance(line.get("Вид_Key"), str)
+             and line["Вид_Key"] not in ("", ZERO) and guid(line["Вид_Key"]) == legal_key]
+    if not lines:
+        return None, "legal_address_missing"
+    if len(lines) != 1:
+        return None, "legal_address_ambiguous"
+    if lines[0].get("Тип") != "Адрес":
+        return None, "legal_address_wrong_type"
+    value = lines[0].get("Представление")
+    if not isinstance(value, str) or not value.strip():
+        return None, "legal_address_representation_empty"
+    return value, None
+
+
+def _support(catalogs):
+    if not isinstance(catalogs, dict) or any(not isinstance(catalogs.get(key), list) for key in (KIND, COUNTRY)):
+        raise CatalogImportConflict("COUNTERPARTY_SUPPORT_SHAPE")
+    if any(not isinstance(row, dict) for key in (KIND, COUNTRY) for row in catalogs[key]):
+        raise CatalogImportConflict("COUNTERPARTY_SUPPORT_SHAPE")
+    legal_key = legal_address_kind(catalogs[KIND])
     countries = {}
     for row in catalogs[COUNTRY]:
         key = guid(row.get("Ref_Key"))
@@ -143,24 +168,11 @@ def build_counterparty_plan(rows: list[SourceRow], catalogs: dict, *, expected_c
     for observation, key, row, reason in parsed:
         address = None
         if reason is None:
-            contacts = row.get("КонтактнаяИнформация")
             if base_unps[row["ИНН"]] > 1:
                 reason = "duplicate_active_by_unp"
-            elif not isinstance(contacts, list) or any(not isinstance(line, dict) for line in contacts):
-                reason = "contact_collection_invalid"
             else:
-                lines = [line for line in contacts if isinstance(line.get("Вид_Key"), str)
-                         and line["Вид_Key"] not in ("", ZERO) and guid(line["Вид_Key"]) == legal_key]
-                if not lines:
-                    reason = "legal_address_missing"
-                elif len(lines) != 1:
-                    reason = "legal_address_ambiguous"
-                elif lines[0].get("Тип") != "Адрес":
-                    reason = "legal_address_wrong_type"
-                elif not isinstance(lines[0].get("Представление"), str) or not lines[0]["Представление"].strip():
-                    reason = "legal_address_representation_empty"
-                else:
-                    address = lines[0]["Представление"]
+                address, reason = legal_address_value(row.get("КонтактнаяИнформация"), legal_key)
+                if reason is None:
                     complete.append((key, row["DataVersion"]))
         if reason is None:
             if not _text_valid(row["Description"], 255):

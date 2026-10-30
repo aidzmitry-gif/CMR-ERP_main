@@ -9,6 +9,109 @@ from modules.integrations.module import IntegrationsModule
 from modules.integrations.registry import RegistryClient
 
 
+def _legal_kind_rows():
+    return [{"Ref_Key": "00000000-0000-0000-0000-000000000999", "Predefined": True, "DeletionMark": False,
+             "PredefinedDataName": "ЮрАдресКонтрагента", "ИмяПредопределенногоВида": "ЮрАдресКонтрагента",
+             "Тип": "Адрес"}]
+
+
+def _legal_contacts():
+    return [{"Вид_Key": "00000000-0000-0000-0000-000000000999", "Тип": "Адрес",
+             "Представление": "Synthetic registered address, 1"}]
+
+
+def _wire_reader(rows):
+    return lambda entity, *args, **kwargs: _legal_kind_rows() if entity == "Catalog_ВидыКонтактнойИнформации" else rows
+
+
+@pytest.mark.parametrize("failure", ["timeout", "http"])
+async def test_onec_address_kind_transport_failure_is_not_empty_success(monkeypatch, failure):
+    import httpx
+
+    from core.services.mdm import CounterpartyWriteError
+    from modules.integrations.client import OneCClient
+
+    row = {"Ref_Key": "00000000-0000-0000-0000-000000000001", "Description": "Synthetic head",
+           "ИНН": "600187521", "ОбособленноеПодразделение": False,
+           "ГоловнойКонтрагент_Key": "00000000-0000-0000-0000-000000000000",
+           "КонтактнаяИнформация": _legal_contacts()}
+
+    def read(entity, *args, **kwargs):
+        if entity == "Catalog_ВидыКонтактнойИнформации":
+            request = httpx.Request("GET", "https://onec.test/private")
+            if failure == "timeout":
+                raise httpx.ReadTimeout("private-source-detail", request=request)
+            response = httpx.Response(500, request=request, text="private-source-detail")
+            response.raise_for_status()
+        return [row]
+
+    client = OneCClient("https://onec.test")
+    monkeypatch.setattr(client, "_get_all", read)
+    with pytest.raises(CounterpartyWriteError) as error:
+        await client.fetch_counterparties()
+    assert error.value.code == "invalid_onec_address_kind" and error.value.status == 502
+    assert "private-source-detail" not in str(error.value)
+
+
+@pytest.mark.parametrize("case", [
+    "valid", "kind_absent", "kind_duplicate", "kind_wrong_type", "kind_deleted",
+    "address_absent", "address_duplicate", "address_wrong_type", "address_blank",
+])
+def test_onec_wire_legal_address_uses_unique_proven_kind(monkeypatch, case):
+    from core.services.mdm import CounterpartyWriteError
+    from modules.integrations.client import OneCClient
+
+    reference = "00000000-0000-0000-0000-000000000001"
+    kind_ref = "00000000-0000-0000-0000-000000000999"
+    kinds = [{"Ref_Key": kind_ref, "Predefined": True, "DeletionMark": False,
+              "PredefinedDataName": "ЮрАдресКонтрагента", "ИмяПредопределенногоВида": "ЮрАдресКонтрагента",
+              "Тип": "Адрес"}]
+    contacts = [{"Вид_Key": kind_ref, "Тип": "Адрес", "Представление": "Synthetic registered address, 1"},
+                {"Вид_Key": reference, "Тип": "Адрес", "Представление": "Synthetic delivery address, 2"}]
+    if case == "kind_absent":
+        kinds = []
+    elif case == "kind_duplicate":
+        kinds *= 2
+    elif case == "kind_wrong_type":
+        kinds[0]["Тип"] = "Телефон"
+    elif case == "kind_deleted":
+        kinds[0]["DeletionMark"] = True
+    elif case == "address_absent":
+        contacts = contacts[1:]
+    elif case == "address_duplicate":
+        contacts += [dict(contacts[0])]
+    elif case == "address_wrong_type":
+        contacts[0]["Тип"] = "Телефон"
+    elif case == "address_blank":
+        contacts[0]["Представление"] = " "
+    row = {"Ref_Key": reference, "Description": "Synthetic head", "НаименованиеПолное": "Synthetic legal head",
+           "ИНН": "600187521", "ОбособленноеПодразделение": False, "ГоловнойКонтрагент_Key": reference,
+           "КонтактнаяИнформация": contacts}
+    calls = []
+
+    def read(entity, params, **kwargs):
+        calls.append((entity, params))
+        return kinds if entity == "Catalog_ВидыКонтактнойИнформации" else [row]
+
+    client = OneCClient("https://onec.test")
+    monkeypatch.setattr(client, "_get_all", read)
+    if case == "valid":
+        mapped = client._fetch_counterparties_sync()
+        assert mapped == [{"id": reference, "name": row["Description"], "legal_name": row["НаименованиеПолное"],
+                           "unp": row["ИНН"], "legal_address": "Synthetic registered address, 1"}]
+        assert any(entity == "Catalog_ВидыКонтактнойИнформации" and "$filter" not in params
+                   for entity, params in calls)
+        assert any(entity == "Catalog_Контрагенты" and "КонтактнаяИнформация" in params["$select"]
+                   for entity, params in calls)
+        assert sum(entity == "Catalog_ВидыКонтактнойИнформации" for entity, _ in calls) == 1
+    else:
+        with pytest.raises(CounterpartyWriteError) as error:
+            client._fetch_counterparties_sync()
+        expected = ("invalid_onec_address_kind" if case.startswith("kind_") else
+                    "legal_address_required" if case == "address_absent" else "invalid_legal_address")
+        assert error.value.code == expected
+
+
 @pytest.mark.parametrize("parent_is_self", [False, True])
 def test_onec_normalized_head_accepts_empty_or_self_reference(monkeypatch, parent_is_self):
     from modules.integrations.client import OneCClient
@@ -17,11 +120,13 @@ def test_onec_normalized_head_accepts_empty_or_self_reference(monkeypatch, paren
     empty = "00000000-0000-0000-0000-000000000000"
     row = {"Ref_Key": reference, "Description": "Synthetic head", "НаименованиеПолное": "Synthetic legal head",
            "ИНН": "600187521", "ОбособленноеПодразделение": False,
-           "ГоловнойКонтрагент_Key": reference if parent_is_self else empty, "КодФилиала": ""}
+           "ГоловнойКонтрагент_Key": reference if parent_is_self else empty, "КодФилиала": "",
+           "КонтактнаяИнформация": _legal_contacts()}
     client = OneCClient("https://onec.test")
-    monkeypatch.setattr(client, "_get_all", lambda *args, **kwargs: [row])
+    monkeypatch.setattr(client, "_get_all", _wire_reader([row]))
     assert client._fetch_counterparties_sync() == [{"name": "Synthetic head", "legal_name": "Synthetic legal head",
-                                                 "unp": "600187521", "id": reference}]
+                                                 "unp": "600187521", "id": reference,
+                                                 "legal_address": "Synthetic registered address, 1"}]
 
 
 async def test_onec_wire_branch_import_keeps_two_branches_under_one_legal_entity(api, session, monkeypatch):
@@ -39,30 +144,29 @@ async def test_onec_wire_branch_import_keeps_two_branches_under_one_legal_entity
     parent = '00000000-0000-0000-0000-000000000001'
     empty = '00000000-0000-0000-0000-000000000000'
     head = {'Ref_Key': parent, 'Description': 'Working head', 'НаименованиеПолное': 'Legal head',
-            'ИНН': '600187521', 'ОбособленноеПодразделение': False, 'ГоловнойКонтрагент_Key': empty}
+            'ИНН': '600187521', 'ОбособленноеПодразделение': False, 'ГоловнойКонтрагент_Key': empty,
+            'КонтактнаяИнформация': _legal_contacts()}
     branch = {'Description': 'First branch', 'ИНН': '600187521', 'ОбособленноеПодразделение': True,
               'ГоловнойКонтрагент_Key': parent, 'КодФилиала': '0002'}
     rows = [{**branch, 'Ref_Key': '00000000-0000-0000-0000-000000000002'}, head,
             {**branch, 'Ref_Key': '00000000-0000-0000-0000-000000000003', 'Description': 'Second branch'}]
     client = OneCClient('https://onec.test')
-    monkeypatch.setattr(client, '_get_all', lambda *args, **kwargs: rows)
+    monkeypatch.setattr(client, '_get_all', _wire_reader(rows))
     gateway = api._transport.app.state.core.services.onec
     monkeypatch.setattr(gateway, 'fetch_counterparties', client.fetch_counterparties)
-    # The wire adapter has no confirmed address mapping: reject and roll back,
-    # including an earlier complete card. Never invent an OData address field.
+    # A malformed normalized gateway batch must still roll back an earlier complete card.
     mapped = await client.fetch_counterparties()
     complete = {'id': '00000000-0000-0000-0000-000000000004', 'unp': '191000004',
                 'name': 'Complete test head', 'legal_address': 'Synthetic registered address, 4'}
-    monkeypatch.setattr(gateway, 'fetch_counterparties', AsyncMock(return_value=[complete, *mapped]))
+    incomplete = [{key: value for key, value in row.items() if key != 'legal_address'} for row in mapped]
+    monkeypatch.setattr(gateway, 'fetch_counterparties', AsyncMock(return_value=[complete, *incomplete]))
     response = await api.post('/integrations/1c/sync')
     assert response.status_code == 422, response.text
     assert response.json()['detail']['code'] == 'legal_address_required'
     for model in (Counterparty, CounterpartyAlias, CounterpartyBranch, CounterpartyBranchAlias, OutboxEvent):
         assert await session.scalar(select(func.count()).select_from(model)) == 0
-    # An explicitly complete normalized fixture exercises the branch importer.
-    enriched = [dict(row, legal_address='Synthetic registered address, 1')
-                if row['id'] == parent else row for row in mapped]
-    monkeypatch.setattr(gateway, 'fetch_counterparties', AsyncMock(return_value=enriched))
+    # Exercise the real wire mapper on both imports, including its address-kind catalogue read.
+    monkeypatch.setattr(gateway, 'fetch_counterparties', client.fetch_counterparties)
     for _ in range(2):
         response = await api.post('/integrations/1c/sync')
         assert response.status_code == 200, response.text
@@ -70,6 +174,7 @@ async def test_onec_wire_branch_import_keeps_two_branches_under_one_legal_entity
     branches = list(await session.scalars(select(CounterpartyBranch)))
     aliases = list(await session.scalars(select(CounterpartyBranchAlias)))
     assert len(parents) == 1 and parents[0].legal_name == 'Legal head'
+    assert parents[0].requisites['legal_address'] == 'Synthetic registered address, 1'
     assert len(branches) == len(aliases) == 2
     assert {b.name for b in branches} == {'First branch', 'Second branch'}
     assert all(b.legal_entity_id == parents[0].id and b.portal_branch_code is None for b in branches)
@@ -185,10 +290,12 @@ async def test_onec_preserves_both_names_and_rejects_truncated_legal_name(api, m
     client = OneCClient("https://onec.test")
     ref = '00000000-0000-0000-0000-000000000001'
     rows = [{"Ref_Key": ref, "Description": "Короткое имя", "НаименованиеПолное": "Полное юридическое имя", "ИНН": "600187521",
-             "ОбособленноеПодразделение": False, "ГоловнойКонтрагент_Key": '00000000-0000-0000-0000-000000000000'}]
-    monkeypatch.setattr(client, "_get_all", lambda *args, **kwargs: rows)
+             "ОбособленноеПодразделение": False, "ГоловнойКонтрагент_Key": '00000000-0000-0000-0000-000000000000',
+             "КонтактнаяИнформация": _legal_contacts()}]
+    monkeypatch.setattr(client, "_get_all", _wire_reader(rows))
     mapped = client._fetch_counterparties_sync()
-    assert mapped == [{"id": ref, "name": "Короткое имя", "legal_name": "Полное юридическое имя", "unp": "600187521"}]
+    assert mapped == [{"id": ref, "name": "Короткое имя", "legal_name": "Полное юридическое имя", "unp": "600187521",
+                       "legal_address": "Synthetic registered address, 1"}]
     rows[0]["НаименованиеПолное"] = "Ю" * 256
     mapped = client._fetch_counterparties_sync()
     assert len(mapped[0]["legal_name"]) == 256

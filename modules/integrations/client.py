@@ -18,6 +18,8 @@ from uuid import UUID
 import httpx
 
 from core.services.mdm import CounterpartyWriteError
+from core.services.native_catalog_import import CatalogImportConflict
+from core.services.onec_counterparty_import import KIND, legal_address_kind, legal_address_value
 
 log = logging.getLogger("integrations.onec")
 
@@ -132,11 +134,12 @@ class OneCClient:
     def _fetch_counterparties_sync(self) -> list[dict]:
         rows = self._get_all(
             "Catalog_Контрагенты",
-            {"$select": "Ref_Key,Description,НаименованиеПолное,ИНН,ОбособленноеПодразделение,ГоловнойКонтрагент_Key,КодФилиала",
+            {"$select": "Ref_Key,Description,НаименованиеПолное,ИНН,ОбособленноеПодразделение,ГоловнойКонтрагент_Key,КодФилиала,КонтактнаяИнформация",
              "$orderby": "Ref_Key"},
             page_size=500,
         )
         out: list[dict] = []
+        legal_kind: str | None = None
         for row in rows:
             if not row:
                 continue
@@ -168,7 +171,31 @@ class OneCClient:
                 out.append({"id": str(source_id), "record_kind": "branch", "name": name,
                             "parent_external_ref": str(parent_id), "raw_branch_code": row.get("КодФилиала")})
             else:
-                out.append({"name": name[:255], "legal_name": legal_name, "unp": unp, "id": str(source_id)})
+                mapped = {"name": name[:255], "legal_name": legal_name, "unp": unp, "id": str(source_id)}
+                if unp:
+                    if legal_kind is None:
+                        # Live metadata and the complete bounded catalogue prove these fields.
+                        # The filtered query failed on this source; read the deterministic catalogue.
+                        try:
+                            kinds = self._get_all(KIND, {
+                                "$select": "Ref_Key,Predefined,DeletionMark,PredefinedDataName,ИмяПредопределенногоВида,Тип",
+                                "$orderby": "Ref_Key",
+                            }, page_size=128)
+                            legal_kind = legal_address_kind(kinds)
+                        except (CatalogImportConflict, httpx.HTTPError, ValueError, TypeError):
+                            raise CounterpartyWriteError("invalid_onec_address_kind",
+                                "1С не подтвердила единственный вид юридического адреса", 502) from None
+                    try:
+                        address, reason = legal_address_value(row.get("КонтактнаяИнформация"), legal_kind)
+                    except CatalogImportConflict:
+                        raise CounterpartyWriteError("invalid_legal_address",
+                            "1С вернула некорректную ссылку вида адреса", 422) from None
+                    if reason:
+                        code = "legal_address_required" if reason == "legal_address_missing" else "invalid_legal_address"
+                        raise CounterpartyWriteError(code,
+                            "1С не подтвердила единственный заполненный юридический адрес", 422)
+                    mapped["legal_address"] = address
+                out.append(mapped)
         return out
 
     def _fetch_stock_sync(self) -> list[dict]:
