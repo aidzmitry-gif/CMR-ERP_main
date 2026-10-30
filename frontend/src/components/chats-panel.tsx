@@ -25,14 +25,26 @@ export function ChatsPanel({ compact = false }: { compact?: boolean }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const [open, setOpen] = useState(false);
-  const [chats, setChats] = useState<ChatWithUnread[]>([]);
+  const [chats, setChats] = useState<ChatWithUnread[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     if (compact && !open) return;
     let active = true;
-    void fetchChats().then((items) => { if (active) setChats(items); });
+    void fetchChats().then((items) => {
+      if (active) { setChats(items); setLoadError(items === null); }
+    }, () => {
+      if (active) { setChats(null); setLoadError(true); }
+    });
     return () => { active = false; };
-  }, [compact, open]);
+  }, [compact, open, attempt]);
+
+  function retry() {
+    setChats(null);
+    setLoadError(false);
+    setAttempt((value) => value + 1);
+  }
 
   function closeOnNavigation(event: MouseEvent<HTMLAnchorElement>) {
     if (compact && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0) dialog.current?.close();
@@ -56,12 +68,26 @@ export function ChatsPanel({ compact = false }: { compact?: boolean }) {
         </div>
 
         <div className="flex-1 overflow-y-auto overflow-x-hidden thin-scroll">
-          {chats.length === 0 && (
+          {chats === null && !loadError && (
+            <p role="status" className={`px-4 py-6 text-sm text-muted ${compact ? "" : "chat-rail-detail"}`}>
+              Загрузка диалогов…
+            </p>
+          )}
+          {loadError && (
+            <div role="alert" className={`space-y-2 px-4 py-6 text-sm ${compact ? "" : "chat-rail-detail"}`}>
+              <p className="text-muted">Не удалось загрузить диалоги.</p>
+              <button type="button" aria-label="Повторить загрузку диалогов" onClick={retry}
+                className="rounded-lg border border-line px-3 py-1.5 text-accent-ink hover:bg-sunken">
+                Повторить
+              </button>
+            </div>
+          )}
+          {chats?.length === 0 && (
             <p className={`px-4 py-6 text-sm text-muted ${compact ? "" : "chat-rail-detail"}`}>
               Диалогов пока нет
             </p>
           )}
-          {chats.map((c) => {
+          {chats?.map((c) => {
             const unread = c.unread ?? 0;
             return (
               <Link
@@ -108,7 +134,7 @@ export function ChatsPanel({ compact = false }: { compact?: boolean }) {
   return <>
     <button type="button" title="Чаты и сделки" aria-label="Открыть чаты" aria-haspopup="dialog" aria-expanded={open}
       className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-sunken"
-      onClick={() => { dialog.current?.showModal(); setOpen(true); }}><MessageSquareText size={19} /></button>
+      onClick={() => { setChats(null); setLoadError(false); dialog.current?.showModal(); setOpen(true); }}><MessageSquareText size={19} /></button>
     <dialog ref={dialog} aria-labelledby={titleId} onClose={() => setOpen(false)}
       className="m-auto max-h-[85dvh] w-[min(360px,calc(100vw-24px))] max-w-none rounded-xl border border-line bg-surface p-0 text-ink shadow-pop backdrop:bg-black/30">
       {panel}

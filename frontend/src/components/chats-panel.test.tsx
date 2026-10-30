@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/link", () => ({
@@ -58,5 +58,51 @@ describe("ChatsPanel (Лента)", () => {
     render(<ChatsPanel />);
     await screen.findByText("ОД");
     expect(screen.queryByTitle(/Непрочитанных/)).not.toBeInTheDocument();
+  });
+});
+
+describe("CHAT_LOAD_240: truthful conversation loading", () => {
+  it("shows loading until a successful empty response arrives", async () => {
+    let finish!: (items: []) => void;
+    mock(api.fetchChats).mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    render(<ChatsPanel />);
+    expect(screen.getByText("Загрузка диалогов…")).toBeInTheDocument();
+    expect(screen.queryByText("Диалогов пока нет")).not.toBeInTheDocument();
+    await act(async () => { finish([]); });
+    expect(await screen.findByText("Диалогов пока нет")).toBeInTheDocument();
+  });
+
+  it("shows a failure instead of an empty list for an unavailable response", async () => {
+    mock(api.fetchChats).mockResolvedValue(null);
+    render(<ChatsPanel />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить диалоги");
+    expect(screen.queryByText("Диалогов пока нет")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Повторить загрузку диалогов" })).toBeEnabled();
+    expect(api.fetchChats).toHaveBeenCalledTimes(1);
+  });
+
+  it("contains an unexpected request rejection in the failure state", async () => {
+    mock(api.fetchChats).mockRejectedValue(new Error("synthetic network failure"));
+    render(<ChatsPanel />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить диалоги");
+    expect(screen.queryByText("Диалогов пока нет")).not.toBeInTheDocument();
+  });
+
+  it("retries only on request and shows the returned conversations", async () => {
+    let finish!: (items: api.ChatItem[]) => void;
+    mock(api.fetchChats).mockResolvedValueOnce(null).mockImplementationOnce(
+      () => new Promise((resolve) => { finish = resolve; }),
+    );
+    render(<ChatsPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "Повторить загрузку диалогов" }));
+    expect(screen.getByText("Загрузка диалогов…")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("Диалогов пока нет")).not.toBeInTheDocument();
+    await act(async () => { finish([
+      { deal_id: 24, number: "CRM-24", company: "Тестовый клиент", last_text: "Ответ", channel: "tg", direction: "in", unread: 2 },
+    ]); });
+    expect(await screen.findByText("Тестовый клиент")).toBeInTheDocument();
+    expect(screen.getByTitle("Непрочитанных: 2")).toBeInTheDocument();
+    expect(api.fetchChats).toHaveBeenCalledTimes(2);
   });
 });

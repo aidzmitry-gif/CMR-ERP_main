@@ -858,13 +858,23 @@ export interface ChatItem {
 }
 
 /** Диалоги для панели «Чаты и дела» (сделки с последним сообщением). */
-export async function fetchChats(): Promise<ChatItem[]> {
+export async function fetchChats(): Promise<ChatItem[] | null> {
   try {
     const res = await fetch("/api/sales/chats", { cache: "no-store" });
-    if (!res.ok) return [];
-    return (await res.json()) as ChatItem[];
+    if (!res.ok) return null;
+    const data: unknown = await res.json();
+    if (!Array.isArray(data) || !data.every((item: unknown) => {
+      if (!item || typeof item !== "object") return false;
+      const chat = item as Partial<ChatItem>;
+      return Number.isSafeInteger(chat.deal_id) && Number(chat.deal_id) > 0
+        && typeof chat.number === "string" && typeof chat.company === "string"
+        && typeof chat.last_text === "string" && typeof chat.channel === "string"
+        && typeof chat.direction === "string"
+        && (chat.unread === undefined || (Number.isSafeInteger(chat.unread) && chat.unread >= 0));
+    })) return null;
+    return data as ChatItem[];
   } catch {
-    return [];
+    return null;
   }
 }
 

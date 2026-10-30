@@ -98,6 +98,41 @@ import {
   upsertPlan,
 } from "@/lib/api";
 
+describe("CHAT_LOAD_240: chat response contract", () => {
+  const row = { deal_id: 24, number: "CRM-24", company: "Тестовый клиент", last_text: "Ответ", channel: "tg", direction: "in", unread: 2 };
+
+  it("preserves a successful conversation response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([row]))));
+    expect(await fetchChats()).toEqual([row]);
+    expect(fetch).toHaveBeenCalledWith("/api/sales/chats", { cache: "no-store" });
+  });
+
+  it("preserves a successful empty response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("[]")));
+    expect(await fetchChats()).toEqual([]);
+  });
+
+  it.each([401, 403, 502])("keeps HTTP %i distinct from an empty response", async (status) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status })));
+    expect(await fetchChats()).toBeNull();
+  });
+
+  it("keeps a network failure distinct from an empty response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("synthetic offline")));
+    expect(await fetchChats()).toBeNull();
+  });
+
+  it.each([null, {}, [{}]])("rejects malformed chat payload %#", async (body) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(body))));
+    expect(await fetchChats()).toBeNull();
+  });
+
+  it("keeps invalid JSON distinct from an empty response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html>synthetic error</html>")));
+    expect(await fetchChats()).toBeNull();
+  });
+});
+
 afterEach(() => vi.restoreAllMocks());
 
 function stubFetch(data: unknown, ok = true) {
@@ -608,7 +643,7 @@ describe("api client — прочие операции и fallback'и", () => {
     expect(await fetchApprovals()).toEqual([]);
     expect(await fetchContacts("1")).toEqual([]);
     expect(await fetchEvents()).toEqual([]);
-    expect(await fetchChats()).toEqual([]);
+    expect(await fetchChats()).toBeNull();
     expect(await routeLead(1)).toBeNull();
     expect(await convertLead(1)).toBeNull();
     expect(await fetchOwnerInsight()).toBeNull();
