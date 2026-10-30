@@ -136,7 +136,10 @@ describe("PlanMatrix", () => {
       year_qty: 3,
       year_nh: 0,
     });
-    (plan.upsertPosition as ReturnType<typeof vi.fn>).mockResolvedValue(withNew);
+    let resolveUpsert!: (board: PlanBoard) => void;
+    (plan.upsertPosition as ReturnType<typeof vi.fn>).mockReturnValue(
+      new Promise<PlanBoard>((resolve) => { resolveUpsert = resolve; }),
+    );
 
     render(<PlanMatrix initial={makeBoard()} />);
     fireEvent.click(screen.getByRole("button", { name: /Добавить позицию/ }));
@@ -149,9 +152,16 @@ describe("PlanMatrix", () => {
         expect.objectContaining({ year: 2026, product: "Крышка", monthly: expect.any(Array) }),
       ),
     );
-    // форма закрылась, новое изделие в таблице
-    expect(screen.queryByPlaceholderText("Название изделия")).not.toBeInTheDocument();
+    // Вызов ещё не подтверждён: форма сохраняется, новая строка не появляется.
+    expect(screen.getByPlaceholderText("Название изделия")).toHaveValue("Крышка");
+    expect(screen.queryByText("Крышка")).not.toBeInTheDocument();
+    resolveUpsert(withNew);
+    // После подтверждённого ответа форма закрылась, новое изделие в таблице.
+    await waitFor(() =>
+      expect(screen.queryByPlaceholderText("Название изделия")).not.toBeInTheDocument(),
+    );
     expect(await screen.findByText("Крышка")).toBeInTheDocument();
+    expect(plan.upsertPosition).toHaveBeenCalledTimes(1);
   });
 
   it("кнопка «Добавить» заблокирована при пустом названии изделия", () => {
