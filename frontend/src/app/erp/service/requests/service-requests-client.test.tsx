@@ -1,6 +1,12 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ServiceRequestsClient } from "./service-requests-client";
+import ServicePage from "../page";
+import ServiceRequestsPage from "./page";
+
+vi.mock("@/components/app-shell", () => ({
+  AppShell: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
 
 vi.mock("@dnd-kit/core", () => ({
   DndContext: ({ children, onDragEnd }: { children: React.ReactNode; onDragEnd: (e: unknown) => void }) => <div>{children}<button onClick={() => onDragEnd({ active: { id: 7 }, over: { id: "done" } })}>Synthetic drag to done</button></div>,
@@ -19,6 +25,25 @@ const card = () => screen.getByRole("button", { name: "Открыть заявк
 async function openCreate() { fireEvent.click(await screen.findByRole("button", { name: "Создать заявку" })); fireEvent.change(screen.getByLabelText("Заголовок"), { target: { value: "Synthetic new request" } }); }
 
 describe("native service kanban", () => {
+  it("keeps customer tickets on the module home and links to service requests", async () => {
+    request.mockResolvedValue(response([{ id: 13, customer: "Synthetic customer", subject: "Synthetic support ticket", status: "open" }]));
+    render(<ServicePage />);
+    expect(await screen.findByRole("cell", { name: "Synthetic support ticket" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "Synthetic customer" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Заявки на обслуживание" })).toHaveAttribute("href", "/erp/service/requests");
+    expect(request.mock.calls.map(([path]) => path)).toEqual(["/api/service/tickets"]);
+    expect(request.mock.calls.every(([, options]) => !options?.method || options.method === "GET")).toBe(true);
+  });
+
+  it("opens native requests through the existing deep link", async () => {
+    request.mockResolvedValue(response([row]));
+    render(<ServiceRequestsPage />);
+    expect(await screen.findByRole("button", { name: "Открыть заявку SR-7: Synthetic repair" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Заявки на обслуживание" })).toBeInTheDocument();
+    expect(request.mock.calls.map(([path]) => path)).toEqual(["/api/service/requests"]);
+    expect(request.mock.calls.every(([, options]) => !options?.method || options.method === "GET")).toBe(true);
+  });
+
   it("renders real rows and exact unknown statuses while keeping unsupported SLA unavailable", async () => {
     request.mockResolvedValue(response([row, { ...row, id: 8, status: "external_review", title: "Synthetic external" }]));
     render(<ServiceRequestsClient />); await screen.findByRole("button", { name: /Открыть заявку SR-7/ });

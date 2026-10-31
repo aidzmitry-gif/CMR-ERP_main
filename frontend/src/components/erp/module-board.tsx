@@ -169,7 +169,7 @@ function ModuleBoardScope({
 
   return (
     <main className="flex-1 overflow-auto p-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-ink">{title}</h1>
           {subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}
