@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { STAGE_BY_ID } from "@/lib/sales-stages";
+import { CALL_STATUS } from "@/lib/call-status";
 import {
   loadCounterpartyRelationships,
   type CounterpartyRelationshipKind,
@@ -94,7 +96,7 @@ function RelationshipSection({ kind, title, counterpartyId, focusContactId }: {
       {page.items.length === 0 ? <p className="text-sm text-muted">Связанные сделки не найдены.</p> : <ul className="space-y-2">
         {page.items.map((deal) => <li key={deal.id} className="rounded-lg bg-sunken px-3 py-2 text-sm">
           <Link className="font-medium text-accent underline" href={`/crm/deals/${deal.id}`}>{deal.number} — {deal.title}</Link>
-          <p className="mt-1 text-xs text-muted">Стадия: {deal.stage} · Ответственный: {managerLabel(deal.owner_id, deal.responsible_manager)}</p>
+          <p className="mt-1 text-xs text-muted">Стадия: {STAGE_BY_ID[deal.stage]?.title ?? deal.stage} · Ответственный: {managerLabel(deal.owner_id, deal.responsible_manager)}</p>
         </li>)}
       </ul>}
     </>}
@@ -102,7 +104,7 @@ function RelationshipSection({ kind, title, counterpartyId, focusContactId }: {
       {page.items.length === 0 ? <p className="text-sm text-muted">Связанные звонки не найдены.</p> : <ul className="space-y-2">
         {page.items.map((call) => <li key={call.id} className="rounded-lg bg-sunken px-3 py-2 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="font-medium text-ink">{call.direction === "out" ? "Исходящий" : "Входящий"} · {call.status}</span>
+            <span className="font-medium text-ink">{call.direction === "out" ? "Исходящий" : "Входящий"} · {CALL_STATUS[call.status]?.label ?? call.status}</span>
             <span className="text-xs text-muted">{call.started_at.slice(0, 16).replace("T", " ")}</span>
           </div>
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs">

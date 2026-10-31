@@ -4,15 +4,7 @@ import { Phone, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fetchCallsResult, triggerIncomingCall, type CallRow, type FetchCallsResult } from "@/lib/api";
-
-const STATUS: Record<string, { label: string; cls: string }> = {
-  ringing: { label: "Звонит", cls: "bg-emerald-50 text-emerald-600" },
-  answered: { label: "Разговор", cls: "bg-blue-50 text-blue-600" },
-  ended: { label: "Завершён", cls: "bg-sunken text-muted" },
-  missed: { label: "Пропущен", cls: "bg-red-50 text-red-600" },
-  busy: { label: "Занято", cls: "bg-amber-50 text-amber-600" },
-  failed: { label: "Сбой", cls: "bg-red-50 text-red-600" },
-};
+import { CALL_STATUS as STATUS } from "@/lib/call-status";
 
 // Тестовый номер используется только в dev-сборке.
 const DEMO_PHONE = "+375291112233";

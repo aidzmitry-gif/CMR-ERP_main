@@ -35,9 +35,11 @@ describe("CounterpartyRelationships", () => {
     expect(await screen.findByText("Synthetic shared contact")).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "SYNTHETIC-77 — Synthetic deal" })).toHaveAttribute("href", "/crm/deals/77");
     expect(screen.getByText(/Ответственный: Не назначен/)).toBeInTheDocument();
+    expect(screen.getByText(/Стадия: Новая заявка/)).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "Открыть звонок" })).toHaveAttribute(
       "href", "/crm/calls?counterparty_id=42&call_id=23#call-23",
     );
+    expect(screen.getByText("Входящий · Завершён")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Контакт компании" })).toHaveAttribute(
       "href", "/erp/spravochniki/counterparty/42?contact=7#counterparty-contact-7",
     );
@@ -46,6 +48,34 @@ describe("CounterpartyRelationships", () => {
     expect(urls.map((url) => url.searchParams.get("kind")).sort()).toEqual(["calls", "contacts", "deals"]);
     expect(urls.every((url) => url.searchParams.get("limit") === "20")).toBe(true);
     expect(urls.find((url) => url.searchParams.get("kind") === "contacts")?.searchParams.get("contact_id")).toBe("7");
+  });
+
+  it("shows_readable_statuses_without_reclassifying_unknown_values_or_changing_links", async () => {
+    request.mockImplementation(async (input: string) => {
+      const kind = new URL(input, "https://example.invalid").searchParams.get("kind");
+      const base = { counterparty_id: 42, offset: 0, limit: 20, kind };
+      if (kind === "deals") return response({ ...base, total: 3, items: ["contract", "won", "future_stage"].map((stage, index) => ({
+        id: 77 + index, number: `SYNTHETIC-${77 + index}`, title: "Synthetic deal", counterparty_id: 42,
+        crm_client_id: null, stage, owner_id: null, responsible_manager: null,
+      })) });
+      if (kind === "calls") return response({ ...base, total: 2, items: ["ended", "future_status"].map((status, index) => ({
+        id: 23 + index, call_id: `synthetic-call-${23 + index}`, direction: "out", owner: "Synthetic owner", status,
+        result: null, started_at: "2026-08-01T10:00:00", counterparty_id: 42,
+        contact_id: null, crm_client_id: null, deal_id: null,
+      })) });
+      return response({ ...base, total: 0, items: [] });
+    });
+    render(<CounterpartyRelationships counterpartyId={42} />);
+    expect(await screen.findByText(/Стадия: Договор\/предоплата/)).toBeInTheDocument();
+    expect(screen.getByText(/Стадия: Успех/)).toBeInTheDocument();
+    expect(screen.getByText(/Стадия: future_stage/)).toBeInTheDocument();
+    expect(await screen.findByText("Исходящий · Завершён")).toBeInTheDocument();
+    expect(screen.getByText("Исходящий · future_status")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "SYNTHETIC-77 — Synthetic deal" })).toHaveAttribute("href", "/crm/deals/77");
+    expect(screen.getAllByRole("link", { name: "Открыть звонок" })[1]).toHaveAttribute(
+      "href", "/crm/calls?counterparty_id=42&call_id=24#call-24",
+    );
+    expect(request).toHaveBeenCalledTimes(3);
   });
 
   it("paginates_relationship_sections_without_resetting_other_sections", async () => {
