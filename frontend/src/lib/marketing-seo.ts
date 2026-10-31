@@ -1,4 +1,4 @@
-export type SeoProjectStatus = "active" | "paused" | "archived";
+export type SeoProjectStatus = string;
 
 export interface SeoProject {
   id: number;
@@ -147,7 +147,7 @@ function normalizeSummary(raw: unknown): SeoProjectsSummary {
     pick<unknown>(row, "totalKeywords", "total_keywords"),
     pick<unknown>(row, "totalTasks", "total_tasks"),
   ];
-  if (!counts.every((value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0)) {
+  if (!counts.every(isCount)) {
     throw new Error("Invalid SEO summary response");
   }
   const [totalProjects, activeProjects, totalKeywords, totalTasks] = counts as number[];
@@ -275,13 +275,16 @@ export async function fetchSeoAttention(): Promise<SeoAttentionItem[]> {
 
 export async function fetchSeoDashboard(): Promise<{
   projects: SeoProject[];
-  summary: SeoProjectsSummary;
+  summary: SeoProjectsSummary | null;
 }> {
-  const [projects, summary] = await Promise.all([
+  const [projects, summary] = await Promise.allSettled([
     fetchSeoProjects(),
     fetchSeoProjectsSummary(),
   ]);
-  return { projects, summary };
+  if (summary.status === "rejected" && summary.reason && typeof summary.reason === "object"
+    && (summary.reason.status === 401 || summary.reason.status === 403)) throw summary.reason;
+  if (projects.status === "rejected") throw projects.reason;
+  return { projects: projects.value, summary: summary.status === "fulfilled" ? summary.value : null };
 }
 
 export { EMPTY_SUMMARY };

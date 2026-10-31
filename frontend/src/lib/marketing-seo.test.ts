@@ -348,7 +348,9 @@ describe("fetchSeoDashboard", () => {
       };
     });
     mockFetch(f);
-    await expect(fetchSeoDashboard()).rejects.toThrow("fetch summary failed");
+    const result = await fetchSeoDashboard();
+    expect(result.projects.map((project) => project.id)).toEqual([1, 2]);
+    expect(result.summary).toBeNull();
     expect(f).toHaveBeenCalledTimes(2);
   });
 

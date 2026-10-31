@@ -17,7 +17,6 @@ import { useEffect, useState } from "react";
 
 import { formatNumber } from "@/lib/format";
 import {
-  EMPTY_SUMMARY,
   fetchSeoAttention,
   fetchSeoDashboard,
   type SeoAttentionItem,
@@ -98,7 +97,7 @@ function QuickLinkCard({
 
 function StatusBadge({ status }: { status: SeoProject["status"] }) {
   const active = status === "active";
-  const label = status === "active" ? "Активен" : status === "paused" ? "Пауза" : "Архив";
+  const label = status === "active" ? "Активен" : status === "paused" ? "Пауза" : status === "archived" ? "Архив" : status;
   return (
     <span
       className={clsx(
@@ -120,7 +119,7 @@ const SEO_PRIORITY_LABELS = new Map([
 
 export function MarketingSeoView() {
   const [projects, setProjects] = useState<SeoProject[]>([]);
-  const [summary, setSummary] = useState<SeoProjectsSummary>(EMPTY_SUMMARY);
+  const [summary, setSummary] = useState<SeoProjectsSummary | null>(null);
   const [attention, setAttention] = useState<SeoAttentionItem[]>([]);
   const [attentionError, setAttentionError] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -131,7 +130,7 @@ export function MarketingSeoView() {
     setLoading(true);
     setError(false);
     setProjects([]);
-    setSummary(EMPTY_SUMMARY);
+    setSummary(null);
     setAttention([]);
     setAttentionError(false);
     setAttempt((value) => value + 1);
@@ -204,21 +203,27 @@ export function MarketingSeoView() {
         </div>
       )}
 
+      {!loading && !error && !summary && (
+        <div role="alert" className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          Не удалось загрузить сводку SEO. Список проектов доступен; общие показатели пока неизвестны. Нажмите «Обновить», чтобы повторить загрузку.
+        </div>
+      )}
+
       <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           label="Всего проектов"
-          value={loading ? "…" : error ? "—" : summary.totalProjects}
+          value={loading ? "…" : error || !summary ? "—" : summary.totalProjects}
           icon={<FolderKanban size={15} />}
         />
-        <MetricCard label="Активных проектов" value={loading ? "…" : error ? "—" : summary.activeProjects} />
+        <MetricCard label="Активных проектов" value={loading ? "…" : error || !summary ? "—" : summary.activeProjects} />
         <MetricCard
           label="Ключей в мониторинге"
-          value={loading ? "…" : error ? "—" : formatNumber(summary.totalKeywords)}
+          value={loading ? "…" : error || !summary ? "—" : formatNumber(summary.totalKeywords)}
           icon={<Search size={15} />}
         />
         <MetricCard
           label="SEO-задач"
-          value={loading ? "…" : error ? "—" : formatNumber(summary.totalTasks)}
+          value={loading ? "…" : error || !summary ? "—" : formatNumber(summary.totalTasks)}
           icon={<ListTodo size={15} />}
         />
       </div>
