@@ -131,16 +131,36 @@ test("procurement keeps navigation on the left and renders the approved board de
   await page.reload();
   await expect(receiptSummaryError).toHaveCount(0);
   await expect(page.getByText("За выбранный период проведённых поступлений нет.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Показано 0 из 0 накладных выбранного юрлица за все даты.", { exact: true })).toBeVisible();
   for (const view of [
-    { name: "receipts-desktop-before", width: 1440, height: 1000, dark: false },
-    { name: "receipts-mobile-before", width: 390, height: 844, dark: false },
-    { name: "receipts-dark-before", width: 1440, height: 1000, dark: true },
+    { name: "receipts-desktop", width: 1440, height: 1000, dark: false },
+    { name: "receipts-mobile", width: 390, height: 844, dark: false },
+    { name: "receipts-dark", width: 1440, height: 1000, dark: true },
   ]) {
     await page.setViewportSize({ width: view.width, height: view.height });
     if (view.dark) await page.getByRole("button", { name: "Включить тёмную тему", exact: true }).click();
     await page.getByRole("heading", { name: "Накладные на поступление", exact: true }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath(`${view.name}.png`), fullPage: true });
     await testInfo.attach(view.name, { path: testInfo.outputPath(`${view.name}.png`), contentType: "image/png" });
+    if (view.width === 390) {
+      const workspace = page.getByRole("main").last();
+      const geometry = await workspace.evaluate(root => ({ width: root.clientWidth, scrollWidth: root.scrollWidth,
+        overflow: [...root.querySelectorAll("button,input,select,textarea")].filter(node => node.getClientRects().length && getComputedStyle(node).visibility !== "hidden").map(node => ({ label: node.getAttribute("aria-label") ?? node.textContent?.trim().slice(0, 80), rect: node.getBoundingClientRect() })).filter(item => item.rect.left < -1 || item.rect.right > innerWidth + 1).map(item => ({ label: item.label, left: item.rect.left, right: item.rect.right })) }));
+      expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.width + 1);
+      expect(geometry.overflow).toEqual([]);
+      await testInfo.attach("receipts-mobile-geometry", { body: JSON.stringify(geometry), contentType: "application/json" });
+      const refresh = page.getByRole("button", { name: "Обновить реестр", exact: true });
+      await refresh.focus();
+      await expect(refresh).toBeFocused();
+      for (const field of [
+        { label: "Склад накладной из справочника", image: "receipts-mobile-warehouse" },
+        { label: "Номенклатура строки 1", image: "receipts-mobile-lines" },
+      ]) {
+        await page.getByLabel(field.label, { exact: true }).scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath(`${field.image}.png`), fullPage: true });
+        await testInfo.attach(field.image, { path: testInfo.outputPath(`${field.image}.png`), contentType: "image/png" });
+      }
+    }
   }
   console.log("RECEIPT_SUMMARY_READS", JSON.stringify({ reads: receiptSummaryReads, manualReloads: 1, commandWrites: 0 }));
   for (const url of receiptSummaryUrls) await page.unroute(url);

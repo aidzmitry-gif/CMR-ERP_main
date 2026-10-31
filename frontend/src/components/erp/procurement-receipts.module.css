@@ -1,0 +1,57 @@
+.workspace {
+  width: 100%;
+  min-width: 0;
+  max-width: 1280px;
+  margin-inline: auto;
+  padding: 24px;
+  overflow-wrap: break-word;
+  color-scheme: light;
+}
+
+:global(.dark) .workspace { color-scheme: dark; }
+
+.workspace :is(section, fieldset, label, input, select, textarea) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.workspace label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.workspace :is(input, select, textarea) {
+  min-height: 40px;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.workspace button {
+  max-width: 100%;
+  min-height: 40px;
+  white-space: normal;
+  line-height: 1.45;
+}
+
+/* Existing receipt action rows may contain several long command names. */
+.workspace :global(.flex.gap-2) { flex-wrap: wrap; }
+
+.workspace > section {
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+}
+
+.workspace legend {
+  max-width: 100%;
+  padding-inline: 6px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+@media (max-width: 639px) {
+  .workspace { padding: 16px; }
+  .workspace > section { padding: 16px; }
+}

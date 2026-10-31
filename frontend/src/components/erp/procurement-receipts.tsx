@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 
 import { ProcurementReceiptDrafts } from "./procurement-receipt-drafts";
 import { ProcurementUnlinkedPurchases } from "./procurement-unlinked-purchases";
+import styles from "./procurement-receipts.module.css";
 
 type Account = { code: string; title: string; category: string; cash: boolean; quantity_tracking: boolean };
 type Policy = { id: number; effective_from: string };
@@ -50,13 +51,17 @@ async function get<T>(path: string): Promise<T> {
   const current = loaded?.key === key ? loaded : null;
   const policy = current?.policies.filter((p) => p.effective_from <= date).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0];
   if (foreignLink) return <p role="alert">Юрлицо ссылки не совпадает с настройкой установки.</p>;
-  return <main className="min-w-0 w-full space-y-4 p-4 sm:p-6 lg:pr-24">
-    <h1 className="text-2xl font-semibold">Накладные на поступление</h1>
-    <div className="grid gap-3 rounded-xl border border-line bg-surface p-4 md:grid-cols-2">
+  return <main className={`${styles.workspace} space-y-5 text-ink`}>
+    <header className="space-y-2">
+      <p className="text-xs font-semibold uppercase tracking-widest text-muted">Закупки · первичные документы</p>
+      <h1 className="text-2xl font-semibold tracking-tight">Накладные на поступление</h1>
+      <p className="max-w-3xl text-sm leading-relaxed text-muted">Реестр накладных поставщиков и сверка проведённых поступлений.</p>
+    </header>
+    <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-line bg-surface p-4">
       <span className="text-sm text-muted">Юрлицо задано в настройках.</span>
-      <label>Дата отражения<Input aria-label="Дата отражения" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
+      <label className="w-full sm:w-64">Дата отражения<Input aria-label="Дата отражения" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
     </div>
-    {error && <p role="alert" className="text-red-700">{error}</p>}
+    {error && <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm leading-relaxed text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">{error}</p>}
     {!org && !error && <p>Выберите юрлицо перед просмотром или созданием накладной.</p>}
     {org && <ProcurementReceiptDrafts key={`draft:${org}`} org={org} initialReceipt={org === initialOrganization ? initialReceipt : undefined} accounts={current?.accounts ?? []} policyId={policy?.id} date={date} onPosted={() => setGeneration((v) => v + 1)} onPendingChange={setPendingDocument} />}
     {org && <ProcurementUnlinkedPurchases key={`unlinked:${org}:${generation}`} org={org} />}
