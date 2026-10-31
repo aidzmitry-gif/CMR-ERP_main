@@ -1,0 +1,63 @@
+
+import hashlib,json,os,re,sys,types,http.client,socket,copy
+from pathlib import Path
+ROOT=Path(__file__).resolve().parent
+require=lambda ok,reason:None if ok else (_ for _ in ()).throw(RuntimeError(reason))
+require(os.geteuid()==0 and ROOT.is_dir() and not any(p.is_symlink() for p in (ROOT,*ROOT.parents)),'PRIVATE_RELEASE_ROOT')
+manifest_raw=(ROOT/'manifest.json').read_bytes()
+require(len(sys.argv)==3 and hashlib.sha256(manifest_raw).hexdigest()==sys.argv[2],'MANIFEST_CHANGED')
+manifest=json.loads(manifest_raw)
+for name,expected in manifest['files'].items():
+ p=ROOT/name;require(not p.is_symlink() and hashlib.sha256(p.read_bytes()).hexdigest()==expected,'PACKAGE_BYTES_CHANGED')
+def module(name,path):
+ m=types.ModuleType(name);m.__file__=str(path);sys.modules[name]=m;exec(compile(path.read_bytes(),str(path),'exec'),m.__dict__);return m
+p=json.loads((ROOT/'profile.json').read_bytes())
+original=Path('/opt/cmr-erp-rehearsals/port-source-77de013399024b6a90c89970027c4f63/prepare_mixed.py').read_bytes()
+require(hashlib.sha256(original).hexdigest()=='a8518021b2ebbdfb792c0a96560ca3b053d0f01029633a50c4cf5adf3205b329','ORIGINAL_KERNEL_CHANGED')
+target=module('target_adapter',ROOT/'target.py')
+binding={'format':'ERP_READY_FRESH_TARGET_BINDING_V1','applicationName':p['oldName'],'applicationID':p['oldContainer'],'postgresID':p['postgresContainer'],'database':p['database']}
+b=json.dumps(binding,sort_keys=True).encode();leaves=target.bind_core(original,b,hashlib.sha256(b).hexdigest())
+producer=module('producer_adapter',ROOT/'producer.py');producer.install(leaves)
+k=types.SimpleNamespace(**leaves._namespace)
+module('prepare_mixed',ROOT/'published_prepare.py')
+cp=module('rehearse_mixed_copy',ROOT/'published_copy.py')
+restore=module('frozen_restore',ROOT/'frozen_restore.py')
+runner_path=Path('/opt/belakb-deploy-v1/deploy.py')
+require(hashlib.sha256(runner_path.read_bytes()).hexdigest()=='4855161df501555b5e898b968c555880b1e067f8f191f62cee265a42e7387096','INSTALLED_RUNNER_CHANGED')
+r=module('installed_runner',runner_path)
+helper_ns={'http':http,'socket':socket,'json':json,'re':re,'copy':copy,'require':k.require,'Hold':RuntimeError}
+exec(compile((ROOT/'engine.py').read_bytes(),'<existing-engine>','exec'),helper_ns)
+oracle_ns={'require':k.require,'re':re};exec(compile((ROOT/'original_specs.py').read_bytes(),'<existing-row-oracle>','exec'),oracle_ns)
+flow=module('operation',ROOT/'operation.py');adapter_module=module('current_adapter',ROOT/'adapter.py')
+mode=sys.argv[1];require(mode in ('preflight','apply','observe','recover'),'MODE')
+subroot=ROOT/('preflight' if mode=='preflight' else 'apply')
+if mode in ('preflight','apply'):
+ require(not subroot.exists(),'EXISTING_ATTEMPT_OBSERVE_NO_RETRY');subroot.mkdir(mode=0o700)
+else:require(subroot.is_dir(),'NO_EXISTING_ATTEMPT')
+with leaves.release_lease() as lease:
+ adapter=adapter_module.CurrentMixedAdapter(subroot,p,core=k,leaves=leaves,copy_tool=cp,
+  engine=helper_ns['Engine'](),runner=r,restore_tool=restore,original_specs=oracle_ns['original_specs'],
+  verify_projection=helper_ns['verify_staged_projection'],lease=lease)
+ required=set(flow.MixedOperation.BEFORE_ADMISSION+flow.MixedOperation.AFTER_ADMISSION+('open_database',
+  'observe_for_recovery','recover_opened_target','restore_database','verify_restored_database','restore_frontend',
+  'open_original_database','start_original_backend','start_original_frontend','verify_original_runtime'))
+ require(all(callable(getattr(adapter,name,None)) for name in required),'INCOMPLETE_REAL_ADAPTER')
+ if mode=='preflight':
+  result={'status':'REAL_ADAPTER_READONLY_PREFLIGHT_PASS','result':adapter.admit(),'root':str(ROOT),
+   'manifestSHA256':hashlib.sha256((ROOT/'manifest.json').read_bytes()).hexdigest(),
+   'productionRuntimeChanged':False,'releaseReady':False}
+  with (ROOT/'preflight.json').open('x') as f:json.dump(result,f);f.flush();os.fsync(f.fileno())
+ else:
+  preflight=json.loads((ROOT/'preflight.json').read_bytes())
+  require(preflight['status']=='REAL_ADAPTER_READONLY_PREFLIGHT_PASS' and
+   preflight['manifestSHA256']==hashlib.sha256((ROOT/'manifest.json').read_bytes()).hexdigest(),'PREFLIGHT_NOT_ACCEPTED')
+  operation=flow.MixedOperation(subroot,p['owner'],adapter)
+  try:
+   state=operation.apply() if mode=='apply' else operation.recover() if mode=='recover' else operation.observe()
+   result={'status':state['status'],'phase':state['phase'],'completed':state['completed'],
+    'admissionMayHaveOpened':state['admissionMayHaveOpened'],'openedTarget':state['openedTarget'],
+    'root':str(ROOT),'releaseReady':False}
+  except BaseException as ex:
+   result={'status':'OPERATION_HOLD_REQUIRES_OBSERVATION','errorType':type(ex).__name__,
+    'safeCode':str(ex) if re.fullmatch('[A-Z0-9_]+',str(ex)) else None,'root':str(ROOT),'releaseReady':False}
+print(json.dumps(result))

@@ -91,6 +91,8 @@ jobs:
         run: python scripts/invitation_release_gate.py
       - name: Lint (ruff)
         run: ruff check .
+      - name: Release tooling tests (offline)
+        run: python -B -m pytest -q ops/belakb-deploy/test_compatible_schema_image.py
       - name: Apply migrations (Postgres)
         run: alembic upgrade head
       - name: Apply migrations to isolated CRM acceptance database

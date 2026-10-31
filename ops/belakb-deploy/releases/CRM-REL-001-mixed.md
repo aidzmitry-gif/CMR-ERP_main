@@ -303,3 +303,39 @@ authenticated OIDC/browser acceptance. The G09 concurrency test is excluded from
 backend runtime source policy and requires separately sealed test bytes. Previous a664
 frontend and af9 backend image receipts remain historical and cannot replace these
 current proofs. No production change or RELEASE_READY is claimed.
+
+
+## Модули выпуска с неизменной схемой 0204 — исходники
+
+В репозиторий перенесены `compatible_schema_image.py` и `fresh_backend_image.py`.
+Они расширяют существующий закреплённый обработчик выпуска; отдельный controller,
+установка runner и bootstrap не добавлены. Установленный runner остаётся прежним.
+
+Автономная проверка из корня checkout:
+
+```sh
+python -B -m pytest -q ops/belakb-deploy/test_compatible_schema_image.py
+```
+
+185 сценариев используют подставные Engine/lease/процессы и временные файлы,
+без Docker, SQL и внешних провайдеров. Проверка включена в существующий backend CI
+перед миграциями; проверка бизнес-кода и порог coverage 90% сохранены.
+
+Тесты используют существующие `prepare_mixed.digest/projection`. Только Config
+копируется глубоко, как в установленном runner; HostConfig и Mounts сохраняют
+его семантику ссылок. Fixture `fixtures/accepted_entrypoint_7a8.py.txt` — закреплённый
+исходный текст для проверки renderer, не команда запуска. Чтение этой тестовой
+fixture нормализует CRLF в LF, после чего проверяется точный SHA256
+`7a8b047dbe202dd8de18947d881378e41edc4abe311abc8f11055ac19bbe8567`.
+Проверка сырых байтов настоящего release-пакета остаётся строгой.
+
+Синтетическое тело квитанции OOM в тестах не является доказательством для production.
+Для разрешённого исключения только в created-состоянии нужны отдельно принятые
+происхождение квитанции, её закреплённые байты и применимость к целевой среде.
+Для running/exited сохраняется точное сравнение с исходной конфигурацией.
+
+Это публикация исходников и автономных проверок. Она не подтверждает готовность
+native-пакета, неизменность daemon со времени старого испытания, параметры нового
+created-контейнера, переключение/возврат или пользовательскую приёмку ERP.
+Рабочие данные, конфигурация приложения, схема, права и действия сотрудников
+этим переносом не меняются. Приватные журналы и runtime-снимки в репозиторий не перенесены.
