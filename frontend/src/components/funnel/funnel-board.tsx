@@ -102,6 +102,7 @@ export interface FunnelBoardProps {
 const PRIORITY_TONE: Record<string, string> = {
   Высокий: "bg-red-50 text-red-600",
   Срочно: "bg-red-50 text-red-600",
+  Срочный: "bg-red-50 text-red-600",
   Средний: "bg-amber-50 text-amber-600",
   Контроль: "bg-amber-50 text-amber-600",
   Низкий: "bg-sunken text-muted",
@@ -466,6 +467,9 @@ function Column({
     </div>
   );
 }
+
+// Pure presentation reused by native module workspaces with their own API contracts.
+export { Card as FunnelCardView, Column as FunnelColumn };
 
 // Строки оперативной панели (не-чат): тон-точка + заголовок + текст, всё всегда видно.
 function PanelRows({ panel }: { panel: FunnelPanel }) {
