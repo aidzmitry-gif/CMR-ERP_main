@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { INSTALLATION_CHANGED,INSTALLATION_STORAGE_KEY } from "@/lib/installation-events";
 import { fetchInstanceOrganization,type InstanceOrganization } from "@/lib/instance-organization";
-import { createContext,useContext,useEffect,useState,type ComponentType,type ReactNode } from "react";
+import { createContext,useContext,useEffect,useLayoutEffect,useState,type ComponentType,type ReactNode } from "react";
 
 const InstanceContext = createContext<InstanceOrganization | null>(null);
 
@@ -38,7 +38,8 @@ function LoadInstanceOrganization({ children }: { children: (organization: Insta
     return () => { active = false; };
   }, [attempt]);
 
-  useEffect(() => {
+  // Subscribe before paint and before mounted forms can emit a change from their effects.
+  useLayoutEffect(() => {
     if (!organization) return;
     let active = true;
     const original = `${organization.id}:${organization.unp}:${organization.revision ?? 0}`;

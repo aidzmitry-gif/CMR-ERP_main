@@ -32,6 +32,20 @@ it("detects A-to-B-to-A through the saved revision", async () => {
   await screen.findByText("Original form"); window.dispatchEvent(new Event(INSTALLATION_CHANGED));
   expect(await screen.findByRole("alert")).toHaveTextContent("изменились");
 });
+it("observes installation changes from the first mounted form effect", async () => {
+  const request = vi.fn().mockResolvedValueOnce(ok(context())).mockResolvedValueOnce(ok(context(7, 3)));
+  const mounted = vi.fn(); vi.stubGlobal("fetch", request);
+  function MountedForm() {
+    useEffect(() => { mounted(); window.dispatchEvent(new Event(INSTALLATION_CHANGED)); }, []);
+    return <input aria-label="Original draft" defaultValue="Preserved draft" />;
+  }
+  render(<InstanceOrganizationGate>{() => <MountedForm />}</InstanceOrganizationGate>);
+  expect(await screen.findByRole("alert")).toHaveTextContent("форма заблокирована");
+  expect(screen.getByLabelText("Original draft")).toHaveValue("Preserved draft");
+  expect(screen.getByLabelText("Original draft").closest("[inert]")).not.toBeNull();
+  expect(mounted).toHaveBeenCalledOnce();
+  expect(request).toHaveBeenCalledTimes(2);
+});
 it("keeps the form usable when the verified installation has not changed", async () => {
   const request = vi.fn().mockResolvedValue(ok(context())); vi.stubGlobal("fetch", request);
   render(<InstanceOrganizationGate>{() => <span>Same form</span>}</InstanceOrganizationGate>);
