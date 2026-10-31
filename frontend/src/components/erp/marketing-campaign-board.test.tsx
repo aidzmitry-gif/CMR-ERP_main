@@ -1,9 +1,15 @@
 import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const authHeaders = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/auth-headers-server", () => ({ backendAuthHeaders: authHeaders }));
 
 import { MarketingCampaignBoard } from "@/components/erp/marketing-campaign-board";
 
 afterEach(() => vi.unstubAllGlobals());
+beforeEach(() => {
+  authHeaders.mockReset().mockResolvedValue({ "X-Test-Principal": "current-ssr-user" });
+});
 
 describe("MarketingCampaignBoard", () => {
   it("показывает «Нет кампаний», когда backend отдаёт пустой список", async () => {
@@ -19,7 +25,7 @@ describe("MarketingCampaignBoard", () => {
     expect(screen.getByText("Нет кампаний").closest("td")).toHaveAttribute("colspan", "8");
   });
 
-  it("показывает «Нет кампаний», когда backend недоступен (fetch кидает ошибку)", async () => {
+  it("отличает сетевую ошибку от подтверждённого пустого списка", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
@@ -29,10 +35,11 @@ describe("MarketingCampaignBoard", () => {
 
     render(await MarketingCampaignBoard());
 
-    expect(screen.getByText("Нет кампаний")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Не удалось загрузить UTM-атрибуцию");
+    expect(screen.queryByText("Нет кампаний")).not.toBeInTheDocument();
   });
 
-  it("показывает «Нет кампаний», когда backend отвечает не-ok статусом", async () => {
+  it("отличает HTTP 500 от подтверждённого пустого списка", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({ ok: false, status: 500, json: async () => [] })),
@@ -40,7 +47,46 @@ describe("MarketingCampaignBoard", () => {
 
     render(await MarketingCampaignBoard());
 
-    expect(screen.getByText("Нет кампаний")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Не удалось загрузить UTM-атрибуцию");
+    expect(screen.queryByText("Нет кампаний")).not.toBeInTheDocument();
+  });
+
+  it("передаёт текущую серверную сессию без переопределения роли и без кеширования", async () => {
+    const fetcher = vi.fn(async () => ({ ok: true, json: async () => [] }));
+    vi.stubGlobal("fetch", fetcher);
+    render(await MarketingCampaignBoard());
+    expect(authHeaders).toHaveBeenCalledExactlyOnceWith();
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith(
+      `${process.env.BACKEND_URL ?? "http://127.0.0.1:8000"}/marketing/campaigns/attribution`,
+      { cache: "no-store", headers: { "X-Test-Principal": "current-ssr-user" } },
+    );
+  });
+
+  it.each([401, 403])("показывает отказ доступа HTTP %s без тела ответа", async (status) => {
+    const body = vi.fn(async () => ({ detail: "private backend detail" }));
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status, json: body })));
+    render(await MarketingCampaignBoard());
+    expect(screen.getByRole("alert")).toHaveTextContent("Нет доступа к UTM-атрибуции");
+    expect(screen.queryByText("Нет кампаний")).not.toBeInTheDocument();
+    expect(screen.queryByText(/private backend detail/)).not.toBeInTheDocument();
+    expect(body).not.toHaveBeenCalled();
+  });
+
+  it("не выдаёт повреждённый ответ за кампании или пустой список", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => [{ id: 1 }] })));
+    render(await MarketingCampaignBoard());
+    expect(screen.getByRole("alert")).toHaveTextContent("Не удалось загрузить UTM-атрибуцию");
+    expect(screen.queryByText("Нет кампаний")).not.toBeInTheDocument();
+  });
+
+  it("не отправляет запрос без сессии, если её получение завершилось ошибкой", async () => {
+    authHeaders.mockRejectedValue(new Error("private session detail"));
+    const fetcher = vi.fn(async () => ({ ok: true, json: async () => [] }));
+    vi.stubGlobal("fetch", fetcher);
+    render(await MarketingCampaignBoard());
+    expect(screen.getByRole("alert")).toHaveTextContent("Не удалось загрузить UTM-атрибуцию");
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(screen.queryByText(/private session detail/)).not.toBeInTheDocument();
   });
 
   it("рендерит строки кампаний с реальными значениями полей", async () => {

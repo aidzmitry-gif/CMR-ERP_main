@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // next/link → простая <a> в jsdom (проверяем href навигации, а не роутер Next).
@@ -46,7 +47,7 @@ function metricCardByLabel(label: string): HTMLElement {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   // Дефолт: один активный проект, без «требует внимания». Тесты переопределяют по нужде.
   mockedDashboard.mockResolvedValue({
     projects: [project()],
@@ -103,21 +104,72 @@ describe("MarketingSeoView", () => {
     render(<MarketingSeoView />);
 
     expect(await screen.findByText(/Нет привязанных SEO-проектов/)).toBeInTheDocument();
-    // без проектов «Дашборд» помечен «скоро» → это не ссылка
+    // Дашборд уже существует: без проекта показываем действительную причину недоступности.
     expect(screen.queryByRole("link", { name: /Дашборд/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Дашборд").closest("div")!.parentElement).toHaveAttribute("title", "Нет проектов");
     // и вообще ни одной ссылки на карточку проекта
     expect(
       screen.queryAllByRole("link").filter((a) => a.getAttribute("href")?.includes("/seo/projects/")),
     ).toHaveLength(0);
   });
 
-  it("сбой загрузки показывает баннер ошибки и пустую таблицу", async () => {
+  it("сбой загрузки показывает недоступность данных без ложных нулей и пустого списка", async () => {
     mockedDashboard.mockRejectedValue(new Error("backend down"));
     render(<MarketingSeoView />);
 
     expect(await screen.findByText(/Не удалось загрузить SEO-проекты/)).toBeInTheDocument();
-    // и таблица в пустом состоянии, без строк проектов
-    expect(screen.getByText(/Нет привязанных SEO-проектов/)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Не удалось загрузить SEO-проекты");
+    expect(screen.getByText("Данные проектов недоступны.")).toBeInTheDocument();
+    expect(screen.queryByText(/Нет привязанных SEO-проектов/)).not.toBeInTheDocument();
+    expect(screen.getByText("Дашборд").closest("div")!.parentElement).toHaveAttribute("title", "Недоступно");
+    for (const label of ["Всего проектов", "Активных проектов", "Ключей в мониторинге", "SEO-задач"]) {
+      expect(within(metricCardByLabel(label)).getByText("—")).toBeInTheDocument();
+      expect(within(metricCardByLabel(label)).queryByText("0")).not.toBeInTheDocument();
+    }
+  });
+
+  it("поздний успешный ответ не возвращает проекты после более нового отказа", async () => {
+    let resolveOld!: (value: Awaited<ReturnType<typeof seo.fetchSeoDashboard>>) => void;
+    const oldResponse = new Promise<Awaited<ReturnType<typeof seo.fetchSeoDashboard>>>((resolve) => { resolveOld = resolve; });
+    mockedDashboard.mockReturnValueOnce(oldResponse).mockRejectedValueOnce(new Error("access denied"));
+    render(<StrictMode><MarketingSeoView /></StrictMode>);
+    await screen.findByText(/Не удалось загрузить SEO-проекты/);
+    expect(mockedDashboard).toHaveBeenCalledTimes(2);
+    await act(async () => resolveOld({
+      projects: [project()],
+      summary: { totalProjects: 1, activeProjects: 1, totalKeywords: 320, totalTasks: 8 },
+    }));
+    expect(screen.queryByRole("link", { name: "Каталог АКБ" })).not.toBeInTheDocument();
+    expect(screen.getByText("Данные проектов недоступны.")).toBeInTheDocument();
+    expect(within(metricCardByLabel("Всего проектов")).getByText("—")).toBeInTheDocument();
+  });
+
+  it("при обновлении сразу скрывает прежние ссылки и внимание, отказ не превращает их в нули", async () => {
+    mockedAttention.mockResolvedValue([{ kind: "task", projectId: 1, projectName: "Каталог АКБ", title: "Проверить", priority: "high", url: "" }]);
+    render(<MarketingSeoView />);
+    await screen.findByRole("link", { name: "Каталог АКБ" });
+    expect(screen.getByText("Требует внимания")).toBeInTheDocument();
+    let rejectRefresh!: (error: Error) => void;
+    mockedDashboard.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectRefresh = reject; }));
+    fireEvent.click(screen.getByRole("button", { name: /Обновить/ }));
+    expect(screen.queryAllByRole("link")).toHaveLength(0);
+    expect(screen.queryByText("Требует внимания")).not.toBeInTheDocument();
+    expect(within(metricCardByLabel("Всего проектов")).getByText("…")).toBeInTheDocument();
+    await act(async () => rejectRefresh(new Error("private access detail")));
+    expect(screen.getByText("Данные проектов недоступны.")).toBeInTheDocument();
+    expect(screen.queryByText(/Нет привязанных SEO-проектов/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/private access detail/)).not.toBeInTheDocument();
+    expect(within(metricCardByLabel("Всего проектов")).getByText("—")).toBeInTheDocument();
+  });
+
+  it("после ошибки повторная загрузка восстанавливает подтверждённые данные", async () => {
+    mockedDashboard.mockRejectedValueOnce(new Error("offline"));
+    render(<MarketingSeoView />);
+    await screen.findByText(/Не удалось загрузить SEO-проекты/);
+    fireEvent.click(screen.getByRole("button", { name: /Обновить/ }));
+    expect(await screen.findByRole("link", { name: "Каталог АКБ" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(within(metricCardByLabel("Всего проектов")).getByText("1")).toBeInTheDocument();
   });
 
   it("секция «Требует внимания» рендерит не более 5 пунктов со ссылкой на проект", async () => {
@@ -139,7 +191,14 @@ describe("MarketingSeoView", () => {
 
     const link = screen.getByRole("link", { name: "Проект 0: Задача 0" });
     expect(link).toHaveAttribute("href", "/erp/marketing/seo/projects/100");
-    expect(screen.getByText("high")).toBeInTheDocument();
+    expect(screen.getByText("Высокий")).toBeInTheDocument();
+  });
+
+  it("не выдумывает перевод неизвестного приоритета задачи", async () => {
+    mockedAttention.mockResolvedValue([{ kind: "task", projectId: 1, projectName: "Каталог АКБ", title: "Проверить", priority: "external_review", url: "" }]);
+    render(<MarketingSeoView />);
+    expect(await screen.findByText("external_review")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Каталог АКБ: Проверить" })).toHaveAttribute("href", "/erp/marketing/seo/projects/1");
   });
 
   it("без пунктов внимания секция «Требует внимания» не рендерится", async () => {
@@ -147,6 +206,36 @@ describe("MarketingSeoView", () => {
     render(<MarketingSeoView />);
     await screen.findByText("Каталог АКБ");
     expect(screen.queryByText("Требует внимания")).not.toBeInTheDocument();
+  });
+
+  it("сбой списка внимания виден отдельно, подтверждённые проекты и метрики остаются доступны", async () => {
+    mockedAttention.mockRejectedValue(new Error("private attention detail"));
+    render(<MarketingSeoView />);
+    expect(await screen.findByRole("link", { name: "Каталог АКБ" })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Не удалось загрузить задачи, требующие внимания");
+    expect(screen.queryByText(/Не удалось загрузить SEO-проекты/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/private attention detail/)).not.toBeInTheDocument();
+    expect(within(metricCardByLabel("Всего проектов")).getByText("1")).toBeInTheDocument();
+  });
+
+  it("обновление после ошибки внимания показывает реальные задачи и убирает предупреждение", async () => {
+    mockedAttention.mockRejectedValueOnce(new Error("offline"));
+    render(<MarketingSeoView />);
+    await screen.findByText(/Не удалось загрузить задачи, требующие внимания/);
+    mockedAttention.mockResolvedValueOnce([{ kind: "task", projectId: 1, projectName: "Каталог АКБ", title: "Проверить", priority: "high", url: "" }]);
+    fireEvent.click(screen.getByRole("button", { name: /Обновить/ }));
+    expect(await screen.findByRole("link", { name: "Каталог АКБ: Проверить" })).toHaveAttribute("href", "/erp/marketing/seo/projects/1");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it.each([401, 403])("отказ доступа внимания HTTP %s скрывает весь набор данных, включая успешный projects", async (status) => {
+    mockedAttention.mockRejectedValue(Object.assign(new Error("private access detail"), { status }));
+    render(<MarketingSeoView />);
+    expect(await screen.findByText(/Не удалось загрузить SEO-проекты/)).toBeInTheDocument();
+    expect(screen.queryAllByRole("link")).toHaveLength(0);
+    expect(screen.queryByText("Требует внимания")).not.toBeInTheDocument();
+    expect(screen.queryByText(/private access detail/)).not.toBeInTheDocument();
+    expect(within(metricCardByLabel("Всего проектов")).getByText("—")).toBeInTheDocument();
   });
 
   it("кнопка «Обновить» перезагружает данные (повторный вызов фетчей)", async () => {

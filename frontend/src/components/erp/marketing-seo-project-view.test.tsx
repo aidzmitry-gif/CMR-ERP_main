@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // next/link → простая <a> в jsdom (компонент тестируем изолированно от роутера).
@@ -110,15 +110,14 @@ describe("MarketingSeoProjectView", () => {
     expect(screen.getByText("Переписать title главной")).toBeInTheDocument();
   });
 
-  it("критические задачи падают на project.taskCount, когда дашборд не загрузился", async () => {
+  it("не выдаёт общее число задач за критические при недоступном дашборде", async () => {
     fetchDashboard.mockResolvedValue(null);
     render(<MarketingSeoProjectView projectId="5" />);
     await screen.findByRole("heading", { name: "microchips.by" });
-    // dashboard=null → criticalTasks берётся из project.taskCount (9)
     const tile = screen.getByText("Критические задачи").closest("div")?.parentElement;
-    expect(tile).toHaveTextContent("9");
-    // и quick wins показывает пустую подсказку
-    expect(screen.getByText("В последнем снимке нет быстрых побед.")).toBeInTheDocument();
+    expect(tile).toHaveTextContent("—");
+    expect(tile).not.toHaveTextContent("9");
+    expect(screen.getByText("Данные о быстрых победах недоступны.")).toBeInTheDocument();
   });
 
   it("статус «active» отображается как «Активен»", async () => {
@@ -146,7 +145,7 @@ describe("MarketingSeoProjectView", () => {
     expect(screen.queryByRole("link", { name: /Открыть в SEO/ })).not.toBeInTheDocument();
   });
 
-  it("переключение на вкладку «SEO-задачи» с пустым списком показывает подсказку про sync", async () => {
+  it("показывает подтверждённый пустой список задач без предположений о синхронизации", async () => {
     render(<MarketingSeoProjectView projectId="5" />);
     await screen.findByRole("heading", { name: "microchips.by" });
     // на дашборде плитки видны
@@ -155,7 +154,7 @@ describe("MarketingSeoProjectView", () => {
     fireEvent.click(screen.getByRole("button", { name: /SEO-задачи/ }));
 
     expect(
-      screen.getByText(/Задачи не синхронизированы\. Запустите sync в SEO-платформе\./),
+      screen.getByText("В проекте пока нет SEO-задач."),
     ).toBeInTheDocument();
     // ушли с дашборда — KPI-плиток больше нет
     expect(screen.queryByText("Ключей в мониторинге")).not.toBeInTheDocument();
@@ -219,5 +218,128 @@ describe("MarketingSeoProjectView", () => {
 
     await waitFor(() => expect(fetchProject).toHaveBeenCalledWith("8"));
     expect(await screen.findByRole("heading", { name: "battery.by" })).toBeInTheDocument();
+  });
+});
+
+
+describe("SEO detail truthful failure states", () => {
+  const httpError = (status: number) => Object.assign(new Error("private backend body"), { status });
+
+  it("отличает сбой проекта от подтверждённого 404", async () => {
+    fetchProject.mockRejectedValue(httpError(500));
+    render(<MarketingSeoProjectView projectId="5" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить SEO-проект.");
+    expect(screen.queryByText("SEO-проект не найден.")).not.toBeInTheDocument();
+    expect(screen.queryByText("private backend body")).not.toBeInTheDocument();
+  });
+
+  it("сбой дашборда оставляет проект и неизвестные показатели вместо нулей", async () => {
+    fetchDashboard.mockRejectedValue(httpError(500));
+    render(<MarketingSeoProjectView projectId="5" />);
+    await screen.findByRole("heading", { name: "microchips.by" });
+    expect(screen.getByRole("alert")).toHaveTextContent("Не удалось загрузить дашборд проекта.");
+    for (const label of ["В ТОП-10", "Критические задачи"]) {
+      expect(screen.getByText(label).parentElement).toHaveTextContent("—");
+    }
+    expect(screen.getByText("Данные о видимости недоступны.")).toBeInTheDocument();
+    expect(screen.queryByText("В последнем снимке нет быстрых побед.")).not.toBeInTheDocument();
+  });
+
+  it("сбой списка задач не становится подтверждённым пустым списком", async () => {
+    fetchTasks.mockRejectedValue(httpError(500));
+    render(<MarketingSeoProjectView projectId="5" />);
+    await screen.findByRole("heading", { name: "microchips.by" });
+    fireEvent.click(screen.getByRole("button", { name: /SEO-задачи/ }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Не удалось загрузить SEO-задачи.");
+    expect(screen.queryByText(/Задачи не синхронизированы|В проекте пока нет SEO-задач/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["project", fetchProject], ["dashboard", fetchDashboard], ["tasks", fetchTasks], ["link", fetchDeepLink],
+  ])("отказ 403 в %s закрывает карточку целиком", async (_name, fetcher) => {
+    fetcher.mockRejectedValue(httpError(403));
+    render(<MarketingSeoProjectView projectId="5" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Нет доступа к SEO-проекту.");
+    expect(screen.queryByRole("heading", { name: "microchips.by" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Ключей в мониторинге")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Открыть в SEO/ })).not.toBeInTheDocument();
+  });
+
+  it("истёкшую сессию не обозначает отсутствующим проектом", async () => {
+    fetchTasks.mockRejectedValue(httpError(401));
+    render(<MarketingSeoProjectView projectId="5" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Сессия истекла. Войдите в систему.");
+    expect(screen.queryByRole("heading", { name: "microchips.by" })).not.toBeInTheDocument();
+  });
+
+  it("сбой внешней ссылки не скрывает доступный проект", async () => {
+    fetchDeepLink.mockRejectedValue(httpError(500));
+    render(<MarketingSeoProjectView projectId="5" />);
+    expect(await screen.findByRole("heading", { name: "microchips.by" })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Не удалось загрузить ссылку SEO.");
+  });
+
+  it("восстанавливает дашборд только по явному обновлению, без скрытого повтора", async () => {
+    fetchDashboard.mockRejectedValueOnce(httpError(500)).mockResolvedValue(dashboard);
+    render(<MarketingSeoProjectView projectId="5" />);
+    await screen.findByRole("heading", { name: "microchips.by" });
+    expect(fetchDashboard).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Обновить" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(await screen.findByText("12")).toBeInTheDocument();
+    for (const fetcher of [fetchProject, fetchDashboard, fetchTasks, fetchDeepLink]) expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("не показывает старую карточку в первый рендер нового projectId", async () => {
+    const view = render(<MarketingSeoProjectView projectId="5" />);
+    await screen.findByRole("heading", { name: "microchips.by" });
+    fetchProject.mockReturnValue(new Promise(() => {}));
+    view.rerender(<MarketingSeoProjectView projectId="8" />);
+    expect(screen.queryByRole("heading", { name: "microchips.by" })).not.toBeInTheDocument();
+    expect(screen.getByText("Загрузка проекта…")).toBeInTheDocument();
+  });
+
+  it("запоздалый ответ старого проекта не заменяет новый", async () => {
+    let completeOld!: (value: SeoProject) => void;
+    fetchProject.mockReturnValueOnce(new Promise<SeoProject>((resolve) => { completeOld = resolve; }));
+    const view = render(<MarketingSeoProjectView projectId="5" />);
+    const next = { ...project, id: 8, name: "Другой учебный проект" };
+    fetchProject.mockResolvedValue(next);
+    fetchDashboard.mockResolvedValue({ ...dashboard, project: next });
+    view.rerender(<MarketingSeoProjectView projectId="8" />);
+    await screen.findByRole("heading", { name: next.name });
+    await act(async () => completeOld(project));
+    expect(screen.getByRole("heading", { name: next.name })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "microchips.by" })).not.toBeInTheDocument();
+  });
+
+  it("не принимает ответ другой карточки за запрошенный проект", async () => {
+    fetchProject.mockResolvedValue({ ...project, id: 8 });
+    render(<MarketingSeoProjectView projectId="5" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить SEO-проект.");
+    expect(screen.queryByRole("heading", { name: "microchips.by" })).not.toBeInTheDocument();
+  });
+
+  it("чужой дашборд не подмешивает показатели в доступный проект", async () => {
+    fetchDashboard.mockResolvedValue({ ...dashboard, project: { ...project, id: 8 } });
+    render(<MarketingSeoProjectView projectId="5" />);
+    await screen.findByRole("heading", { name: "microchips.by" });
+    expect(screen.getByRole("alert")).toHaveTextContent("Не удалось загрузить дашборд проекта.");
+    expect(screen.getByText("В ТОП-10").parentElement).toHaveTextContent("—");
+  });
+
+  it("показывает подтверждённые нулевые показатели дашборда", async () => {
+    fetchDashboard.mockResolvedValue({ ...dashboard, top10Count: 0, criticalTasks: 0 });
+    render(<MarketingSeoProjectView projectId="5" />);
+    await screen.findByRole("heading", { name: "microchips.by" });
+    for (const label of ["В ТОП-10", "Критические задачи"]) expect(screen.getByText(label).parentElement).toHaveTextContent("0");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("неизвестный статус не превращает проект в архивный", async () => {
+    fetchProject.mockResolvedValue({ ...project, status: "pending_external" });
+    render(<MarketingSeoProjectView projectId="5" />);
+    expect(await screen.findByText("pending_external")).toBeInTheDocument();
+    expect(screen.queryByText("Архив")).not.toBeInTheDocument();
   });
 });

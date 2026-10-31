@@ -80,9 +80,9 @@ function Editor({ org, orderId, onPendingChange }: { org: number; orderId: numbe
     try { const v = await fetchLandedPreview(org, orderId); await who(n, current.principal); if (active(n)) setPreview(v); }
     catch (e) { complete = false; if (active(n)) { setPreview(null); setError(message(e)); if (e instanceof ReadFailure && [401, 403].includes(e.status)) { clearView(); throw e; } } }
     try { const v = await fetchExpectedReservations(org, orderId); await who(n, current.principal); if (active(n)) setExpected(v); }
-    catch { if (active(n)) setExpected(null); }
+    catch (e) { complete = false; if (active(n)) { setExpected(null); setError(message(e)); if (e instanceof ReadFailure && [401, 403].includes(e.status)) { clearView(); throw e; } } }
     try { const v = await fetchDealDemandOrder(org, orderId); await who(n, current.principal); if (active(n)) setDemandOrder(v); }
-    catch { if (active(n)) setDemandOrder(null); }
+    catch (e) { complete = false; if (active(n)) { setDemandOrder(null); setError(message(e)); if (e instanceof ReadFailure && [401, 403].includes(e.status)) { clearView(); throw e; } } }
     try { const v = await fetchPlan(org, orderId); await who(n, current.principal); if (active(n)) { setPlan(v); if (!planDirty) { setMethod(v.transport_method_code ?? "truck"); setTarget(v.target_arrival_date ?? ""); } } }
     catch (e) { complete = false; if (active(n)) { setPlan(null); setError(message(e)); if (e instanceof ReadFailure && [401, 403].includes(e.status)) { clearView(); throw e; } } }
     try { const v = await fetchEditHistory(org, orderId); await who(n, current.principal); if (active(n)) { setHistory(v); setHistoryError(""); } }

@@ -62,11 +62,11 @@ function VisibilityChart({ points }: { points: { date: string; visibility: numbe
 
   return (
 
-    <div className="flex h-32 items-end gap-1">
+    <div className="flex h-32 items-end justify-center gap-2">
 
       {points.map((p) => (
 
-        <div key={p.date} className="group flex flex-1 flex-col items-center gap-1">
+        <div key={p.date} className="group flex h-full min-w-0 max-w-12 flex-1 flex-col items-center justify-end gap-1">
 
           <div
 
@@ -140,85 +140,80 @@ function PriorityBadge({ priority }: { priority: string }) {
 
 export function MarketingSeoProjectView({ projectId }: { projectId: string }) {
 
-  const [project, setProject] = useState<SeoProject | null>(null);
-
-  const [dashboard, setDashboard] = useState<SeoDashboard | null>(null);
-
-  const [tasks, setTasks] = useState<SeoTask[]>([]);
-
-  const [deepLink, setDeepLink] = useState<string | null>(null);
-
   const [tab, setTab] = useState<TabKey>("dashboard");
-
-  const [loading, setLoading] = useState(true);
-
-  const [notFound, setNotFound] = useState(false);
-
-
+  const [revision, setRevision] = useState(0);
+  const key = `${projectId}:${revision}`;
+  const [loaded, setLoaded] = useState<{
+    key: string;
+    project: SeoProject | null;
+    dashboard: SeoDashboard | null;
+    tasks: SeoTask[] | null;
+    deepLink: string | null;
+    error: string | null;
+    notFound: boolean;
+    linkFailed: boolean;
+  } | null>(null);
+  const state = loaded?.key === key ? loaded : null;
+  const loading = state === null;
+  const project = state?.project ?? null;
+  const dashboard = state?.dashboard ?? null;
+  const tasks = state?.tasks ?? [];
+  const deepLink = state?.deepLink ?? null;
+  const error = state?.error ?? null;
+  const notFound = state?.notFound ?? false;
 
   useEffect(() => {
-
-    let cancelled = false;
-
-    setLoading(true);
-
-    setNotFound(false);
-
-    void Promise.all([
-
-      fetchSeoProject(projectId),
-
-      fetchSeoProjectDashboard(projectId).catch(() => null),
-
-      fetchSeoTasks(projectId).catch(() => []),
-
-      fetchSeoDeepLink(projectId),
-
-    ])
-
-      .then(([proj, dash, taskList, link]) => {
-
-        if (cancelled) return;
-
-        if (!proj) {
-
-          setNotFound(true);
-
+    let active = true;
+    const empty = { key, project: null, dashboard: null, tasks: null, deepLink: null,
+      error: null, notFound: false, linkFailed: false };
+    void (async () => {
+      // Defer even invalid route handling so a changed key hides old content immediately.
+      await Promise.resolve();
+      const requestedId = Number(projectId);
+      if (!/^\d+$/.test(projectId) || !Number.isSafeInteger(requestedId) || requestedId <= 0) {
+        if (active) setLoaded({ ...empty, notFound: true });
+        return;
+      }
+      try {
+        const results = await Promise.allSettled([
+          fetchSeoProject(projectId), fetchSeoProjectDashboard(projectId),
+          fetchSeoTasks(projectId), fetchSeoDeepLink(projectId),
+        ] as const);
+        if (!active) return;
+        const statuses = results.flatMap((result) => result.status === "rejected"
+          ? [(result.reason as { status?: number } | null)?.status] : []);
+        if (statuses.includes(401) || statuses.includes(403)) {
+          setLoaded({ ...empty, error: statuses.includes(401)
+            ? "Сессия истекла. Войдите в систему." : "Нет доступа к SEO-проекту." });
           return;
-
         }
-
-        setProject(proj);
-
-        setDashboard(dash);
-
-        setTasks(taskList);
-
-        setDeepLink(link);
-
-      })
-
-      .catch(() => {
-
-        if (!cancelled) setNotFound(true);
-
-      })
-
-      .finally(() => {
-
-        if (!cancelled) setLoading(false);
-
-      });
-
-    return () => {
-
-      cancelled = true;
-
-    };
-
-  }, [projectId]);
-
-
+        const [projectResult, dashboardResult, tasksResult, linkResult] = results;
+        if (projectResult.status === "rejected") {
+          setLoaded({ ...empty, error: "Не удалось загрузить SEO-проект. Повторите попытку." });
+          return;
+        }
+        if (projectResult.value === null) {
+          setLoaded({ ...empty, notFound: true });
+          return;
+        }
+        if (!projectResult.value || projectResult.value.id !== requestedId) {
+          setLoaded({ ...empty, error: "Не удалось загрузить SEO-проект. Повторите попытку." });
+          return;
+        }
+        setLoaded({
+          ...empty, project: projectResult.value,
+          dashboard: dashboardResult.status === "fulfilled"
+            && dashboardResult.value?.project?.id === requestedId ? dashboardResult.value : null,
+          tasks: tasksResult.status === "fulfilled" && Array.isArray(tasksResult.value) ? tasksResult.value : null,
+          deepLink: linkResult.status === "fulfilled" ? linkResult.value : null,
+          linkFailed: linkResult.status === "rejected",
+        });
+      } catch {
+        if (active) setLoaded({ ...empty, error: "Не удалось загрузить SEO-проект. Повторите попытку." });
+      }
+    })();
+    return () => { active = false; };
+  }, [projectId, key]);
 
   if (loading) {
 
@@ -236,7 +231,7 @@ export function MarketingSeoProjectView({ projectId }: { projectId: string }) {
 
 
 
-  if (notFound || !project) {
+  if (notFound || error || !project) {
 
     return (
 
@@ -256,7 +251,11 @@ export function MarketingSeoProjectView({ projectId }: { projectId: string }) {
 
         </Link>
 
-        <p className="mt-6 text-sm text-muted">SEO-проект не найден.</p>
+        <p role={error ? "alert" : undefined} className="mt-6 text-sm text-muted">{error ?? "SEO-проект не найден."}</p>
+        <button type="button" onClick={() => setRevision((value) => value + 1)}
+          className="mt-4 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink">
+          Повторить
+        </button>
 
       </main>
 
@@ -317,6 +316,10 @@ export function MarketingSeoProjectView({ projectId }: { projectId: string }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => setRevision((value) => value + 1)}
+            className="rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-sunken/50">
+            Обновить
+          </button>
 
           {deepLink && (
             <a
@@ -362,7 +365,7 @@ export function MarketingSeoProjectView({ projectId }: { projectId: string }) {
 
                 ? "Пауза"
 
-                : "Архив"}
+                : project.status === "archived" ? "Архив" : project.status || "—"}
 
           </span>
 
@@ -444,6 +447,9 @@ export function MarketingSeoProjectView({ projectId }: { projectId: string }) {
 
 
 
+      {state?.linkFailed && <p role="alert" className="mt-4 text-sm text-muted">Не удалось загрузить ссылку SEO.</p>}
+      {tab === "dashboard" && !dashboard && <p role="alert" className="mt-4 text-sm text-muted">Не удалось загрузить дашборд проекта.</p>}
+
       {tab === "dashboard" ? (
 
         <>
@@ -480,7 +486,7 @@ export function MarketingSeoProjectView({ projectId }: { projectId: string }) {
 
               <div className="mt-2 text-2xl font-bold tabular-nums text-ink">
 
-                {formatNumber(dashboard?.top10Count ?? 0)}
+                {dashboard ? formatNumber(dashboard.top10Count) : "—"}
 
               </div>
 
@@ -492,7 +498,7 @@ export function MarketingSeoProjectView({ projectId }: { projectId: string }) {
 
               <div className="mt-2 text-2xl font-bold tabular-nums text-ink">
 
-                {formatNumber(dashboard?.criticalTasks ?? project.taskCount)}
+                {dashboard ? formatNumber(dashboard.criticalTasks) : "—"}
 
               </div>
 
@@ -510,7 +516,7 @@ export function MarketingSeoProjectView({ projectId }: { projectId: string }) {
 
               <div className="mt-4">
 
-                <VisibilityChart points={visibility} />
+                {dashboard ? <VisibilityChart points={visibility} /> : <p className="text-sm text-muted">Данные о видимости недоступны.</p>}
 
               </div>
 
@@ -520,7 +526,7 @@ export function MarketingSeoProjectView({ projectId }: { projectId: string }) {
 
               <h2 className="text-sm font-semibold text-ink">Быстрые победы</h2>
 
-              {quickWins.length === 0 ? (
+              {!dashboard ? <p className="mt-3 text-sm text-muted">Данные о быстрых победах недоступны.</p> : quickWins.length === 0 ? (
 
                 <p className="mt-3 text-sm text-muted">В последнем снимке нет быстрых побед.</p>
 
@@ -594,13 +600,15 @@ export function MarketingSeoProjectView({ projectId }: { projectId: string }) {
 
       ) : (
 
-        <div className="mt-5 overflow-hidden rounded-2xl border border-line bg-surface shadow-card">
+        <div role="region" aria-label="SEO-задачи проекта" tabIndex={0} className="mt-5 overflow-x-auto rounded-2xl border border-line bg-surface shadow-card">
 
-          {tasks.length === 0 ? (
+          {state?.tasks === null ? (
+            <p role="alert" className="px-4 py-8 text-center text-sm text-muted">Не удалось загрузить SEO-задачи. Повторите попытку.</p>
+          ) : tasks.length === 0 ? (
 
             <div className="px-4 py-8 text-center text-sm text-muted">
 
-              Задачи не синхронизированы. Запустите sync в SEO-платформе.
+              В проекте пока нет SEO-задач.
 
             </div>
 

@@ -1,3 +1,5 @@
+import { backendAuthHeaders } from "@/lib/auth-headers-server";
+
 interface CampaignAttribution {
   id: number;
   name: string;
@@ -10,26 +12,48 @@ interface CampaignAttribution {
   goal: string;
 }
 
+function isCampaign(value: unknown): value is CampaignAttribution {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Record<string, unknown>;
+  return Number.isSafeInteger(row.id) && Number(row.id) > 0
+    && Number.isSafeInteger(row.leads) && Number(row.leads) >= 0
+    && ["name", "channel", "utm_source", "utm_medium", "utm_campaign", "budget", "goal"]
+      .every((key) => typeof row[key] === "string");
+}
+
 export async function MarketingCampaignBoard() {
   const base = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
   let items: CampaignAttribution[] = [];
+  let error = "";
   try {
     const res = await fetch(`${base}/marketing/campaigns/attribution`, {
       cache: "no-store",
+      headers: await backendAuthHeaders(),
     });
-    if (res.ok) items = (await res.json()) as CampaignAttribution[];
+    if (res.status === 401 || res.status === 403) {
+      error = "Нет доступа к UTM-атрибуции. Проверьте вход и права доступа.";
+    } else {
+      if (!res.ok) throw new Error("Campaigns unavailable");
+      const data: unknown = await res.json();
+      if (!Array.isArray(data) || !data.every(isCampaign)
+        || new Set(data.map((row) => row.id)).size !== data.length) {
+        throw new Error("Invalid campaigns response");
+      }
+      items = data;
+    }
   } catch {
-    // backend недоступен — пустая таблица
+    error = "Не удалось загрузить UTM-атрибуцию. Попробуйте обновить страницу.";
   }
 
   return (
     <section className="mt-8">
-      <h2 className="text-lg font-semibold mb-3 text-zinc-900 dark:text-zinc-100">
-        UTM Attribution
+      <h2 className="mb-3 text-lg font-semibold text-ink">
+        UTM-атрибуция
       </h2>
-      <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-700">
+      {error ? <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p> : (
+      <div className="overflow-x-auto rounded-2xl border border-line bg-surface text-ink shadow-card">
         <table className="w-full text-sm">
-          <thead className="bg-zinc-50 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 uppercase text-xs tracking-wide">
+          <thead className="bg-sunken/50 text-xs uppercase tracking-wide text-muted">
             <tr>
               <th className="px-4 py-3 text-left">Кампания</th>
               <th className="px-4 py-3 text-left">Канал</th>
@@ -41,12 +65,12 @@ export async function MarketingCampaignBoard() {
               <th className="px-4 py-3 text-left">Цель</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          <tbody className="divide-y divide-line">
             {items.length === 0 ? (
               <tr>
                 <td
                   colSpan={8}
-                  className="px-4 py-6 text-center text-zinc-400 dark:text-zinc-500"
+                  className="px-4 py-6 text-center text-muted"
                 >
                   Нет кампаний
                 </td>
@@ -55,26 +79,26 @@ export async function MarketingCampaignBoard() {
               items.map((c) => (
                 <tr
                   key={c.id}
-                  className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
+                  className="transition-colors hover:bg-sunken/30"
                 >
-                  <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-100">
+                  <td className="px-4 py-3 font-medium text-ink">
                     {c.name}
                   </td>
-                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{c.channel}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-zinc-500">
+                  <td className="px-4 py-3 text-muted">{c.channel}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-muted">
                     {c.utm_source || "—"}
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-zinc-500">
+                  <td className="px-4 py-3 font-mono text-xs text-muted">
                     {c.utm_medium || "—"}
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-zinc-500">
+                  <td className="px-4 py-3 font-mono text-xs text-muted">
                     {c.utm_campaign || "—"}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">{c.budget}</td>
-                  <td className="px-4 py-3 text-right tabular-nums font-semibold text-indigo-600 dark:text-indigo-400">
+                  <td className="px-4 py-3 text-right font-semibold tabular-nums text-accent-ink">
                     {c.leads}
                   </td>
-                  <td className="px-4 py-3 text-zinc-500 dark:text-zinc-400 text-xs">
+                  <td className="px-4 py-3 text-xs text-muted">
                     {c.goal || "—"}
                   </td>
                 </tr>
@@ -83,6 +107,7 @@ export async function MarketingCampaignBoard() {
           </tbody>
         </table>
       </div>
+      )}
     </section>
   );
 }

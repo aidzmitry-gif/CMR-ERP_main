@@ -29,12 +29,16 @@ const blockerLabel = (value: string) => ({
 }[value] ?? value);
 
 export function ProcurementPurchaseChain({ org, orderId }: { org: number; orderId: number }) {
+  return <PurchaseChainReview key={`${org}:${orderId}`} org={org} orderId={orderId} />;
+}
+
+function PurchaseChainReview({ org, orderId }: { org: number; orderId: number }) {
   const [chain, setChain] = useState<PurchaseChain | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   async function load() {
-    setBusy(true); setError("");
+    setBusy(true); setChain(null); setError("");
     try { setChain(await fetchPurchaseChain(org, orderId)); }
     catch (e) { setError(e instanceof Error ? e.message : "Не удалось прочитать цепочку закупки"); }
     finally { setBusy(false); }

@@ -13,7 +13,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { formatNumber } from "@/lib/format";
 import {
@@ -51,12 +51,14 @@ function QuickLinkCard({
   icon,
   href,
   soon,
+  statusText,
 }: {
   label: string;
   description: string;
   icon: React.ReactNode;
   href?: string;
   soon?: boolean;
+  statusText?: string;
 }) {
   const body = (
     <>
@@ -64,6 +66,7 @@ function QuickLinkCard({
         {icon}
         <span className="text-sm font-medium text-ink">{label}</span>
         {soon && <span className="text-[10px] font-semibold uppercase text-faint">скоро</span>}
+        {!soon && statusText && <span className="text-[10px] font-semibold uppercase text-faint">{statusText}</span>}
       </div>
       <p className="mt-1.5 text-xs leading-relaxed text-muted">{description}</p>
     </>
@@ -86,7 +89,7 @@ function QuickLinkCard({
         "rounded-xl border border-line bg-surface px-4 py-3.5",
         soon && "opacity-75",
       )}
-      title={soon ? "Раздел в разработке" : undefined}
+      title={soon ? "Раздел в разработке" : statusText}
     >
       {body}
     </div>
@@ -108,34 +111,57 @@ function StatusBadge({ status }: { status: SeoProject["status"] }) {
   );
 }
 
+const SEO_PRIORITY_LABELS = new Map([
+  ["critical", "Критический"],
+  ["high", "Высокий"],
+  ["medium", "Средний"],
+  ["low", "Низкий"],
+]);
+
 export function MarketingSeoView() {
   const [projects, setProjects] = useState<SeoProject[]>([]);
   const [summary, setSummary] = useState<SeoProjectsSummary>(EMPTY_SUMMARY);
   const [attention, setAttention] = useState<SeoAttentionItem[]>([]);
+  const [attentionError, setAttentionError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
-  const load = useCallback(async () => {
+  function refresh() {
     setLoading(true);
     setError(false);
-    try {
-      const [data, attn] = await Promise.all([fetchSeoDashboard(), fetchSeoAttention()]);
-      setProjects(data.projects);
-      setSummary(data.summary);
-      setAttention(attn);
-    } catch {
-      setError(true);
-      setProjects([]);
-      setSummary(EMPTY_SUMMARY);
-      setAttention([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    setProjects([]);
+    setSummary(EMPTY_SUMMARY);
+    setAttention([]);
+    setAttentionError(false);
+    setAttempt((value) => value + 1);
+  }
 
   useEffect(() => {
+    let active = true;
+    async function load() {
+      try {
+        const [data, attn] = await Promise.allSettled([fetchSeoDashboard(), fetchSeoAttention()]);
+        if (!active) return;
+        const attentionDenied = attn.status === "rejected" && attn.reason
+          && typeof attn.reason === "object" && (attn.reason.status === 401 || attn.reason.status === 403);
+        if (data.status === "rejected" || attentionDenied) {
+          setError(true);
+          return;
+        }
+        setProjects(data.value.projects);
+        setSummary(data.value.summary);
+        if (attn.status === "fulfilled") setAttention(attn.value);
+        else setAttentionError(true);
+      } catch {
+        if (active) setError(true);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
     void load();
-  }, [load]);
+    return () => { active = false; };
+  }, [attempt]);
 
   return (
     <main className="flex-1 overflow-auto p-6">
@@ -153,7 +179,7 @@ export function MarketingSeoView() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => void load()}
+            onClick={refresh}
             disabled={loading}
             className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-sunken/50 disabled:opacity-50"
           >
@@ -173,26 +199,26 @@ export function MarketingSeoView() {
       </div>
 
       {error && (
-        <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          Не удалось загрузить SEO-проекты. Проверьте backend и попробуйте обновить.
+        <div role="alert" className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          Не удалось загрузить SEO-проекты. Попробуйте обновить страницу; если ошибка повторится, проверьте вход и права доступа.
         </div>
       )}
 
       <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           label="Всего проектов"
-          value={loading ? "…" : summary.totalProjects}
+          value={loading ? "…" : error ? "—" : summary.totalProjects}
           icon={<FolderKanban size={15} />}
         />
-        <MetricCard label="Активных проектов" value={loading ? "…" : summary.activeProjects} />
+        <MetricCard label="Активных проектов" value={loading ? "…" : error ? "—" : summary.activeProjects} />
         <MetricCard
           label="Ключей в мониторинге"
-          value={loading ? "…" : formatNumber(summary.totalKeywords)}
+          value={loading ? "…" : error ? "—" : formatNumber(summary.totalKeywords)}
           icon={<Search size={15} />}
         />
         <MetricCard
           label="SEO-задач"
-          value={loading ? "…" : formatNumber(summary.totalTasks)}
+          value={loading ? "…" : error ? "—" : formatNumber(summary.totalTasks)}
           icon={<ListTodo size={15} />}
         />
       </div>
@@ -205,7 +231,7 @@ export function MarketingSeoView() {
             description="Видимость, динамика позиций и быстрые победы по проекту."
             icon={<BarChart3 size={15} />}
             href={projects[0] ? `/erp/marketing/seo/projects/${projects[0].id}` : undefined}
-            soon={projects.length === 0}
+            statusText={loading ? "Загрузка…" : error ? "Недоступно" : projects.length === 0 ? "Нет проектов" : undefined}
           />
           <QuickLinkCard
             label="Ключевые запросы"
@@ -228,9 +254,10 @@ export function MarketingSeoView() {
         </div>
       </div>
 
-      {attention.length > 0 && (
+      {(attentionError || attention.length > 0) && (
         <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50/60 p-5">
           <h2 className="text-sm font-semibold text-amber-900">Требует внимания</h2>
+          {attentionError && <p role="alert" className="mt-3 text-sm text-amber-950">Не удалось загрузить задачи, требующие внимания. Попробуйте обновить страницу.</p>}
           <ul className="mt-3 space-y-2">
             {attention.slice(0, 5).map((item, i) => (
               <li key={`${item.projectId}-${i}`} className="flex flex-wrap items-center justify-between gap-2 text-sm">
@@ -241,7 +268,7 @@ export function MarketingSeoView() {
                   {item.projectName}: {item.title}
                 </Link>
                 <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
-                  {item.priority}
+                  {SEO_PRIORITY_LABELS.get(item.priority) ?? item.priority}
                 </span>
               </li>
             ))}
@@ -250,21 +277,22 @@ export function MarketingSeoView() {
       )}
 
       <div className="mt-8">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-ink">Проекты</h2>
-          <span className="flex items-center gap-1 text-xs text-faint">
+          <span className="flex w-full items-center gap-1 text-xs text-faint sm:w-auto">
             <TrendingUp size={12} />
-            {loading ? "Загрузка…" : "Реестр CRM · синхронизация с SEO-платформой"}
+            {loading ? "Загрузка…" : error ? "Данные не загружены" : "Реестр CRM · синхронизация с SEO-платформой"}
           </span>
         </div>
 
-        <div className="mt-3 overflow-hidden rounded-2xl border border-line bg-surface shadow-card">
+        <div role="region" aria-label="Список SEO-проектов" tabIndex={0} className="mt-3 overflow-x-auto rounded-2xl border border-line bg-surface shadow-card">
           {loading ? (
             <div className="px-4 py-8 text-center text-sm text-muted">Загрузка проектов…</div>
+          ) : error ? (
+            <div className="px-4 py-8 text-center text-sm text-muted">Данные проектов недоступны.</div>
           ) : projects.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-muted">
-              Нет привязанных SEO-проектов. Подключите SEO-сервис через webhook или{" "}
-              <code className="text-xs">POST /marketing/seo/projects/link</code>.
+              Нет привязанных SEO-проектов. После подключения SEO-сервиса они появятся здесь.
             </div>
           ) : (
             <table className="w-full text-sm">

@@ -45,6 +45,7 @@ beforeEach(() => {
     if (url.endsWith("request-plan-context")) return ok({ organization_id: org, principal, can_manage: manage });
     if (url.includes("/sku-options?q=")) return ok({ organization_id: org, items: [{ id: 71, code: "AKB-190", title: "Аккумулятор", unit: "шт" }, { id: 99, code: "NEW", title: "Новый товар", unit: "шт" }], truncated: false });
     if (url.includes("/edit-history?after_id=")) return ok({ organization_id: org, order_id: 7, number: org === 1 ? "ZAK-7" : "B-7", items: [], next_after_id: null });
+    if (url.endsWith("expected-reservations/order/7") || url.endsWith("orders/7/deal-demands")) return ok({ organization_id: org, order_id: 7, lines: [] });
     if (init?.method) {
       const c = JSON.parse(String(init.body)) as EditCommand;
       const common = { version: 1, organization_id: org, principal, request_key: c.request_key, command_hash: await commandHash(c), order_id: 7, action: c.action };
@@ -75,6 +76,46 @@ beforeEach(() => {
   }); vi.stubGlobal("fetch", f);
 });
 afterEach(() => vi.unstubAllGlobals());
+it.each([
+  ["expected-reservations/order/7", 401],
+  ["expected-reservations/order/7", 403],
+  ["orders/7/deal-demands", 401],
+  ["orders/7/deal-demands", 403],
+] as const)("access330 clears previously loaded composition when %s denies with %s", async (suffix, code) => {
+  await ready();
+  const original = f.getMockImplementation()!;
+  f.mockImplementation((url: string, init?: RequestInit) => url.endsWith(suffix)
+    ? Promise.resolve({ ok: false, status: code, json: async () => ({ detail: "denied" }) })
+    : original(url, init));
+  fireEvent.click(screen.getByRole("button", { name: "Проверить состав" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Проверить состав" })).toBeEnabled());
+  expect(screen.queryByText("Состав заказа ZAK-7")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Shenzhen Co/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Добавить строку" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Сохранить и закрыть" })).toBeDisabled();
+  expect(screen.getByRole("alert")).toHaveTextContent(String(code));
+  expect(writes()).toHaveLength(0);
+});
+it.each(["expected-reservations/order/7", "orders/7/deal-demands"])(
+  "access330 reports unavailable %s and recovers only on explicit refresh", async suffix => {
+    const original = f.getMockImplementation()!;
+    let unavailable = true;
+    f.mockImplementation((url: string, init?: RequestInit) => unavailable && url.endsWith(suffix)
+      ? Promise.resolve({ ok: false, status: 500, json: async () => ({ detail: "unavailable" }) })
+      : original(url, init));
+    await ready();
+    expect(screen.getByRole("alert")).toHaveTextContent("500");
+    expect(screen.getByText(/Shenzhen Co/)).toBeInTheDocument();
+    expect(f.mock.calls.filter(([url]) => String(url).endsWith(suffix))).toHaveLength(1);
+    unavailable = false;
+    fireEvent.click(screen.getByRole("button", { name: "Проверить состав" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Проверить состав" })).toBeEnabled());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText("Состав заказа ZAK-7")).toBeInTheDocument();
+    expect(f.mock.calls.filter(([url]) => String(url).endsWith(suffix))).toHaveLength(2);
+    expect(writes()).toHaveLength(0);
+  },
+);
 async function ready() { render(<ProcurementMachineEditor orderId={7} suggestedOrg="1" />);
   await waitForCompany(); await screen.findByText("Состав заказа ZAK-7"); await waitFor(() => expect(screen.getByRole("button", { name: "Проверить состав" })).toBeEnabled()); }
 async function selectNewSku() { await screen.findByRole("option", { name: "NEW · Новый товар · шт" }); fireEvent.change(screen.getByLabelText("Номенклатура из справочника"), { target: { value: "99" } }); }
