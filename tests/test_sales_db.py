@@ -962,6 +962,7 @@ async def test_ai_draft_reply_unit():
     from modules.sales.models import Deal, Message
 
     class _Settings:
+        environment = "dev"
         ai_enabled = True
         llm_base_url = ""  # mock-режим
         llm_model = "qwen2.5"
@@ -981,6 +982,7 @@ async def test_ai_assist_unit():
     from modules.sales.models import Deal
 
     class _Settings:
+        environment = "dev"
         ai_enabled = True
         llm_base_url = ""
         llm_model = "qwen2.5"
@@ -1005,6 +1007,7 @@ async def test_ai_event_handler(session):
     from modules.sales.events import on_incoming_message_ai
 
     class _Settings:
+        environment = "dev"
         ai_enabled = True
         llm_base_url = ""
         llm_model = "qwen2.5"

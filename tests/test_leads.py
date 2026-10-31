@@ -917,6 +917,7 @@ async def test_ai_qualify_lead_unit():
     from modules.leads.models import Lead
 
     class _Settings:
+        environment = "dev"
         ai_enabled = True
         llm_base_url = ""  # mock-режим
         llm_model = "qwen2.5"
