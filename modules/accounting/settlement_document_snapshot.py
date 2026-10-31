@@ -35,7 +35,8 @@ def procurement_result(row, revision):
 
 def sales_result(row):
     return {"source": "sales", "id": row.id, "number": row.number,
-            "version": row.version, "reference": f"sales:document:{row.id}"}
+            "version": row.version, "reference": f"sales:document:{row.id}",
+            "content_sha256": row.content_sha256}
 
 
 async def options(session, org_id: int, counterparty_id: int, term: str):
