@@ -17,12 +17,14 @@ function deptGroup(dept: string): HTMLElement {
 }
 
 describe("DocsArchive", () => {
-  it("рендерит заголовок, гейт доступа архивариуса и demo-строки", () => {
+  it("обозначает локальный макет и образцы без выдуманной авторизации", () => {
     render(<DocsArchive />);
     expect(screen.getByRole("heading", { name: /Архив документов/ })).toBeInTheDocument();
-    // гейт доступа: роль doc_admin и вошедший архивариус
-    expect(screen.getByText(/роль: doc_admin/)).toBeInTheDocument();
-    expect(screen.getAllByText(/Архивариус · Кузнецова Л\./).length).toBeGreaterThan(0);
+    expect(screen.getByRole("note", { name: "Демонстрационный архив" }))
+      .toHaveTextContent("Серверные документы не меняются");
+    expect(screen.getByText("Макет")).toBeVisible();
+    expect(screen.queryByText(/Сейчас вошёл:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/роль: doc_admin/)).not.toBeInTheDocument();
     // конкретные помеченные документы из demo-данных
     expect(screen.getByText(/Счёт СЧ-0461/)).toBeInTheDocument();
     expect(screen.getByText(/Договор ДГ-0120 — тендер РУП/)).toBeInTheDocument();
@@ -81,6 +83,7 @@ describe("DocsArchive", () => {
     expect(screen.getByText(/Восстановлено:/)).toBeInTheDocument();
     // журнал вырос до 4 (добавлена запись restore)
     expect(within(journalBadge).getByText("4")).toBeInTheDocument();
+    expect(screen.getByRole("note", { name: "Демонстрационный архив" })).toBeVisible();
   });
 
   it("«Удалить» безвозвратно убирает документ и логирует «удалён безвозвратно»", () => {

@@ -5,10 +5,15 @@ AI-подмодули всех модулей обращались к нему, 
 маршрутизация локал↔API и учёт токенов живут в одном месте.
 
 В деве локальная модель (Qwen/Ollama) может быть не поднята — при пустом
-``llm_base_url`` шлюз работает в детерминированном mock-режиме (как 1С-mock).
+``llm_base_url`` шлюз работает в mock-режиме только при ``environment=dev``.
 Реальный LiteLLM (OpenAI-совместимый) подключается тем же контрактом ``complete``.
 """
 from __future__ import annotations
+
+import asyncio
+import json
+
+import httpx
 
 
 class LLMGateway:
@@ -16,8 +21,9 @@ class LLMGateway:
 
     def __init__(self, settings=None) -> None:
         self.enabled = bool(getattr(settings, "ai_enabled", False))
-        self.base_url = getattr(settings, "llm_base_url", "") or ""
+        self.base_url = (getattr(settings, "llm_base_url", "") or "").strip()
         self.model = getattr(settings, "llm_model", "") or ""
+        self.dev_mode = getattr(settings, "environment", "") == "dev"
 
     async def complete(self, prompt: str, system: str = "", kind: str = "") -> str:
         """Сгенерировать ответ модели. Требует включённого AI-слоя (feature-flag).
@@ -28,12 +34,70 @@ class LLMGateway:
         if not self.enabled:
             raise RuntimeError("AI-слой выключен (feature-flag ai_enabled)")
         if self.base_url:
-            # TODO(ai): реальный OpenAI-совместимый запрос к LiteLLM/Ollama
             return await self._call_model(prompt, system)
-        return self._mock(kind)
+        if self.dev_mode:
+            return self._mock(kind)
+        raise RuntimeError("Некорректные настройки AI-шлюза")
 
-    async def _call_model(self, prompt: str, system: str) -> str:  # pragma: no cover
-        raise NotImplementedError("Реальный LiteLLM подключается на этапе AI-слоя")
+    async def _call_model(self, prompt: str, system: str) -> str:
+        try:
+            url = httpx.URL(self.base_url)
+            valid_url = (
+                url.scheme in {"http", "https"} and url.host
+                and not url.username and not url.password and not url.query and not url.fragment
+                and "?" not in self.base_url and "#" not in self.base_url
+            )
+        except (httpx.InvalidURL, ValueError):
+            valid_url = False
+        if not valid_url or not self.model.strip():
+            raise RuntimeError("Некорректные настройки AI-шлюза") from None
+
+        suffix = "/v1/chat/completions" if url.path in {"", "/"} else "/chat/completions"
+        endpoint = self.base_url.rstrip("/") + suffix
+        messages = [{"role": "user", "content": prompt}]
+        if system:
+            messages.insert(0, {"role": "system", "content": system})
+
+        # A configured provider failure must never become a synthetic mock answer.
+        # Disable redirects/proxy discovery so prompts go only to the configured endpoint.
+        try:
+            async with asyncio.timeout(30), httpx.AsyncClient(
+                timeout=httpx.Timeout(30, connect=5), follow_redirects=False, trust_env=False,
+            ) as client:
+                async with client.stream(
+                    "POST", endpoint,
+                    json={"model": self.model, "messages": messages, "stream": False},
+                    headers={"Accept": "application/json", "Accept-Encoding": "identity"},
+                ) as response:
+                    if response.status_code != 200:
+                        raise RuntimeError("AI-провайдер недоступен")
+                    # Reject encoded bodies before HTTPX can decompress them without a bound.
+                    if response.headers.get("content-encoding", "").strip().lower() not in {"", "identity"}:
+                        raise RuntimeError("AI-провайдер вернул некорректный ответ")
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes(chunk_size=16384):
+                        if len(body) + len(chunk) > 1024 * 1024:
+                            raise RuntimeError("AI-провайдер вернул некорректный ответ")
+                        body.extend(chunk)
+        except (httpx.HTTPError, TimeoutError):
+            # Provider exceptions can contain URLs or response/prompt material.
+            raise RuntimeError("AI-провайдер недоступен") from None
+
+        try:
+            data = json.loads(body)
+        except ValueError:
+            raise RuntimeError("AI-провайдер вернул некорректный ответ") from None
+        choices = data.get("choices") if isinstance(data, dict) else None
+        choice = choices[0] if isinstance(choices, list) and choices else None
+        message = choice.get("message") if isinstance(choice, dict) else None
+        content = message.get("content") if isinstance(message, dict) else None
+        if (
+            not isinstance(content, str) or not content.strip()
+            or message.get("role") != "assistant" or message.get("refusal")
+            or message.get("tool_calls") or choice.get("finish_reason") != "stop"
+        ):
+            raise RuntimeError("AI-провайдер вернул некорректный ответ")
+        return content
 
     # Детерминированные ответы без модели — чтобы AI-слой работал в деве (как 1С-mock).
     _MOCKS = {

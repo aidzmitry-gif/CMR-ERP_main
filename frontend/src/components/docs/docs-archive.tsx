@@ -12,18 +12,16 @@ import {
   RotateCcw,
   Scale,
   ShieldAlert,
-  ShieldCheck,
   Sparkles,
   Trash2,
   TriangleAlert,
-  User,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { formatByn } from "@/lib/format";
 
 // demo-данные (бэкенда по экрану пока нет). Валюта — BYN.
-// Архив документов — модуль ВНЕ CRM: безвозвратное удаление помеченных в сделках
-// документов/версий. Доступ — только у архивариуса (роль doc_admin). Всё логируется.
+// Прототип архива: документы, роли, AI-вердикты и журнал ниже — локальные образцы.
+// Серверный архив, его права и политика удаления ещё не подключены.
 
 type IconCmp = React.ComponentType<{ size?: number; className?: string }>;
 
@@ -380,39 +378,24 @@ export function DocsArchive() {
           <div>
             <h1 className="flex items-center gap-2 text-xl font-bold text-ink">
               <Archive size={20} className="text-accent" /> Архив документов
+              <span className="rounded-full border border-line px-2 py-0.5 text-xs font-medium text-muted">Макет</span>
             </h1>
             <p className="mt-1 max-w-3xl text-sm text-muted">
-              Сюда попадают документы и версии,{" "}
-              <b className="font-semibold text-ink">помеченные на удаление</b> в карточках
-              сделок. В самой CRM удалить документ нельзя — только пометить. Безвозвратное
-              удаление выполняется здесь, сгруппировано по отделам: можно отметить отдел и
-              удалить группой.
+              Пример разбора документов и версий, помеченных на удаление,
+              с группировкой по отделам. Можно попробовать действия на образцах.
             </p>
           </div>
         </div>
 
-        {/* Гейт доступа — роль архивариуса */}
-        <div className="flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+        <div role="note" aria-label="Демонстрационный архив" className="flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
           <ShieldAlert size={22} className="mt-0.5 flex-shrink-0 text-amber-600" />
           <div className="space-y-2 text-[13px] leading-relaxed text-amber-700">
             <div>
-              Доступ к безвозвратному удалению —{" "}
-              <b className="font-semibold">только у ответственного за архив</b>. Этот модуль
-              не входит в CRM: менеджеры и РОП сюда не имеют доступа (разделение полномочий,
-              защита от потери документов и подмены истории).
+              <b className="font-semibold">Демонстрационный архив.</b> Документы, роли,
+              рекомендации ИИ и журнал — примеры. Действия меняют только данные на этой
+              странице. Серверные документы не меняются.
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-[12px]">
-              <span>Сейчас вошёл:</span>
-              <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-surface px-2.5 py-0.5 font-semibold">
-                <User size={12} /> Архивариус · Кузнецова Л.
-              </span>
-              <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-surface px-2.5 py-0.5 font-semibold">
-                <ShieldCheck size={12} /> роль: doc_admin
-              </span>
-              <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-surface px-2.5 py-0.5 font-semibold">
-                <Lock size={12} /> действия логируются
-              </span>
-            </div>
+            <p className="text-xs">Рабочий архив и проверка прав доступа пока не подключены.</p>
           </div>
         </div>
 
@@ -534,7 +517,7 @@ export function DocsArchive() {
                   <span className="rounded-full bg-surface px-2.5 py-0.5 text-[11px] font-semibold text-muted">
                     {g.items.length} док./версий
                   </span>
-                  <span className="hidden text-xs tabular-nums text-muted sm:inline">
+                  <span className="text-xs tabular-nums text-muted">
                     {formatByn(g.sum)}
                   </span>
                   <button
@@ -573,14 +556,14 @@ export function DocsArchive() {
 
         {/* Журнал аудита */}
         <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-card">
-          <div className="flex items-center gap-2 border-b border-line bg-sunken px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2 border-b border-line bg-sunken px-4 py-3">
             <History size={15} className="text-muted" />
             <span className="text-sm font-semibold text-ink">Журнал аудита</span>
             <span className="rounded-full bg-surface px-2.5 py-0.5 text-[11px] font-semibold text-muted">
               {audit.length}
             </span>
             <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-faint">
-              <Lock size={11} /> необратимо · кто / что / когда / основание
+              <Lock size={11} /> пример журнала · кто / что / когда / основание
             </span>
           </div>
           <ul className="divide-y divide-line">
@@ -650,25 +633,28 @@ function TrashRow({
 
   return (
     <div
-      className={`grid grid-cols-[20px_1fr_auto_auto_auto] items-center gap-3.5 border-b border-line px-4 py-3 last:border-0 ${
+      role="group"
+      aria-label={doc.n}
+      className={`grid grid-cols-[20px_minmax(0,1fr)] items-center gap-x-3.5 gap-y-2 border-b border-line px-4 py-3 last:border-0 md:grid-cols-[20px_minmax(0,1fr)_auto_auto_auto] ${
         selected ? "bg-red-50/50" : ""
       }`}
     >
       <input
         type="checkbox"
+        aria-label={`Отметить ${doc.n}`}
         checked={selected}
         onChange={(e) => onToggle(e.target.checked)}
-        className="accent-red-500"
+        className="mt-1 self-start accent-red-500 md:mt-0 md:self-center"
       />
 
       <div className="min-w-0">
-        <div className="flex items-center gap-1.5 text-[13px] font-semibold text-ink">
-          <span className="truncate">{doc.n}</span>
+        <div className="flex flex-wrap items-center gap-1.5 text-[13px] font-semibold text-ink md:flex-nowrap">
+          <span className="min-w-0 break-words md:truncate">{doc.n}</span>
           <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[10px] font-bold text-accent-ink">
             v{doc.ver}
           </span>
         </div>
-        <div className="mt-0.5 truncate text-[11.5px] text-muted">
+        <div className="mt-0.5 break-words text-[11.5px] text-muted">
           <span className="font-semibold text-accent-ink">{doc.deal}</span> · пометил{" "}
           {doc.by} · {doc.at} ·{" "}
           <b className="tabular-nums text-ink">{formatByn(doc.amount)}</b>
@@ -682,7 +668,7 @@ function TrashRow({
       </span>
 
       <span
-        className={`inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-semibold ${VERDICT_CLS[verdict]}`}
+        className={`col-start-2 inline-flex items-center gap-1 justify-self-start whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-semibold md:col-start-auto ${VERDICT_CLS[verdict]}`}
         title={verdict !== "none" ? doc.aiWhy : "ИИ ещё не проверял основания"}
       >
         {verdict === "safe" ? (
@@ -693,7 +679,7 @@ function TrashRow({
         {VERDICT_LABEL[verdict]}
       </span>
 
-      <div className="flex gap-1.5">
+      <div className="col-start-2 flex flex-wrap gap-1.5 md:col-start-auto md:flex-nowrap">
         <button
           type="button"
           onClick={onRestore}

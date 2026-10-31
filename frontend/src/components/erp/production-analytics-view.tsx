@@ -94,43 +94,64 @@ export function ProductionAnalyticsView({ initial }: Props) {
           color="text-ink"
         />
       </div>
-      <p className="mt-2 text-xs text-amber-700" role="note">
+      <p className="mt-2 text-xs text-amber-800 dark:text-amber-300" role="note">
         Плановая премия рассчитана по допущению производства; это не бухгалтерское начисление зарплаты или подтверждённый ФОТ.
       </p>
 
       {/* Plan / Fact chart */}
       <div>
         <h3 className="text-sm font-medium text-muted mb-3">План / Факт н.ч по месяцам</h3>
-        <div className="flex items-end gap-2 h-32 border-b border-line pb-1">
-          {data.plan_fact_by_month.map((m, i) => {
+        <div aria-hidden="true" className="flex items-end gap-2 h-32 border-b border-line pb-1">
+          {data.plan_fact_by_month.map((m) => {
             const planH = Math.round((m.plan_nh / maxNh) * 100);
             const factH = Math.round((m.fact_nh / maxNh) * 100);
             return (
               <div key={m.month} className="flex-1 flex flex-col items-center gap-0.5">
                 <div className="w-full flex items-end gap-0.5 h-24">
                   <div
-                    className="flex-1 rounded-t bg-blue-300 opacity-80"
+                    className="flex-1 rounded-t bg-accent/60"
                     style={{ height: `${planH}%`, minHeight: planH > 0 ? "2px" : "0" }}
                     title={`план: ${fmtNh(m.plan_nh)} н.ч`}
                   />
                   <div
-                    className="flex-1 rounded-t bg-green-400 opacity-70"
+                    className="flex-1 rounded-t bg-stage-won"
                     style={{ height: `${factH}%`, minHeight: factH > 0 ? "2px" : "0" }}
                     title={`факт: ${fmtNh(m.fact_nh)} н.ч`}
                   />
                 </div>
-                <span className="text-xs text-faint">{MONTHS[i]}</span>
+                <span className="text-xs text-muted">{MONTHS[m.month - 1]}</span>
               </div>
             );
           })}
         </div>
         <div className="flex gap-4 mt-1 text-xs text-muted">
           <span className="flex items-center gap-1">
-            <span className="inline-block w-3 h-3 bg-blue-300 rounded-sm" /> план
+            <span className="inline-block w-3 h-3 bg-accent/60 rounded-sm" /> план
           </span>
           <span className="flex items-center gap-1">
-            <span className="inline-block w-3 h-3 bg-green-400 rounded-sm" /> факт
+            <span className="inline-block w-3 h-3 bg-stage-won rounded-sm" /> факт
           </span>
+        </div>
+        <div className="mt-3 overflow-hidden rounded-xl border border-line bg-surface">
+          <table className="w-full text-sm tabular-nums">
+            <caption className="sr-only">План и факт по месяцам, нормо-часы</caption>
+            <thead className="bg-sunken text-muted">
+              <tr>
+                <th scope="col" className="px-3 py-2 text-left font-medium">Месяц</th>
+                <th scope="col" className="px-3 py-2 text-right font-medium">План, н.ч</th>
+                <th scope="col" className="px-3 py-2 text-right font-medium">Факт, н.ч</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.plan_fact_by_month.map((m) => (
+                <tr key={m.month} className="border-t border-line text-ink">
+                  <th scope="row" className="px-3 py-1.5 text-left font-medium">{MONTHS[m.month - 1]}</th>
+                  <td className="px-3 py-1.5 text-right">{fmtNh(m.plan_nh)}</td>
+                  <td className="px-3 py-1.5 text-right">{fmtNh(m.fact_nh)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 

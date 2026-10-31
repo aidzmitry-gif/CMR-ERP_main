@@ -50,6 +50,40 @@ function makeData(overrides: Partial<AnalyticsData> = {}): AnalyticsData {
 beforeEach(() => vi.clearAllMocks());
 
 describe("ProductionAnalyticsView", () => {
+  it("точные план и факт всех месяцев читаются в таблице без наведения", () => {
+    render(<ProductionAnalyticsView initial={makeData({
+      plan_fact_by_month: Array.from({ length: 12 }, (_, i) => ({
+        month: i + 1, plan_nh: i === 0 ? 0 : (i + 1) * 10,
+        fact_nh: i === 0 ? 0 : (i + 1) * 8 - 2.5,
+      })),
+    })} />);
+    const table = screen.getByRole("table", { name: "План и факт по месяцам, нормо-часы" });
+    const rows = within(table).getAllByRole("row");
+    expect(rows).toHaveLength(13);
+    expect(within(rows[0]).getAllByRole("columnheader").map((cell) => cell.textContent))
+      .toEqual(["Месяц", "План, н.ч", "Факт, н.ч"]);
+    expect(rows[1]).toHaveTextContent("Янв");
+    expect(within(rows[1]).getAllByRole("cell").map((cell) => cell.textContent))
+      .toEqual(["0,0", "0,0"]);
+    expect(rows[12]).toHaveTextContent("Дек");
+    expect(within(rows[12]).getAllByRole("cell").map((cell) => cell.textContent))
+      .toEqual(["120,0", "93,5"]);
+    expect(screen.getByRole("note")).toHaveTextContent("не бухгалтерское начисление зарплаты");
+  });
+
+  it("месяцы частичного ответа подписаны по номеру месяца, а не позиции в массиве", () => {
+    render(<ProductionAnalyticsView initial={makeData({
+      plan_fact_by_month: [{ month: 4, plan_nh: 15, fact_nh: 12 }, { month: 12, plan_nh: 0, fact_nh: 0 }],
+    })} />);
+    const table = screen.getByRole("table", { name: "План и факт по месяцам, нормо-часы" });
+    expect(within(table).getByRole("row", { name: "Апр 15,0 12,0" })).toBeVisible();
+    expect(within(table).getByRole("row", { name: "Дек 0,0 0,0" })).toBeVisible();
+    expect(screen.getAllByText("Апр")).toHaveLength(2);
+    expect(screen.getAllByText("Дек")).toHaveLength(2);
+    expect(screen.queryByText("Янв")).not.toBeInTheDocument();
+    expect(screen.queryByText("Фев")).not.toBeInTheDocument();
+  });
+
   it("без данных показывает сообщение о недоступности, а не пустой экран", () => {
     render(<ProductionAnalyticsView initial={null} />);
     expect(

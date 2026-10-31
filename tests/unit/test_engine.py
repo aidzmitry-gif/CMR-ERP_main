@@ -146,7 +146,7 @@ async def test_llm_gateway_disabled_raises():
 async def test_llm_gateway_mock_by_kind():
     from core.services.litellm import LLMGateway
 
-    g = LLMGateway(SimpleNamespace(ai_enabled=True, llm_base_url="", llm_model="qwen"))
+    g = LLMGateway(SimpleNamespace(ai_enabled=True, environment="dev", llm_base_url="", llm_model="qwen"))
     draft = await g.complete("p", kind="draft")
     qualify = await g.complete("p", kind="qualify")
     unknown = await g.complete("p", kind="нечто")  # неизвестный kind → fallback на draft
@@ -154,13 +154,25 @@ async def test_llm_gateway_mock_by_kind():
     assert unknown == draft
 
 
-async def test_llm_gateway_real_model_not_implemented():
+async def test_llm_gateway_real_model_response(monkeypatch):
+    import httpx
+
     from core.services.litellm import LLMGateway
 
-    # задан base_url → попытка реального вызова, тело ещё не реализовано
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={
+            "choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "Ответ модели"}}],
+        })
+
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original_client(transport=httpx.MockTransport(respond), **kw))
     g = LLMGateway(SimpleNamespace(ai_enabled=True, llm_base_url="http://localhost:11434", llm_model="qwen"))
-    with pytest.raises(NotImplementedError):
-        await g.complete("p", kind="draft")
+    assert await g.complete("p", kind="draft") == "Ответ модели"
+    assert len(requests) == 1
+    assert str(requests[0].url) == "http://localhost:11434/v1/chat/completions"
 
 
 # --- Temporal-заглушка ---
