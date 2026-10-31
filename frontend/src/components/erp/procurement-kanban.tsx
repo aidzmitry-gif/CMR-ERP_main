@@ -80,9 +80,25 @@ function errorText(error: unknown) {
 }
 
 async function api<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, { cache: "no-store", ...options });
-  const body = await response.text();
-  if (!response.ok) throw new Error(`Ошибка ${response.status}: ${body || "без описания"}`);
+  let response: Response;
+  try {
+    response = await fetch(url, { cache: "no-store", ...options });
+  } catch {
+    throw new Error("Не удалось связаться с сервисом закупок. Проверьте соединение и обновите канбан.");
+  }
+  if (!response.ok) {
+    const message = response.status === 401 ? "Сессия истекла. Войдите в ERP заново."
+      : response.status === 403 ? "Нет доступа к документам закупок. Проверьте права сотрудника."
+      : response.status === 409 ? "Данные или права изменились. Обновите канбан перед следующим действием."
+      : "Не удалось выполнить запрос закупок. Обновите канбан для проверки текущих данных.";
+    throw new Error(`${message} (HTTP ${response.status})`);
+  }
+  let body: string;
+  try {
+    body = await response.text();
+  } catch {
+    throw new Error("Не удалось прочитать ответ сервиса закупок. Обновите канбан для проверки текущих данных.");
+  }
   if (!body) throw new Error("Сервис закупок вернул пустой ответ");
   try {
     return JSON.parse(body) as T;

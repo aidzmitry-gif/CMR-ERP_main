@@ -90,6 +90,59 @@ it("показывает источник дефицита только у по�
 
 configureBeforeEach(() => resetCompany(1));
 
+it.each([401, 403, 409, 502, 503])("conceals private response details on HTTP %s", async status => {
+  vi.mocked(fetch).mockResolvedValue(json({ detail: "PRIVATE_BOARD_SENTINEL: internal upstream diagnostics" }, status) as Response);
+  render(<ProcurementKanban />);
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent(String(status));
+  expect(alert).not.toHaveTextContent("PRIVATE_BOARD_SENTINEL");
+  expect(screen.queryByText("Нет документов на этом этапе.")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Обновить канбан" })).not.toBeDisabled();
+});
+
+it("conceals transport exception details when the board request fails", async () => {
+  vi.mocked(fetch).mockRejectedValue(new Error("PRIVATE_BOARD_SENTINEL: transport diagnostics"));
+  render(<ProcurementKanban />);
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("Не удалось связаться с сервисом закупок");
+  expect(alert).not.toHaveTextContent("PRIVATE_BOARD_SENTINEL");
+});
+
+it("conceals response stream exception details", async () => {
+  vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200, text: async () => { throw new Error("PRIVATE_BOARD_SENTINEL: stream diagnostics"); } } as Response);
+  render(<ProcurementKanban />);
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("Не удалось прочитать ответ сервиса закупок");
+  expect(alert).not.toHaveTextContent("PRIVATE_BOARD_SENTINEL");
+});
+
+it("conceals a stage refusal without moving the card or repeating the command", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("request-plan-context")) return json({ organization_id: 1, principal: "tester", can_manage: true }) as Response;
+    if (url.endsWith("/requests/1/stage")) return json({ detail: "PRIVATE_BOARD_SENTINEL: conflicting record diagnostics" }, 409) as Response;
+    return original(input, init);
+  });
+  render(<ProcurementKanban />);
+  const card = (await screen.findByText("REQ-001")).closest("article")!;
+  const advance = within(card).getByRole("button", { name: "Далее: Поиск поставщика" });
+  await waitFor(() => expect(advance).not.toBeDisabled());
+  fireEvent.click(advance);
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("409");
+  expect(alert).not.toHaveTextContent("PRIVATE_BOARD_SENTINEL");
+  expect(screen.queryByText("Стадия заявки обновлена.")).not.toBeInTheDocument();
+  const refresh = screen.getByRole("button", { name: "Обновить канбан" });
+  await waitFor(() => expect(refresh).not.toBeDisabled());
+  fireEvent.click(refresh);
+  expect(await within(screen.getByLabelText("Колонка Потребность")).findByText("REQ-001")).toBeInTheDocument();
+  expect(within(screen.getByLabelText("Колонка Поиск поставщика")).queryByText("REQ-001")).not.toBeInTheDocument();
+  const writes = vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith("/requests/1/stage"));
+  expect(writes).toHaveLength(1);
+  expect(writes[0][1]?.method).toBe("PATCH");
+});
+
 it("searches loaded documents without new requests and keeps the same cards in list view", async () => {
   render(<ProcurementKanban />);
   await screen.findByText("REQ-001");
