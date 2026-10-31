@@ -705,14 +705,14 @@ def test_bounded_same_schema_callback(monkeypatch, case):
     if number in (28, 29):
         ctx.advance = 3.01 if number == 28 else 15.01
     if number == 27:
-        secret = 'PRIVATE_SENTINEL_374'
-        for error in (OSError(secret), subprocess.TimeoutExpired(secret, 3, output=secret)):
+        error_marker = 'synthetic probe failure'
+        for error in (OSError(error_marker), subprocess.TimeoutExpired(error_marker, 3, output=error_marker)):
             ctx.error = error
             for callback in (health, schema):
                 with pytest.raises(RuntimeError) as caught:
                     callback(old)
-                assert secret not in str(caught.value)
-                assert secret not in ''.join(traceback.format_exception(caught.value))
+                assert error_marker not in str(caught.value)
+                assert error_marker not in ''.join(traceback.format_exception(caught.value))
         return
     if number == 16:
         for raw in (b'0204\n0204\n', b'0205\n0204\n', b'0203\n0204\n0205\n',
