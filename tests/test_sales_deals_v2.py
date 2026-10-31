@@ -2011,6 +2011,41 @@ async def test_plan_sources_regulars_cycle_and_single_order(session, api, _deals
     assert single["in_month"] is False
 
 
+@pytest.mark.parametrize(
+    ("closed_dates", "cycle_days", "expected", "in_month"),
+    [
+        (["10.01.2026", "10.01.2026"], None, None, False),
+        (["10.01.2026", "10.01.2026", "10.03.2026"], 59, "2026-05-08", True),
+        (["10.01.2026", "10.03.2026", "10.03.2026", "09.05.2026"], 60, "2026-07-08", False),
+    ],
+    ids=["same-day-only", "duplicate-first-day", "duplicate-middle-day"],
+)
+async def test_plan_sources_cycle_uses_distinct_dates(
+    session, api, _deals_v2_parties, closed_dates, cycle_days, expected, in_month,
+):
+    """Several real won deals on one date count as deals, not zero-day intervals."""
+    from modules.sales.models import Deal
+
+    for index, closed_on in enumerate(closed_dates, 1):
+        deal = await _new_deal(api, f"REG-DATES-{index}", counterparty="Постоянный", amount=1000)
+        won = await api.post(f"/sales/deals/{deal['id']}/win")
+        assert won.status_code == 200, won.text
+        row = await session.get(Deal, deal["id"])
+        row.closed_date = closed_on
+    await session.commit()
+
+    response = await api.get("/sales/plan-sources", params={"month": "2026-05"})
+    assert response.status_code == 200, response.text
+    regular = next(row for row in response.json()["regulars"] if row["counterparty"] == "Постоянный")
+    assert regular["orders_count"] == len(closed_dates)
+    assert regular["last_order"] == ("2026-05-09" if len(closed_dates) == 4 else
+                                     "2026-03-10" if len(closed_dates) == 3 else "2026-01-10")
+    assert regular["cycle_days"] == cycle_days
+    assert regular["expected"] == expected
+    assert regular["in_month"] is in_month
+    assert regular["avg_check"] == 1000
+
+
 async def test_plan_sources_committed_open_only(api, _deals_v2_parties):
     """committed отдаёт ОТКРЫТУЮ сделку с expected_close_date в месяце; won-сделку — нет."""
     open_deal = await _new_deal(api, "CMT-1", amount=800, expected_close_date="15.08.2026")
