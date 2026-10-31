@@ -8,8 +8,8 @@ afterEach(() => vi.unstubAllGlobals());
 it("shows accounting postings separately from supplier invoices and pages without duplicates", async () => {
   const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () =>
     url.includes("after_id=8")
-      ? { rows: [{ entry_id: 7, document_date: "2026-07-01", posting_date: "2026-07-02", source: "legacy-7", source_version: 1 }], next_after_id: null }
-      : { rows: [{ entry_id: 8, document_date: "2026-08-01", posting_date: "2026-08-03", source: "legacy-8", source_version: 2 }], next_after_id: 8 },
+      ? { organization_id: 7, rows: [{ entry_id: 8, document_date: "2026-08-01", posting_date: "2026-08-03", source: "legacy-8", source_version: 2 }, { entry_id: 7, document_date: "2026-07-01", posting_date: "2026-07-02", source: "legacy-7", source_version: 1 }], next_after_id: null }
+      : { organization_id: 7, rows: [{ entry_id: 8, document_date: "2026-08-01", posting_date: "2026-08-03", source: "legacy-8", source_version: 2 }], next_after_id: 8 },
   }));
   vi.stubGlobal("fetch", fetcher);
   render(<ProcurementUnlinkedPurchases org="7" />);
@@ -25,6 +25,7 @@ it("shows accounting postings separately from supplier invoices and pages withou
 
 it("does not retain another organization's postings after switching the selected book", async () => {
   const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () => ({
+    organization_id: url.includes("/7/") ? 7 : 8,
     rows: [{ entry_id: url.includes("/7/") ? 8 : 9, document_date: "2026-08-01", posting_date: "2026-08-02", source: "old", source_version: 1 }],
     next_after_id: null,
   }) }));
@@ -40,5 +41,20 @@ it("shows access denial instead of an empty reconciliation result", async () => 
   vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 403 })));
   render(<ProcurementUnlinkedPurchases org="7" />);
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Нет доступа к бухгалтерским поступлениям этого юрлица."));
+  expect(screen.queryByText("Поступлений без связанной первички не найдено.")).not.toBeInTheDocument();
+});
+
+it.each(["network", "json", "shape", "cursor", "foreign"])("rejects private or malformed unlinked read %s without claiming empty", async mode => {
+  vi.stubGlobal("fetch", vi.fn(async () => {
+    if (mode === "network") throw new Error("PRIVATE_UNLINKED_INTERNAL_DETAILS");
+    return { ok: true, json: async () => {
+      if (mode === "json") throw new Error("PRIVATE_UNLINKED_INTERNAL_DETAILS");
+      return mode === "shape" ? { organization_id: 7, rows: [{ entry_id: "bad" }], next_after_id: null }
+        : { organization_id: mode === "foreign" ? 8 : 7, rows: [], next_after_id: mode === "foreign" ? null : -1 };
+    } };
+  }));
+  render(<ProcurementUnlinkedPurchases org="7" />);
+  const alert = await screen.findByRole("alert");
+  expect(alert).not.toHaveTextContent("PRIVATE_UNLINKED_INTERNAL_DETAILS");
   expect(screen.queryByText("Поступлений без связанной первички не найдено.")).not.toBeInTheDocument();
 });

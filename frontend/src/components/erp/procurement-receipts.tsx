@@ -16,11 +16,19 @@ type Account = { code: string; title: string; category: string; cash: boolean; q
 type Policy = { id: number; effective_from: string };
 type Entry = { id: number; source: string; source_version: number; document_date: string; posting_date: string; operation: string; explanation: string };
 async function get<T>(path: string): Promise<T> {
-  const response = await fetch(`/api/accounting${path}`, { cache: "no-store" });
-  const data = await response.json();
-  if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Не удалось загрузить поступления.");
+  let response: Response;
+  try { response = await fetch(`/api/accounting${path}`, { cache: "no-store" }); }
+  catch { throw new Error("Не удалось загрузить поступления. Проверьте соединение с сервером."); }
+  if (!response.ok) throw new Error(response.status === 403
+    ? "Нет доступа к бухгалтерским поступлениям этого юрлица."
+    : "Не удалось загрузить поступления.");
+  let data: unknown;
+  try { data = await response.json(); }
+  catch { throw new Error("Ответ со списком поступлений не подтверждён."); }
+  if (!Array.isArray(data)) throw new Error("Ответ со списком поступлений не подтверждён.");
   return data as T;
 }
+
  function ProcurementReceiptsWorkspace({ initialOrganization, initialReceipt }: { initialOrganization?: string; initialReceipt?: string } = {}) {
   const org = String(useInstanceOrganization().id);
   const [, setPendingDocument] = useState(false);
@@ -42,7 +50,7 @@ async function get<T>(path: string): Promise<T> {
   const current = loaded?.key === key ? loaded : null;
   const policy = current?.policies.filter((p) => p.effective_from <= date).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0];
   if (foreignLink) return <p role="alert">Юрлицо ссылки не совпадает с настройкой установки.</p>;
-  return <main className="min-w-0 w-0 flex-1 space-y-4 overflow-auto p-6 lg:pr-24">
+  return <main className="min-w-0 w-full space-y-4 p-4 sm:p-6 lg:pr-24">
     <h1 className="text-2xl font-semibold">Накладные на поступление</h1>
     <div className="grid gap-3 rounded-xl border border-line bg-surface p-4 md:grid-cols-2">
       <span className="text-sm text-muted">Юрлицо задано в настройках.</span>

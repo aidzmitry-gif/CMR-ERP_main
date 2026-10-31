@@ -106,6 +106,46 @@ test("procurement keeps navigation on the left and renders the approved board de
   await page.screenshot({ path: testInfo.outputPath("procurement-mobile-board.png"), fullPage: true });
   await testInfo.attach("procurement-mobile-board", { path: testInfo.outputPath("procurement-mobile-board.png"), contentType: "image/png" });
 
+  // Read-only receipt summary failure/recovery; never post an invoice or warehouse movement.
+  let receiptRecovery = false;
+  let receiptSummaryReads = 0;
+  const receiptSummaryUrls = [
+    `**/api/accounting/organizations/${organization.id}/accounts?*`,
+    `**/api/accounting/organizations/${organization.id}/policies`,
+    `**/api/accounting/organizations/${organization.id}/entries?*`,
+  ];
+  for (const url of receiptSummaryUrls) await page.route(url, async route => {
+    expect(route.request().method()).toBe("GET");
+    receiptSummaryReads += 1;
+    await route.fulfill(receiptRecovery ? { json: [] } : { status: 500, json: { detail: "PRIVATE_RECEIPT_BACKEND_DETAILS" } });
+  });
+  await page.goto("/erp/procurement/receipts");
+  const receiptSummaryError = page.getByRole("alert").filter({ hasText: "Не удалось загрузить поступления" });
+  await expect(receiptSummaryError).toBeVisible();
+  expect((await page.getByRole("main").last().boundingBox())!.width).toBeGreaterThanOrEqual(280);
+  await expect(page.locator("body")).not.toContainText("PRIVATE_RECEIPT_BACKEND_DETAILS");
+  await expect(page.getByText("За выбранный период проведённых поступлений нет.", { exact: true })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("receipts-safe-error.png"), fullPage: true });
+  await testInfo.attach("receipts-safe-error", { path: testInfo.outputPath("receipts-safe-error.png"), contentType: "image/png" });
+  receiptRecovery = true;
+  await page.reload();
+  await expect(receiptSummaryError).toHaveCount(0);
+  await expect(page.getByText("За выбранный период проведённых поступлений нет.", { exact: true })).toBeVisible();
+  for (const view of [
+    { name: "receipts-desktop-before", width: 1440, height: 1000, dark: false },
+    { name: "receipts-mobile-before", width: 390, height: 844, dark: false },
+    { name: "receipts-dark-before", width: 1440, height: 1000, dark: true },
+  ]) {
+    await page.setViewportSize({ width: view.width, height: view.height });
+    if (view.dark) await page.getByRole("button", { name: "Включить тёмную тему", exact: true }).click();
+    await page.getByRole("heading", { name: "Накладные на поступление", exact: true }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`${view.name}.png`), fullPage: true });
+    await testInfo.attach(view.name, { path: testInfo.outputPath(`${view.name}.png`), contentType: "image/png" });
+  }
+  console.log("RECEIPT_SUMMARY_READS", JSON.stringify({ reads: receiptSummaryReads, manualReloads: 1, commandWrites: 0 }));
+  for (const url of receiptSummaryUrls) await page.unroute(url);
+  await page.getByRole("button", { name: "Включить светлую тему", exact: true }).click();
+
   // RFQ presentation uses explicit synthetic GET fixtures; no create/bid/award commands.
   const rfqUrl = `**/api/procurement/organizations/${organization.id}/rfq?*`;
   const supplierUrl = `**/api/procurement/organizations/${organization.id}/supplier-options`;

@@ -10,7 +10,21 @@ type UnlinkedPurchase = {
   source: string;
   source_version: number;
 };
-type Page = { rows: UnlinkedPurchase[]; next_after_id: number | null };
+type Page = { organization_id: number; rows: UnlinkedPurchase[]; next_after_id: number | null };
+const unavailable = "Не удалось проверить поступления без первички.";
+const denied = "Нет доступа к бухгалтерским поступлениям этого юрлица.";
+function validPage(value: unknown, cursor: number | null, org: number): value is Page {
+  if (!value || typeof value !== "object") return false;
+  const page = value as Partial<Page>;
+  return page.organization_id === org && Array.isArray(page.rows) && page.rows.every(row => row && typeof row === "object" &&
+    Number.isSafeInteger(row.entry_id) && row.entry_id > 0 &&
+    typeof row.document_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(row.document_date) &&
+    typeof row.posting_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(row.posting_date) &&
+    typeof row.source === "string" && Number.isSafeInteger(row.source_version) && row.source_version > 0) &&
+    (page.next_after_id === null || (Number.isSafeInteger(page.next_after_id) && page.next_after_id! > 0 &&
+      page.rows.length > 0 && (cursor === null || page.next_after_id! < cursor)));
+}
+
 
 export function ProcurementUnlinkedPurchases({ org }: { org: string }) {
   const [rows, setRows] = useState<UnlinkedPurchase[]>([]);
@@ -24,16 +38,16 @@ export function ProcurementUnlinkedPurchases({ org }: { org: string }) {
     let active = true;
     const url = `/api/accounting/organizations/${encodeURIComponent(org)}/purchases/unlinked-primary?limit=100${cursor === null ? "" : `&after_id=${cursor}`}`;
     void fetch(url, { cache: "no-store" }).then(async (response) => {
-      if (!response.ok) throw new Error(response.status === 403
-        ? "Нет доступа к бухгалтерским поступлениям этого юрлица."
-        : "Не удалось проверить поступления без первички.");
-      return await response.json() as Page;
+      if (!response.ok) throw new Error(response.status === 403 ? denied : unavailable);
+      const page: unknown = await response.json();
+      if (!validPage(page, cursor, Number(org))) throw new Error(unavailable);
+      return page;
     }).then((page) => {
       if (!active) return;
-      setRows((previous) => cursor === null ? page.rows : [...previous, ...page.rows]);
+      setRows(previous => [...new Map([...(cursor === null ? [] : previous), ...page.rows].map(row => [row.entry_id, row])).values()]);
       setNext(page.next_after_id);
       setError("");
-    }).catch((reason: Error) => { if (active) setError(reason.message); })
+    }).catch((reason: unknown) => { if (active) setError(reason instanceof Error && reason.message === denied ? denied : unavailable); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [org, cursor, retry]);

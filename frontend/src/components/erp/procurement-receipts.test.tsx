@@ -906,7 +906,7 @@ it("warns before replacing an unsaved new receipt", async () => {
 });
 
 it("has no company switch that could discard an unsaved supplier invoice", async () => {
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes("unlinked-primary") ? { rows: [], next_after_id: null } : [] })));
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes("unlinked-primary") ? { organization_id: 7, rows: [], next_after_id: null } : [] })));
   const confirm = vi.fn(() => false); vi.stubGlobal("confirm", confirm);
   render(<ProcurementReceipts initialOrganization="7" />);
   await waitForCompany();
@@ -1647,3 +1647,21 @@ it("shows a 403 from the workpaper history endpoint without enabling confirmatio
 });
 
 configureBeforeEach(() => resetCompany(7));
+
+it.each(["http", "network", "json", "shape"])("receipt-summary rejects unsafe or malformed read %s", async mode => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    if (url.includes("/accounts?") || url.endsWith("/policies") || url.includes("/entries?")) {
+      if (mode === "network") throw new Error("PRIVATE_RECEIPT_INTERNAL_DETAILS");
+      return { ok: mode !== "http", status: mode === "http" ? 500 : 200, json: async () => {
+        if (mode === "json") throw new Error("PRIVATE_RECEIPT_INTERNAL_DETAILS");
+        return mode === "http" ? { detail: "PRIVATE_RECEIPT_INTERNAL_DETAILS" } : { unexpected: true };
+      } };
+    }
+    return { ok: true, json: async () => url.includes("unlinked-primary") ? { organization_id: 7, rows: [], next_after_id: null } : [] };
+  }));
+  render(<ProcurementReceipts />);
+  await waitForCompany();
+  await waitFor(() => expect(screen.getAllByRole("alert").some(node => /Не удалось|не подтверждён/.test(node.textContent ?? ""))).toBe(true));
+  expect(document.body).not.toHaveTextContent("PRIVATE_RECEIPT_INTERNAL_DETAILS");
+  expect(screen.queryByText(/За выбранный период проведённых поступлений нет/)).not.toBeInTheDocument();
+});
