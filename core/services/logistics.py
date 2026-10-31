@@ -185,6 +185,17 @@ class ShippingProducerGateway(Protocol):
 
 
 class LogisticsGateway(Protocol):
+    async def shipping_source_status(self, session: Any, *, source: dict, payload_sha256: str,
+                                     expected_association: dict | None) -> dict:
+        """Read one caller-authorized source and its exact target, without locks/writes.
+
+        Caller freezes and authorizes the source/organization before calling and
+        rechecks that scope before disclosure. Association is server-owned exact
+        invoice + execution_id + intent_digest, never client-supplied authority.
+        This informational snapshot is not fulfillment/cancellation authority.
+        """
+        ...
+
     def assert_unexecuted_invoice(self, snapshot: dict) -> None:
         """Reject known engagement/execution in caller-collected exact snapshot."""
         ...

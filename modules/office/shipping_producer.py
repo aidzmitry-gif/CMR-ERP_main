@@ -1,4 +1,5 @@
 """Office request preparation, explicit association and exact payload verification."""
+from copy import deepcopy
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from core.runtime.deps import get_core, get_session
-from core.services.auth import get_current_user
+from core.services.auth import get_current_user, has_permission
 from core.services.logistics import (
     ExactInvoiceIdentity,
     SourceDiscoveryV1,
@@ -349,6 +350,103 @@ async def transaction(session=Depends(get_session)):
 router = APIRouter()
 
 
+async def _shipping_read_rows(session, doc_id):
+    doc = await session.scalar(select(OfficeDoc).where(OfficeDoc.id == doc_id)
+        .execution_options(populate_existing=True))
+    if doc is None:
+        raise HTTPException(404, "Office document not found")
+    request = await session.scalar(select(ShippingRequest).where(ShippingRequest.office_doc_id == doc_id)
+        .execution_options(populate_existing=True))
+    association = await session.scalar(select(OfficeInvoiceAssociation).where(OfficeInvoiceAssociation.office_doc_id == doc_id)
+        .execution_options(populate_existing=True))
+    assignment = await latest_assignment(session, doc_id)
+    return doc, request, association, assignment
+
+
+def _shipping_read_snapshot(rows):
+    doc, request, association, assignment = rows
+    return deepcopy({"document": {**source_snapshot(doc), "stage": doc.stage},
+        "request": snapshot_row(request) if request is not None else None,
+        "association": snapshot_row(association) if association is not None else None,
+        "assignment": snapshot_row(assignment) if assignment is not None else None})
+
+
+async def _shipping_context(session, core, user, doc_id):
+    rows = await _shipping_read_rows(session, doc_id)
+    frozen = _shipping_read_snapshot(rows)  # Never adopt a binding appearing after authorization.
+    actor, revision = await authorize_doc(core, session, rows[0], user, "office.doc.read")
+    effective, _ = await current_actor(core, session, user, "office.doc.read")
+    doc, raw, assoc, assignment = (frozen[key] for key in ("document", "request", "association", "assignment"))
+    source = {key: value for key, value in doc.items() if key != "stage"}
+    current_hash = canonical_hash(source)
+    reviewer = bool(assignment and assignment["subject"] == actor)
+    result = {"source_snapshot": source, "source_sha256": current_hash, "assignment_revision": revision,
+        "document_stage": doc["stage"], "principal": actor, "is_current_reviewer": reviewer,
+        "capabilities": {"can_request": reviewer and has_permission(core, effective, "office.carrier.request"),
+            "can_associate": reviewer and has_permission(core, effective, "office.shipping.associate")},
+        "request": None, "association": None, "source_matches_request": True,
+        "logistics": {"state": "not_prepared", "intake_id": None, "pending_reason": "", "target": None, "shipment": None}}
+    expected_association = None
+    if raw is None and assoc is not None:
+        conflict("Office association has no prepared request")
+    if raw is not None:
+        model, computed = canonical_shipping_payload(raw["payload"])
+        if (str(UUID(raw["id"])) != raw["id"] or raw["office_doc_id"] != doc_id
+                or raw["source_snapshot"]["document_id"] != doc_id
+                or canonical_hash(raw["source_snapshot"]) != raw["source_sha256"]
+                or model.source.model_dump() != {"kind": "office", "key": "office:shipping-request:" + raw["id"], "revision": "1"}
+                or model.source_refs.document_id != doc_id
+                or model.source_refs.document_number != raw["source_snapshot"]["number"]
+                or computed != raw["payload_sha256"]):
+            conflict("Prepared Office request attribution changed")
+        result["request"] = {"request_key": raw["request_key"], "actor": raw["actor"],
+            "created_at": raw["created_at"], "source_snapshot": raw["source_snapshot"],
+            "envelope_id": raw["id"], "payload": model.model_dump(),
+            "payload_sha256": computed, "source_sha256": raw["source_sha256"]}
+        result["source_matches_request"] = current_hash == raw["source_sha256"]
+        if assoc is not None:
+            if (assoc["office_doc_id"] != doc_id or assoc["request_id"] != raw["id"]
+                    or str(UUID(assoc["id"])) != assoc["id"]
+                    or str(UUID(assoc["execution_id"])) != assoc["execution_id"]):
+                conflict("Office association refers to another request")
+            evidence = Evidence.model_validate(assoc["evidence_refs"])
+            confirmation = ConfirmInput(request_key=assoc["request_key"], expected_source_hash=raw["source_sha256"],
+                expected_assignment_revision=assoc["assignment_revision"], exact_invoice=assoc["exact_invoice"],
+                envelope_id=raw["id"], expected_payload_hash=computed,
+                expected_intent_digest=assoc["intent_digest"], evidence_refs=evidence)
+            exact = confirmation.exact_invoice.model_dump()
+            historical = await session.scalar(select(ShippingReviewAssignment).where(
+                ShippingReviewAssignment.office_doc_id == doc_id,
+                ShippingReviewAssignment.revision == assoc["assignment_revision"],
+            ).execution_options(populate_existing=True))
+            if (historical is None or not historical.subject or historical.subject != assoc["actor"]
+                    or assoc["organization_id"] != exact["organization_id"]
+                    or evidence.source_sha256 != raw["source_sha256"]
+                    or evidence.invoice_sha256 != exact["expected_content_sha256"]
+                    or shipping_intent_digest(exact, model.intent) != assoc["intent_digest"]
+                    or canonical_hash(confirmation.model_dump()) != assoc["confirmation_sha256"]):
+                conflict("Office association history changed")
+            expected_association = {"exact_invoice": exact, "execution_id": assoc["execution_id"],
+                                    "intent_digest": assoc["intent_digest"]}
+            result["association"] = {"association_id": assoc["id"], "request_key": assoc["request_key"],
+                **expected_association, "assignment_revision": assoc["assignment_revision"],
+                "current_review_matches": bool(assignment and assignment["revision"] == assoc["assignment_revision"]
+                                               and assignment["subject"] == historical.subject)}
+        status = getattr(core.services.logistics, "shipping_source_status", None)
+        if not result["source_matches_request"]:
+            result["logistics"]["state"] = "source_changed"
+        elif status is None:
+            result["logistics"]["state"] = "unavailable"
+        else:
+            result["logistics"] = await status(session, source=model.source.model_dump(), payload_sha256=computed,
+                                                expected_association=expected_association)
+    current = await _shipping_read_rows(session, doc_id)
+    final_actor, final_revision = await authorize_doc(core, session, current[0], user, "office.doc.read")
+    if _shipping_read_snapshot(current) != frozen or (final_actor, final_revision) != (actor, revision):
+        conflict("Office shipping context changed while reading; refresh")
+    return result
+
+
 @router.post("/docs/{doc_id}/shipping-reviewer")
 async def shipping_reviewer(doc_id: int, data: AssignmentInput, session=Depends(transaction),
     core=Depends(get_core), user=Depends(get_current_user)):
@@ -359,11 +457,11 @@ async def shipping_reviewer(doc_id: int, data: AssignmentInput, session=Depends(
 
 @router.get("/docs/{doc_id}/shipping-source")
 async def shipping_source(doc_id: int, session=Depends(transaction), core=Depends(get_core), user=Depends(get_current_user)):
-    doc = await session.get(OfficeDoc, doc_id)
-    if doc is None:
-        raise HTTPException(404, "Office document not found")
-    _, revision = await authorize_doc(core, session, doc, user, "office.doc.read")
-    return {"source_snapshot": source_snapshot(doc), "source_sha256": source_hash(doc), "assignment_revision": revision}
+    try:
+        with session.no_autoflush:
+            return await _shipping_context(session, core, user, doc_id)
+    except (ValidationError, ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(409, "Saved Office shipping context is invalid") from exc
 
 
 @router.post("/docs/{doc_id}/shipping-association-preview")
