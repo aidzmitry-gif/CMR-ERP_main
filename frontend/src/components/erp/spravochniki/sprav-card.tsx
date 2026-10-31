@@ -3,6 +3,7 @@
 import { Mail, Phone, Shield, Star, User } from "lucide-react";
 
 import { SourceTag } from "@/components/source-tag";
+import { CALL_STATUS } from "@/lib/call-status";
 import type { CounterpartyCard } from "@/lib/reference-data";
 import { formatAuditDate, formatTouchTs, provenanceCounts, touchKindMeta } from "@/lib/spravochniki-card";
 
@@ -281,13 +282,13 @@ export function SpravCard({ card, showContacts = true }: { card: CounterpartyCar
               {card.touches.map((t) => {
                 const meta = touchKindMeta(t.kind);
                 return (
-                  <div key={t.ref} className="flex items-start gap-3 rounded-xl bg-sunken px-3 py-2">
+                  <div key={t.ref} className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-1 rounded-xl bg-sunken px-3 py-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
                     <span className="mt-0.5 shrink-0 text-[13px]" aria-hidden>
                       {meta.icon}
                     </span>
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium text-ink">{t.title}</span>
+                        <span className="break-words text-sm font-medium text-ink">{t.kind === "call" ? CALL_STATUS[t.title]?.label ?? t.title : t.title}</span>
                         <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-muted">
                           {meta.label}
                         </span>
@@ -303,7 +304,7 @@ export function SpravCard({ card, showContacts = true }: { card: CounterpartyCar
                         )}
                       </div>
                     </div>
-                    <span className="shrink-0 font-mono text-[12px] text-muted">{formatTouchTs(t.ts)}</span>
+                    <span className="col-start-2 font-mono text-[12px] text-muted sm:col-start-auto">{formatTouchTs(t.ts)}</span>
                   </div>
                 );
               })}

@@ -101,7 +101,7 @@ async function get<T>(path: string): Promise<T> {
 
   return <section className="space-y-4 p-6"><h1 className="text-xl font-semibold">Заказы поставщикам</h1><p>Создайте черновик с позициями в выбранном юрлице. Изменения доступны главному бухгалтеру с доступом к закупкам.</p>
     {suggestedOrg && suggestedRequest && <p>Переход из плана: юрлицо {suggestedOrg}, заявка {suggestedRequest}. Подтвердите выбор в форме.</p>}
-    <Link href="/erp/procurement/ownership" className="text-accent underline">Указать юрлицо старых заказов</Link>
+    <Link href="/erp/procurement/ownership" className="block w-fit text-accent underline">Указать юрлицо старых заказов</Link>
     {error && <p role="alert">{error}</p>}<span className="text-sm text-muted">Юрлицо задано в настройках.</span>
     {org && <OrderWorkspace key={org} org={Number(org)} />}
   </section>;
