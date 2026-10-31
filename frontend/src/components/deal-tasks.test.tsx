@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/api", async (importOriginal) => ({
@@ -10,6 +10,13 @@ vi.mock("@/lib/api", async (importOriginal) => ({
 
 import { DealTasks, TaskSummary } from "@/components/deal-tasks";
 import * as api from "@/lib/api";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -28,6 +35,84 @@ beforeEach(() => {
 });
 
 describe("DealTasks", () => {
+  it.each(["pending", "failure"])("does not report zero tasks while the list is %s", async (state) => {
+    const response = deferred<api.DealTaskView[]>();
+    vi.mocked(api.fetchDealTasks).mockReturnValueOnce(response.promise);
+    render(<DealTasks dealId="1" />);
+    if (state === "failure") {
+      await act(async () => response.reject(new Error("synthetic list unavailable")));
+      expect(screen.getByRole("alert")).toHaveTextContent("Не удалось загрузить задачи");
+    }
+    expect(screen.getByText("(— откр.)")).toBeInTheDocument();
+    expect(screen.queryByText("(0 откр.)")).not.toBeInTheDocument();
+    expect(screen.queryByText("Задач пока нет")).not.toBeInTheDocument();
+  });
+
+  it("removes the old deal's tasks and draft immediately when the selected deal changes", async () => {
+    const view = render(<DealTasks dealId="1" />);
+    await screen.findByText("Перезвонить");
+    fireEvent.change(screen.getByPlaceholderText("Что сделать…"), { target: { value: "Черновик первой сделки" } });
+    const second = deferred<api.DealTaskView[]>();
+    vi.mocked(api.fetchDealTasks).mockReturnValueOnce(second.promise);
+    view.rerender(<DealTasks dealId="2" />);
+    expect(screen.queryByText("Перезвонить")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Что сделать…")).toHaveValue("");
+    expect(screen.getByText("(— откр.)")).toBeInTheDocument();
+    await act(async () => second.resolve([]));
+    expect(screen.getByText("Задач пока нет")).toBeInTheDocument();
+    expect(screen.getByText("(0 откр.)")).toBeInTheDocument();
+  });
+
+  it("does not clear the new deal's draft or refresh the old deal after a late create response", async () => {
+    const saved = deferred<boolean>();
+    vi.mocked(api.createDealTask).mockReturnValueOnce(saved.promise);
+    vi.mocked(api.fetchDealTasks).mockResolvedValue([]);
+    const view = render(<DealTasks dealId="1" />);
+    await screen.findByText("Задач пока нет");
+    fireEvent.change(screen.getByPlaceholderText("Что сделать…"), { target: { value: "Первая сделка" } });
+    fireEvent.click(screen.getByRole("button", { name: "Задача" }));
+    view.rerender(<DealTasks dealId="2" />);
+    await screen.findByText("Задач пока нет");
+    fireEvent.change(screen.getByPlaceholderText("Что сделать…"), { target: { value: "Вторая сделка" } });
+    await act(async () => saved.resolve(true));
+    expect(screen.getByPlaceholderText("Что сделать…")).toHaveValue("Вторая сделка");
+    expect(screen.getByRole("button", { name: "Задача" })).toBeEnabled();
+    expect(api.fetchDealTasks).toHaveBeenCalledTimes(2);
+    expect(api.createDealTask).toHaveBeenCalledTimes(1);
+    expect(api.createDealTask).toHaveBeenCalledWith("1", { title: "Первая сделка", due_at: null });
+  });
+
+  it("keeps a refreshed list when an older initial read finishes after successful creation", async () => {
+    const initial = deferred<api.DealTaskView[]>();
+    vi.mocked(api.fetchDealTasks).mockReturnValueOnce(initial.promise).mockResolvedValueOnce([{
+      id: 8, deal_id: 1, title: "Сохранённая задача", kind: "other", assignee_id: null,
+      due_at: null, status: "open", result: null, overdue: false,
+    }]);
+    render(<DealTasks dealId="1" />);
+    fireEvent.change(screen.getByPlaceholderText("Что сделать…"), { target: { value: "Сохранённая задача" } });
+    fireEvent.click(screen.getByRole("button", { name: "Задача" }));
+    await waitFor(() => expect(api.fetchDealTasks).toHaveBeenCalledTimes(2));
+    await act(async () => initial.resolve([]));
+    expect(await screen.findByText("Сохранённая задача")).toBeInTheDocument();
+    expect(screen.getByText("(1 откр.)")).toBeInTheDocument();
+    expect(screen.queryByText("Задач пока нет")).not.toBeInTheDocument();
+  });
+
+  it("does not display a late completion failure on a different deal", async () => {
+    const completed = deferred<boolean>();
+    vi.mocked(api.completeDealTask).mockReturnValueOnce(completed.promise);
+    const view = render(<DealTasks dealId="1" />);
+    fireEvent.click(await screen.findByTitle("Выполнено"));
+    vi.mocked(api.fetchDealTasks).mockResolvedValueOnce([]);
+    view.rerender(<DealTasks dealId="2" />);
+    await screen.findByText("Задач пока нет");
+    await act(async () => completed.reject(new Error("synthetic old-deal completion failure")));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("Перезвонить")).not.toBeInTheDocument();
+    expect(api.completeDealTask).toHaveBeenCalledTimes(1);
+    expect(api.fetchDealTasks).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     ["open", "Открыта"], ["in_progress", "В работе"],
     ["awaiting_control", "Ждёт контроля"], ["postponed", "Отложена"],

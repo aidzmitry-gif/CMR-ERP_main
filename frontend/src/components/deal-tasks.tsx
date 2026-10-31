@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import { CheckSquare, Clock, ListTodo, Plus } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   completeDealTask,
   createDealTask,
@@ -85,6 +85,10 @@ export function TaskSummary({ task, busy = false, onDone }: {
 /** Блок «Задачи» на экране сделки (SALES-41): список с подсветкой просрочки,
  * постановка задачи (срок опционально), отметка «Выполнено». */
 export function DealTasks({ dealId }: { dealId: string }) {
+  return <ScopedDealTasks key={dealId} dealId={dealId} />;
+}
+
+function ScopedDealTasks({ dealId }: { dealId: string }) {
   const [tasks, setTasks] = useState<DealTaskView[]>([]);
   const [title, setTitle] = useState("");
   const [due, setDue] = useState("");
@@ -93,62 +97,75 @@ export function DealTasks({ dealId }: { dealId: string }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [revision, setRevision] = useState(0);
+  const active = useRef(false);
+  const readVersion = useRef(0);
+  const mutationInFlight = useRef(false);
 
-  async function refresh() {
-    try {
-      setTasks(await fetchDealTasks(dealId));
-      setLoadError(false);
-    } catch {
+  const refresh = useCallback(() => {
+    const version = ++readVersion.current;
+    const current = () => active.current && version === readVersion.current;
+    return fetchDealTasks(dealId).then((rows) => {
+      if (current()) setTasks(rows);
+    }).catch(() => {
       // A successful create/complete must not be reported as a failed mutation
       // solely because the follow-up list request failed.
-      setLoadError(true);
-    }
-  }
+      if (current()) setLoadError(true);
+    }).finally(() => {
+      if (current()) setLoading(false);
+    });
+  }, [dealId]);
 
   useEffect(() => {
-    let live = true;
-    void fetchDealTasks(dealId).then((rows) => {
-      if (live) { setTasks(rows); setLoadError(false); setLoading(false); }
-    }).catch(() => {
-      if (live) { setLoadError(true); setLoading(false); }
-    });
-    return () => { live = false; };
-  }, [dealId, revision]);
+    active.current = true;
+    void refresh();
+    return () => { active.current = false; readVersion.current += 1; };
+  }, [refresh, revision]);
 
   async function onAdd() {
-    if (!title.trim()) return;
+    if (!title.trim() || mutationInFlight.current) return;
+    mutationInFlight.current = true;
     setBusy(true);
     setError(null);
     try {
       const saved = await createDealTask(dealId, { title: title.trim(), due_at: due ? localToNaiveUtc(due) : null });
+      if (!active.current) return;
       if (!saved) {
         setError("Не удалось создать задачу. Повторите попытку.");
         return;
       }
       setTitle("");
       setDue("");
+      setLoading(true);
+      setLoadError(false);
       await refresh();
     } catch {
-      setError("Не удалось создать задачу. Повторите попытку.");
+      if (active.current) setError("Не удалось создать задачу. Повторите попытку.");
     } finally {
-      setBusy(false);
+      mutationInFlight.current = false;
+      if (active.current) setBusy(false);
     }
   }
 
   async function onDone(id: number) {
+    if (mutationInFlight.current) return;
+    mutationInFlight.current = true;
     setBusy(true);
     setError(null);
     try {
       const saved = await completeDealTask(id);
+      if (!active.current) return;
       if (!saved) {
         setError("Не удалось завершить задачу. Повторите попытку.");
         return;
       }
+      setLoading(true);
+      setLoadError(false);
       await refresh();
     } catch {
-      setError("Не удалось завершить задачу. Повторите попытку.");
+      if (active.current) setError("Не удалось завершить задачу. Повторите попытку.");
     } finally {
-      setBusy(false);
+      mutationInFlight.current = false;
+      if (active.current) setBusy(false);
     }
   }
 
@@ -158,7 +175,7 @@ export function DealTasks({ dealId }: { dealId: string }) {
     <div className="mt-4 rounded-xl border border-line p-4">
       <div className="flex items-center gap-2 font-semibold text-ink">
         <ListTodo size={18} className="text-accent-ink" />
-        Задачи <span className="font-medium text-accent-ink">({openCount} откр.)</span>
+        Задачи <span className="font-medium text-accent-ink">({loading || loadError ? "—" : openCount} откр.)</span>
         <Link href="/crm/tasks" className="ml-auto text-xs font-normal text-accent-ink underline">Все задачи</Link>
       </div>
 

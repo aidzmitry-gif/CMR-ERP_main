@@ -13,6 +13,48 @@ import { formatByn } from "@/lib/format";
 const byn = (n: number) => new RegExp(formatByn(n).replace(/\s/g, "\\s"));
 
 describe("RegularClients", () => {
+  it("обозначает учебные показатели и отсутствие записи до взаимодействия", () => {
+    render(<RegularClients />);
+    const notice = screen.getByRole("note", { name: "Учебный режим" });
+    expect(notice).toHaveTextContent("Данные и показатели приведены для примера");
+    expect(notice).toHaveTextContent("не сохраняются");
+    expect(notice).toHaveTextContent("не передаются в закупки");
+    fireEvent.click(screen.getByRole("button", { name: /Пора связаться/ }));
+    expect(notice).toBeInTheDocument();
+  });
+
+  it("учебная отметка не обещает сохранение и сбрасывается при повторном открытии", () => {
+    render(<RegularClients />);
+    fireEvent.click(screen.getByText(/СтройБаза/));
+    fireEvent.click(screen.getByRole("button", { name: /Скорректировать/ }));
+    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить в демо" }));
+    expect(screen.getByRole("button", { name: "Отмечено в демо" })).toBeDisabled();
+    fireEvent.click(screen.getByText(/СтройБаза/));
+    fireEvent.click(screen.getByText(/СтройБаза/));
+    expect(screen.getByRole("button", { name: "Подтвердить в демо" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Отмечено в демо" })).not.toBeInTheDocument();
+  });
+
+  it("после изменения количества прежняя учебная отметка снимается", () => {
+    render(<RegularClients />);
+    fireEvent.click(screen.getByText(/СтройБаза/));
+    fireEvent.click(screen.getByRole("button", { name: /Скорректировать/ }));
+    const quantity = screen.getByRole("spinbutton");
+    fireEvent.change(quantity, { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить в демо" }));
+    fireEvent.change(quantity, { target: { value: "13" } });
+    expect(screen.queryByRole("button", { name: "Отмечено в демо" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Подтвердить в демо" })).toBeEnabled();
+  });
+
+  it("не выдаёт выигрыш сделки за оплату и не обещает автоматическую эскалацию", () => {
+    render(<RegularClients />);
+    expect(screen.getByText(/Выигрыш сделки не подтверждает оплату или отгрузку/)).toBeInTheDocument();
+    expect(screen.getByText(/Автоматические задачи и эскалация в этом разделе пока не подключены/)).toBeInTheDocument();
+    expect(screen.queryByText(/добавляем обработчик/)).not.toBeInTheDocument();
+  });
+
   it("рендерит заголовок и KPI удержания с суммой в BYN", () => {
     render(<RegularClients />);
     expect(screen.getByRole("heading", { name: "Постоянные клиенты" })).toBeInTheDocument();
@@ -88,7 +130,7 @@ describe("RegularClients", () => {
     fireEvent.click(screen.getByText(/СтройБаза/));
 
     // при нулевом объёме кнопка подтверждения заблокирована
-    const confirmBtn = screen.getByRole("button", { name: /Подтвердить объём на месяц/ });
+    const confirmBtn = screen.getByRole("button", { name: "Подтвердить в демо" });
     expect(confirmBtn).toBeDisabled();
 
     // корректируем количество → кнопка разблокирована
@@ -96,14 +138,14 @@ describe("RegularClients", () => {
     const input = document.querySelector('input[type="number"]') as HTMLInputElement;
     fireEvent.change(input, { target: { value: "12" } });
 
-    const confirmBtn2 = screen.getByRole("button", { name: /Подтвердить объём на месяц/ });
+    const confirmBtn2 = screen.getByRole("button", { name: "Подтвердить в демо" });
     expect(confirmBtn2).not.toBeDisabled();
 
     fireEvent.click(confirmBtn2);
 
-    // после подтверждения — статичная кнопка «Подтверждено на месяц» и «обновлено сегодня»
-    expect(screen.getByRole("button", { name: /Подтверждено на месяц/ })).toBeInTheDocument();
-    expect(screen.getByText("сегодня")).toBeInTheDocument();
+    // Отметка явно учебная, без обещания записи или передачи в закупки.
+    expect(screen.getByRole("button", { name: "Отмечено в демо" })).toBeInTheDocument();
+    expect(screen.getByText("в этой демонстрации")).toBeInTheDocument();
   });
 
   it("сворачивает раскрытую строку повторным кликом (single-open)", () => {

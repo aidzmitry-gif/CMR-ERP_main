@@ -20,6 +20,7 @@ import {
   Users,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { formatByn } from "@/lib/format";
 
 // ── Типы ───────────────────────────────────────────────────────────────────
@@ -307,11 +308,9 @@ const FLOW: { icon: React.ReactNode; title: string; tag?: string; body: React.Re
   {
     icon: <CheckCircle2 size={15} className="text-emerald-600" />,
     title: "Сделка выиграна",
-    tag: "событие sales.deal.won",
     body: (
       <>
-        Доставка/оплата прошла. Сейчас на это <b className="font-semibold text-ink">никто не подписан</b> —
-        добавляем обработчик <b className="font-semibold text-ink">on_deal_won</b>.
+        Выигрыш сделки не подтверждает оплату или отгрузку. Для истории покупок нужны подтверждённые документы.
       </>
     ),
   },
@@ -320,16 +319,15 @@ const FLOW: { icon: React.ReactNode; title: string; tag?: string; body: React.Re
     title: "Карточка клиента",
     body: (
       <>
-        Обновляется <b className="font-semibold text-ink">last_order</b>, пересчитывается интервал →{" "}
-        <b className="font-semibold text-ink">дата следующего заказа</b>. Клиент попадает в этот список.
+        Рабочие карточки доступны в клиентской базе CRM. История покупок в этом примере учебная.
       </>
     ),
   },
   {
     icon: <Clock size={15} className="text-amber-600" />,
-    title: "Авто-задачи",
+    title: "Следующий контакт",
     body: (
-      <>+7 дн: «проверить, всё ли ок» (качество). За lead-time до след. заказа: «пора связаться — перезаказ».</>
+      <>Автоматические задачи и эскалация в этом разделе пока не подключены. Учебный сигнал не создаёт поручение.</>
     ),
   },
   {
@@ -337,8 +335,7 @@ const FLOW: { icon: React.ReactNode; title: string; tag?: string; body: React.Re
     title: "Перезаказ",
     body: (
       <>
-        Новая сделка <b className="font-semibold text-ink">по шаблону прошлой</b> (те же позиции), стартует
-        ближе к концу воронки + подсказка по допродаже.
+        Повторный заказ оформляется отдельно в CRM. Этот пример не создаёт сделку, оплату или складской резерв.
       </>
     ),
   },
@@ -356,6 +353,7 @@ function ConfirmPanel({ client }: { client: Client }) {
   const liveBadge: Client = { ...client, roll, cbs: confirmed || editing ? (total > 0 ? "ok" : "risk") : client.cbs };
 
   function setSkuConf(idx: number, value: number) {
+    setConfirmed(false);
     setSkus((prev) => prev.map((s, i) => (i === idx ? { ...s, conf: Math.max(0, value) } : s)));
   }
 
@@ -367,7 +365,7 @@ function ConfirmPanel({ client }: { client: Client }) {
           <ConfBadgePill client={liveBadge} />
         </div>
         <div className="flex items-center gap-2 text-[11px] text-muted">
-          обновлено продавцом <b className="font-semibold text-ink">{confirmed ? "сегодня" : editing ? "сейчас" : client.upd}</b> ·
+          учебная отметка <b className="font-semibold text-ink">{confirmed ? "в этой демонстрации" : editing ? "редактируется" : client.upd}</b> ·
           уверенность <b className="font-semibold text-ink">{client.conf}%</b>
           <span className="inline-block h-1.5 w-[110px] overflow-hidden rounded-full bg-sunken align-middle">
             <span className={`block h-full rounded-full ${confTone(client.conf)}`} style={{ width: `${client.conf}%` }} />
@@ -435,7 +433,7 @@ function ConfirmPanel({ client }: { client: Client }) {
       </p>
 
       <div className="mb-2.5 rounded-xl bg-blue-50 px-3 py-2.5 text-[12.5px] text-blue-600">
-        → в план закупки следующей машины:{" "}
+        Пример расчёта для закупки:{" "}
         <span className={`font-bold ${rollup.tone}`}>{rollup.text}</span>
       </div>
 
@@ -446,7 +444,7 @@ function ConfirmPanel({ client }: { client: Client }) {
             disabled
             className="inline-flex cursor-default items-center gap-1.5 rounded-xl border border-emerald-600 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-600"
           >
-            <Check size={14} /> Подтверждено на месяц
+            <Check size={14} /> Отмечено в демо
           </button>
         ) : (
           <button
@@ -456,7 +454,7 @@ function ConfirmPanel({ client }: { client: Client }) {
             disabled={total <= 0}
             title={total <= 0 ? "Объём 0 — сначала «Скорректировать» и укажите количество" : undefined}
           >
-            <CheckCircle2 size={14} /> Подтвердить объём на месяц
+            <CheckCircle2 size={14} /> Подтвердить в демо
           </button>
         )}
         <button
@@ -471,7 +469,7 @@ function ConfirmPanel({ client }: { client: Client }) {
           {editing ? <Check size={14} /> : <Pencil size={14} />} {editing ? "Готово" : "Скорректировать"}
         </button>
         <span className="text-[11px] text-faint">
-          подтверждение уйдёт закупщику в план следующей машины
+          Учебная отметка сбросится при закрытии строки или обновлении страницы. План закупок не изменится.
         </span>
       </div>
     </div>
@@ -514,7 +512,21 @@ export function RegularClients() {
           </p>
         </div>
 
+        <aside role="note" aria-label="Учебный режим" className="rounded-2xl border border-accent/20 bg-accent-soft p-4 text-sm text-ink">
+          <div className="flex items-start gap-3">
+            <Info size={20} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
+            <div className="min-w-0 space-y-2">
+              <h2 className="font-semibold">Учебный пример · рабочие данные не подключены</h2>
+              <p>Данные и показатели приведены для примера и не отражают вашу клиентскую базу. Изменения не сохраняются и не передаются в закупки.</p>
+              <Link href="/crm/clients" className="inline-flex min-h-10 items-center gap-2 font-semibold text-accent underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4">
+                Открыть рабочую базу клиентов <ArrowRight size={16} aria-hidden="true" />
+              </Link>
+            </div>
+          </div>
+        </aside>
+
         {/* KPI удержания */}
+        <h2 className="text-sm font-semibold text-muted">Примеры показателей удержания</h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           {RETENTION_KPIS.map((k) => (
             <div key={k.label} className="rounded-2xl bg-surface p-4 shadow-card">
@@ -585,15 +597,16 @@ export function RegularClients() {
           <Info size={16} className="mt-0.5 shrink-0 text-muted" />
           <span>
             Сортировка по умолчанию — <b className="font-semibold text-ink">«кому звонить раньше»</b> (просрочка → пора → в цикле).
-            Статус считается из истории: периодичность = медиана интервалов между заказами, ожидаемая дата = последний
-            заказ + интервал. Просрочка → авто-эскалация РОПу.
+            Здесь показаны учебные статусы и даты. Рабочая оценка требует истории подтверждённых покупок:
+            не менее двух различных дат, средний положительный интервал и видимый источник. Просрочка — повод
+            уточнить потребность, а не подтверждение потери клиента.
           </span>
         </div>
 
         {/* Постпродажный хвост */}
         <div className="pt-2">
           <h2 className="mb-3 text-[15px] font-bold text-ink">
-            Что происходит после продажи (won) — чтобы не забыть
+            От сделки к повторному заказу
           </h2>
           <div className="flex flex-wrap items-stretch gap-2.5">
             {FLOW.map((n, idx) => (
