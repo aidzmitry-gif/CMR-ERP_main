@@ -3,6 +3,15 @@ from typing import Any, Protocol
 
 
 class SalesSourceGateway(Protocol):
+    async def invoice_shipping_read_source(self, session: Any, document_id: int, *, organization_id: int,
+                                           expected_version: int, expected_content_sha256: str) -> dict:
+        """Historical facts without DML, autoflush or fulfillment permission.
+
+        Caller holds org; PostgreSQL deal/document row locks are retained until
+        caller completes. SQLite development reads do not prove serialization.
+        """
+        ...
+
     async def authorize_shipping_deal(self, session: Any, deal_id: int, user: Any) -> None:
         """Verify persisted Sales visibility; no foreign-module ORM or commit."""
         ...

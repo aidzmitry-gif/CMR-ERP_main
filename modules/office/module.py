@@ -70,6 +70,11 @@ class OfficeModule(ModuleContract):
         core.subscribe("logistics.intake.observed", shipping_projection.on_intake_observed)
         core.subscribe("logistics.contract.signed", shipping_projection.on_contract_signed)
         core.subscribe("sales.invoice.cancelled", shipping_projection.on_invoice_cancelled)
+        from modules.office import warehouse_projection
+
+        core.include_router(warehouse_projection.router, prefix=self.api_prefix)
+        core.subscribe("wms.invoice.physical_shipped", warehouse_projection.on_physical_shipped)
+        core.subscribe("wms.invoice.remainder_released", warehouse_projection.on_remainder_released)
 
 
 def get_module() -> ModuleContract:

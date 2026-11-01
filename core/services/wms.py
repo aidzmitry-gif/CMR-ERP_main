@@ -6,6 +6,14 @@ from typing import Any, Protocol
 
 
 class WmsReservationGateway(Protocol):
+    async def invoice_shipping_progress(self, session: Any, organization_id: int, source: dict) -> dict:
+        """Caller holds org/Sales; acquire WMS locks before any Office lock.
+
+        Verified canonical invoice quantities, not external coverage, fulfillment
+        permission or a physical command. No writes, flush, events or commit.
+        """
+        ...
+
     async def production_receipt_status(self, session, organization_id: int, event_id: int, source: dict) -> dict: ...
 
     async def receiving_places(self, session, organization_id: int, query: str) -> list[dict]: ...
