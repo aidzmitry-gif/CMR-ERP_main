@@ -65,6 +65,7 @@ export interface FunnelDetailExtras {
 export interface FunnelBoardProps {
   title: string;
   subtitle?: string;
+  refreshToken?: number;
   boardPath: string; // GET  /api{boardPath}
   createPath: string; // POST /api{createPath}
   patchPath: string; // PATCH /api{patchPath}/{id}
@@ -808,6 +809,7 @@ function DetailDrawer({
 }
 
 export function FunnelBoard({
+  refreshToken,
   title,
   subtitle,
   boardPath,
@@ -832,7 +834,7 @@ export function FunnelBoard({
   const [stages, setStages] = useState<FunnelStage[]>([]);
   const [reload, setReload] = useState(0);
   const [loadedPath, setLoadedPath] = useState<string | null>(null);
-  const loadKey = `${boardPath}:${reload}`;
+  const loadKey = `${boardPath}:${reload}${refreshToken === undefined ? "" : `:${refreshToken}`}`;
   const loaded = loadedPath === loadKey;
   const [loadFailure, setLoadError] = useState<string | null>(null);
   const loadError = loaded ? loadFailure : null;

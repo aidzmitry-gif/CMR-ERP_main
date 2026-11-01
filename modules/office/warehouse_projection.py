@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
 
 from core.runtime.deps import get_core
-from core.services.auth import get_current_user
+from core.services.auth import get_current_user, has_permission
 from core.services.logistics import ExactInvoiceIdentity, snapshot_row
 from core.services.shipping_payload import canonical_hash
 from modules.office.models import OfficeDoc
@@ -141,9 +141,10 @@ async def addressed(core, session, user, doc_id, permission, *, read_only=False)
     return doc, progress
 
 
-def response_body(doc, progress):
+def response_body(doc, progress, *, principal, can_reconcile):
     return {"office_document_id": doc.id, "document_stage": doc.stage, "wms_ref": doc.wms_ref,
-            "state": "unassociated" if progress is None else "observed", "progress": progress}
+            "state": "unassociated" if progress is None else "observed", "progress": progress,
+            "principal": principal, "can_reconcile": can_reconcile}
 
 
 @router.get("/docs/{doc_id}/warehouse-progress")
@@ -152,7 +153,9 @@ async def read_progress(doc_id: int, response: Response, session=Depends(transac
     response.headers["Cache-Control"] = "private, no-store"
     with session.no_autoflush:
         doc, progress = await addressed(core, session, user, doc_id, "office.doc.read", read_only=True)
-        return response_body(doc, progress)
+        effective, principal = await current_actor(core, session, user, "office.doc.read")
+        return response_body(doc, progress, principal=principal,
+            can_reconcile=progress is not None and has_permission(core, effective, "office.stage.move"))
 
 
 @router.post("/docs/{doc_id}/warehouse-progress/reconcile")
@@ -166,7 +169,8 @@ async def reconcile_progress(doc_id: int, response: Response, session=Depends(tr
         changes = values(doc, progress)
         for name, value in changes.items():
             setattr(doc, name, value)
-        result = response_body(doc, progress)
+        _, principal = await current_actor(core, session, user, "office.stage.move")
+        result = response_body(doc, progress, principal=principal, can_reconcile=True)
     await session.commit()
     return result
 

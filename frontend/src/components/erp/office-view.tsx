@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { FileText, Truck, UserCheck } from "lucide-react";
-import { useState } from "react";
+import { cloneElement, isValidElement, useState } from "react";
 
 import { OfficeDelivery } from "@/components/erp/office-delivery";
 import { OfficeReviewQueue } from "@/components/erp/office-review-queue";
@@ -37,6 +37,9 @@ function TabButton({
 /** Keep the native document funnel mounted when switching workspace tabs. */
 export function OfficeView({ board }: { board: React.ReactNode }) {
   const [tab, setTab] = useState<Tab>("docs");
+  const [boardRevision, setBoardRevision] = useState(0);
+  const refreshedBoard = isValidElement<{ refreshToken?: number }>(board) && typeof board.type === "function"
+    ? cloneElement(board, { refreshToken: boardRevision }) : board;
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -57,8 +60,8 @@ export function OfficeView({ board }: { board: React.ReactNode }) {
       </div>
 
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        <div className={tab === "docs" ? "contents" : "hidden"}>{board}</div>
-        {tab === "delivery" && <OfficeDelivery />}
+        <div className={tab === "docs" ? "contents" : "hidden"}>{refreshedBoard}</div>
+        {tab === "delivery" && <OfficeDelivery onReconciled={() => setBoardRevision(v => v + 1)} />}
         {tab === "reviewers" && <OfficeReviewQueue />}
       </div>
     </div>

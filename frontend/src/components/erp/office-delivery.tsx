@@ -12,7 +12,7 @@ export const OFFICE_STAGE_LABELS: Record<string, string> = {
   await_pay: "Ожидание оплаты", paid: "Оплачен", docs: "Документы",
 };
 
-export function OfficeDelivery() {
+export function OfficeDelivery({ onReconciled }: { onReconciled?: () => void }) {
   const [rows, setRows] = useState<OfficeDocument[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
@@ -52,7 +52,7 @@ export function OfficeDelivery() {
               <div className="min-w-0 flex-1"><p className="break-words text-sm font-semibold text-ink">{row.number || `Документ #${row.id}`}</p><p className="mt-0.5 break-words text-sm text-muted">{row.company || "Компания не указана"}</p><span className="mt-2 inline-flex rounded bg-sunken px-2 py-0.5 text-xs text-muted">{OFFICE_STAGE_LABELS[row.stage] || `Этап: ${row.stage}`}</span></div><ArrowRight size={15} className="mt-1 shrink-0 text-faint" />
             </button>)}{visible.length === 0 && <p className="p-5 text-sm text-muted">По этому запросу документы не найдены.</p>}</div>
           </section>
-          {document ? <OfficeShippingWorkspace key={document.id} document={document} /> : <div className="rounded-xl border border-dashed border-line bg-surface p-7 sm:p-10"><Truck size={30} className="mb-4 text-accent-ink" /><h2 className="text-lg font-semibold text-ink">Откройте документ в списке</h2><p className="mt-2 max-w-lg text-sm leading-6 text-muted">В карточке будут условия заявки, точный счёт и подтверждённый статус исполнения. Оплата и оформление документов отображаются в своей воронке.</p></div>}
+          {document ? <OfficeShippingWorkspace key={document.id} document={document} onReconciled={() => { setRevision(v => v + 1); onReconciled?.(); }} /> : <div className="rounded-xl border border-dashed border-line bg-surface p-7 sm:p-10"><Truck size={30} className="mb-4 text-accent-ink" /><h2 className="text-lg font-semibold text-ink">Откройте документ в списке</h2><p className="mt-2 max-w-lg text-sm leading-6 text-muted">В карточке будут условия заявки, точный счёт и подтверждённый статус исполнения. Оплата и оформление документов отображаются в своей воронке.</p></div>}
         </div>}
       </div>
     </main>

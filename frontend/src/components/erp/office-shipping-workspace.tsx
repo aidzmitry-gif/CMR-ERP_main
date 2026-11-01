@@ -4,6 +4,7 @@ import { Check, FileCheck2, RefreshCw, Truck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { OfficeShippingInvoice } from "@/components/erp/office-shipping-invoice";
+import { OfficeWarehouseProgress } from "@/components/erp/office-warehouse-progress";
 import {
   clearPending, confirmAssociation, decimalInput, fetchOfficeCarriers, fetchShippingContext,
   OfficeShippingError, pendingMatches, prepareShipping, readPending, resolveIntake, savePending, validIntent,
@@ -79,7 +80,7 @@ function PreparationForm({ context, disabled, submit }: { context: ShippingConte
   </form>;
 }
 
-export function OfficeShippingWorkspace({ document }: { document: OfficeDocument }) {
+export function OfficeShippingWorkspace({ document, onReconciled }: { document: OfficeDocument; onReconciled?: () => void }) {
   const [snapshot, setContext] = useState<ShippingContext | null>(null);
   const context = snapshot?.source_snapshot.document_id === document.id ? snapshot : null;
   const [loading, setLoading] = useState(true);
@@ -172,6 +173,7 @@ export function OfficeShippingWorkspace({ document }: { document: OfficeDocument
         {context.logistics.shipment && <dl className="grid gap-3 text-sm sm:grid-cols-2">{[["Отгрузка", context.logistics.shipment.number], ["Состояние", shipmentLabels[context.logistics.shipment.status] || context.logistics.shipment.status], ["Перевозчик", context.logistics.shipment.carrier_name], ["Трекинг", context.logistics.shipment.tracking_no], ["Статус трекинга", context.logistics.shipment.tracking_status], ["Ожидаемая дата", context.logistics.shipment.eta]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-muted">{label}</dt><dd className="mt-1 break-words text-ink">{value || "Нет подтверждённых данных"}</dd></div>)}</dl>}
         {context.logistics.state === "pending" && context.association?.current_review_matches && context.capabilities.can_associate && context.source_matches_request && <><button type="button" disabled={busy || !!pending || !!storageError} onClick={() => void processIntake()} className={button}>Обработать заявку в логистике</button><p className="text-xs leading-5 text-muted">Операция создаёт или использует внутреннее исполнение. Внешнее бронирование и фактическая передача груза выполняются отдельно.</p></>}
       </section>
+      <OfficeWarehouseProgress key={`${context.principal}:${document.id}:${context.association?.association_id ?? "unassociated"}:${context.association?.exact_invoice.expected_content_sha256 ?? ""}`} context={context} disabled={busy || !!pending || !!storageError || !context.source_matches_request} onReconciled={() => { refresh(); onReconciled?.(); }} />
     </>}
   </section>;
 }

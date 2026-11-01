@@ -21,6 +21,14 @@ export type ConfirmCommand = { request_key: string; expected_source_hash: string
 export type AssociationPreview = { exact_invoice: ExactInvoice; intent_digest: string; assignment_revision: number; verified_invoice: { deal_id: number; [key: string]: unknown } };
 export type InvoiceChoice = { number: string; exact_invoice: ExactInvoice };
 export type PendingCommand = { version: 1; principal: string; document_id: number; kind: "prepare"; body: PrepareCommand } | { version: 1; principal: string; document_id: number; kind: "confirm"; body: ConfirmCommand };
+export type WarehouseLine = { source: string; line_no: number; sku_code: string; warehouse: string; expected_qty: string; shipped_qty: string; reserved_qty: string; released_qty: string };
+export type WarehouseProgress = {
+  schema_version: 1; exact_invoice: ExactInvoice; scope: "canonical_invoice_reservation"; coverage_complete: false;
+  state: "none_recorded" | "partial" | "complete"; lines: WarehouseLine[];
+  acts: { act_id: number; source_key: string; digest: string; operation_date: string; execution_mode: "wms" | "document" }[];
+  releases: { release_id: number; digest: string }[]; basis_digest: string;
+};
+export type WarehouseSnapshot = { office_document_id: number; document_stage: string; wms_ref: string; principal: string; can_reconcile: boolean; state: "unassociated" | "observed"; progress: WarehouseProgress | null };
 
 export class OfficeShippingError extends Error {
   constructor(message: string, readonly status?: number, readonly uncertain = false) { super(message); }
@@ -149,6 +157,42 @@ export async function parseShippingContext(v: unknown, id: number): Promise<Ship
 }
 export async function fetchShippingContext(id: number, signal?: AbortSignal): Promise<ShippingContext> {
   return parseShippingContext(await request(`${path(id)}/shipping-source`, { signal }), id);
+}
+function warehouseSnapshot(value: unknown, context: ShippingContext): WarehouseSnapshot {
+  if (!object(value) || value.office_document_id !== context.source_snapshot.document_id || value.principal !== context.principal
+    || !text(value.document_stage) || !text(value.wms_ref) || !bool(value.can_reconcile)) invalid();
+  if (value.state === "unassociated") {
+    if (value.progress !== null || value.can_reconcile || context.association) invalid();
+  } else {
+    const p = value.progress;
+    if (value.state !== "observed" || !object(p) || p.schema_version !== 1 || p.scope !== "canonical_invoice_reservation"
+      || p.coverage_complete !== false || !context.association || !same(p.exact_invoice, context.association.exact_invoice)
+      || !["none_recorded", "partial", "complete"].includes(String(p.state)) || !digest(p.basis_digest)
+      || !Array.isArray(p.lines) || !p.lines.length || !Array.isArray(p.acts) || !Array.isArray(p.releases)) invalid();
+    const quantity = (v: unknown): v is string => text(v) && /^(0|[1-9]\d*)\.\d{2}$/.test(v);
+    if (!p.lines.every(row => object(row) && positive(row.line_no) && ["source", "sku_code", "warehouse"].every(k => text(row[k]) && !!row[k])
+      && ["expected_qty", "shipped_qty", "reserved_qty", "released_qty"].every(k => quantity(row[k])))
+      || new Set(p.lines.map(row => row.source)).size !== p.lines.length
+      || !p.acts.every(row => object(row) && positive(row.act_id) && uuid(row.source_key) && digest(row.digest)
+        && text(row.operation_date) && /^\d{4}-\d{2}-\d{2}$/.test(row.operation_date) && ["wms", "document"].includes(String(row.execution_mode)))
+      || !p.releases.every(row => object(row) && positive(row.release_id) && digest(row.digest))) invalid();
+    const quantityUnits = (v: string) => BigInt(v.replace(".", ""));
+    if (!p.lines.every(row => quantityUnits(row.expected_qty) > 0n
+      && quantityUnits(row.expected_qty) === quantityUnits(row.shipped_qty) + quantityUnits(row.reserved_qty) + quantityUnits(row.released_qty))
+      || (p.state === "complete") !== p.lines.every(row => row.expected_qty === row.shipped_qty)
+      || (p.state === "none_recorded") !== (p.acts.length === 0)
+      || (p.acts.length === 0) !== p.lines.every(row => row.shipped_qty === "0.00")) invalid();
+  }
+  return value as WarehouseSnapshot;
+}
+export async function fetchWarehouseProgress(context: ShippingContext, signal?: AbortSignal): Promise<WarehouseSnapshot> {
+  return warehouseSnapshot(await request(`${path(context.source_snapshot.document_id)}/warehouse-progress`, { signal }), context);
+}
+export async function reconcileWarehouseProgress(context: ShippingContext): Promise<void> {
+  // The server recomputes facts for this addressed document; this is not a stock command.
+  const value = await request(`${path(context.source_snapshot.document_id)}/warehouse-progress/reconcile`, { method: "POST" });
+  try { warehouseSnapshot(value, context); }
+  catch { throw new OfficeShippingError("Ответ сверки не подтверждён. Перечитайте сохранённые сведения.", undefined, true); }
 }
 export async function prepareShipping(id: number, body: PrepareCommand): Promise<void> {
   if (!prepare(body)) invalid();
