@@ -381,7 +381,7 @@ export interface FunnelKpi {
   value: string;
   target?: string; // «40» → отрисуется как «/ 40»
   note: string; // подпись снизу, напр. «80% от плана»
-  percent: number; // заполнение прогресс-бара (0–100)
+  percent?: number; // заполнение прогресс-бара (0–100), если есть подтверждённый показатель
   tone: FunnelTone;
 }
 

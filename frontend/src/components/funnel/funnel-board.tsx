@@ -33,7 +33,7 @@ import {
 import { FaTelegramPlane, FaWeixin, FaWhatsapp } from "react-icons/fa";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createFunnelCard, fetchFunnelBoard, moveFunnelCard } from "@/lib/funnel-api";
-import { formatMoney, formatNextStep } from "@/lib/format";
+import { formatByn, formatMoney, formatNextStep } from "@/lib/format";
 import Gate1PickerModal from "./gate1-picker-modal";
 import type {
   FunnelCard,
@@ -63,6 +63,7 @@ export interface FunnelDetailExtras {
 }
 
 export interface FunnelBoardProps {
+  currency?: "BYN";
   title: string;
   subtitle?: string;
   refreshToken?: number;
@@ -75,7 +76,7 @@ export interface FunnelBoardProps {
   /** показывать денежные суммы (для HR/производства/обучения — false) */
   showSum?: boolean;
   /** верхние плитки «План/Факт» */
-  kpis?: FunnelKpi[];
+  kpis?: FunnelKpi[] | ((stages: FunnelStage[]) => FunnelKpi[]);
   /** строка статуса над доской (AI ведёт N · просрочки · период) */
   statusNote?: string;
   /** AI-инсайт-строка (фиолетовая плашка над доской) */
@@ -206,7 +207,7 @@ function moveCard(stages: FunnelStage[], cardId: number, targetStage: string): F
 
 function KpiTile({ kpi }: { kpi: FunnelKpi }) {
   return (
-    <div className="rounded-xl bg-surface p-4 shadow-card">
+    <div role="group" aria-label={kpi.label} className="rounded-xl bg-surface p-4 shadow-card">
       <div className="flex items-center gap-2">
         <span className={clsx("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", TONE_CHIP[kpi.tone])}>
           <span className="h-2 w-2 rounded-full bg-current" />
@@ -217,15 +218,16 @@ function KpiTile({ kpi }: { kpi: FunnelKpi }) {
         {kpi.value}
         {kpi.target && <span className="text-sm font-normal text-muted"> / {kpi.target}</span>}
       </div>
-      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-sunken">
+      {kpi.percent != null && <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-sunken">
         <div className={clsx("h-full rounded-full", TONE_BAR[kpi.tone])} style={{ width: `${kpi.percent}%` }} />
-      </div>
+      </div>}
       <div className="mt-1.5 text-xs text-muted">{kpi.note}</div>
     </div>
   );
 }
 
 function Card({
+  formatAmount = formatMoney,
   card,
   onOpen,
   showChannels,
@@ -233,6 +235,7 @@ function Card({
   showActions,
 }: {
   card: FunnelCard;
+  formatAmount?: typeof formatMoney;
   onOpen?: () => void;
   showChannels?: boolean;
   showFocusPills?: boolean;
@@ -283,7 +286,7 @@ function Card({
       )}
 
       {card.amount != null && card.amount > 0 && (
-        <div className="mt-1.5 font-semibold text-ink">{formatMoney(card.amount)}</div>
+        <div className="mt-1.5 font-semibold text-ink">{formatAmount(card.amount)}</div>
       )}
 
       {card.progress != null && (
@@ -408,6 +411,7 @@ function Card({
 }
 
 function DraggableCard({
+  formatAmount = formatMoney,
   card,
   onOpen,
   showChannels,
@@ -415,6 +419,7 @@ function DraggableCard({
   showActions,
 }: {
   card: FunnelCard;
+  formatAmount?: typeof formatMoney;
   onOpen?: () => void;
   showChannels?: boolean;
   showFocusPills?: boolean;
@@ -424,6 +429,7 @@ function DraggableCard({
   return (
     <div ref={setNodeRef} {...attributes} {...listeners} className={isDragging ? "opacity-40" : ""}>
       <Card
+        formatAmount={formatAmount}
         card={card}
         onOpen={onOpen}
         showChannels={showChannels}
@@ -435,11 +441,13 @@ function DraggableCard({
 }
 
 function Column({
+  formatAmount = formatMoney,
   stage,
   showSum,
   children,
 }: {
   stage: FunnelStage;
+  formatAmount?: typeof formatMoney;
   showSum: boolean;
   children: React.ReactNode;
 }) {
@@ -452,7 +460,7 @@ function Column({
           <div className="font-semibold text-ink">{stage.title}</div>
           <div className="mt-0.5 text-xs text-muted">
             {stage.count} {stage.count === 1 ? "карточка" : "шт."}
-            {showSum && stage.sum > 0 ? ` · ${formatMoney(stage.sum)}` : ""}
+            {showSum && stage.sum > 0 ? ` · ${formatAmount(stage.sum)}` : ""}
           </div>
         </div>
       </div>
@@ -619,6 +627,7 @@ function StageTimeline({ stages, currentStageId }: { stages: FunnelStage[]; curr
 }
 
 function DetailDrawer({
+  formatAmount = formatMoney,
   card,
   stageId,
   stages,
@@ -626,6 +635,7 @@ function DetailDrawer({
   onClose,
 }: {
   card: FunnelCard;
+  formatAmount?: typeof formatMoney;
   stageId: string;
   stages: FunnelStage[];
   extras?: FunnelDetailExtras;
@@ -656,7 +666,7 @@ function DetailDrawer({
               </span>
             )}
             {card.amount != null && card.amount > 0 && (
-              <span className="text-sm font-semibold text-ink">{formatMoney(card.amount)}</span>
+              <span className="text-sm font-semibold text-ink">{formatAmount(card.amount)}</span>
             )}
             {card.owner && <span className="text-sm text-muted">· {card.owner}</span>}
             {card.date && <span className="text-sm text-muted">· {card.date}</span>}
@@ -809,6 +819,7 @@ function DetailDrawer({
 }
 
 export function FunnelBoard({
+  currency,
   refreshToken,
   title,
   subtitle,
@@ -833,6 +844,7 @@ export function FunnelBoard({
 }: FunnelBoardProps) {
   const [stages, setStages] = useState<FunnelStage[]>([]);
   const [reload, setReload] = useState(0);
+  const formatAmount = currency === "BYN" ? formatByn : formatMoney;
   const [loadedPath, setLoadedPath] = useState<string | null>(null);
   const loadKey = `${boardPath}:${reload}${refreshToken === undefined ? "" : `:${refreshToken}`}`;
   const loaded = loadedPath === loadKey;
@@ -947,15 +959,16 @@ export function FunnelBoard({
     const doneCount = last?.count ?? 0;
     const metrics: FunnelSummaryMetric[] = [
       { label: "В работе", value: String(activeCount) },
-      ...(showSum ? [{ label: "Сумма в работе", value: formatMoney(activeSum) }] : []),
+      ...(showSum ? [{ label: "Сумма в работе", value: formatAmount(activeSum) }] : []),
       { label: "В финале", value: String(doneCount) },
-      ...(showSum ? [{ label: "Сумма финала", value: formatMoney(last?.sum ?? 0) }] : []),
+      ...(showSum ? [{ label: "Сумма финала", value: formatAmount(last?.sum ?? 0) }] : []),
       { label: "Конверсия", value: `${total ? ((doneCount / total) * 100).toFixed(1) : "0.0"}%` },
     ];
     return metrics;
-  }, [stages, showSum]);
+  }, [stages, showSum, formatAmount]);
 
   const summaryMetrics = summary ?? computed;
+  const displayedKpis = typeof kpis === "function" ? loaded && !loadError ? kpis(stages) : [] : kpis;
 
   return (
     <>
@@ -993,9 +1006,9 @@ export function FunnelBoard({
         </div>
 
         {/* KPI «План/Факт» */}
-        {kpis && kpis.length > 0 && (
+        {displayedKpis && displayedKpis.length > 0 && (
           <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-            {kpis.map((k) => (
+            {displayedKpis.map((k) => (
               <KpiTile key={k.label} kpi={k} />
             ))}
           </div>
@@ -1082,9 +1095,10 @@ export function FunnelBoard({
         <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
           <div className="mt-2 flex gap-4 overflow-x-auto pb-2 thin-scroll">
             {filtered.map((stage) => (
-              <Column key={stage.id} stage={stage} showSum={showSum}>
+              <Column key={stage.id} stage={stage} showSum={showSum} formatAmount={formatAmount}>
                 {stage.cards.map((card) => (
                   <DraggableCard
+                    formatAmount={formatAmount}
                     key={card.id}
                     card={card}
                     showChannels={showChannels}
@@ -1104,14 +1118,14 @@ export function FunnelBoard({
           <DragOverlay>
             {active ? (
               <div className="w-[280px] rotate-2">
-                <Card card={active} showChannels={showChannels} showFocusPills={showFocusPills} showActions={showActions} />
+                <Card card={active} formatAmount={formatAmount} showChannels={showChannels} showFocusPills={showFocusPills} showActions={showActions} />
               </div>
             ) : null}
           </DragOverlay>
         </DndContext>
 
         {/* Итоги */}
-        {loaded && !loadError && <div className="mt-4 rounded-xl bg-surface p-5 shadow-card">
+        {loaded && !loadError && summaryMetrics.length > 0 && <div className="mt-4 rounded-xl bg-surface p-5 shadow-card">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="font-semibold text-ink">Итоги по воронке</h3>
             <span className="text-xs text-muted">за период</span>
@@ -1189,6 +1203,7 @@ export function FunnelBoard({
 
       {selected && (
         <DetailDrawer
+          formatAmount={formatAmount}
           card={selected.card}
           stageId={selected.stageId}
           stages={stages}
