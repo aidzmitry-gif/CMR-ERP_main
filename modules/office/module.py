@@ -65,6 +65,11 @@ class OfficeModule(ModuleContract):
         core.subscribe("logistics.delivery.delivered", events.on_delivery_delivered)  # ← Логистика
         core.subscribe("logistics.delivery.tracking", events.on_delivery_tracking)    # ← Логистика (статус в пути)
         core.subscribe("finance.payment.received", events.on_payment_received)  # ← Финансы
+        from modules.office import shipping_projection
+
+        core.subscribe("logistics.intake.observed", shipping_projection.on_intake_observed)
+        core.subscribe("logistics.contract.signed", shipping_projection.on_contract_signed)
+        core.subscribe("sales.invoice.cancelled", shipping_projection.on_invoice_cancelled)
 
 
 def get_module() -> ModuleContract:

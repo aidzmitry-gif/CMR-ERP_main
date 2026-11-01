@@ -185,6 +185,15 @@ class ShippingProducerGateway(Protocol):
 
 
 class LogisticsGateway(Protocol):
+    async def office_shipping_projection_context(self, session: Any, *, intake_id: int | None = None,
+                                                 rfq_id: int | None = None, shipment_id: int | None = None) -> dict:
+        """Internal event discovery: all exact Office sources for one saved ID.
+
+        No authorization, fulfillment, row locks, writes or commit. Office owns
+        source/history validation and locks its documents before display updates.
+        """
+        ...
+
     async def shipping_source_status(self, session: Any, *, source: dict, payload_sha256: str,
                                      expected_association: dict | None) -> dict:
         """Read one caller-authorized source and its exact target, without locks/writes.

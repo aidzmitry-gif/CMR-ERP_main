@@ -240,6 +240,15 @@ async def _find_doc(session: AsyncSession, *, allow_protected=False, **by: Any) 
     return None
 
 
+async def _project_saved_delivery(payload, ctx):
+    if "shipment_id" not in payload:
+        return False
+    from modules.office.shipping_projection import project_context
+
+    await project_context(ctx, shipment_id=payload["shipment_id"], include_legacy=True)
+    return True
+
+
 async def on_deal_won(payload: dict, ctx) -> None:
     """CRM: сделка выиграна → завести документ в стадии «Готово к отгрузке».
 
@@ -300,6 +309,8 @@ async def on_shipment_completed(payload: dict, ctx) -> None:
 
 async def on_delivery_delivered(payload: dict, ctx) -> None:
     """Логистика: перевозчик доставил груз → фиксируем трекинг в документе."""
+    if await _project_saved_delivery(payload, ctx):
+        return
     session: AsyncSession = ctx.session
     doc = await _find_doc(
         session,
@@ -353,8 +364,10 @@ async def on_delivery_tracking(payload: dict, ctx) -> None:
     """Логистика: промежуточный статус перевозки → отражаем на карточке документа.
 
     Офис-менеджер «работает в логистике» — видит состояние перевозки прямо на
-    документе. Сопоставление по ``logistics_ref`` (= номер отгрузки логистики).
+    документе. Старые события сопоставляются по ``logistics_ref``.
     """
+    if await _project_saved_delivery(payload, ctx):
+        return
     session: AsyncSession = ctx.session
     doc = await _find_doc(
         session,
