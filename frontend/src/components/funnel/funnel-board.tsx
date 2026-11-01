@@ -845,9 +845,10 @@ export function FunnelBoard({
   const [stages, setStages] = useState<FunnelStage[]>([]);
   const [reload, setReload] = useState(0);
   const formatAmount = currency === "BYN" ? formatByn : formatMoney;
-  const [loadedPath, setLoadedPath] = useState<string | null>(null);
   const loadKey = `${boardPath}:${reload}${refreshToken === undefined ? "" : `:${refreshToken}`}`;
-  const loaded = loadedPath === loadKey;
+  const request = useMemo(() => ({ boardPath, loadKey }), [boardPath, loadKey]);
+  const [loadedRequest, setLoadedRequest] = useState<typeof request | null>(null);
+  const loaded = loadedRequest === request;
   const [loadFailure, setLoadError] = useState<string | null>(null);
   const loadError = loaded ? loadFailure : null;
   const [actionError, setActionError] = useState<string | null>(null);
@@ -855,12 +856,17 @@ export function FunnelBoard({
   const mutation = useRef(false);
   const currentPath = useRef(boardPath);
   useEffect(() => { currentPath.current = boardPath; }, [boardPath]);
-  const [query, setQuery] = useState("");
+  const emptyView = { boardPath, query: "", stage: "", owner: "", priority: "" };
+  const [view, setView] = useState(emptyView);
+  const currentView = view.boardPath === boardPath ? view : emptyView;
+  const { query, stage: stageFilter, owner: ownerFilter, priority: priorityFilter } = currentView;
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filterPanelId = useId();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<Record<string, string | number>>(() => blankForm(fields));
   const [busy, setBusy] = useState(false);
-  const [active, setActive] = useState<FunnelCard | null>(null);
-  const [selected, setSelected] = useState<{ card: FunnelCard; stageId: string } | null>(null);
+  const [active, setActive] = useState<{ id: number; boardPath: string } | null>(null);
+  const [selected, setSelected] = useState<{ id: number; boardPath: string } | null>(null);
   const [gate1DealId, setGate1DealId] = useState<number | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
@@ -873,19 +879,19 @@ export function FunnelBoard({
       if (!alive || currentPath.current !== boardPath) return;
       setStages(s);
       setLoadError(null);
-      setLoadedPath(loadKey);
+      setLoadedRequest(request);
     }).catch(() => {
       if (!alive || currentPath.current !== boardPath) return;
       setStages([]);
       setLoadError("Не удалось загрузить доску. Проверьте связь и повторите загрузку.");
-      setLoadedPath(loadKey);
+      setLoadedRequest(request);
     });
     return () => { alive = false; };
-  }, [boardPath, loadKey]);
+  }, [boardPath, request]);
 
   function handleDragStart(e: DragStartEvent) {
     const id = Number(e.active.id);
-    setActive(stages.flatMap((s) => s.cards).find((c) => c.id === id) ?? null);
+    setActive(stages.some((s) => s.cards.some((c) => c.id === id)) ? { id, boardPath } : null);
   }
 
   async function handleDragEnd(e: DragEndEvent) {
@@ -931,18 +937,34 @@ export function FunnelBoard({
   }
 
   const q = query.trim().toLowerCase();
+  const filterCount = Number(Boolean(stageFilter)) + Number(Boolean(ownerFilter)) + Number(Boolean(priorityFilter));
+  const hasSelection = Boolean(q || filterCount);
+  const availableStages = loaded && !loadError ? stages : [];
+  const owners = [...new Set(availableStages.flatMap((s) => s.cards.map((c) => c.owner)))].sort((a, b) => a.localeCompare(b, "ru"));
+  const priorities = [...new Set(availableStages.flatMap((s) => s.cards.map((c) => c.priority)))].sort((a, b) => a.localeCompare(b, "ru"));
+  const selectedStage = selected?.boardPath === boardPath ? availableStages.find((s) => s.cards.some((c) => c.id === selected.id)) : undefined;
+  const selectedCard = selectedStage?.cards.find((c) => c.id === selected?.id);
+  const activeCard = active?.boardPath === boardPath ? availableStages.flatMap((s) => s.cards).find((c) => c.id === active.id) : undefined;
+
+  function updateView(field: "query" | "stage" | "owner" | "priority", value: string) {
+    setView((previous) => ({ ...(previous.boardPath === boardPath ? previous : emptyView), [field]: value }));
+  }
+
   const filtered = useMemo(
-    () =>
-      (loaded && !loadError ? stages : []).map((s) => ({
-        ...s,
-        cards: q
-          ? s.cards.filter((c) =>
-              `${c.code} ${c.title} ${c.subtitle} ${c.owner}`.toLowerCase().includes(q),
-            )
-          : s.cards,
-      })),
-    [stages, q, loaded, loadError],
+    () => (loaded && !loadError ? stages : [])
+      .filter((s) => !stageFilter || s.id === stageFilter)
+      .map((s) => {
+        if (!hasSelection) return s;
+        const cards = s.cards.filter((c) =>
+          (!q || `${c.code} ${c.title} ${c.subtitle} ${c.owner}`.toLowerCase().includes(q)) &&
+          (!ownerFilter || `=${c.owner}` === ownerFilter) &&
+          (!priorityFilter || `=${c.priority}` === priorityFilter));
+        return { ...s, cards, count: cards.length, sum: cards.reduce((total, c) => total + (c.amount ?? 0), 0) };
+      }),
+    [stages, q, loaded, loadError, stageFilter, ownerFilter, priorityFilter, hasSelection],
   );
+  const shownCount = filtered.reduce((total, s) => total + s.cards.length, 0);
+  const availableCount = availableStages.reduce((total, s) => total + s.cards.length, 0);
 
   const computed = useMemo(() => {
     const last = stages[stages.length - 1];
@@ -983,13 +1005,13 @@ export function FunnelBoard({
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
             <input
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => updateView("query", e.target.value)}
               placeholder="Поиск..."
               className="w-full rounded-lg border border-line bg-surface py-2 pl-9 pr-3 text-sm text-ink outline-none placeholder:text-faint focus:border-accent"
             />
           </div>
-          <button className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken">
-            <SlidersHorizontal size={16} /> Фильтры
+          <button type="button" aria-expanded={filtersOpen} aria-controls={filterPanelId} onClick={() => setFiltersOpen((value) => !value)} className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken">
+            <SlidersHorizontal size={16} /> Фильтры{filterCount > 0 ? ` · ${filterCount}` : ""}
           </button>
           <button className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted hover:bg-sunken">
             <Settings2 size={16} /> Настроить воронку
@@ -1004,6 +1026,38 @@ export function FunnelBoard({
             <Plus size={16} /> {createLabel}
           </button>
         </div>
+
+        {filtersOpen && <fieldset id={filterPanelId} className="mt-4 min-w-0 rounded-xl border border-line bg-surface p-4">
+          <legend className="px-1 text-sm font-semibold text-ink">Фильтры доски</legend>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="min-w-0 text-xs font-medium text-muted">Этап
+              <select value={stageFilter} disabled={!loaded || Boolean(loadError)} onChange={(e) => updateView("stage", e.target.value)} className="mt-1 block w-full min-w-0 rounded-lg border border-line bg-surface p-2 text-sm text-ink">
+                <option value="">Все этапы</option>
+                {stageFilter && !availableStages.some((s) => s.id === stageFilter) && <option value={stageFilter}>Выбранный этап отсутствует в снимке</option>}
+                {availableStages.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
+              </select>
+            </label>
+            <label className="min-w-0 text-xs font-medium text-muted">Ответственный в карточке
+              <select value={ownerFilter} disabled={!loaded || Boolean(loadError)} onChange={(e) => updateView("owner", e.target.value)} className="mt-1 block w-full min-w-0 rounded-lg border border-line bg-surface p-2 text-sm text-ink">
+                <option value="">Все ответственные</option>
+                {ownerFilter && !owners.some((owner) => `=${owner}` === ownerFilter) && <option value={ownerFilter}>Выбранный ответственный отсутствует в снимке</option>}
+                {owners.map((owner) => <option key={owner} value={`=${owner}`}>{owner || "Без ответственного"}</option>)}
+              </select>
+            </label>
+            <label className="min-w-0 text-xs font-medium text-muted">Приоритет
+              <select value={priorityFilter} disabled={!loaded || Boolean(loadError)} onChange={(e) => updateView("priority", e.target.value)} className="mt-1 block w-full min-w-0 rounded-lg border border-line bg-surface p-2 text-sm text-ink">
+                <option value="">Все приоритеты</option>
+                {priorityFilter && !priorities.some((priority) => `=${priority}` === priorityFilter) && <option value={priorityFilter}>Выбранный приоритет отсутствует в снимке</option>}
+                {priorities.map((priority) => <option key={priority} value={`=${priority}`}>{priority || "Без приоритета"}</option>)}
+              </select>
+            </label>
+          </div>
+          <p className="mt-3 text-xs text-muted">Фильтры изменяют карточки и счётчики колонок; остальные показатели не пересчитываются. Ответственный отбирается по тексту в карточке.</p>
+          <button type="button" disabled={!hasSelection} onClick={() => setView(emptyView)} className="mt-3 rounded-lg border border-line px-3 py-2 text-sm font-medium text-accent disabled:opacity-50">Сбросить отбор и поиск</button>
+        </fieldset>}
+        {loaded && !loadError && (filtersOpen || hasSelection) && <p role="status" className="mt-3 text-sm text-muted">
+          Показано {shownCount} из {availableCount} загруженных карточек.{hasSelection && shownCount === 0 ? " Нет карточек по выбранным условиям." : ""}
+        </p>}
 
         {/* KPI «План/Факт» */}
         {displayedKpis && displayedKpis.length > 0 && (
@@ -1104,21 +1158,21 @@ export function FunnelBoard({
                     showChannels={showChannels}
                     showFocusPills={showFocusPills}
                     showActions={showActions}
-                    onOpen={() => setSelected({ card, stageId: stage.id })}
+                    onOpen={() => setSelected({ id: card.id, boardPath })}
                   />
                 ))}
               </Column>
             ))}
             {filtered.length === 0 && !loadError && (
               <p className="p-6 text-sm text-muted">
-                {loaded ? "Доска пуста" : "Загрузка доски…"}
+                {loaded ? hasSelection ? "Нет карточек по выбранным условиям" : "Доска пуста" : "Загрузка доски…"}
               </p>
             )}
           </div>
           <DragOverlay>
-            {active ? (
+            {activeCard ? (
               <div className="w-[280px] rotate-2">
-                <Card card={active} formatAmount={formatAmount} showChannels={showChannels} showFocusPills={showFocusPills} showActions={showActions} />
+                <Card card={activeCard} formatAmount={formatAmount} showChannels={showChannels} showFocusPills={showFocusPills} showActions={showActions} />
               </div>
             ) : null}
           </DragOverlay>
@@ -1201,11 +1255,11 @@ export function FunnelBoard({
 
       {panel && <RightPanel panel={panel} />}
 
-      {selected && (
+      {selectedCard && selectedStage && (
         <DetailDrawer
           formatAmount={formatAmount}
-          card={selected.card}
-          stageId={selected.stageId}
+          card={selectedCard}
+          stageId={selectedStage.id}
           stages={stages}
           extras={detailExtras}
           onClose={() => setSelected(null)}
