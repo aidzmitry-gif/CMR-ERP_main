@@ -1,0 +1,12 @@
+{
+  "mailbox": "order@microchips.by",
+  "imap_host": "imap.yandex.ru",
+  "imap_port": 993,
+  "username": "order@microchips.by",
+  "password": "REPLACE_WITH_SALES_MAILBOX_PASSWORD",
+  "endpoint": "http://127.0.0.1:8000/integrations/sales-mail/v1",
+  "inbound_token": "REPLACE_WITH_G04_INBOUND_TOKEN",
+  "imap_timeout": 30,
+  "http_timeout": 15,
+  "relay_attempts": 3
+}

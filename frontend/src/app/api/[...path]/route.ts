@@ -30,6 +30,10 @@ async function proxy(req: NextRequest, segments: string[]): Promise<Response> {
   const out = new Headers();
   const contentType = res.headers.get("content-type");
   if (contentType) out.set("content-type", contentType);
+  for (const name of ["content-disposition", "x-content-type-options", "cache-control"]) {
+    const value = res.headers.get(name);
+    if (value) out.set(name, value);
+  }
   // SSE/поток: пробрасываем тело стримом, НЕ буферизуем. Иначе text/event-stream
   // (окно входящего звонка, /sales/calls/stream) «висит» до закрытия апстрима и
   // карточки звонка не доходят до клиента.
